@@ -1,0 +1,56 @@
+[project]
+mode = "simulation"
+database_path = "run_data/attodry_control.sqlite"
+
+[cryostat]
+backend = "simulation"
+temperature_min_k = 1.6
+temperature_max_k = 300.0
+
+[magnet]
+hardware_x_max_t = 3.0
+hardware_z_max_t = 9.0
+experiment_vector_max_t = 3.0
+field_tolerance_t = 0.001
+stable_range_t = 0.0005
+stable_dwell_s = 10.0
+poll_interval_s = 1.0
+wait_timeout_s = 7200.0
+
+[temperature_stability]
+tolerance_k = 0.01
+stable_range_k = 0.005
+stable_dwell_s = 30.0
+poll_interval_s = 1.0
+wait_timeout_s = 7200.0
+
+[cleanup]
+normal_end_field_policy = "hold"
+exception_field_policy = "zero"
+
+[lockin_xx]
+model = "SR830"
+address = "SIMULATED::SR830::XX"
+reference_source = "internal"
+sine_output_connected = true
+source_voltage_v = 0.004
+frequency_hz = 17.777
+
+[lockin_xy]
+model = "SR830"
+address = "SIMULATED::SR830::XY"
+reference_source = "external_ttl"
+sine_output_connected = false
+source_voltage_v = 0.004
+frequency_hz = 17.777
+
+[gate_top]
+backend = "simulation"
+compliance_a = 1e-8
+leakage_limit_a = 5e-9
+
+[gate_bottom]
+backend = "simulation"
+compliance_a = 1e-8
+leakage_limit_a = 5e-9
+
