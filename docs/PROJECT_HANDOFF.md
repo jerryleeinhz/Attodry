@@ -97,8 +97,8 @@ Completed in Stage 3:
   R values were xx 100.26/6.02/11.09 uV and xy 0/1.43/0.60 uV for h1/h2/h3.
   The accepted JSON remains only on the ignored control-computer path.
 
-Stage 4 - attoDRY legacy-DLL adapter: offline implementation complete; real DLL
-ABI and laboratory validation remain pending.
+Stage 4 - attoDRY legacy-DLL adapter: offline implementation and target-computer
+DLL ABI preflight complete; real read-only connection remains pending authorization.
 
 Completed offline in Stage 4:
 
@@ -110,6 +110,13 @@ Completed offline in Stage 4:
   read-before-toggle idempotent control operations.
 - Added safe zero-detour coordinated vector setpoints, rolling stable waits, and
   monitored vendor sweep-to-zero behavior against a fake DLL.
+- Target preflight found vendor DLL version 2.0 and confirmed 64-bit AMD64 PE32+
+  plus all 21 required exports without calling begin/connect. The ignored local
+  TOML still has placeholder cryostat COM/DLL values pending operator confirmation.
+- Added `attodry_test`, an explicitly connection-authorized read-only state CLI
+  that constructs the driver with setting writes disabled, retains confirmed
+  state on read failure, and disconnects/ends after sampling. Connection failure
+  after a successful begin now attempts end without masking the primary error.
 
 Current boundary: all hardware-free work through Stage 7 and integrated dual-SR830
 harmonic validation are complete. attoDRY, SMUs, and real end-to-end acquisition
@@ -153,14 +160,14 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 118 tests and passes in the minimal
+- The complete hardware-free suite contains 121 tests and passes in the minimal
   environment with one matplotlib rendering test skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `7e1d6df604ceeeb71f6d96239468f065dda344c964a99d2f441629b4569dab8b`.
+  `bfcc9ae476d1c129160ab3edad0a26944516e7715225c1c14727a59e2bdffda9`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path is commissioned, but do not claim an

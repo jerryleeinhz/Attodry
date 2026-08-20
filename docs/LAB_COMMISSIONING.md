@@ -46,6 +46,22 @@ state: temperatures, Bx/Bz readback and setpoints, control flags, and error code
 No setting write is authorized by this step. If any read fails, retain the last
 confirmed state and verify the magnet manually.
 
+After the station-local COM port and DLL path have been confirmed, use:
+
+```powershell
+python -m attodry_control.attodry_test `
+  --config config\hardware.local.toml `
+  --samples 10 `
+  --interval-s 1 `
+  --authorize-connection |
+  Tee-Object -FilePath "attodry_read_state.json"
+```
+
+The command constructs the driver with `writes_authorized=False`; it cannot call
+temperature, field, control-toggle, or sweep-to-zero setters. It records only
+full-state reads, then calls Disconnect and end. Connection authorization does
+not authorize any later setting write.
+
 ## 3. Gate SMU zero-bias validation
 
 This stage cannot be coded until the exact SMU models are supplied. After the

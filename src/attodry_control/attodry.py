@@ -198,8 +198,10 @@ class AttoDryDriver:
         if self.connected:
             raise AttoDryError("attoDRY driver is already connected.")
         started = monotonic()
+        begun = False
         try:
             self._call("begin", "AttoDRY_Interface_begin", ctypes.c_ushort(self.device_type))
+            begun = True
             self._call(
                 "Connect",
                 "AttoDRY_Interface_Connect",
@@ -217,12 +219,19 @@ class AttoDryDriver:
                         f"attoDRY initialization exceeded {self.connection_timeout_s:g} s."
                     )
                 sleeper(0.1)
-        except BaseException:
+        except BaseException as exc:
             if self.connected:
                 try:
                     self._call("Disconnect", "AttoDRY_Interface_Disconnect")
+                except BaseException as cleanup_error:
+                    exc.add_note(f"attoDRY disconnect cleanup also failed: {cleanup_error}")
                 finally:
                     self.connected = False
+            if begun:
+                try:
+                    self._call("end", "AttoDRY_Interface_end")
+                except BaseException as cleanup_error:
+                    exc.add_note(f"attoDRY end cleanup also failed: {cleanup_error}")
             raise
 
     def read_state(self) -> CryostatState:

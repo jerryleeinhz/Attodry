@@ -103,8 +103,8 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 
 ## Stage 4 - attoDRY real driver
 
-Status: offline implementation complete (2026-08-20); real DLL ABI and laboratory
-validation pending staged commissioning.
+Status: offline implementation and target-computer DLL ABI preflight complete
+(2026-08-20); real read-only connection pending staged authorization.
 
 - Added safe 64-bit vendor DLL loading and explicit function signatures.
 - Added separately authorized COM connection and initialization timeout.
@@ -115,6 +115,13 @@ validation pending staged commissioning.
   rolling stable waits, and monitored verified zeroing.
 - Added fake-DLL return-code, timeout, write-authorization, path, stability, and
   vector-path contract tests before laboratory use.
+- Target-computer preflight confirmed 64-bit Python, an AMD64 PE32+ vendor DLL
+  version 2.0, and all 21 required exports without calling begin/connect. The
+  station-local COM port and DLL path remain unconfigured pending operator confirmation.
+- Added an explicitly connection-authorized `attodry_test` read-only state CLI.
+  It always disables setting writes, retains last-confirmed state on read failure,
+  and disconnects/ends after sampling. Failed connection initialization now also
+  attempts `end()` without masking the original error.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 
@@ -163,7 +170,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 118 tests and passes in the minimal environment
+- The full offline suite covers 121 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

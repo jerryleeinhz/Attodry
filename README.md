@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现，以及双 SR830 独立一谐波器件测试。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。集成谐波写入、attoDRY、SMU 和端到端真实硬件路径仍需分阶段显式授权；具体 SMU 命令等待确认型号。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现，以及双 SR830 集成 1/2/3 次谐波器件验收。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。attoDRY DLL ABI 预检已通过，真实连接、SMU 和端到端硬件路径仍需分阶段显式授权；具体 SMU 命令等待确认型号。
 
 ## 已确认硬件
 
@@ -59,6 +59,7 @@ python -m attodry_control.lockin_test discover
 Copy-Item config\hardware.example.toml config\hardware.local.toml
 python -m attodry_control.lockin_test diagnose --config config\hardware.local.toml
 python -m attodry_control.lockin_test measure-harmonics --help
+python -m attodry_control.attodry_test --help
 python -m attodry_control.lockin_test --help
 ```
 

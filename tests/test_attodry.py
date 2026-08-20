@@ -1,5 +1,8 @@
 from collections import deque
 import ctypes
+from contextlib import redirect_stdout
+import io
+import json
 import math
 import unittest
 from unittest.mock import patch
@@ -10,6 +13,7 @@ from attodry_control.attodry import (
     AttoDryDllError,
     AttoDryTimeout,
 )
+from attodry_control.attodry_test import run as run_attodry_test
 from attodry_control.config import load_config
 from attodry_control.models import VectorField
 from attodry_control.safety import SafetyViolation
@@ -186,6 +190,15 @@ class AttoDryDriverTests(unittest.TestCase):
             self.driver.connect(monotonic=times.__next__, sleeper=lambda _: None)
 
         self.assertIn("disconnect", self.dll.events)
+        self.assertEqual(self.dll.events[-1], "end")
+
+    def test_connect_failure_ends_begun_interface(self) -> None:
+        self.dll.return_codes["connect"] = 5
+
+        with self.assertRaisesRegex(AttoDryDllError, "Connect.*5"):
+            self.connect()
+
+        self.assertEqual(self.dll.events, ["begin", "connect", "end"])
 
     def test_every_nonzero_dll_return_is_an_error(self) -> None:
         self.connect()
@@ -274,6 +287,48 @@ class AttoDryDriverTests(unittest.TestCase):
             driver.set_temperature(3.0)
 
         self.assertNotIn("set_temperature", self.dll.events)
+
+    def test_read_only_cli_requires_authorization_before_loading_dll(self) -> None:
+        loaded = []
+
+        with self.assertRaises(AttoDryAuthorizationError):
+            run_attodry_test(
+                ["--config", "config/hardware.example.toml"],
+                dll_loader=lambda path: loaded.append(path),
+            )
+
+        self.assertEqual(loaded, [])
+
+    def test_read_only_cli_reads_state_without_setting_writes(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run_attodry_test(
+                [
+                    "--config",
+                    "config/hardware.example.toml",
+                    "--samples",
+                    "2",
+                    "--interval-s",
+                    "0",
+                    "--authorize-connection",
+                ],
+                dll_loader=lambda _: self.dll,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertFalse(result["writes_authorized"])
+        self.assertEqual(len(result["samples"]), 2)
+        self.assertTrue(result["disconnected"])
+        self.assertEqual(self.dll.events[-2:], ["disconnect", "end"])
+        self.assertFalse(
+            any(
+                event.startswith(("set_", "toggle_", "sweep_"))
+                for event in self.dll.events
+            )
+        )
 
 
 if __name__ == "__main__":
