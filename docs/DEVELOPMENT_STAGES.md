@@ -103,8 +103,9 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 
 ## Stage 4 - attoDRY real driver
 
-Status: offline implementation and target-computer DLL ABI preflight complete
-(2026-08-20); real read-only connection pending staged authorization.
+Status: offline implementation, target-computer DLL ABI preflight, and real
+read-only connection validation complete (2026-08-20); setting writes remain
+uncommissioned and require separate explicit authorization.
 
 - Added safe 64-bit vendor DLL loading and explicit function signatures.
 - Added separately authorized COM connection and initialization timeout.
@@ -117,11 +118,18 @@ Status: offline implementation and target-computer DLL ABI preflight complete
   vector-path contract tests before laboratory use.
 - Target-computer preflight confirmed 64-bit Python, an AMD64 PE32+ vendor DLL
   version 2.0, and all 21 required exports without calling begin/connect. The
-  station-local COM port and DLL path remain unconfigured pending operator confirmation.
+  operator-confirmed station-local COM port and DLL path are stored only in the
+  ignored local configuration.
 - Added an explicitly connection-authorized `attodry_test` read-only state CLI.
   It always disables setting writes, retains last-confirmed state on read failure,
   and disconnects/ends after sampling. Failed connection initialization now also
   attempts `end()` without masking the original error.
+- The authorized real read-only run completed 10/10 one-second full-state reads
+  with setting writes disabled. Sample temperature was 1.7251--1.7255 K and VTI
+  temperature was 1.7146--1.7153 K; Bx/Bz readbacks and setpoints stayed at zero,
+  temperature and field control stayed disabled, and every error code was zero.
+  The run disconnected and ended normally; its raw JSON remains only on the
+  ignored control-computer path.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 

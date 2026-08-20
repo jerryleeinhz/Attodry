@@ -62,6 +62,11 @@ temperature, field, control-toggle, or sweep-to-zero setters. It records only
 full-state reads, then calls Disconnect and end. Connection authorization does
 not authorize any later setting write.
 
+Acceptance record (2026-08-20): the authorized 10-second run completed 10/10
+full-state reads with writes disabled, zero error codes, zero Bx/Bz readbacks and
+setpoints, and both control flags disabled. Disconnect and end completed normally.
+The raw JSON and station-local connection details remain on ignored paths only.
+
 ## 3. Gate SMU zero-bias validation
 
 This stage cannot be coded until the exact SMU models are supplied. After the

@@ -97,8 +97,9 @@ Completed in Stage 3:
   R values were xx 100.26/6.02/11.09 uV and xy 0/1.43/0.60 uV for h1/h2/h3.
   The accepted JSON remains only on the ignored control-computer path.
 
-Stage 4 - attoDRY legacy-DLL adapter: offline implementation and target-computer
-DLL ABI preflight complete; real read-only connection remains pending authorization.
+Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
+DLL ABI preflight, and real read-only connection validation complete; setting
+writes remain uncommissioned and require separate explicit authorization.
 
 Completed offline in Stage 4:
 
@@ -111,16 +112,23 @@ Completed offline in Stage 4:
 - Added safe zero-detour coordinated vector setpoints, rolling stable waits, and
   monitored vendor sweep-to-zero behavior against a fake DLL.
 - Target preflight found vendor DLL version 2.0 and confirmed 64-bit AMD64 PE32+
-  plus all 21 required exports without calling begin/connect. The ignored local
-  TOML still has placeholder cryostat COM/DLL values pending operator confirmation.
+  plus all 21 required exports without calling begin/connect. The confirmed
+  station-local COM port and DLL path are stored only in the ignored local TOML.
 - Added `attodry_test`, an explicitly connection-authorized read-only state CLI
   that constructs the driver with setting writes disabled, retains confirmed
   state on read failure, and disconnects/ends after sampling. Connection failure
   after a successful begin now attempts end without masking the primary error.
+- The authorized 10-second real connection completed 10/10 full-state samples
+  with `writes_authorized=false`, then disconnected and ended normally. Sample
+  temperature ranged from 1.7251 to 1.7255 K and VTI temperature from 1.7146 to
+  1.7153 K. Bx/Bz readbacks and setpoints remained zero, both control flags
+  remained disabled, and all error codes were zero. Raw output remains only on
+  the ignored control-computer path.
 
-Current boundary: all hardware-free work through Stage 7 and integrated dual-SR830
-harmonic validation are complete. attoDRY, SMUs, and real end-to-end acquisition
-still require staged authorization.
+Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
+harmonic validation, and the attoDRY read-only connection are complete. attoDRY
+setting writes, SMUs, and real end-to-end acquisition still require staged
+authorization.
 
 Stage 5 - gate safety and integrated acquisition: model-independent offline core
 complete; vendor SMU adapters remain pending exact models and safety parameters.
@@ -170,8 +178,9 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
   `bfcc9ae476d1c129160ab3edad0a26944516e7715225c1c14727a59e2bdffda9`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
-  integrated 1/2/3-harmonic SR830 path is commissioned, but do not claim an
-  attoDRY, SMU, or real end-to-end acquisition.
+  integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are
+  commissioned, but do not claim write-enabled attoDRY, SMU, or real end-to-end
+  acquisition.
 
 User-priority SR830 bench-test slice completed in the laboratory:
 
@@ -279,8 +288,8 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Perform staged attoDRY read-only and small-movement commissioning only after
-   explicit connection/write authorization.
+1. Perform staged attoDRY small-movement commissioning only after a new explicit
+   write authorization and operator-selected smallest practical targets.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Freeze and verify the complete hardware wheelhouse on the offline control
