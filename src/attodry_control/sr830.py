@@ -187,8 +187,16 @@ class Sr830:
             raise ValueError("Only harmonics 1, 2, and 3 are supported.")
         self._resource.write(f"HARM {harmonic}")
 
-    def read_harmonic_sample(self, expected_harmonic: int) -> Sr830HarmonicSample:
+    def read_harmonic(self) -> int:
         harmonic = self._query_int("HARM?")
+        if harmonic not in (1, 2, 3):
+            raise Sr830Error(
+                f"lockin_{self.role.value} returned unsupported harmonic {harmonic}."
+            )
+        return harmonic
+
+    def read_harmonic_sample(self, expected_harmonic: int) -> Sr830HarmonicSample:
+        harmonic = self.read_harmonic()
         if harmonic != expected_harmonic:
             raise Sr830Error(
                 f"lockin_{self.role.value} harmonic readback is {harmonic}; "
@@ -387,6 +395,16 @@ def _attempt_minimum_output(*instruments: Sr830) -> list[BaseException]:
     return errors
 
 
+def _attempt_first_harmonic(*instruments: Sr830) -> list[BaseException]:
+    errors: list[BaseException] = []
+    for instrument in instruments:
+        try:
+            instrument.set_harmonic(1)
+        except BaseException as exc:
+            errors.append(exc)
+    return errors
+
+
 class DualSr830Controller:
     """Semantic pair controller for sequential xx/xy harmonic snapshots."""
 
@@ -450,11 +468,25 @@ class DualSr830Controller:
                     )
             self.lockin_xx.set_harmonic(1)
             self.lockin_xy.set_harmonic(1)
+            for instrument in (self.lockin_xx, self.lockin_xy):
+                restored = instrument.read_harmonic()
+                if restored != 1:
+                    raise Sr830AcquisitionError(
+                        f"lockin_{instrument.role.value} did not restore harmonic 1.",
+                        tuple(readings),
+                    )
             return DualSr830Measurement(tuple(readings))
         except BaseException as exc:
+            harmonic_errors = _attempt_first_harmonic(
+                self.lockin_xx, self.lockin_xy
+            )
             cleanup_errors = _attempt_minimum_output(
                 self.lockin_xx, self.lockin_xy
             )
+            for harmonic_error in harmonic_errors:
+                exc.add_note(
+                    f"First-harmonic restoration also failed: {harmonic_error}"
+                )
             for cleanup_error in cleanup_errors:
                 exc.add_note(f"Minimum-output cleanup also failed: {cleanup_error}")
             if isinstance(exc, (KeyboardInterrupt, SystemExit, Sr830AcquisitionError)):

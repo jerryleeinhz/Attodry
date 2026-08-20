@@ -83,8 +83,12 @@ integrated 1/2/3-harmonic write-path validation remains pending explicit authori
   300 ms time constant while preserving 17.777 Hz, 4 mVrms, and 24 dB/oct. All
   60 samples read those settings back with complete status and no unlock,
   overload, or instrument error. Vxx averaged about 104.70 uV; Vxy was at the
-  instrument's near-zero quantized floor (maximum about 59.6 nV), so a physical
-  Vxy signal check remains pending before integrated acquisition is claimed.
+  instrument's near-zero quantized floor (maximum about 59.6 nV), which the
+  operator accepted as the device's normal zero-field baseline.
+- Added the separately authorized `measure-harmonics` laboratory command. It
+  records partial rejected data, measures paired harmonics 1/2/3 in order, and
+  restores harmonic 1 after success or attempts harmonic-1/minimum-output cleanup
+  after failure. Real write-path validation is the next Stage 3 checkpoint.
 
 ## Stage 4 - attoDRY real driver
 
@@ -148,8 +152,9 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 114 tests, including real matplotlib rendering in
-  the analysis-enabled environment; source compilation passes without hardware.
+- The full offline suite covers 117 tests and passes in the minimal environment
+  with one matplotlib rendering test skipped; source compilation passes without
+  hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in
   `PROJECT_HANDOFF.md`.

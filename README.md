@@ -58,6 +58,7 @@ python -m pip install -e ".[hardware]"
 python -m attodry_control.lockin_test discover
 Copy-Item config\hardware.example.toml config\hardware.local.toml
 python -m attodry_control.lockin_test diagnose --config config\hardware.local.toml
+python -m attodry_control.lockin_test measure-harmonics --help
 python -m attodry_control.lockin_test --help
 ```
 

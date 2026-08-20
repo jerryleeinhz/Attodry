@@ -78,9 +78,13 @@ Completed in Stage 3:
   300 ms time constant without changing 17.777 Hz, 4 mVrms, or 24 dB/oct. The
   60-second readback record was complete and contained no unlock, overload, or
   instrument error. Vxx averaged about 104.70 uV, while Vxy remained at the
-  near-zero quantized floor (maximum about 59.6 nV). This passes communications,
-  configuration, and lock-status acceptance, but does not establish a physical
-  Vxy response; retain that as a prerequisite for integrated acquisition.
+  near-zero quantized floor (maximum about 59.6 nV). The operator accepted this
+  as the device's normal zero-field Vxy baseline.
+- Added a separately authorized `measure-harmonics` CLI that repeats the verified
+  minimum-output role configuration, writes paired harmonics 1/2/3, consumes
+  status latches, retains partial rejected data, and restores harmonic 1. Failure
+  also attempts harmonic-1 and minimum-output cleanup before requiring manual
+  readback confirmation.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation complete; real DLL
 ABI and laboratory validation remain pending.
@@ -97,9 +101,8 @@ Completed offline in Stage 4:
   monitored vendor sweep-to-zero behavior against a fake DLL.
 
 Current boundary: all hardware-free work through Stage 7 and standalone
-first-harmonic SR830 communications/Vxx validation are complete. A physical Vxy
-response check, integrated harmonic writes, attoDRY, SMUs, and real end-to-end
-acquisition still require staged authorization.
+first-harmonic SR830 validation are complete. Integrated harmonic writes,
+attoDRY, SMUs, and real end-to-end acquisition still require staged authorization.
 
 Stage 5 - gate safety and integrated acquisition: model-independent offline core
 complete; vendor SMU adapters remain pending exact models and safety parameters.
@@ -139,13 +142,14 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 114 tests; it passes in both the
-  minimal environment (one rendering test skipped) and the analysis-enabled
-  environment (all rendering exercised). Source compilation also passes.
+- The complete hardware-free suite contains 117 tests and passes in the minimal
+  environment with one matplotlib rendering test skipped. Source compilation
+  passes. The plotting path is unchanged from its prior rendered validation;
+  the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `e566339ed678de80c900a26566ec81461a5ca4e0c6f3b33ee65d9b098b07869c`.
+  `dd22c99523118cbc95a6990f947dc8845cf6ca34a923c3f0582ac9e87e6d8bbd`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   standalone first-harmonic SR830 test is commissioned, but do not claim an

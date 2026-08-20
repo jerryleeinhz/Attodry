@@ -14,8 +14,10 @@ from .config import RunMode, load_config
 from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
+    DualSr830Controller,
     PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
     Sr830,
+    Sr830AcquisitionError,
     Sr830Diagnostic,
     Sr830Error,
     configure_minimum_excitation_pair,
@@ -74,6 +76,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirm lockin_xy SINE OUT is physically disconnected.",
     )
     configure.set_defaults(handler=_run_configure)
+
+    harmonics = subparsers.add_parser(
+        "measure-harmonics",
+        help="Measure one ordered xx/xy 1/2/3-harmonic cycle and restore harmonic 1.",
+    )
+    _add_pair_arguments(harmonics)
+    harmonics.add_argument(
+        "--frequency-hz",
+        type=_positive_float,
+        help="Override the config frequency. Default: config value or 17.777 Hz.",
+    )
+    harmonics.add_argument(
+        "--settle-s",
+        type=_nonnegative_float,
+        default=2.0,
+        help="Wait after each paired harmonic change. Default: 2 seconds.",
+    )
+    harmonics.add_argument(
+        "--authorize-writes",
+        action="store_true",
+        help="Explicitly authorize reference-role, minimum-output, and HARM 1/2/3 writes.",
+    )
+    harmonics.add_argument(
+        "--confirm-xy-sine-disconnected",
+        action="store_true",
+        help="Confirm lockin_xy SINE OUT is physically disconnected.",
+    )
+    harmonics.set_defaults(handler=_run_harmonics)
     return parser
 
 
@@ -82,8 +112,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         exit_code = run(argv)
     except KeyboardInterrupt:
         print(
-            "Interrupted. No automatic output write was attempted; manually verify "
-            "lockin_xx is at 4 mVrms before disconnecting the device.",
+            "Interrupted. If harmonic measurement had started, first-harmonic and "
+            "minimum-output cleanup were attempted. Manually verify both HARM readbacks "
+            "and lockin_xx at 4 mVrms before disconnecting the device.",
             file=sys.stderr,
         )
         raise SystemExit(130) from None
@@ -199,6 +230,70 @@ def _run_configure(args: argparse.Namespace, factory: Callable[[], object]) -> i
                         "lockin_xx": asdict(result.after_xx),
                         "lockin_xy": asdict(result.after_xy),
                     },
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+    return 0
+
+
+def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> int:
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    if not args.authorize_writes:
+        raise AuthorizationRequired("SR830 harmonic-setting writes were not authorized.")
+    if not args.confirm_xy_sine_disconnected:
+        raise AuthorizationRequired(
+            "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+        )
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        controller = DualSr830Controller(lockin_xx, lockin_xy)
+        configuration = controller.configure_minimum(
+            frequency_hz=settings["frequency_hz"],
+            authorize_writes=args.authorize_writes,
+            confirm_xy_sine_disconnected=args.confirm_xy_sine_disconnected,
+        )
+        try:
+            measurement = controller.measure_harmonics(
+                settle_s=args.settle_s,
+                sleeper=time.sleep,
+            )
+        except Sr830AcquisitionError as exc:
+            print(
+                json.dumps(
+                    {
+                        "completed": False,
+                        "captured_unix_s": time.time(),
+                        "error": str(exc),
+                        "partial_readings": [
+                            asdict(reading) for reading in exc.partial_readings
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            raise
+        print(
+            json.dumps(
+                {
+                    "completed": True,
+                    "captured_unix_s": time.time(),
+                    "status_latches_consumed": True,
+                    "configuration": {
+                        "before": {
+                            "lockin_xx": asdict(configuration.before_xx),
+                            "lockin_xy": asdict(configuration.before_xy),
+                        },
+                        "after": {
+                            "lockin_xx": asdict(configuration.after_xx),
+                            "lockin_xy": asdict(configuration.after_xy),
+                        },
+                    },
+                    "readings": [asdict(reading) for reading in measurement.readings],
+                    "pair_reads_are_sequential": measurement.pair_reads_are_sequential,
+                    "restored_harmonic": 1,
                 },
                 indent=2,
                 ensure_ascii=False,

@@ -366,6 +366,94 @@ class Sr830Tests(unittest.TestCase):
 
         self.assertEqual(manager.opened, [])
 
+    def test_cli_refuses_unauthorized_harmonics_before_opening_resources(self) -> None:
+        manager = FakeResourceManager({})
+
+        with self.assertRaises(AuthorizationRequired):
+            run(
+                [
+                    "measure-harmonics",
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(manager.opened, [])
+
+    def test_cli_harmonics_records_six_readings_and_restores_first_harmonic(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "measure-harmonics",
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--settle-s",
+                    "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(len(result["readings"]), 6)
+        self.assertEqual(result["restored_harmonic"], 1)
+        self.assertEqual(xx_resource.responses["HARM?"], "1\n")
+        self.assertEqual(xy_resource.responses["HARM?"], "1\n")
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("HARM ")],
+            ["HARM 1", "HARM 1", "HARM 2", "HARM 3", "HARM 1"],
+        )
+        self.assertFalse(
+            any(
+                write.startswith(("SENS ", "OFLT ", "OFSL "))
+                for write in xx_resource.writes + xy_resource.writes
+            )
+        )
+
+    def test_cli_harmonic_failure_records_partial_data_and_restores_safe_state(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = "8\n"
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaises(Sr830AcquisitionError):
+            run(
+                [
+                    "measure-harmonics",
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--settle-s",
+                    "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertEqual(len(result["partial_readings"]), 2)
+        self.assertEqual(xx_resource.writes[-2:], ["HARM 1", "SLVL 0.004"])
+        self.assertEqual(xy_resource.writes[-2:], ["HARM 1", "SLVL 0.004"])
+
     def test_dual_controller_sets_both_harmonics_before_each_pair_snapshot(self) -> None:
         events: list[tuple[str, str, str]] = []
         xx_resource = FakeVisaResource(

@@ -188,6 +188,30 @@ bit remains an unconditional failure.
 available as explicit one-command overrides; they take precedence over the TOML
 values and do not edit the local file.
 
+## 7. Validate ordered first/second/third-harmonic reads
+
+This is a separate write-authorized stage. With the confirmed device limits,
+`lockin_xy` SINE OUT still physically disconnected, and both inputs free of
+overload, run:
+
+```powershell
+python -m attodry_control.lockin_test measure-harmonics `
+  --config config\hardware.local.toml `
+  --settle-s 2 `
+  --authorize-writes `
+  --confirm-xy-sine-disconnected |
+  Tee-Object -FilePath "dual_sr830_harmonics.json"
+```
+
+The command first repeats the verified 4 mVrms reference-role configuration. It
+does not change sensitivity, time constant, input mode, shield grounding, or
+filter slope. For each harmonic it writes both instruments before either SNAP
+read, waits for the requested settling interval, consumes `LIAS?`/`ERRS?`, and
+retains the six ordered xx/xy readings. It restores both instruments to harmonic
+1 after success. On failure or interruption it attempts harmonic-1 restoration
+and 4 mVrms minimum-output cleanup, but the operator must still confirm both
+front panels before disconnecting the device.
+
 ## Acceptance criteria
 
 - Both IDNs identify Stanford Research Systems SR830 units with distinct VISA
@@ -203,6 +227,9 @@ values and do not edit the local file.
   retained even if the result is rejected.
 - Reversing the device current leads or a voltage-probe pair produces the
   expected sign change before a physical sign convention is accepted.
+- The harmonic-stage record contains xx and xy readings for harmonics 1, 2, and
+  3, with no unlock, overload, instrument error, or frequency mismatch, and both
+  instruments read back harmonic 1 afterward.
 
 ## Stop and disconnect
 
