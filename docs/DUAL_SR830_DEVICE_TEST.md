@@ -203,14 +203,15 @@ python -m attodry_control.lockin_test measure-harmonics `
   Tee-Object -FilePath "dual_sr830_harmonics.json"
 ```
 
-The command first repeats the verified 4 mVrms reference-role configuration. It
-does not change sensitivity, time constant, input mode, shield grounding, or
-filter slope. For each harmonic it writes both instruments before either SNAP
-read, waits for the requested settling interval, consumes `LIAS?`/`ERRS?`, and
-retains the six ordered xx/xy readings. It restores both instruments to harmonic
-1 after success. On failure or interruption it attempts harmonic-1 restoration
-and 4 mVrms minimum-output cleanup, but the operator must still confirm both
-front panels before disconnecting the device.
+The command consumes status latches while verifying the existing 4 mVrms
+reference-role configuration, then writes only harmonic settings. It does not
+rewrite the reference mode or change frequency, sensitivity, time constant,
+input mode, shield grounding, or filter slope. For each harmonic it writes both
+instruments before either SNAP read, waits for the requested settling interval,
+consumes `LIAS?`/`ERRS?`, and retains the six ordered xx/xy readings. It restores
+both instruments to harmonic 1 after success. On failure or interruption it
+attempts harmonic-1 restoration and 4 mVrms minimum-output cleanup, but the
+operator must still confirm both front panels before disconnecting the device.
 
 ## Acceptance criteria
 

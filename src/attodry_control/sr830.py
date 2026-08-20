@@ -432,6 +432,49 @@ class DualSr830Controller:
         self._configured = True
         return result
 
+    def authorize_existing_configuration(
+        self,
+        *,
+        frequency_hz: float,
+        authorize_writes: bool,
+        confirm_xy_sine_disconnected: bool,
+    ) -> tuple[Sr830Diagnostic, Sr830Diagnostic]:
+        """Verify an already configured pair before separately authorized HARM writes."""
+
+        if not authorize_writes:
+            raise AuthorizationRequired("SR830 harmonic writes were not authorized.")
+        if not confirm_xy_sine_disconnected:
+            raise AuthorizationRequired(
+                "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+            )
+        xx = self.lockin_xx.read_diagnostic(consume_status_latches=True)
+        xy = self.lockin_xy.read_diagnostic(consume_status_latches=True)
+        if xx.identity == xy.identity:
+            raise Sr830Error("Both semantic roles returned the same SR830 identity.")
+        _verify_pair_readback(xx, xy, frequency_hz)
+        problems: list[str] = []
+        for diagnostic in (xx, xy):
+            if diagnostic.lia_status is None or diagnostic.error_status is None:
+                problems.append(
+                    f"lockin_{diagnostic.role.value} safety status is incomplete"
+                )
+                continue
+            if diagnostic.lia_status.reference_unlocked:
+                problems.append(f"lockin_{diagnostic.role.value} reference is unlocked")
+            if diagnostic.lia_status.any_overload:
+                problems.append(f"lockin_{diagnostic.role.value} reports overload")
+            if diagnostic.error_status:
+                problems.append(
+                    f"lockin_{diagnostic.role.value} error status is "
+                    f"{diagnostic.error_status}"
+                )
+        if problems:
+            raise Sr830Error(
+                "SR830 preflight status verification failed: " + "; ".join(problems)
+            )
+        self._configured = True
+        return xx, xy
+
     def measure_harmonics(
         self,
         *,

@@ -21,7 +21,7 @@ from attodry_control.sr830 import (
 class FakeVisaResource:
     def __init__(
         self,
-        responses: dict[str, str],
+        responses: dict[str, str | list[str]],
         fail_write: str | None = None,
         *,
         name: str = "instrument",
@@ -40,7 +40,12 @@ class FakeVisaResource:
         if self.events is not None:
             self.events.append((self.name, "query", command))
         try:
-            return self.responses[command]
+            response = self.responses[command]
+            if isinstance(response, list):
+                if not response:
+                    raise AssertionError(f"No queued response remains for: {command}")
+                return response.pop(0)
+            return response
         except KeyError as exc:
             raise AssertionError(f"Unexpected query: {command}") from exc
 
@@ -415,19 +420,47 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xy_resource.responses["HARM?"], "1\n")
         self.assertEqual(
             [write for write in xx_resource.writes if write.startswith("HARM ")],
-            ["HARM 1", "HARM 1", "HARM 2", "HARM 3", "HARM 1"],
+            ["HARM 1", "HARM 2", "HARM 3", "HARM 1"],
         )
         self.assertFalse(
             any(
-                write.startswith(("SENS ", "OFLT ", "OFSL "))
+                write.startswith(
+                    ("FMOD ", "RSLP ", "FREQ ", "SENS ", "OFLT ", "OFSL ")
+                )
                 for write in xx_resource.writes + xy_resource.writes
             )
         )
 
-    def test_cli_harmonic_failure_records_partial_data_and_restores_safe_state(self) -> None:
+    def test_cli_harmonic_preflight_unlock_stops_before_writes(self) -> None:
         xx_resource = FakeVisaResource(responses(reference_mode=1))
         xy_responses = responses(reference_mode=0)
         xy_responses["LIAS?"] = "8\n"
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+
+        with self.assertRaisesRegex(Sr830Error, "preflight.*unlocked"):
+            run(
+                [
+                    "measure-harmonics",
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--settle-s",
+                    "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
+
+    def test_cli_harmonic_failure_records_partial_data_and_restores_safe_state(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = ["0\n", "8\n"]
         xy_resource = FakeVisaResource(xy_responses)
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()

@@ -86,9 +86,16 @@ integrated 1/2/3-harmonic write-path validation remains pending explicit authori
   instrument's near-zero quantized floor (maximum about 59.6 nV), which the
   operator accepted as the device's normal zero-field baseline.
 - Added the separately authorized `measure-harmonics` laboratory command. It
-  records partial rejected data, measures paired harmonics 1/2/3 in order, and
-  restores harmonic 1 after success or attempts harmonic-1/minimum-output cleanup
-  after failure. Real write-path validation is the next Stage 3 checkpoint.
+  validates the existing reference configuration without rewriting it, records
+  partial rejected data, measures paired harmonics 1/2/3 in order, and restores
+  harmonic 1 after success or attempts harmonic-1/minimum-output cleanup after
+  failure. Real write-path validation is the next Stage 3 checkpoint.
+- The first real harmonic attempt was safely rejected at harmonic 1 because
+  rewriting the already-correct XY external-reference mode created a transient
+  unlock latch. The retained partial readings showed no overload; the immediate
+  cleanup readback confirmed both units at harmonic 1 and 4 mVrms with zero
+  status/error bits. The CLI now uses a latch-consuming read-only preflight and
+  does not rewrite an already verified reference configuration.
 
 ## Stage 4 - attoDRY real driver
 
@@ -152,7 +159,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 117 tests and passes in the minimal environment
+- The full offline suite covers 118 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

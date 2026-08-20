@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     harmonics.add_argument(
         "--authorize-writes",
         action="store_true",
-        help="Explicitly authorize reference-role, minimum-output, and HARM 1/2/3 writes.",
+        help="Explicitly authorize HARM 1/2/3 and minimum-output cleanup writes.",
     )
     harmonics.add_argument(
         "--confirm-xy-sine-disconnected",
@@ -249,7 +249,7 @@ def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> i
         )
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         controller = DualSr830Controller(lockin_xx, lockin_xy)
-        configuration = controller.configure_minimum(
+        preflight_xx, preflight_xy = controller.authorize_existing_configuration(
             frequency_hz=settings["frequency_hz"],
             authorize_writes=args.authorize_writes,
             confirm_xy_sine_disconnected=args.confirm_xy_sine_disconnected,
@@ -266,6 +266,10 @@ def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> i
                         "completed": False,
                         "captured_unix_s": time.time(),
                         "error": str(exc),
+                        "preflight": {
+                            "lockin_xx": asdict(preflight_xx),
+                            "lockin_xy": asdict(preflight_xy),
+                        },
                         "partial_readings": [
                             asdict(reading) for reading in exc.partial_readings
                         ],
@@ -281,15 +285,9 @@ def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> i
                     "completed": True,
                     "captured_unix_s": time.time(),
                     "status_latches_consumed": True,
-                    "configuration": {
-                        "before": {
-                            "lockin_xx": asdict(configuration.before_xx),
-                            "lockin_xy": asdict(configuration.before_xy),
-                        },
-                        "after": {
-                            "lockin_xx": asdict(configuration.after_xx),
-                            "lockin_xy": asdict(configuration.after_xy),
-                        },
+                    "preflight": {
+                        "lockin_xx": asdict(preflight_xx),
+                        "lockin_xy": asdict(preflight_xy),
                     },
                     "readings": [asdict(reading) for reading in measurement.readings],
                     "pair_reads_are_sequential": measurement.pair_reads_are_sequential,
