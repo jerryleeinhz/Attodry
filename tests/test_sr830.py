@@ -1,6 +1,8 @@
 from contextlib import redirect_stdout
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 
 from attodry_control.lockin_test import run
@@ -72,13 +74,13 @@ class FakeResourceManager:
         self.closed = True
 
 
-def responses(reference_mode: int) -> dict[str, str]:
+def responses(reference_mode: int, *, frequency_hz: float = 17.777) -> dict[str, str]:
     serial = "s/n00111" if reference_mode == 1 else "s/n00222"
     return {
         "*IDN?": f"Stanford_Research_Systems,SR830,{serial},ver1.000\n",
         "FMOD?": f"{reference_mode}\n",
         "RSLP?": "1\n",
-        "FREQ?": "17.777\n",
+        "FREQ?": f"{frequency_hz:g}\n",
         "HARM?": "1\n",
         "SLVL?": "0.004\n",
         "ISRC?": "1\n",
@@ -89,13 +91,32 @@ def responses(reference_mode: int) -> dict[str, str]:
         "RMOD?": "1\n",
         "OFLT?": "10\n",
         "OFSL?": "3\n",
-        "SNAP? 1,2,3,4,9": "1e-6,2e-7,1.0198e-6,11.31,17.777\n",
+        "SNAP? 1,2,3,4,9": (
+            f"1e-6,2e-7,1.0198e-6,11.31,{frequency_hz:g}\n"
+        ),
         "LIAS?": "0\n",
         "ERRS?": "0\n",
     }
 
 
 class Sr830Tests(unittest.TestCase):
+    def _hardware_config(self, *, frequency_hz: float = 17.777) -> Path:
+        temporary = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
+        temporary.close()
+        path = Path(temporary.name)
+        template = Path("config/hardware.example.toml").read_text(encoding="utf-8")
+        configured = (
+            template.replace(
+                "CHANGE_ME_SR830_XX_VISA_ADDRESS", "GPIB0::8::INSTR"
+            )
+            .replace("CHANGE_ME_SR830_XY_VISA_ADDRESS", "GPIB0::9::INSTR")
+            .replace("timeout_ms = 5000", "timeout_ms = 4321")
+            .replace("frequency_hz = 17.777", f"frequency_hz = {frequency_hz:g}")
+        )
+        path.write_text(configured, encoding="utf-8")
+        self.addCleanup(path.unlink)
+        return path
+
     def test_diagnostic_without_status_only_sends_queries(self) -> None:
         resource = FakeVisaResource(responses(reference_mode=1))
         instrument = Sr830(resource, LockinRole.XX)
@@ -241,6 +262,57 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xx_resource.writes, [])
         self.assertEqual(xy_resource.writes, [])
         self.assertTrue(manager.closed)
+
+    def test_cli_diagnose_uses_semantic_addresses_and_timeout_from_config(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+        manager = FakeResourceManager(
+            {
+                "GPIB0::8::INSTR": xx_resource,
+                "GPIB0::9::INSTR": xy_resource,
+            }
+        )
+
+        with redirect_stdout(io.StringIO()):
+            exit_code = run(
+                ["diagnose", "--config", str(self._hardware_config())],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(manager.opened, ["GPIB0::8::INSTR", "GPIB0::9::INSTR"])
+        self.assertEqual(xx_resource.timeout, 4321)
+        self.assertEqual(xy_resource.timeout, 4321)
+
+    def test_cli_configuration_uses_frequency_from_config(self) -> None:
+        frequency_hz = 19.0
+        xx_resource = FakeVisaResource(
+            responses(reference_mode=1, frequency_hz=frequency_hz)
+        )
+        xy_resource = FakeVisaResource(
+            responses(reference_mode=0, frequency_hz=frequency_hz)
+        )
+        manager = FakeResourceManager(
+            {
+                "GPIB0::8::INSTR": xx_resource,
+                "GPIB0::9::INSTR": xy_resource,
+            }
+        )
+
+        with redirect_stdout(io.StringIO()):
+            exit_code = run(
+                [
+                    "configure-minimum",
+                    "--config",
+                    str(self._hardware_config(frequency_hz=frequency_hz)),
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("FREQ 19", xx_resource.writes)
 
     def test_cli_refuses_unauthorized_configuration_before_opening_resources(self) -> None:
         manager = FakeResourceManager({})

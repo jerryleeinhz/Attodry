@@ -5,10 +5,12 @@ from contextlib import ExitStack
 from dataclasses import asdict
 import json
 import math
+from pathlib import Path
 import sys
 import time
 from typing import Callable, Sequence
 
+from .config import RunMode, load_config
 from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
@@ -55,7 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_pair_arguments(configure)
-    configure.add_argument("--frequency-hz", type=_positive_float, default=17.777)
+    configure.add_argument(
+        "--frequency-hz",
+        type=_positive_float,
+        help="Override the config frequency. Default: config value or 17.777 Hz.",
+    )
     configure.add_argument(
         "--authorize-writes",
         action="store_true",
@@ -97,9 +103,18 @@ def run(
 
 
 def _add_pair_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--xx-address", required=True)
-    parser.add_argument("--xy-address", required=True)
-    parser.add_argument("--timeout-ms", type=_positive_integer, default=5000)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help="Hardware TOML supplying semantic SR830 addresses, timeout, and frequency.",
+    )
+    parser.add_argument("--xx-address", help="Override lockin_xx.address from --config.")
+    parser.add_argument("--xy-address", help="Override lockin_xy.address from --config.")
+    parser.add_argument(
+        "--timeout-ms",
+        type=_positive_integer,
+        help="Override visa.timeout_ms from --config. Default without config: 5000.",
+    )
 
 
 def _run_discover(args: argparse.Namespace, factory: Callable[[], object]) -> int:
@@ -113,9 +128,10 @@ def _run_discover(args: argparse.Namespace, factory: Callable[[], object]) -> in
 
 
 def _run_diagnose(args: argparse.Namespace, factory: Callable[[], object]) -> int:
-    _validate_distinct_addresses(args.xx_address, args.xy_address)
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     had_problem = False
-    with _open_pair(args, factory) as (lockin_xx, lockin_xy):
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         for index in range(args.samples):
             if index:
                 time.sleep(args.interval_s)
@@ -154,18 +170,19 @@ def _run_diagnose(args: argparse.Namespace, factory: Callable[[], object]) -> in
 
 
 def _run_configure(args: argparse.Namespace, factory: Callable[[], object]) -> int:
-    _validate_distinct_addresses(args.xx_address, args.xy_address)
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     if not args.authorize_writes:
         raise AuthorizationRequired("SR830 setting writes were not explicitly authorized.")
     if not args.confirm_xy_sine_disconnected:
         raise AuthorizationRequired(
             "Physical disconnection of lockin_xy SINE OUT was not confirmed."
         )
-    with _open_pair(args, factory) as (lockin_xx, lockin_xy):
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         result = configure_minimum_excitation_pair(
             lockin_xx,
             lockin_xy,
-            frequency_hz=args.frequency_hz,
+            frequency_hz=settings["frequency_hz"],
             authorize_writes=args.authorize_writes,
             confirm_xy_sine_disconnected=args.confirm_xy_sine_disconnected,
         )
@@ -189,14 +206,18 @@ def _run_configure(args: argparse.Namespace, factory: Callable[[], object]) -> i
     return 0
 
 
-def _open_pair(args: argparse.Namespace, factory: Callable[[], object]):
+def _open_pair(settings: dict[str, object], factory: Callable[[], object]):
     stack = ExitStack()
     manager = factory()
     stack.callback(manager.close)
     try:
-        xx_resource = _open_resource(manager, args.xx_address, args.timeout_ms)
+        xx_resource = _open_resource(
+            manager, str(settings["xx_address"]), int(settings["timeout_ms"])
+        )
         stack.callback(xx_resource.close)
-        xy_resource = _open_resource(manager, args.xy_address, args.timeout_ms)
+        xy_resource = _open_resource(
+            manager, str(settings["xy_address"]), int(settings["timeout_ms"])
+        )
         stack.callback(xy_resource.close)
     except BaseException:
         stack.close()
@@ -206,6 +227,41 @@ def _open_pair(args: argparse.Namespace, factory: Callable[[], object]):
         Sr830(xy_resource, LockinRole.XY),
     )
     return _PairContext(stack, pair)
+
+
+def _resolve_pair_settings(args: argparse.Namespace) -> dict[str, object]:
+    config = None
+    if args.config is not None:
+        config = load_config(args.config)
+        if config.project.mode is not RunMode.HARDWARE:
+            raise ValueError("The standalone SR830 tool requires a hardware config.")
+
+    xx_address = args.xx_address or (
+        None if config is None else config.lockin_xx.address
+    )
+    xy_address = args.xy_address or (
+        None if config is None else config.lockin_xy.address
+    )
+    for name, address in (("lockin_xx", xx_address), ("lockin_xy", xy_address)):
+        if address is None or "CHANGE_ME" in address:
+            raise ValueError(
+                f"{name} VISA address is required via --config or --{name[-2:]}-address."
+            )
+
+    timeout_ms = args.timeout_ms
+    if timeout_ms is None:
+        timeout_ms = 5000 if config is None else config.visa.timeout_ms
+
+    frequency_hz = getattr(args, "frequency_hz", None)
+    if frequency_hz is None:
+        frequency_hz = 17.777 if config is None else config.lockin_xx.frequency_hz
+
+    return {
+        "xx_address": xx_address,
+        "xy_address": xy_address,
+        "timeout_ms": timeout_ms,
+        "frequency_hz": frequency_hz,
+    }
 
 
 class _PairContext:

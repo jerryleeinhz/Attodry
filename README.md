@@ -56,6 +56,8 @@ SR830 的独立测试。工具的诊断模式只查询；任何设置写入都�
 ```powershell
 python -m pip install -e ".[hardware]"
 python -m attodry_control.lockin_test discover
+Copy-Item config\hardware.example.toml config\hardware.local.toml
+python -m attodry_control.lockin_test diagnose --config config\hardware.local.toml
 python -m attodry_control.lockin_test --help
 ```
 

@@ -63,6 +63,9 @@ user-supplied VISA addresses and device safety parameters.
 - Added read-only identity/reference/input diagnostics before writes.
 - Diagnostics explicitly distinguish query success from complete safety status,
   and duplicate physical SR830 identity aborts configuration before any write.
+- The standalone diagnostics and minimum-output configuration read semantic
+  addresses, VISA timeout, and frequency from the ignored station-local TOML;
+  explicit command-line values remain temporary overrides.
 
 ## Stage 4 - attoDRY real driver
 
@@ -126,7 +129,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 109 tests, including real matplotlib rendering in
+- The full offline suite covers 111 tests, including real matplotlib rendering in
   the analysis-enabled environment; source compilation passes without hardware.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in

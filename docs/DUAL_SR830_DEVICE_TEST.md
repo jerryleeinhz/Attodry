@@ -82,19 +82,39 @@ python -m pip install -e ".[hardware]"
 python -m attodry_control.lockin_test discover
 ```
 
+On each SR830, press **Setup** repeatedly until the Reference display shows
+`ADDRESS`; the displayed number is the GPIB device address. Turn the knob to
+change it. The official manual describes 1-30 as usable GPIB device addresses;
+assign a different address to each physical SR830. Press Phase, Freq, Ampl,
+Harm#, or Aux Out to leave Setup. Also use the Setup `GPIB/RS232` page to make
+sure the response interface is GPIB.
+
+In a VISA resource such as `GPIB0::8::INSTR`, `GPIB0` is the computer's first
+GPIB controller and `8` is the address displayed by the SR830.
+
 `discover` lists resources but does not open an instrument. Match each address
 to a physical SR830 by temporarily powering or disconnecting one interface at a
 time, or by comparing serial numbers from `*IDN?`. Record the semantic mapping;
 do not call the units only "#1" and "#2" in configuration or data.
 
+Create the ignored station-local configuration once:
+
+```powershell
+Copy-Item config\hardware.example.toml config\hardware.local.toml
+notepad config\hardware.local.toml
+```
+
+For this standalone step, edit `[visa].timeout_ms`, both `[lockin_*].address`
+values, and the shared `frequency_hz`. Other `CHANGE_ME` values may remain until
+their hardware stages, but the full integrated hardware path will reject them.
+
 ## 4. Query both instruments without setting writes
 
-Replace the example addresses with the discovered resources:
+Use the station-local configuration:
 
 ```powershell
 python -m attodry_control.lockin_test diagnose `
-  --xx-address "GPIB0::8::INSTR" `
-  --xy-address "GPIB0::9::INSTR"
+  --config config\hardware.local.toml
 ```
 
 This path sends query commands only. It reads IDN, reference and input settings,
@@ -118,9 +138,7 @@ excitation path either disconnected or confirmed safe at 4 mVrms:
 
 ```powershell
 python -m attodry_control.lockin_test configure-minimum `
-  --xx-address "GPIB0::8::INSTR" `
-  --xy-address "GPIB0::9::INSTR" `
-  --frequency-hz 17.777 `
+  --config config\hardware.local.toml `
   --authorize-writes `
   --confirm-xy-sine-disconnected
 ```
@@ -151,8 +169,7 @@ Collect one JSON line per sample, including status:
 
 ```powershell
 python -m attodry_control.lockin_test diagnose `
-  --xx-address "GPIB0::8::INSTR" `
-  --xy-address "GPIB0::9::INSTR" `
+  --config config\hardware.local.toml `
   --samples 60 `
   --interval-s 1 `
   --consume-status-latches |
@@ -162,6 +179,10 @@ python -m attodry_control.lockin_test diagnose `
 The two instruments are queried sequentially; each instrument's X/Y/R/phase/
 frequency values are internally coherent, but the pair is not simultaneous.
 This limitation must be retained in the test record.
+
+`--xx-address`, `--xy-address`, `--timeout-ms`, and `--frequency-hz` remain
+available as explicit one-command overrides; they take precedence over the TOML
+values and do not edit the local file.
 
 ## Acceptance criteria
 

@@ -58,6 +58,9 @@ Completed offline in Stage 3:
 - All setting paths perform full query-only diagnostics before their first write.
 - Query-only output marks latched safety status incomplete unless explicitly
   consumed, and identical full IDNs from the two addresses block all writes.
+- `lockin_test diagnose/configure-minimum --config hardware.local.toml` reuses
+  semantic addresses, VISA timeout, and frequency from the unified local TOML;
+  CLI values override the file without modifying it.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation complete; real DLL
 ABI and laboratory validation remain pending.
@@ -114,13 +117,13 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 109 tests; it passes in both the
+- The complete hardware-free suite contains 111 tests; it passes in both the
   minimal environment (one rendering test skipped) and the analysis-enabled
   environment (all rendering exercised). Source compilation also passes.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `1f2138eff5720ccc7c0ffd1bb89881c3f3e7de0accda65c555edf7cafc677ec7`.
+  `320ec966e6d1f040ee0a6896757cb4348c192fbad0786e96fb4012c655eed00a`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. Do
   not claim any commissioned SR830, attoDRY, SMU, or real end-to-end acquisition.
