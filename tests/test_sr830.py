@@ -62,6 +62,36 @@ class FakeVisaResource:
         self.closed = True
 
 
+class TrackingVisaResource(FakeVisaResource):
+    def __init__(
+        self,
+        responses: dict[str, str | list[str]],
+        *,
+        shared_frequency: dict[str, float],
+        name: str,
+    ):
+        super().__init__(responses, name=name)
+        self.shared_frequency = shared_frequency
+
+    def query(self, command: str) -> str:
+        if command == "FREQ?":
+            self.queries.append(command)
+            return f"{self.shared_frequency['hz']:g}\n"
+        if command == "SNAP? 1,2,3,4,9":
+            self.queries.append(command)
+            return f"1e-6,2e-7,1.0198e-6,11.31,{self.shared_frequency['hz']:g}\n"
+        return super().query(command)
+
+    def write(self, command: str) -> None:
+        super().write(command)
+        if command.startswith("FREQ "):
+            self.shared_frequency["hz"] = float(command.split()[1])
+        elif command.startswith("SLVL "):
+            self.responses["SLVL?"] = command.split()[1] + "\n"
+        elif command.startswith("SENS "):
+            self.responses["SENS?"] = command.split()[1] + "\n"
+
+
 class FakeResourceManager:
     def __init__(self, resources: dict[str, FakeVisaResource]):
         self.resources = resources
@@ -486,6 +516,154 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(len(result["partial_readings"]), 2)
         self.assertEqual(xx_resource.writes[-2:], ["HARM 1", "SLVL 0.004"])
         self.assertEqual(xy_resource.writes[-2:], ["HARM 1", "SLVL 0.004"])
+
+    def test_cli_sweeps_refuse_unauthorized_writes_before_opening_resources(self) -> None:
+        for command in ("sweep-frequency", "sweep-excitation"):
+            manager = FakeResourceManager({})
+            arguments = [command, "--xx-address", "XX", "--xy-address", "XY"]
+            if command == "sweep-excitation":
+                arguments.extend(
+                    [
+                        "--series-resistance-ohm", "100000",
+                        "--device-resistance-ohm", "1000",
+                        "--max-device-current-a", "0.005",
+                        "--max-device-voltage-v", "5",
+                    ]
+                )
+            with self.assertRaises(AuthorizationRequired):
+                run(arguments, resource_manager_factory=lambda: manager)
+            self.assertEqual(manager.opened, [])
+
+    def test_cli_frequency_sweep_records_points_and_restores_baseline(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777,1000",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(len(result["points"]), 2)
+        self.assertEqual(
+            xx_resource.writes,
+            ["FREQ 1000", "SLVL 0.004", "FREQ 17.777"],
+        )
+        self.assertEqual(xy_resource.writes, [])
+        self.assertTrue(result["cleanup"]["verified"])
+
+    def test_cli_excitation_sweep_checks_limits_and_restores_original_range(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,0.4",
+                    "--series-resistance-ohm", "100000",
+                    "--device-resistance-ohm", "1000",
+                    "--max-device-current-a", "0.005",
+                    "--max-device-voltage-v", "5",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                    "--confirm-no-50ohm-termination",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertAlmostEqual(
+            result["safety"]["nominal_maximum_current_a_rms"],
+            0.4 / 101050.0,
+        )
+        self.assertEqual(
+            xx_resource.writes,
+            [
+                "SENS 21",
+                "SLVL 0.4",
+                "SLVL 0.004",
+                "FREQ 17.777",
+                "SENS 23",
+            ],
+        )
+        self.assertEqual(xy_resource.writes, [])
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
+
+    def test_cli_excitation_overload_keeps_rejected_sample_and_cleans_up(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["LIAS?"] = ["0\n", "0\n", "1\n", "0\n"]
+        xx_resource = TrackingVisaResource(
+            xx_responses, shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "overload"):
+            run(
+                [
+                    "sweep-excitation",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,0.4",
+                    "--series-resistance-ohm", "100000",
+                    "--device-resistance-ohm", "1000",
+                    "--max-device-current-a", "0.005",
+                    "--max-device-voltage-v", "5",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                    "--confirm-no-50ohm-termination",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertEqual(len(result["points"]), 2)
+        self.assertEqual(len(result["points"][1]["samples"]), 1)
+        self.assertTrue(result["cleanup"]["verified"])
+        self.assertEqual(xx_resource.writes[-3:], ["SLVL 0.004", "FREQ 17.777", "SENS 23"])
 
     def test_dual_controller_sets_both_harmonics_before_each_pair_snapshot(self) -> None:
         events: list[tuple[str, str, str]] = []

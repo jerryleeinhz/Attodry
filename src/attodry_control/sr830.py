@@ -8,6 +8,7 @@ from .models import LockinReading, LockinRole
 
 
 MINIMUM_SINE_OUTPUT_V = 0.004
+MAXIMUM_SINE_OUTPUT_V = 5.0
 MAXIMUM_REFERENCE_FREQUENCY_HZ = 102_000.0
 # Two sequential SR830 readbacks can differ by one 1 mHz display step.
 PAIR_FREQUENCY_ABS_TOLERANCE_HZ = 0.001_01
@@ -182,6 +183,45 @@ class Sr830:
     def set_minimum_sine_output(self) -> None:
         self._resource.write(f"SLVL {MINIMUM_SINE_OUTPUT_V:.3f}")
 
+    def set_sine_output(self, amplitude_v: float) -> None:
+        if (
+            not math.isfinite(amplitude_v)
+            or amplitude_v < MINIMUM_SINE_OUTPUT_V
+            or amplitude_v > MAXIMUM_SINE_OUTPUT_V
+        ):
+            raise ValueError("SINE OUT must be finite and within 0.004-5 V RMS.")
+        self._resource.write(f"SLVL {amplitude_v:g}")
+
+    def read_sine_output(self) -> float:
+        return self._query_float("SLVL?")
+
+    def set_internal_reference_frequency(self, frequency_hz: float) -> None:
+        if self.role is not LockinRole.XX:
+            raise Sr830Error("Internal reference frequency may only be set on lockin_xx.")
+        if (
+            not math.isfinite(frequency_hz)
+            or frequency_hz < 0.001
+            or frequency_hz > MAXIMUM_REFERENCE_FREQUENCY_HZ
+        ):
+            raise ValueError("Reference frequency must be within 0.001-102000 Hz.")
+        self._resource.write(f"FREQ {frequency_hz:g}")
+
+    def read_reference_frequency(self) -> float:
+        return self._query_float("FREQ?")
+
+    def set_sensitivity(self, code: int) -> None:
+        if not 0 <= code <= 26:
+            raise ValueError("SR830 sensitivity code must be between 0 and 26.")
+        self._resource.write(f"SENS {code}")
+
+    def read_sensitivity(self) -> int:
+        code = self._query_int("SENS?")
+        if not 0 <= code <= 26:
+            raise Sr830Error(
+                f"lockin_{self.role.value} returned invalid sensitivity code {code}."
+            )
+        return code
+
     def set_harmonic(self, harmonic: int) -> None:
         if harmonic not in (1, 2, 3):
             raise ValueError("Only harmonics 1, 2, and 3 are supported.")
@@ -223,7 +263,7 @@ class Sr830:
             raise Sr830Error("Internal excitation may only be configured for lockin_xx.")
         self._resource.write("FMOD 1")
         self._resource.write("HARM 1")
-        self._resource.write(f"FREQ {frequency_hz:g}")
+        self.set_internal_reference_frequency(frequency_hz)
 
     def configure_xy_external_ttl(self) -> None:
         if self.role is not LockinRole.XY:

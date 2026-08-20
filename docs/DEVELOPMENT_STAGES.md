@@ -100,6 +100,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   back at harmonic 1. Measured R values for xx h1/h2/h3 were approximately
   100.26/6.02/11.09 uV; xy h1/h2/h3 were approximately 0/1.43/0.60 uV.
   The raw accepted record remains only on the ignored control-computer path.
+- Added separately authorized frequency and excitation sweep commands for the
+  next device-only tests. Both consume status latches, retain rejected point
+  samples, stop on unlock/overload/error/readback mismatch, and verify restoration
+  of 4 mVrms and the 17.777 Hz baseline. The excitation path additionally checks
+  explicit device current/voltage bounds before opening VISA, temporarily widens
+  only the xx sensitivity, and restores its original readback. Real sweep
+  execution remains pending a new setting-write authorization.
 
 ## Stage 4 - attoDRY real driver
 
@@ -178,7 +185,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 121 tests and passes in the minimal environment
+- The full offline suite covers 125 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

@@ -96,6 +96,13 @@ Completed in Stage 3:
   frequencies, and verified restoration of both units to harmonic 1. Approximate
   R values were xx 100.26/6.02/11.09 uV and xy 0/1.43/0.60 uV for h1/h2/h3.
   The accepted JSON remains only on the ignored control-computer path.
+- Added write-gated `sweep-frequency` and `sweep-excitation` device-only commands.
+  They use increasing predefined points, latch-consuming xx/xy samples, strict
+  unlock/overload/error/readback rejection, retained partial raw points, and
+  verified restoration of the 17.777 Hz/4 mVrms baseline. The excitation scan
+  requires explicit circuit and device limits, validates worst-case bounds before
+  opening VISA, temporarily changes only xx sensitivity, then restores its
+  original readback. Real execution remains pending separate authorization.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -168,14 +175,14 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 121 tests and passes in the minimal
+- The complete hardware-free suite contains 125 tests and passes in the minimal
   environment with one matplotlib rendering test skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `bfcc9ae476d1c129160ab3edad0a26944516e7715225c1c14727a59e2bdffda9`.
+  `58f9d44657f938b9b772cb32e9df2bb3cb57d17f86f258bd7593a3a48399ccfa`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are

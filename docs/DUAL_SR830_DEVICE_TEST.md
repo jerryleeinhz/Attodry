@@ -213,6 +213,53 @@ both instruments to harmonic 1 after success. On failure or interruption it
 attempts harmonic-1 restoration and 4 mVrms minimum-output cleanup, but the
 operator must still confirm both front panels before disconnecting the device.
 
+## 8. Frequency and excitation sweeps
+
+These are separate write-authorized device-only tests. The frequency scan uses
+4 mVrms and first-harmonic detection at 17.777, 25, 35.5, 50, 70.7, 100, 141,
+200, 282, 398, 562, 794, and 1000 Hz. It writes only the internal frequency on
+`lockin_xx`; `lockin_xy` follows the external TTL reference. Each point waits
+1.5 seconds and retains three sequential xx/xy samples 0.3 seconds apart.
+
+```powershell
+python -m attodry_control.lockin_test sweep-frequency `
+  --config config\hardware.local.toml `
+  --authorize-writes `
+  --confirm-xy-sine-disconnected
+```
+
+The excitation scan is a source-voltage scan with a nominal current calculated
+from the complete supplied series path. Its default source points are 4, 6, 10,
+16, 26, 40, 64, 100, 160, 252, and 400 mVrms. For the confirmed 100 kohm
+external resistor, 50 ohm SR830 output resistance, and approximate 1 kohm device,
+run:
+
+```powershell
+python -m attodry_control.lockin_test sweep-excitation `
+  --config config\hardware.local.toml `
+  --series-resistance-ohm 100000 `
+  --device-resistance-ohm 1000 `
+  --max-device-current-a 0.005 `
+  --max-device-voltage-v 5 `
+  --xx-sensitivity-code 21 `
+  --authorize-writes `
+  --confirm-xy-sine-disconnected `
+  --confirm-no-50ohm-termination
+```
+
+Sensitivity code 21 is the 20 mV range and is applied only to `lockin_xx` for
+the excitation sweep. The original xx sensitivity is recorded and restored;
+`lockin_xy` sensitivity is not changed. Neither sweep writes FMOD, RSLP, HARM,
+ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume `LIAS?`/`ERRS?`, stop
+at the first unsafe or mismatched point, retain the rejected sample, and attempt
+to restore `lockin_xx` to 4 mVrms and 17.777 Hz. A communication failure still
+requires manual front-panel verification.
+
+At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
+voltage about 3.958 mVrms. The conservative short-circuit current bound is about
+3.998 uArms, and the conservative open-circuit device-voltage bound is 0.4 Vrms;
+both are checked against the supplied limits before VISA is opened.
+
 ## Acceptance criteria
 
 - Both IDNs identify Stanford Research Systems SR830 units with distinct VISA
