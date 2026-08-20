@@ -62,12 +62,19 @@ frequency_hz = 17.777
 [gate_top]
 model = "CHANGE_ME"
 address = "CHANGE_ME_TOP_GATE_VISA_ADDRESS"
-compliance_a = 1e-8
-leakage_limit_a = 5e-9
+compliance_a = "CHANGE_ME"
+leakage_limit_a = "CHANGE_ME"
+max_abs_voltage_v = "CHANGE_ME"
+ramp_step_v = "CHANGE_ME"
+readback_tolerance_v = "CHANGE_ME"
+settle_s = "CHANGE_ME"
 
 [gate_bottom]
 model = "CHANGE_ME"
 address = "CHANGE_ME_BOTTOM_GATE_VISA_ADDRESS"
-compliance_a = 1e-8
-leakage_limit_a = 5e-9
-
+compliance_a = "CHANGE_ME"
+leakage_limit_a = "CHANGE_ME"
+max_abs_voltage_v = "CHANGE_ME"
+ramp_step_v = "CHANGE_ME"
+readback_tolerance_v = "CHANGE_ME"
+settle_s = "CHANGE_ME"

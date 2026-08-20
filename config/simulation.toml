@@ -48,9 +48,16 @@ frequency_hz = 17.777
 backend = "simulation"
 compliance_a = 1e-8
 leakage_limit_a = 5e-9
+max_abs_voltage_v = 2.0
+ramp_step_v = 0.1
+readback_tolerance_v = 0.001
+settle_s = 0.0
 
 [gate_bottom]
 backend = "simulation"
 compliance_a = 1e-8
 leakage_limit_a = 5e-9
-
+max_abs_voltage_v = 2.0
+ramp_step_v = 0.1
+readback_tolerance_v = 0.001
+settle_s = 0.0

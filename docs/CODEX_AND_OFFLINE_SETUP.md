@@ -39,7 +39,9 @@ python -m pip download --dest wheelhouse .
 Copy-Item .\dist\*.whl .\wheelhouse\
 ```
 
-The wheelhouse is not final for real hardware until the QCoDeS, PyVISA, plotting, and any vendor-runtime requirements are added and frozen in later stages.
+For the currently implemented extras, use `.[hardware,analysis]` when downloading
+the wheelhouse. The wheelhouse is not final for real hardware until the exact SMU
+models determine whether another vendor library is required.
 
 Copy these items to the offline computer:
 
@@ -62,3 +64,14 @@ python -m pip install --no-index --find-links .\wheelhouse attodry-transport-con
 ```
 
 Copy `config/hardware.example.toml` to `config/hardware.local.toml`, edit all `CHANGE_ME` values, and run only the read-only diagnostic stage first.
+
+Before hardware commissioning, prove the installed environment with:
+
+```powershell
+python -m unittest discover -s tests -v
+attodry-simulate --database .\run_data\release-check.sqlite --run-id release-check --inject-first-unlock
+attodry-monitor --database .\run_data\release-check.sqlite --run-id release-check
+```
+
+Then follow `LAB_COMMISSIONING.md`; passing simulation does not authorize a real
+instrument connection or write.

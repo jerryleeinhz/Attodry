@@ -1,0 +1,10 @@
+# Copy to gate_calibration.local.toml and replace every value from independent
+# device geometry/calibration. Do not infer these values from a resistance map.
+
+[gate_calibration]
+top_capacitance_f_per_m2 = "CHANGE_ME"
+bottom_capacitance_f_per_m2 = "CHANGE_ME"
+top_offset_v = "CHANGE_ME"
+bottom_offset_v = "CHANGE_ME"
+density_offset_per_m2 = "CHANGE_ME"
+displacement_offset_c_per_m2 = "CHANGE_ME"

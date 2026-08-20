@@ -56,6 +56,17 @@ class CryostatState:
     error_code: int
     error_message: str = ""
 
+    def __post_init__(self) -> None:
+        temperatures = (
+            self.sample_temperature_k,
+            self.user_temperature_k,
+            self.vti_temperature_k,
+        )
+        if any(not math.isfinite(value) or value <= 0 for value in temperatures):
+            raise ValueError("Cryostat temperatures must be finite and positive.")
+        if isinstance(self.error_code, bool) or not isinstance(self.error_code, int):
+            raise ValueError("Cryostat error_code must be an integer.")
+
 
 @dataclass(frozen=True, slots=True)
 class LockinReading:
@@ -72,6 +83,19 @@ class LockinReading:
     def __post_init__(self) -> None:
         if self.harmonic not in (1, 2, 3):
             raise ValueError("Only harmonics 1, 2, and 3 are supported.")
+        values = (
+            self.x_v,
+            self.y_v,
+            self.amplitude_v,
+            self.phase_deg,
+            self.frequency_hz,
+        )
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("Lock-in readings must be finite.")
+        if self.amplitude_v < 0:
+            raise ValueError("Lock-in amplitude must be non-negative.")
+        if self.frequency_hz <= 0:
+            raise ValueError("Lock-in frequency must be positive.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,3 +107,15 @@ class GateState:
     compliance_a: float
     output_enabled: bool
 
+    def __post_init__(self) -> None:
+        if not self.role.strip():
+            raise ValueError("Gate role must be non-empty.")
+        values = (self.voltage_set_v, self.voltage_read_v, self.compliance_a)
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("Gate state values must be finite.")
+        if self.compliance_a <= 0:
+            raise ValueError("Gate compliance must be positive.")
+        if self.leakage_current_a is not None and not math.isfinite(
+            self.leakage_current_a
+        ):
+            raise ValueError("Gate leakage current must be finite when present.")

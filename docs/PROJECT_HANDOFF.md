@@ -6,9 +6,137 @@ Last updated: 2026-08-20
 
 Stage 0 - confirmed design and safety scaffold: complete.
 
-Next stage: Stage 1 - configuration models, simulation devices, and platform-independent acquisition records.
+Stage 1 - strict configuration and full simulation: complete.
 
-This repository does not yet control real hardware. Do not claim that a real attoDRY, SR830, SMU, SQLite run, monitor, or publication plot has been implemented.
+Completed in Stage 1:
+
+- Strict, hardware-free TOML loading for both checked-in configuration templates.
+- Missing and unknown fields are rejected, as are mode/backend mismatches.
+- The confirmed 3 T project limit, cleanup zero-field policy, semantic SR830 roles,
+  distinct lock-in addresses, matched frequency, and gate protection ordering are
+  validated before any driver could be constructed.
+- Added deterministic simulation cryostat, semantic xx/xy lock-ins, and top/bottom
+  gates with injected timeout, communication, unlock, overload, and leakage faults.
+- Added condition, attempt, raw-reading, and accepted-result records with explicit
+  `condition_id`, `attempt_index`, and accepted/rejected contracts.
+- Added numeric, X/Z vector, temperature-field, gate-grid, and paired-gate scans.
+- Added deterministic cleanup with raw rejected readings retained, Ctrl+C cleanup,
+  and last-confirmed field preservation when zero readback fails.
+
+Stage 2 - SQLite storage, resume, monitoring, and audit: complete.
+
+Completed in Stage 2:
+
+- Added WAL/FULL-synchronous SQLite storage for runs, events, conditions,
+  attempts, raw instrument samples, cryostat/gate station samples, transport
+  readings, and checkpoints.
+- Enforced a database-level single accepted attempt per condition and promoted
+  raw/transport/station rows to accepted only after one safe station snapshot and
+  six safe xx/xy × h1/h2/h3 readings.
+- Rejected and interrupted raw attempts remain stored and are excluded by the
+  default accepted-only loader.
+- Added monotonic checkpoints, pending-condition resume, retry numbering, and
+  a URI `mode=ro`/`query_only` monitor plus `attodry-monitor` CLI.
+- Added explicit `scan_id` storage. Migrated legacy rows use `legacy`, and the
+  publication layer isolates those rows by condition instead of inventing scan
+  boundaries.
+- Cleanup audit events persist each action, zero/hold confirmation, and the full
+  last-confirmed cryostat state. `KeyboardInterrupt` also persists station data
+  and any raw lock-in readings captured before interruption.
+
+Stage 3 - integrated dual-SR830 driver: offline implementation complete;
+laboratory validation remains blocked on user-supplied station and device parameters.
+
+Completed offline in Stage 3:
+
+- Added semantic dual-controller orchestration on top of the SR830 command adapter.
+- Both units receive each harmonic setting before per-unit coherent SNAP reads;
+  xx/xy pair timing remains explicitly sequential rather than falsely simultaneous.
+- Unlock, input/reserve/filter/output overload, instrument error, readback mismatch,
+  and communication failure all fail closed to minimum-output attempts while
+  retaining partial raw readings.
+- All setting paths perform full query-only diagnostics before their first write.
+- Query-only output marks latched safety status incomplete unless explicitly
+  consumed, and identical full IDNs from the two addresses block all writes.
+
+Stage 4 - attoDRY legacy-DLL adapter: offline implementation complete; real DLL
+ABI and laboratory validation remain pending.
+
+Completed offline in Stage 4:
+
+- Added 64-bit/path checks and explicit ctypes signatures for every used symbol.
+- Added separately authorized begin/connect/initialization polling and timeout.
+- Every DLL call checks its return code; read failures preserve the prior
+  `last_confirmed_state` rather than inferring a new field value.
+- Added full temperature/VTI/X/Z/setpoint/control/error state reads and
+  read-before-toggle idempotent control operations.
+- Added safe zero-detour coordinated vector setpoints, rolling stable waits, and
+  monitored vendor sweep-to-zero behavior against a fake DLL.
+
+Current boundary: all hardware-free work through Stage 7 is implemented; staged
+laboratory commissioning is the next activity after operator inputs and approval.
+
+Stage 5 - gate safety and integrated acquisition: model-independent offline core
+complete; vendor SMU adapters remain pending exact models and safety parameters.
+
+Completed offline in Stage 5:
+
+- Added explicit write authorization, configured absolute-voltage limit,
+  compliance setup, controlled ramps, voltage/leakage readback checks, and
+  best-effort zero/disable behavior for model-independent gate backends.
+- Hardware readiness rejects unresolved addresses and all per-gate compliance,
+  leakage, voltage, ramp-step, readback-tolerance, and settle-time placeholders
+  before any hardware driver can be constructed.
+- Added signed Vxx/I and excitation-current helpers that do not guess the sample
+  path impedance, plus explicit linear paired-gate relations.
+- Added audited simulation execution across SQLite start/raw/complete events,
+  retry, resume, checkpoints, normal hold/zero cleanup, and failure cleanup.
+
+Stage 6 - accepted-only analysis: offline implementation complete.
+
+Completed offline in Stage 6:
+
+- Added read-only accepted-attempt long-form loading and explicit rejected-audit
+  opt-in, CSV export, accepted gate-leakage loading, Bx/Bz/magnitude/angle
+  metadata, transport traces, and 2D gate-map preparation/plotting.
+- Added `attodry-analyze` and a notebook that imports only the analysis surface.
+- Added an auditable publication suite for current/harmonic/frequency/
+  temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
+  results, with an explicit generated/skipped manifest and fit summary.
+- Derived current/resistance and n-D outputs require operator-supplied path
+  resistance and gate calibration. Unsupported Hall/Nernst/scattering/geometry/
+  mechanism products are skipped, never guessed.
+- The pinned matplotlib analysis environment rendered the representative suite;
+  curve, heat-map, leakage, and n-D outputs were visually inspected.
+
+Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
+
+- Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
+  rejection/retry test.
+- Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
+- The complete hardware-free suite contains 109 tests; it passes in both the
+  minimal environment (one rendering test skipped) and the analysis-enabled
+  environment (all rendering exercised). Source compilation also passes.
+- The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
+  without downloading dependencies, inspected, and isolated-import checked after
+  the final offline changes. SHA-256:
+  `1f2138eff5720ccc7c0ffd1bb89881c3f3e7de0accda65c555edf7cafc677ec7`.
+  This is not yet the frozen hardware wheelhouse.
+- The integrated acquisition path still cannot construct real SMU hardware. Do
+  not claim any commissioned SR830, attoDRY, SMU, or real end-to-end acquisition.
+
+User-priority SR830 bench-test slice completed offline:
+
+- `docs/DUAL_SR830_DEVICE_TEST.md` defines safe cabling, minimum-excitation
+  calculation, front-panel setup, commands, acceptance criteria, and stop steps.
+- `python -m attodry_control.lockin_test discover` lists VISA resources without
+  opening instruments.
+- `diagnose` sends queries only; status-latch consumption requires an explicit flag.
+- `configure-minimum` requires explicit write authorization and physical XY SINE
+  OUT disconnection confirmation, records before/after readback, and retries the
+  4 mVrms minimum on both units after a caught write failure.
+- Laboratory validation is blocked on the user's VISA addresses, device current/
+  voltage limits, excitation-path impedance, and confirmed input/shield wiring.
 
 ## User-confirmed requirements
 
@@ -22,7 +150,9 @@ This repository does not yet control real hardware. Do not claim that a real att
 - The experiment field invariant is `sqrt(Bx^2 + Bz^2) <= 3 T`.
 - A caught exception or `Ctrl+C` requests field zero after electrical outputs are made safe.
 - Normal completion field behavior is configurable, default `hold` in the example configuration.
-- Gate SMU control, compliance/leakage protection, monitoring, offline installation, notebook analysis, and paper-oriented plots remain project goals.
+- Real vendor-specific gate SMU control and laboratory validation remain project
+  goals; offline compliance/leakage protection, monitoring, installation workflow,
+  notebook analysis, and paper-oriented plotting are implemented.
 
 ## Confirmed equipment details
 
@@ -94,9 +224,11 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Add strict TOML loading and validation without opening hardware.
-2. Add simulation implementations of the cryostat, two lock-ins, and two gates.
-3. Define condition, attempt, accepted-result, and raw transport record models.
-4. Add failure-injection tests for timeout, unlock, overload, gate leakage, and cleanup order.
-5. Update `docs/DEVELOPMENT_STAGES.md` when Stage 1 is actually complete.
-
+1. Perform the user-priority standalone dual-SR830 laboratory test after the user
+   supplies the required station and device limits.
+2. Add the two vendor SMU adapters only after exact models, limits, and command
+   references are supplied.
+3. Perform staged attoDRY read-only and small-movement commissioning only after
+   explicit connection/write authorization.
+4. Freeze and verify the complete hardware wheelhouse on the offline control
+   computer after its Python/VISA environment is known.

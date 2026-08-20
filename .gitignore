@@ -3,6 +3,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .coverage
+.firecrawl/
 .venv/
 .test-tmp/
 build/
@@ -11,8 +12,8 @@ wheelhouse/
 run_data/
 analysis_output/
 config/hardware.local.toml
+config/gate_calibration.local.toml
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 *.dll
-

@@ -10,9 +10,18 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+hardware = ["pyvisa==1.16.2"]
+analysis = ["matplotlib==3.10.9"]
+
+[project.scripts]
+attodry-lockin-test = "attodry_control.lockin_test:main"
+attodry-monitor = "attodry_control.monitor:main"
+attodry-analyze = "attodry_control.analysis:main"
+attodry-simulate = "attodry_control.simulate:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-

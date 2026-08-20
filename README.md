@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库是安全骨架（阶段 0），不会连接或控制真实仪器。已经实现并测试的是平台无关的数据模型、X/Z 矢量场安全边界和连续稳定窗口判据。真实 DLL、VISA 驱动、扫描执行、SQLite、监视和绘图将在后续阶段逐步迁移和验证。
+当前仓库已完成阶段 1–2，以及阶段 3–7 可在无硬件条件下完成的离线实现。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。所有真实硬件路径仍需显式授权且尚未实验室验证；具体 SMU 命令等待确认型号。
 
 ## 已确认硬件
 
@@ -46,6 +46,19 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
 
 如果电脑没有 `py` 命令，先安装 64 位 Python 3.11，并在安装器中勾选 Python Launcher。Conda 不是必需条件。更完整的 Codex、虚拟环境和离线 wheelhouse 工作流见 `docs/CODEX_AND_OFFLINE_SETUP.md`。
 
+## 双 SR830 独立器件测试
+
+在接入 attoDRY、磁体或栅极 SMU 之前，先按
+[`docs/DUAL_SR830_DEVICE_TEST.md`](docs/DUAL_SR830_DEVICE_TEST.md) 完成两台
+SR830 的独立测试。工具的诊断模式只查询；任何设置写入都需要显式授权并
+确认 `lockin_xy` 的 SINE OUT 已物理断开。
+
+```powershell
+python -m pip install -e ".[hardware]"
+python -m attodry_control.lockin_test discover
+python -m attodry_control.lockin_test --help
+```
+
 ## 目录
 
 ```text
@@ -60,6 +73,13 @@ tests/                  安全边界和稳定判据测试
 ```powershell
 python -m unittest discover -s tests -v
 python -m attodry_control
+python -m attodry_control.monitor --database PATH --run-id RUN_ID
+python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --inject-first-unlock
+python -m attodry_control.analysis --database PATH --run-id RUN_ID --csv analysis_output/run.csv
+python -m attodry_control.analysis --database PATH --run-id RUN_ID --publication-dir analysis_output/RUN_ID --format png --format pdf
 ```
 
-第二条命令只显示骨架状态，不会连接仪器。
+这些命令中的状态、仿真、监视和分析路径都不会连接真实仪器。绘图需要安装
+`.[analysis]` 可选依赖。分析输入、显式电流/栅极校准和输出清单见
+[`docs/DATA_ANALYSIS.md`](docs/DATA_ANALYSIS.md)；实验室步骤见
+[`docs/LAB_COMMISSIONING.md`](docs/LAB_COMMISSIONING.md)。

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .models import CryostatState, LockinReading, VectorField
+from .models import CryostatState, GateState, LockinReading, VectorField
 
 
 class CryostatController(Protocol):
@@ -30,5 +30,18 @@ class LockinController(Protocol):
 
     def read_harmonic(self, harmonic: int) -> LockinReading: ...
 
+    def set_minimum_excitation(self) -> None: ...
+
     def close(self) -> None: ...
 
+
+class GateController(Protocol):
+    def read_state(self) -> GateState: ...
+
+    def set_voltage(self, voltage_v: float) -> None: ...
+
+    def enable_output(self) -> None: ...
+
+    def disable_output(self) -> None: ...
+
+    def close(self) -> None: ...

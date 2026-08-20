@@ -69,13 +69,40 @@ All tolerances and dwell periods are configuration values and are stored with th
 
 Before acquisition, diagnostics must verify distinct VISA addresses, both IDNs, reference modes, frequency consistency, harmonic, lock state, overload state, time constant, sensitivity, and source readback.
 
+The pre-integration laboratory procedure is
+[`DUAL_SR830_DEVICE_TEST.md`](DUAL_SR830_DEVICE_TEST.md). Its setting-write path
+requires explicit authorization and confirmation that `lockin_xy` SINE OUT is
+physically disconnected. The ordinary diagnostic path sends queries only;
+reading `LIAS?` or `ERRS?` is separately opted in because those queries consume
+latched status bits.
+
 ## Exception handling
 
 The agreed default for a caught exception or `Ctrl+C` is zero field. Cleanup order is electrical outputs first, then magnet zero request, then final state logging and disconnect.
 
 APS100 hardware power-fail, quench, and shutdown-input behavior remains an independent protection layer. It does not guarantee that a Python crash returns the magnet to zero.
 
+## Gate SMUs
+
+The model-independent controller requires every safety value explicitly: absolute
+voltage limit, current compliance, leakage trip, maximum ramp step, settle time,
+and voltage-readback tolerance. It sets compliance before enabling an output,
+enables only at 0 V, verifies every ramp step, and attempts a stepped return to
+zero followed by output disable after any write, readback, or leakage failure.
+
+No vendor command adapter is active until the exact top/bottom SMU models and
+manuals are confirmed. A communication failure does not prove 0 V or output-off;
+the last confirmed state is retained and the instrument must be checked manually.
+
+The checked-in hardware template deliberately leaves VISA/DLL/COM values and all
+six per-gate limits as `CHANGE_ME`. `require_hardware_ready()` rejects these
+placeholders before a hardware driver is constructed; replacing them requires
+operator-confirmed station values, not copied example limits.
+
+Signed resistance is `Vxx_X / I_rms`. The software never infers `I_rms` from the
+SR830 amplitude unless the operator explicitly supplies the complete excitation
+path resistance, including series components and termination/loading effects.
+
 ## Vendor files
 
 Do not commit vendor DLLs. Configure their installed path in `config/hardware.local.toml`. Preserve vendor manuals and installation packages outside the Python repository.
-
