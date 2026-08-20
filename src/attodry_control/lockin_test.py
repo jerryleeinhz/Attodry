@@ -179,12 +179,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-device-voltage-v", type=_positive_float, required=True
     )
     excitation_sweep.add_argument(
-        "--xx-sensitivity-code",
-        type=_sensitivity_code,
-        default=21,
-        help="Temporary lockin_xx sensitivity code. Default 21 (20 mV).",
-    )
-    excitation_sweep.add_argument(
         "--confirm-no-50ohm-termination",
         action="store_true",
         help="Confirm no external 50 ohm termination is present.",
@@ -239,6 +233,12 @@ def _add_sweep_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--settle-s", type=_nonnegative_float, default=1.5)
     parser.add_argument("--samples-per-point", type=_positive_integer, default=3)
     parser.add_argument("--sample-interval-s", type=_nonnegative_float, default=0.3)
+    parser.add_argument(
+        "--xx-sensitivity-code",
+        type=_sensitivity_code,
+        default=21,
+        help="Temporary lockin_xx sensitivity code. Default 21 (20 mV).",
+    )
     parser.add_argument(
         "--authorize-writes",
         action="store_true",
@@ -423,6 +423,12 @@ def _run_frequency_sweep(
         writes_started = False
         failure: BaseException | None = None
         try:
+            writes_started = True
+            lockin_xx.set_sensitivity(args.xx_sensitivity_code)
+            if lockin_xx.read_sensitivity() != args.xx_sensitivity_code:
+                raise Sr830Error(
+                    "lockin_xx sensitivity readback does not match the sweep setting."
+                )
             for point_index, target_hz in enumerate(points):
                 wrote_setting = not math.isclose(
                     target_hz, baseline_hz, rel_tol=0.0, abs_tol=1e-12
@@ -439,7 +445,6 @@ def _run_frequency_sweep(
                 }
                 records.append(point_record)
                 if wrote_setting:
-                    writes_started = True
                     lockin_xx.set_internal_reference_frequency(target_hz)
                     time.sleep(args.settle_s)
                     transition, transition_problems = _consume_frequency_transition(
@@ -480,7 +485,7 @@ def _run_frequency_sweep(
             lockin_xy,
             baseline_hz=baseline_hz,
             original_xx_sensitivity=preflight_xx.sensitivity,
-            restore_sensitivity=False,
+            restore_sensitivity=True,
             restore_frequency=True,
             settle_s=args.settle_s,
             writes_started=writes_started,
@@ -495,6 +500,7 @@ def _run_frequency_sweep(
                 "lockin_xy": asdict(preflight_xy),
             },
             "requested_points_hz": points,
+            "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
             "sample_interval_s": args.sample_interval_s,
@@ -820,11 +826,6 @@ def _restore_scan_state(
             action()
         except BaseException as exc:
             errors.append(f"{label}: {exc}")
-    if restore_sensitivity:
-        try:
-            lockin_xx.set_sensitivity(original_xx_sensitivity)
-        except BaseException as exc:
-            errors.append(f"restore lockin_xx sensitivity: {exc}")
     transition: dict[str, object] | None = None
     time.sleep(settle_s)
     if restore_frequency:
@@ -835,6 +836,12 @@ def _restore_scan_state(
             errors.extend(transition_problems)
         except BaseException as exc:
             errors.append(f"frequency-restoration transition readback: {exc}")
+        time.sleep(settle_s)
+    if restore_sensitivity:
+        try:
+            lockin_xx.set_sensitivity(original_xx_sensitivity)
+        except BaseException as exc:
+            errors.append(f"restore lockin_xx sensitivity: {exc}")
         time.sleep(settle_s)
     try:
         xx = lockin_xx.read_diagnostic(consume_status_latches=True)

@@ -570,10 +570,18 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(len(result["points"]), 2)
         self.assertEqual(
             xx_resource.writes,
-            ["FREQ 1000", "SLVL 0.004", "FREQ 17.777"],
+            [
+                "SENS 21",
+                "FREQ 1000",
+                "SLVL 0.004",
+                "FREQ 17.777",
+                "SENS 23",
+            ],
         )
         self.assertEqual(xy_resource.writes, [])
         self.assertTrue(result["cleanup"]["verified"])
+        self.assertEqual(result["temporary_xx_sensitivity_code"], 21)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
 
     def test_cli_frequency_sweep_separates_transition_unlock_from_sample_window(self) -> None:
         shared_frequency = {"hz": 17.777}

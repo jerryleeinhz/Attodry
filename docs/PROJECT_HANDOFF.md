@@ -118,6 +118,13 @@ Completed in Stage 3:
   50 ppm sweep-only external-readback tolerance covers this measured jitter while
   leaving unlock, overload, error, and non-sweep harmonic criteria unchanged.
   Its real retry and the excitation scan are not yet authorized.
+- The next authorized run passed through 35.5 Hz and stopped at the first 50 Hz
+  formal sample because XX reported output overload at about 1.09 mV on its 1 mV
+  sensitivity range. Final 17.777 Hz/4 mVrms/1 mV readback and both status words
+  were clear, but the rejected overload record is retained and the excitation
+  scan did not run. The frequency command now temporarily uses SENS 21 (20 mV)
+  and restores the original xx range only after returning to the baseline and
+  settling. A new authorization must include this frequency-scan SENS write.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -197,7 +204,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `502334564eaac74f8cb2914515bc28548ccaf76871d2eeba0536bd1ed2d9366c`.
+  `bff5a996bbdb7b845f10278c9011b8de5cca5fef41edb548a62517b94d127bfe`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are

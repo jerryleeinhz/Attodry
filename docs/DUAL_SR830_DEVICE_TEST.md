@@ -226,6 +226,13 @@ is recorded as expected; any overload, instrument error, unexpected setting
 change, XX internal-reference unlock, or renewed XY unlock in the formal sample
 window still fails the scan.
 
+The frequency scan temporarily sets only `lockin_xx` to sensitivity code 21
+(20 mV) before its baseline sample. This prevents a genuine output overload seen
+when Vxx reached about 1.09 mV at 50 Hz on the 1 mV range. It does not change the
+4 mVrms source or `lockin_xy` sensitivity. Cleanup returns to 17.777 Hz while
+the wider range is still active, waits through transition clearing and settling,
+then restores the original xx sensitivity and verifies its readback.
+
 The frequency sweep uses a separate 50 ppm relative tolerance, with the existing
 1.01 mHz absolute floor, for the locked XY external-frequency readback. This was
 set from a retained 70.7 Hz sample that read 70.6978 Hz (31 ppm low) with no
@@ -279,6 +286,12 @@ the third 70.7 Hz sample solely because the locked XY frequency readback differe
 by 2.2 mHz (31 ppm). Final 17.777 Hz/4 mVrms restoration was fully verified.
 The sweep-only 50 ppm readback tolerance above was added from that retained
 result and also requires a newly authorized retry.
+
+The following retry stopped on an actual XX output-overload latch in the first
+50 Hz formal sample, where R was about 1.09 mV on the 1 mV sensitivity range.
+Final restoration was clear, but the overload attempt remains rejected and the
+excitation scan did not start. The temporary 20 mV xx frequency-sweep range above
+was added from that result and requires a new SENS-write authorization.
 
 At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
 voltage about 3.958 mVrms. The conservative short-circuit current bound is about

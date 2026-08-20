@@ -122,6 +122,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   separate 50 ppm relative tolerance now applies only to frequency-sweep external
   readback jitter; all unlock/error checks and the established harmonic-path
   tolerance remain unchanged. Another real retry is pending authorization.
+- The next authorized retry stopped at 50 Hz on a real XX output-overload latch:
+  Vxx had risen to about 1.09 mV on the 1 mV sensitivity range. Final baseline
+  readback was clear, but the overload remains retained as a rejected attempt and
+  the excitation scan did not start. Frequency sweeps now temporarily use the
+  20 mV xx sensitivity range, without changing the 4 mVrms source, and restore
+  the original sensitivity only after frequency restoration and settling. This
+  added SENS write requires a new explicit authorization.
 
 ## Stage 4 - attoDRY real driver
 
