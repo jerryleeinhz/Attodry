@@ -14,6 +14,7 @@ from .config import RunMode, load_config
 from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
+    PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
     Sr830,
     Sr830Diagnostic,
     Sr830Error,
@@ -304,7 +305,7 @@ def _diagnostic_problems(
         xx.snapshot_frequency_hz,
         xy.snapshot_frequency_hz,
         rel_tol=1e-5,
-        abs_tol=0.0001,
+        abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
     ):
         problems.append("lock-in reference frequencies differ")
     for diagnostic in (xx, xy):

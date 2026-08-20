@@ -9,6 +9,8 @@ from .models import LockinReading, LockinRole
 
 MINIMUM_SINE_OUTPUT_V = 0.004
 MAXIMUM_REFERENCE_FREQUENCY_HZ = 102_000.0
+# Two sequential SR830 readbacks can differ by one 1 mHz display step.
+PAIR_FREQUENCY_ABS_TOLERANCE_HZ = 0.001_01
 
 
 class Sr830Error(RuntimeError):
@@ -368,7 +370,7 @@ def _verify_pair_readback(
             diagnostic.frequency_hz,
             expected_frequency_hz,
             rel_tol=1e-5,
-            abs_tol=0.0001,
+            abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
         ):
             problems.append(f"{diagnostic.role.value} frequency readback does not match")
     if problems:
@@ -440,7 +442,7 @@ class DualSr830Controller:
                     xx_sample.reading.frequency_hz,
                     xy_sample.reading.frequency_hz,
                     rel_tol=1e-5,
-                    abs_tol=0.0001,
+                    abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
                 ):
                     raise Sr830AcquisitionError(
                         f"xx/xy frequency mismatch at harmonic {harmonic}.",

@@ -284,6 +284,40 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xx_resource.timeout, 4321)
         self.assertEqual(xy_resource.timeout, 4321)
 
+    def test_cli_diagnose_accepts_one_millihertz_pair_readback_difference(self) -> None:
+        xx_resource = FakeVisaResource(
+            responses(reference_mode=1, frequency_hz=17.777)
+        )
+        xy_resource = FakeVisaResource(
+            responses(reference_mode=0, frequency_hz=17.778)
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+
+        with redirect_stdout(io.StringIO()):
+            exit_code = run(
+                ["diagnose", "--xx-address", "XX", "--xy-address", "XY"],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(exit_code, 0)
+
+    def test_cli_diagnose_rejects_two_millihertz_pair_readback_difference(self) -> None:
+        xx_resource = FakeVisaResource(
+            responses(reference_mode=1, frequency_hz=17.777)
+        )
+        xy_resource = FakeVisaResource(
+            responses(reference_mode=0, frequency_hz=17.779)
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+
+        with redirect_stdout(io.StringIO()):
+            exit_code = run(
+                ["diagnose", "--xx-address", "XX", "--xy-address", "XY"],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(exit_code, 1)
+
     def test_cli_configuration_uses_frequency_from_config(self) -> None:
         frequency_hz = 19.0
         xx_resource = FakeVisaResource(
@@ -375,6 +409,29 @@ class Sr830Tests(unittest.TestCase):
             ]
             self.assertLess(xx_write, snapshots[0])
             self.assertLess(xy_write, snapshots[0])
+
+    def test_dual_controller_accepts_one_millihertz_pair_readback_difference(
+        self,
+    ) -> None:
+        xx_resource = FakeVisaResource(
+            responses(reference_mode=1, frequency_hz=17.777)
+        )
+        xy_resource = FakeVisaResource(
+            responses(reference_mode=0, frequency_hz=17.778)
+        )
+        controller = DualSr830Controller(
+            Sr830(xx_resource, LockinRole.XX),
+            Sr830(xy_resource, LockinRole.XY),
+        )
+
+        controller.configure_minimum(
+            frequency_hz=17.777,
+            authorize_writes=True,
+            confirm_xy_sine_disconnected=True,
+        )
+        result = controller.measure_harmonics(settle_s=0.0, sleeper=lambda _: None)
+
+        self.assertEqual(len(result.readings), 6)
 
     def test_dual_controller_unlock_fails_closed_with_partial_raw_readings(self) -> None:
         xx_resource = FakeVisaResource(responses(reference_mode=1))

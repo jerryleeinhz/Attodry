@@ -44,10 +44,10 @@ Completed in Stage 2:
   last-confirmed cryostat state. `KeyboardInterrupt` also persists station data
   and any raw lock-in readings captured before interruption.
 
-Stage 3 - integrated dual-SR830 driver: offline implementation complete;
-laboratory validation remains blocked on user-supplied station and device parameters.
+Stage 3 - integrated dual-SR830 driver: standalone first-harmonic laboratory
+validation complete; integrated 1/2/3-harmonic write-path validation remains pending.
 
-Completed offline in Stage 3:
+Completed in Stage 3:
 
 - Added semantic dual-controller orchestration on top of the SR830 command adapter.
 - Both units receive each harmonic setting before per-unit coherent SNAP reads;
@@ -61,6 +61,26 @@ Completed offline in Stage 3:
 - `lockin_test diagnose/configure-minimum --config hardware.local.toml` reuses
   semantic addresses, VISA timeout, and frequency from the unified local TOML;
   CLI values override the file without modifying it.
+- Standalone laboratory commissioning confirmed distinct SR830 identities,
+  internal xx and external-TTL-rising xy reference roles, 17.777 Hz, 4 mVrms,
+  A-B/Float inputs, and physically disconnected xy SINE OUT. The confirmed
+  100 kohm external series resistor plus the SR830 50 ohm output resistance and
+  approximate 1 kohm device give about 39.58 nArms.
+- The Vxx A/B reversal produced X/Y ratios of about -1.012/-0.986, retained R
+  within about 1%, and shifted phase by 179.78 degrees. The final accepted bench
+  state has a stable approximately 0.11 mV Vxx magnitude; the final record has
+  59 consecutive post-latch-clear samples with no unlock, overload, or instrument
+  error. Raw commissioning JSONL remains only on the ignored control-computer path.
+- Sequential SR830 frequency readbacks differed by at most 0.9 mHz without
+  unlock. The shared check now allows one 1 mHz readback step plus floating-point
+  margin and still rejects a 2 mHz mismatch.
+- A later authorized optimization set both lock-ins to 1 mV sensitivity and
+  300 ms time constant without changing 17.777 Hz, 4 mVrms, or 24 dB/oct. The
+  60-second readback record was complete and contained no unlock, overload, or
+  instrument error. Vxx averaged about 104.70 uV, while Vxy remained at the
+  near-zero quantized floor (maximum about 59.6 nV). This passes communications,
+  configuration, and lock-status acceptance, but does not establish a physical
+  Vxy response; retain that as a prerequisite for integrated acquisition.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation complete; real DLL
 ABI and laboratory validation remain pending.
@@ -76,8 +96,10 @@ Completed offline in Stage 4:
 - Added safe zero-detour coordinated vector setpoints, rolling stable waits, and
   monitored vendor sweep-to-zero behavior against a fake DLL.
 
-Current boundary: all hardware-free work through Stage 7 is implemented; staged
-laboratory commissioning is the next activity after operator inputs and approval.
+Current boundary: all hardware-free work through Stage 7 and standalone
+first-harmonic SR830 communications/Vxx validation are complete. A physical Vxy
+response check, integrated harmonic writes, attoDRY, SMUs, and real end-to-end
+acquisition still require staged authorization.
 
 Stage 5 - gate safety and integrated acquisition: model-independent offline core
 complete; vendor SMU adapters remain pending exact models and safety parameters.
@@ -117,18 +139,19 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 111 tests; it passes in both the
+- The complete hardware-free suite contains 114 tests; it passes in both the
   minimal environment (one rendering test skipped) and the analysis-enabled
   environment (all rendering exercised). Source compilation also passes.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `320ec966e6d1f040ee0a6896757cb4348c192fbad0786e96fb4012c655eed00a`.
+  `e566339ed678de80c900a26566ec81461a5ca4e0c6f3b33ee65d9b098b07869c`.
   This is not yet the frozen hardware wheelhouse.
-- The integrated acquisition path still cannot construct real SMU hardware. Do
-  not claim any commissioned SR830, attoDRY, SMU, or real end-to-end acquisition.
+- The integrated acquisition path still cannot construct real SMU hardware. The
+  standalone first-harmonic SR830 test is commissioned, but do not claim an
+  integrated 1/2/3-harmonic SR830, attoDRY, SMU, or real end-to-end acquisition.
 
-User-priority SR830 bench-test slice completed offline:
+User-priority SR830 bench-test slice completed in the laboratory:
 
 - `docs/DUAL_SR830_DEVICE_TEST.md` defines safe cabling, minimum-excitation
   calculation, front-panel setup, commands, acceptance criteria, and stop steps.
@@ -138,8 +161,8 @@ User-priority SR830 bench-test slice completed offline:
 - `configure-minimum` requires explicit write authorization and physical XY SINE
   OUT disconnection confirmation, records before/after readback, and retries the
   4 mVrms minimum on both units after a caught write failure.
-- Laboratory validation is blocked on the user's VISA addresses, device current/
-  voltage limits, excitation-path impedance, and confirmed input/shield wiring.
+- The standalone first-harmonic device test and physical Vxx sign reversal are
+  complete. Integrated harmonic-setting writes remain separately gated.
 
 ## User-confirmed requirements
 
@@ -158,6 +181,13 @@ User-priority SR830 bench-test slice completed offline:
   notebook analysis, and paper-oriented plotting are implemented.
 
 ## Confirmed equipment details
+
+Control-computer runtime:
+
+- On `LK_setup`, run every project command in the Conda environment `lyr`.
+- SSH automation must either activate `lyr` or invoke
+  `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe` directly; never use the
+  control computer's bare system `python`.
 
 Factory system specification:
 
@@ -227,8 +257,8 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Perform the user-priority standalone dual-SR830 laboratory test after the user
-   supplies the required station and device limits.
+1. Perform integrated 1/2/3-harmonic SR830 validation only after separate write
+   authorization for harmonic changes.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Perform staged attoDRY read-only and small-movement commissioning only after

@@ -180,6 +180,10 @@ The two instruments are queried sequentially; each instrument's X/Y/R/phase/
 frequency values are internally coherent, but the pair is not simultaneous.
 This limitation must be retained in the test record.
 
+Pair-frequency comparisons allow one 1 mHz SR830 readback step plus floating-
+point margin. A 2 mHz difference still fails, and any `LIAS?` reference-unlock
+bit remains an unconditional failure.
+
 `--xx-address`, `--xy-address`, `--timeout-ms`, and `--frequency-hz` remain
 available as explicit one-command overrides; they take precedence over the TOML
 values and do not edit the local file.
@@ -191,7 +195,9 @@ values and do not edit the local file.
 - `lockin_xx` reads internal reference, harmonic 1, and the intended frequency.
 - `lockin_xy` reads external reference, TTL rising, harmonic 1, the same
   frequency, and no unlock.
-- Neither instrument reports input/reserve, filter, or output overload.
+- The first latch-consuming sample records and clears status accumulated before
+  the observation window. Every later sample must remain free of input/reserve,
+  filter, and output overload; a persistent or reappearing overload fails.
 - Both report zero instrument-error status.
 - X, Y, R, and phase settle over the chosen observation window; raw samples are
   retained even if the result is rejected.

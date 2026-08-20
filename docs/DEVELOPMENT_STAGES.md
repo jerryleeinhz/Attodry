@@ -46,8 +46,8 @@ Status: complete (2026-08-20).
 
 ## Stage 3 - dual SR830 real driver
 
-Status: offline implementation complete (2026-08-20); laboratory validation pending
-user-supplied VISA addresses and device safety parameters.
+Status: standalone first-harmonic laboratory validation complete (2026-08-20);
+integrated 1/2/3-harmonic write-path validation remains pending explicit authorization.
 
 - Added query-only diagnostics and an explicitly authorized minimum-output
   reference-role configuration tool, verified against fake VISA resources.
@@ -66,6 +66,25 @@ user-supplied VISA addresses and device safety parameters.
 - The standalone diagnostics and minimum-output configuration read semantic
   addresses, VISA timeout, and frequency from the ignored station-local TOML;
   explicit command-line values remain temporary overrides.
+- Laboratory commissioning confirmed two distinct SR830 units at 17.777 Hz,
+  4 mVrms excitation through 100 kohm external plus 50 ohm source resistance,
+  differential A-B/Float voltage inputs, and physically disconnected `lockin_xy`
+  SINE OUT. The calculated device current is about 39.58 nArms for the approximate
+  1 kohm device.
+- A Vxx A/B reversal inverted X and Y, preserved R to within about 1%, and shifted
+  phase by 179.78 degrees. The restored current wiring completed 59 consecutive
+  post-latch-clear samples without unlock, overload, or instrument error; the
+  operator accepted the stable approximately 0.11 mV Vxx magnitude as the new
+  bench baseline.
+- Lab data showed up to 0.9 mHz sequential pair-readback variation with no unlock.
+  Frequency checks now allow one 1 mHz readback step plus floating-point margin,
+  while a 2 mHz mismatch remains rejected.
+- An authorized range/filter refinement set both units to 1 mV sensitivity and
+  300 ms time constant while preserving 17.777 Hz, 4 mVrms, and 24 dB/oct. All
+  60 samples read those settings back with complete status and no unlock,
+  overload, or instrument error. Vxx averaged about 104.70 uV; Vxy was at the
+  instrument's near-zero quantized floor (maximum about 59.6 nV), so a physical
+  Vxy signal check remains pending before integrated acquisition is claimed.
 
 ## Stage 4 - attoDRY real driver
 
@@ -129,7 +148,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 111 tests, including real matplotlib rendering in
+- The full offline suite covers 114 tests, including real matplotlib rendering in
   the analysis-enabled environment; source compilation passes without hardware.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in
