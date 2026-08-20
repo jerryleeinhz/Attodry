@@ -46,8 +46,7 @@ Status: complete (2026-08-20).
 
 ## Stage 3 - dual SR830 real driver
 
-Status: standalone first-harmonic laboratory validation complete (2026-08-20);
-integrated 1/2/3-harmonic write-path validation remains pending explicit authorization.
+Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 
 - Added query-only diagnostics and an explicitly authorized minimum-output
   reference-role configuration tool, verified against fake VISA resources.
@@ -89,13 +88,18 @@ integrated 1/2/3-harmonic write-path validation remains pending explicit authori
   validates the existing reference configuration without rewriting it, records
   partial rejected data, measures paired harmonics 1/2/3 in order, and restores
   harmonic 1 after success or attempts harmonic-1/minimum-output cleanup after
-  failure. Real write-path validation is the next Stage 3 checkpoint.
+  failure.
 - The first real harmonic attempt was safely rejected at harmonic 1 because
   rewriting the already-correct XY external-reference mode created a transient
   unlock latch. The retained partial readings showed no overload; the immediate
   cleanup readback confirmed both units at harmonic 1 and 4 mVrms with zero
   status/error bits. The CLI now uses a latch-consuming read-only preflight and
   does not rewrite an already verified reference configuration.
+- The authorized retry completed all six ordered xx/xy readings with no unlock,
+  overload, instrument error, or pair-frequency rejection, then read both units
+  back at harmonic 1. Measured R values for xx h1/h2/h3 were approximately
+  100.26/6.02/11.09 uV; xy h1/h2/h3 were approximately 0/1.43/0.60 uV.
+  The raw accepted record remains only on the ignored control-computer path.
 
 ## Stage 4 - attoDRY real driver
 

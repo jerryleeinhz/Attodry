@@ -44,8 +44,8 @@ Completed in Stage 2:
   last-confirmed cryostat state. `KeyboardInterrupt` also persists station data
   and any raw lock-in readings captured before interruption.
 
-Stage 3 - integrated dual-SR830 driver: standalone first-harmonic laboratory
-validation complete; integrated 1/2/3-harmonic write-path validation remains pending.
+Stage 3 - integrated dual-SR830 driver: integrated 1/2/3-harmonic laboratory
+validation complete (2026-08-20).
 
 Completed in Stage 3:
 
@@ -90,7 +90,12 @@ Completed in Stage 3:
   Partial readings were retained, and the cleanup readback confirmed both units
   restored to harmonic 1 and 4 mVrms with zero status/error bits. The revised CLI
   now performs read-only preflight validation and does not rewrite reference mode
-  or frequency; a new real attempt remains separately authorized.
+  or frequency; the subsequent authorized retry used this revision.
+- The separately authorized retry completed xx/xy harmonics 1, 2, and 3 with all
+  six readings locked, no overload or instrument error, accepted sequential pair
+  frequencies, and verified restoration of both units to harmonic 1. Approximate
+  R values were xx 100.26/6.02/11.09 uV and xy 0/1.43/0.60 uV for h1/h2/h3.
+  The accepted JSON remains only on the ignored control-computer path.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation complete; real DLL
 ABI and laboratory validation remain pending.
@@ -106,9 +111,9 @@ Completed offline in Stage 4:
 - Added safe zero-detour coordinated vector setpoints, rolling stable waits, and
   monitored vendor sweep-to-zero behavior against a fake DLL.
 
-Current boundary: all hardware-free work through Stage 7 and standalone
-first-harmonic SR830 validation are complete. Integrated harmonic writes,
-attoDRY, SMUs, and real end-to-end acquisition still require staged authorization.
+Current boundary: all hardware-free work through Stage 7 and integrated dual-SR830
+harmonic validation are complete. attoDRY, SMUs, and real end-to-end acquisition
+still require staged authorization.
 
 Stage 5 - gate safety and integrated acquisition: model-independent offline core
 complete; vendor SMU adapters remain pending exact models and safety parameters.
@@ -158,8 +163,8 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
   `7e1d6df604ceeeb71f6d96239468f065dda344c964a99d2f441629b4569dab8b`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
-  standalone first-harmonic SR830 test is commissioned, but do not claim an
-  integrated 1/2/3-harmonic SR830, attoDRY, SMU, or real end-to-end acquisition.
+  integrated 1/2/3-harmonic SR830 path is commissioned, but do not claim an
+  attoDRY, SMU, or real end-to-end acquisition.
 
 User-priority SR830 bench-test slice completed in the laboratory:
 
@@ -171,8 +176,8 @@ User-priority SR830 bench-test slice completed in the laboratory:
 - `configure-minimum` requires explicit write authorization and physical XY SINE
   OUT disconnection confirmation, records before/after readback, and retries the
   4 mVrms minimum on both units after a caught write failure.
-- The standalone first-harmonic device test and physical Vxx sign reversal are
-  complete. Integrated harmonic-setting writes remain separately gated.
+- The standalone first-harmonic device test, physical Vxx sign reversal, and
+  integrated 1/2/3-harmonic write path are complete.
 
 ## User-confirmed requirements
 
@@ -267,11 +272,9 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Perform integrated 1/2/3-harmonic SR830 validation only after separate write
-   authorization for harmonic changes.
+1. Perform staged attoDRY read-only and small-movement commissioning only after
+   explicit connection/write authorization.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
-3. Perform staged attoDRY read-only and small-movement commissioning only after
-   explicit connection/write authorization.
-4. Freeze and verify the complete hardware wheelhouse on the offline control
+3. Freeze and verify the complete hardware wheelhouse on the offline control
    computer after its Python/VISA environment is known.
