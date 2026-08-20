@@ -572,6 +572,47 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xy_resource.writes, [])
         self.assertTrue(result["cleanup"]["verified"])
 
+    def test_cli_frequency_sweep_separates_transition_unlock_from_sample_window(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = ["0\n", "0\n", "8\n", "0\n", "8\n", "0\n"]
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777,25",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        transition = result["points"][1]["transition_status"]
+        self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 8)
+        self.assertEqual(
+            result["points"][1]["samples"][0]["lockin_xy"]["lia_status"]["raw"],
+            0,
+        )
+        self.assertEqual(result["cleanup"]["transition_status"]["lockin_xy"]["lia_status"]["raw"], 8)
+        self.assertTrue(result["cleanup"]["verified"])
+
     def test_cli_excitation_sweep_checks_limits_and_restores_original_range(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
@@ -617,7 +658,6 @@ class Sr830Tests(unittest.TestCase):
                 "SENS 21",
                 "SLVL 0.4",
                 "SLVL 0.004",
-                "FREQ 17.777",
                 "SENS 23",
             ],
         )
@@ -663,7 +703,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(len(result["points"]), 2)
         self.assertEqual(len(result["points"][1]["samples"]), 1)
         self.assertTrue(result["cleanup"]["verified"])
-        self.assertEqual(xx_resource.writes[-3:], ["SLVL 0.004", "FREQ 17.777", "SENS 23"])
+        self.assertEqual(xx_resource.writes[-2:], ["SLVL 0.004", "SENS 23"])
 
     def test_dual_controller_sets_both_harmonics_before_each_pair_snapshot(self) -> None:
         events: list[tuple[str, str, str]] = []

@@ -103,6 +103,14 @@ Completed in Stage 3:
   requires explicit circuit and device limits, validates worst-case bounds before
   opening VISA, temporarily changes only xx sensitivity, then restores its
   original readback. Real execution remains pending separate authorization.
+- The first authorized frequency run safely stopped at 25 Hz on an XY unlock
+  latch after accepting the 17.777 Hz baseline. Cleanup restored 17.777 Hz,
+  4 mVrms, and the original 1 mV sensitivity; the cleanup record retained the
+  latch and therefore did not falsely claim verification. A subsequent 10-sample
+  read-only recovery record was fully clear. The revised sweep now separates and
+  records expected external-reference transition latches, clears them after an
+  initial settle, waits again, and applies the unchanged fail-closed checks to
+  the formal sample window. The revised real retry is not yet authorized.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -175,14 +183,14 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 125 tests and passes in the minimal
+- The complete hardware-free suite contains 126 tests and passes in the minimal
   environment with one matplotlib rendering test skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `58f9d44657f938b9b772cb32e9df2bb3cb57d17f86f258bd7593a3a48399ccfa`.
+  `e41ba424ba7741d891d51daeacb23f462de8b1a404a6c1dcb7774dd122fb5180`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are

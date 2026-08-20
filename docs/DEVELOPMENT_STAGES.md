@@ -107,6 +107,14 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   explicit device current/voltage bounds before opening VISA, temporarily widens
   only the xx sensitivity, and restores its original readback. Real sweep
   execution remains pending a new setting-write authorization.
+- The first authorized frequency sweep accepted the 17.777 Hz baseline, then
+  stopped at 25 Hz because XY reported a latched external-reference unlock. XX
+  restored to 17.777 Hz, 4 mVrms, and its original 1 mV sensitivity; a subsequent
+  10-sample read-only recovery record had zero status/error bits throughout.
+  The scanner now records and clears the expected transition-period XY unlock
+  latch after an initial settling interval, waits a second settling interval,
+  and still rejects any unlock in the formal measurement window. A real retry
+  and the excitation sweep remain pending authorization for the revised commit.
 
 ## Stage 4 - attoDRY real driver
 
@@ -185,7 +193,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 125 tests and passes in the minimal environment
+- The full offline suite covers 126 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

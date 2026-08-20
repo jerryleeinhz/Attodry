@@ -429,6 +429,7 @@ def _run_frequency_sweep(
                     "source_v_rms": 0.004,
                     "nominal_current_a_rms": None,
                     "write_performed": wrote_setting,
+                    "transition_status": None,
                     "frequency_readback_hz": None,
                     "samples": [],
                 }
@@ -436,6 +437,16 @@ def _run_frequency_sweep(
                 if wrote_setting:
                     writes_started = True
                     lockin_xx.set_internal_reference_frequency(target_hz)
+                    time.sleep(args.settle_s)
+                    transition, transition_problems = _consume_frequency_transition(
+                        lockin_xx, lockin_xy
+                    )
+                    point_record["transition_status"] = transition
+                    if transition_problems:
+                        raise Sr830Error(
+                            "Unsafe frequency transition: "
+                            + "; ".join(transition_problems)
+                        )
                 time.sleep(args.settle_s)
                 xx_readback = lockin_xx.read_reference_frequency()
                 xy_readback = lockin_xy.read_reference_frequency()
@@ -460,6 +471,7 @@ def _run_frequency_sweep(
             baseline_hz=baseline_hz,
             original_xx_sensitivity=preflight_xx.sensitivity,
             restore_sensitivity=False,
+            restore_frequency=True,
             settle_s=args.settle_s,
             writes_started=writes_started,
         )
@@ -555,6 +567,7 @@ def _run_excitation_sweep(
             baseline_hz=baseline_hz,
             original_xx_sensitivity=preflight_xx.sensitivity,
             restore_sensitivity=True,
+            restore_frequency=False,
             settle_s=args.settle_s,
             writes_started=writes_started,
         )
@@ -719,6 +732,47 @@ def _capture_sweep_point(
             raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
 
 
+def _consume_frequency_transition(
+    lockin_xx: Sr830, lockin_xy: Sr830
+) -> tuple[dict[str, object], list[str]]:
+    """Record and clear status from a deliberate FREQ transition.
+
+    A transient external-reference unlock or frequency-range-change latch is
+    expected while the TTL reference moves. The formal sample window begins only
+    after these latches are consumed and another settling interval has elapsed.
+    """
+
+    xx = lockin_xx.read_harmonic_sample(1)
+    xy = lockin_xy.read_harmonic_sample(1)
+    problems: list[str] = []
+    if xx.lia_status.reference_unlocked:
+        problems.append("lockin_xx internal reference unlocked during transition")
+    for sample in (xx, xy):
+        role = sample.reading.role.value
+        if sample.lia_status.any_overload:
+            problems.append(f"lockin_{role} overloaded during transition")
+        if sample.lia_status.time_constant_changed:
+            problems.append(f"lockin_{role} time constant changed unexpectedly")
+        if sample.error_status:
+            problems.append(
+                f"lockin_{role} instrument error during transition is "
+                f"{sample.error_status}"
+            )
+    return (
+        {
+            "captured_unix_s": time.time(),
+            "expected_transient_latches": [
+                "lockin_xy.reference_unlocked",
+                "frequency_range_changed",
+            ],
+            "lockin_xx": asdict(xx),
+            "lockin_xy": asdict(xy),
+            "problems": problems,
+        },
+        problems,
+    )
+
+
 def _restore_scan_state(
     lockin_xx: Sr830,
     lockin_xy: Sr830,
@@ -726,6 +780,7 @@ def _restore_scan_state(
     baseline_hz: float,
     original_xx_sensitivity: int,
     restore_sensitivity: bool,
+    restore_frequency: bool,
     settle_s: float,
     writes_started: bool,
 ) -> dict[str, object]:
@@ -733,13 +788,17 @@ def _restore_scan_state(
         return {"attempted": False, "verified": True, "errors": []}
     errors: list[str] = []
     diagnostics: dict[str, object] = {}
-    for label, action in (
-        ("restore lockin_xx to 4 mVrms", lockin_xx.set_minimum_sine_output),
-        (
-            f"restore lockin_xx to {baseline_hz:g} Hz",
-            lambda: lockin_xx.set_internal_reference_frequency(baseline_hz),
-        ),
-    ):
+    actions: list[tuple[str, Callable[[], None]]] = [
+        ("restore lockin_xx to 4 mVrms", lockin_xx.set_minimum_sine_output)
+    ]
+    if restore_frequency:
+        actions.append(
+            (
+                f"restore lockin_xx to {baseline_hz:g} Hz",
+                lambda: lockin_xx.set_internal_reference_frequency(baseline_hz),
+            )
+        )
+    for label, action in actions:
         try:
             action()
         except BaseException as exc:
@@ -749,7 +808,17 @@ def _restore_scan_state(
             lockin_xx.set_sensitivity(original_xx_sensitivity)
         except BaseException as exc:
             errors.append(f"restore lockin_xx sensitivity: {exc}")
+    transition: dict[str, object] | None = None
     time.sleep(settle_s)
+    if restore_frequency:
+        try:
+            transition, transition_problems = _consume_frequency_transition(
+                lockin_xx, lockin_xy
+            )
+            errors.extend(transition_problems)
+        except BaseException as exc:
+            errors.append(f"frequency-restoration transition readback: {exc}")
+        time.sleep(settle_s)
     try:
         xx = lockin_xx.read_diagnostic(consume_status_latches=True)
         xy = lockin_xy.read_diagnostic(consume_status_latches=True)
@@ -774,6 +843,7 @@ def _restore_scan_state(
         "attempted": True,
         "verified": not errors,
         "errors": errors,
+        "transition_status": transition,
         "final": diagnostics,
     }
 

@@ -218,8 +218,13 @@ operator must still confirm both front panels before disconnecting the device.
 These are separate write-authorized device-only tests. The frequency scan uses
 4 mVrms and first-harmonic detection at 17.777, 25, 35.5, 50, 70.7, 100, 141,
 200, 282, 398, 562, 794, and 1000 Hz. It writes only the internal frequency on
-`lockin_xx`; `lockin_xy` follows the external TTL reference. Each point waits
-1.5 seconds and retains three sequential xx/xy samples 0.3 seconds apart.
+`lockin_xx`; `lockin_xy` follows the external TTL reference. After each actual
+frequency change, the tool waits 1.5 seconds, records and clears transition
+status, waits another 1.5 seconds, then retains three sequential xx/xy samples
+0.3 seconds apart. A transition-period XY unlock or frequency-range-change latch
+is recorded as expected; any overload, instrument error, unexpected setting
+change, XX internal-reference unlock, or renewed XY unlock in the formal sample
+window still fails the scan.
 
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency `
@@ -254,6 +259,14 @@ ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume `LIAS?`/`ERRS?`, stop
 at the first unsafe or mismatched point, retain the rejected sample, and attempt
 to restore `lockin_xx` to 4 mVrms and 17.777 Hz. A communication failure still
 requires manual front-panel verification.
+
+The first real frequency attempt stopped at 25 Hz on a transition-period XY
+unlock latch and did not proceed to the excitation scan. The restored settings
+read back correctly, but the retained latch made the immediate cleanup result
+unverified. A subsequent 10-sample read-only recovery record at 17.777 Hz had
+zero unlock, overload, and error bits throughout. The transition/status-window
+separation above was added from that retained result; it requires a newly
+authorized real retry.
 
 At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
 voltage about 3.958 mVrms. The conservative short-circuit current bound is about
