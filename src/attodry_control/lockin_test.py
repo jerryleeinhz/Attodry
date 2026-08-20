@@ -53,6 +53,10 @@ DEFAULT_EXCITATION_SWEEP_V = (
     0.400,
 )
 SR830_OUTPUT_RESISTANCE_OHM = 50.0
+# The external SR830 frequency readback showed 31 ppm jitter at 70.7 Hz while
+# remaining locked. This sweep-only tolerance applies to the measured readback;
+# unlock and error status remain unconditional failures.
+SWEEP_FREQUENCY_REL_TOLERANCE = 50e-6
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -454,7 +458,12 @@ def _run_frequency_sweep(
                     "lockin_xx": xx_readback,
                     "lockin_xy": xy_readback,
                 }
-                _verify_frequency_readbacks(target_hz, xx_readback, xy_readback)
+                _verify_frequency_readbacks(
+                    target_hz,
+                    xx_readback,
+                    xy_readback,
+                    rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
+                )
                 _capture_sweep_point(
                     lockin_xx,
                     lockin_xy,
@@ -462,6 +471,7 @@ def _run_frequency_sweep(
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
+                    frequency_rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
                 )
         except BaseException as exc:
             failure = exc
@@ -558,6 +568,7 @@ def _run_excitation_sweep(
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
+                    frequency_rel_tolerance=1e-5,
                 )
         except BaseException as exc:
             failure = exc
@@ -662,13 +673,17 @@ def _validate_excitation_safety(
 
 
 def _verify_frequency_readbacks(
-    target_hz: float, xx_readback_hz: float, xy_readback_hz: float
+    target_hz: float,
+    xx_readback_hz: float,
+    xy_readback_hz: float,
+    *,
+    rel_tolerance: float = 1e-5,
 ) -> None:
     for role, readback in (("xx", xx_readback_hz), ("xy", xy_readback_hz)):
         if not math.isclose(
             readback,
             target_hz,
-            rel_tol=1e-5,
+            rel_tol=rel_tolerance,
             abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
         ):
             raise Sr830Error(
@@ -678,7 +693,7 @@ def _verify_frequency_readbacks(
     if not math.isclose(
         xx_readback_hz,
         xy_readback_hz,
-        rel_tol=1e-5,
+        rel_tol=rel_tolerance,
         abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
     ):
         raise Sr830Error("xx/xy frequency readbacks do not match.")
@@ -692,6 +707,7 @@ def _capture_sweep_point(
     samples: int,
     sample_interval_s: float,
     record: dict[str, object],
+    frequency_rel_tolerance: float,
 ) -> None:
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
@@ -717,6 +733,7 @@ def _capture_sweep_point(
                 target_frequency_hz,
                 xx.reading.frequency_hz,
                 xy.reading.frequency_hz,
+                rel_tolerance=frequency_rel_tolerance,
             )
         except Sr830Error as exc:
             problems.append(str(exc))
@@ -828,10 +845,20 @@ def _restore_scan_state(
             errors.append("lockin_xx did not read back 4 mVrms")
         try:
             _verify_frequency_readbacks(
-                baseline_hz, xx.frequency_hz, xy.frequency_hz
+                baseline_hz,
+                xx.frequency_hz,
+                xy.frequency_hz,
+                rel_tolerance=(
+                    SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
+                ),
             )
             _verify_frequency_readbacks(
-                baseline_hz, xx.snapshot_frequency_hz, xy.snapshot_frequency_hz
+                baseline_hz,
+                xx.snapshot_frequency_hz,
+                xy.snapshot_frequency_hz,
+                rel_tolerance=(
+                    SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
+                ),
             )
         except Sr830Error as exc:
             errors.append(str(exc))

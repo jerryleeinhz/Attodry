@@ -69,17 +69,20 @@ class TrackingVisaResource(FakeVisaResource):
         *,
         shared_frequency: dict[str, float],
         name: str,
+        frequency_scale: float = 1.0,
     ):
         super().__init__(responses, name=name)
         self.shared_frequency = shared_frequency
+        self.frequency_scale = frequency_scale
 
     def query(self, command: str) -> str:
         if command == "FREQ?":
             self.queries.append(command)
-            return f"{self.shared_frequency['hz']:g}\n"
+            return f"{self.shared_frequency['hz'] * self.frequency_scale:g}\n"
         if command == "SNAP? 1,2,3,4,9":
             self.queries.append(command)
-            return f"1e-6,2e-7,1.0198e-6,11.31,{self.shared_frequency['hz']:g}\n"
+            frequency_hz = self.shared_frequency["hz"] * self.frequency_scale
+            return f"1e-6,2e-7,1.0198e-6,11.31,{frequency_hz:g}\n"
         return super().query(command)
 
     def write(self, command: str) -> None:
@@ -612,6 +615,45 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(result["cleanup"]["transition_status"]["lockin_xy"]["lia_status"]["raw"], 8)
         self.assertTrue(result["cleanup"]["verified"])
+
+    def test_cli_frequency_sweep_accepts_locked_external_readback_within_50_ppm(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0),
+            shared_frequency=shared_frequency,
+            name="xy",
+            frequency_scale=70.6978 / 70.7,
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777,70.7",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertAlmostEqual(
+            result["points"][1]["frequency_readback_hz"]["lockin_xy"],
+            70.6978,
+            places=4,
+        )
 
     def test_cli_excitation_sweep_checks_limits_and_restores_original_range(self) -> None:
         shared_frequency = {"hz": 17.777}

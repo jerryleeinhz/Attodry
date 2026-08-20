@@ -226,6 +226,12 @@ is recorded as expected; any overload, instrument error, unexpected setting
 change, XX internal-reference unlock, or renewed XY unlock in the formal sample
 window still fails the scan.
 
+The frequency sweep uses a separate 50 ppm relative tolerance, with the existing
+1.01 mHz absolute floor, for the locked XY external-frequency readback. This was
+set from a retained 70.7 Hz sample that read 70.6978 Hz (31 ppm low) with no
+unlock, overload, or instrument error. It does not change the stricter integrated
+harmonic-path comparison and never overrides a status failure.
+
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency `
   --config config\hardware.local.toml `
@@ -267,6 +273,12 @@ unverified. A subsequent 10-sample read-only recovery record at 17.777 Hz had
 zero unlock, overload, and error bits throughout. The transition/status-window
 separation above was added from that retained result; it requires a newly
 authorized real retry.
+
+The next transition-aware retry accepted 25, 35.5, and 50 Hz, then stopped on
+the third 70.7 Hz sample solely because the locked XY frequency readback differed
+by 2.2 mHz (31 ppm). Final 17.777 Hz/4 mVrms restoration was fully verified.
+The sweep-only 50 ppm readback tolerance above was added from that retained
+result and also requires a newly authorized retry.
 
 At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
 voltage about 3.958 mVrms. The conservative short-circuit current bound is about

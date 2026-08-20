@@ -115,6 +115,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   latch after an initial settling interval, waits a second settling interval,
   and still rejects any unlock in the formal measurement window. A real retry
   and the excitation sweep remain pending authorization for the revised commit.
+- The authorized transition-aware retry passed the formal windows at 25, 35.5,
+  and 50 Hz, then retained and rejected the third 70.7 Hz sample solely because
+  the locked XY frequency readback was 70.6978 Hz (31 ppm low). There were no
+  overloads or instrument errors and final restoration was fully verified. A
+  separate 50 ppm relative tolerance now applies only to frequency-sweep external
+  readback jitter; all unlock/error checks and the established harmonic-path
+  tolerance remain unchanged. Another real retry is pending authorization.
 
 ## Stage 4 - attoDRY real driver
 
@@ -193,7 +200,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 126 tests and passes in the minimal environment
+- The full offline suite covers 127 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading
