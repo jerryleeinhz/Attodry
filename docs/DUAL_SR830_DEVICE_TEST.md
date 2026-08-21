@@ -288,6 +288,15 @@ Thus h3 is limited to 34 kHz and h2 to 51 kHz; for example, h3 at 38.310 kHz
 would require 114.931 kHz and is rejected before the sweep begins. H1-only
 frequency scans may still use the 100 kHz endpoint.
 
+For the operator-selected coverage policy, add
+`--skip-unsupported-harmonics` together with `--all-harmonics`. It retains only
+the supported orders at each point and writes an audited `skipped_harmonics`
+entry for every omission; no missing order is inferred in analysis. On the
+confirmed ten-point 17.777 Hz--100 kHz grid, this yields h1 at all ten points,
+h2 through 38.310 kHz (nine points), and h3 through 14.677 kHz (eight points).
+Without this explicit option, `--all-harmonics` retains the strict pre-VISA
+rejection described above.
+
 The HARM transition record is deliberately excluded from formal curves. It may
 contain only a filter-overload and/or frequency-range-change latch while the
 reference moves to the selected detection harmonic. It is consumed, retained,

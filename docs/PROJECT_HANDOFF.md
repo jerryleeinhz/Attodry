@@ -276,6 +276,14 @@ Completed in Stage 3:
   opens, so it cannot repeat this write-enabled failure. H3 is limited to 34 kHz
   and h2 to 51 kHz; choosing the high-frequency acquisition policy remains the
   next operator decision.
+- The operator chose coverage over equal per-order endpoints. The original ten
+  17.777 Hz--100 kHz points will retain h1 at all points, h2 at its supported
+  first nine points, and h3 at its supported first eight points. The new explicit
+  `--skip-unsupported-harmonics` flag requires `--all-harmonics`, records every
+  omitted order with its required detection frequency and 102 kHz limit, and
+  never writes unsupported HARM values. Without that flag, strict all-harmonic
+  scans remain pre-VISA rejections. Fake-VISA validation passes; the target
+  computer has not yet received this revision.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

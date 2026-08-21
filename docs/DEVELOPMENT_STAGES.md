@@ -277,6 +277,14 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   every requested `harmonic * frequency` product before opening VISA, preventing
   any setting write for unsupported all-harmonic grids. H3 is limited to 34 kHz
   and h2 to 51 kHz; the high-frequency sampling plan remains operator-selected.
+- The operator selected coverage over equal per-order endpoints: retain the
+  original ten-point 17.777 Hz--100 kHz grid, acquire h1 at all ten points, h2
+  at its supported first nine points, and h3 at its supported first eight points.
+  The explicit `--skip-unsupported-harmonics` flag requires `--all-harmonics`,
+  emits one auditable omission record per unsupported point/order, and never
+  writes an unsupported HARM setting. Strict all-harmonic invocation remains a
+  pre-VISA rejection. Fake-VISA tests cover both the strict rejection and the
+  selected partial-order coverage; target-offline validation is pending.
 
 ## Stage 4 - attoDRY real driver
 

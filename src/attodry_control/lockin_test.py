@@ -224,6 +224,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_FREQUENCY_SWEEP_HZ,
         help="Comma-separated increasing frequencies. Default: 17.777 Hz to 1 kHz.",
     )
+    frequency_sweep.add_argument(
+        "--skip-unsupported-harmonics",
+        action="store_true",
+        help=(
+            "With --all-harmonics, retain each in-range order and record orders "
+            "whose harmonic times frequency exceeds the SR830 102 kHz limit."
+        ),
+    )
     frequency_sweep.set_defaults(handler=_run_frequency_sweep)
 
     excitation_sweep = subparsers.add_parser(
@@ -828,7 +836,10 @@ def _run_frequency_sweep(
             f"0.001-{MAXIMUM_REFERENCE_FREQUENCY_HZ:g} Hz."
         )
     harmonics = _requested_sweep_harmonics(args)
-    _validate_harmonic_detection_frequencies(points, harmonics)
+    if args.skip_unsupported_harmonics and not args.all_harmonics:
+        raise ValueError("--skip-unsupported-harmonics requires --all-harmonics.")
+    if not args.skip_unsupported_harmonics:
+        _validate_harmonic_detection_frequencies(points, harmonics)
     baseline_hz = float(settings["frequency_hz"])
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
@@ -859,6 +870,7 @@ def _run_frequency_sweep(
                     "write_performed": wrote_setting,
                     "transition_status": None,
                     "frequency_readback_hz": None,
+                    "skipped_harmonics": [],
                     "harmonic_transition_status": [],
                     "samples": [],
                 }
@@ -888,11 +900,17 @@ def _run_frequency_sweep(
                     xy_readback,
                     rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
                 )
+                point_harmonics, skipped_harmonics = _harmonics_for_frequency(
+                    target_hz,
+                    harmonics,
+                    skip_unsupported=args.skip_unsupported_harmonics,
+                )
+                point_record["skipped_harmonics"] = skipped_harmonics
                 _capture_sweep_point(
                     lockin_xx,
                     lockin_xy,
                     target_frequency_hz=target_hz,
-                    harmonics=harmonics,
+                    harmonics=point_harmonics,
                     harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
@@ -922,6 +940,7 @@ def _run_frequency_sweep(
             },
             "requested_points_hz": points,
             "requested_harmonics": harmonics,
+            "skip_unsupported_harmonics": args.skip_unsupported_harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
@@ -1076,6 +1095,36 @@ def _validate_harmonic_detection_frequencies(
         "Requested harmonic detection frequency exceeds the SR830 "
         f"{MAXIMUM_REFERENCE_FREQUENCY_HZ:g} Hz limit: {details}."
     )
+
+
+def _harmonics_for_frequency(
+    frequency_hz: float,
+    requested_harmonics: Sequence[int],
+    *,
+    skip_unsupported: bool,
+) -> tuple[tuple[int, ...], list[dict[str, float | int | str]]]:
+    supported: list[int] = []
+    skipped: list[dict[str, float | int | str]] = []
+    for harmonic in requested_harmonics:
+        detection_hz = frequency_hz * harmonic
+        if detection_hz <= MAXIMUM_REFERENCE_FREQUENCY_HZ:
+            supported.append(harmonic)
+            continue
+        if not skip_unsupported:
+            _validate_harmonic_detection_frequencies((frequency_hz,), (harmonic,))
+        skipped.append(
+            {
+                "harmonic": harmonic,
+                "required_detection_frequency_hz": detection_hz,
+                "limit_hz": MAXIMUM_REFERENCE_FREQUENCY_HZ,
+                "reason": "exceeds_sr830_reference_limit",
+            }
+        )
+    if not supported:
+        raise ValueError(
+            f"No requested harmonic is supported at {frequency_hz:g} Hz."
+        )
+    return tuple(supported), skipped
 
 
 def _validate_increasing_points(
