@@ -27,6 +27,7 @@ class InputCoupling(StrEnum):
 
 class SensitivityMode(StrEnum):
     FIXED = "fixed"
+    BOUNDED_AUTO = "bounded_auto"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +56,23 @@ _INPUT_COUPLING_CODES = {InputCoupling.AC: 0}
 # specified and tested; accepting a physical value is not write authorization.
 _TIME_CONSTANT_CODES = {0.3: 9}
 _FILTER_SLOPE_CODES = {24: 3}
-_SENSITIVITY_CODES = {0.001: 17}
+_SENSITIVITY_CODES = {0.001: 17, 0.01: 20, 0.02: 21}
+
+
+def sensitivity_code(full_scale_v: float) -> int:
+    try:
+        return _SENSITIVITY_CODES[full_scale_v]
+    except KeyError as exc:
+        raise ValueError(
+            "sensitivity full scale must be one of 0.001, 0.01, or 0.02 V"
+        ) from exc
+
+
+def sensitivity_full_scale_v(code: int) -> float:
+    for full_scale_v, mapped_code in _SENSITIVITY_CODES.items():
+        if mapped_code == code:
+            return full_scale_v
+    raise ValueError("sensitivity code is outside the project-confirmed ranges")
 
 
 def map_sr830_settings(
@@ -87,11 +104,9 @@ def map_sr830_settings(
     except KeyError as exc:
         raise ValueError("filter_slope_db_oct must be the confirmed 24 dB/oct") from exc
     try:
-        sensitivity_code = _SENSITIVITY_CODES[sensitivity_full_scale_v]
-    except KeyError as exc:
-        raise ValueError(
-            "sensitivity_full_scale_v must be the confirmed 0.001 V"
-        ) from exc
+        sensitivity_code_value = sensitivity_code(sensitivity_full_scale_v)
+    except ValueError as exc:
+        raise ValueError("unsupported sensitivity_full_scale_v") from exc
 
     return Sr830SettingCodes(
         reference_source=_REFERENCE_SOURCE_CODES[reference_source],
@@ -101,5 +116,5 @@ def map_sr830_settings(
         input_coupling=_INPUT_COUPLING_CODES[input_coupling],
         time_constant=time_constant_code,
         filter_slope=filter_slope_code,
-        sensitivity=sensitivity_code,
+        sensitivity=sensitivity_code_value,
     )

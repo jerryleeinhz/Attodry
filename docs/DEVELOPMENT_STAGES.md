@@ -166,6 +166,15 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   latch while XY remained clear, then strictly verified 17.777 Hz, 4 mVrms, the
   original 1 mV XX sensitivity, and zero final status/error words on both units.
   Frequency and excitation device-only commissioning is complete.
+- Completed the Lock-in L0--L3 offline module on `codex/module-lockin`. The
+  user-confirmed policy fixes XY at 1 mV and bounds XX to 10--20 mV with 0.85
+  target occupancy, two consecutive fit samples before narrowing, and one
+  adjustment per condition preflight. The pure decision state machine fails
+  closed at the widest bound. Its fake-VISA transition executor requires separate
+  write and latch-consumption authorization, exact readback, two five-time-
+  constant waits, retained transition/verification samples, and freezes the
+  formal range. Failure minimizes excitation and attempts range restoration.
+  No real VISA resource was opened.
 
 ## Stage 4 - attoDRY real driver
 
@@ -255,9 +264,10 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 140 tests and passes in the minimal environment
-  with one matplotlib rendering test skipped; source compilation passes without
-  hardware. The plotting code is unchanged from its prior rendered validation.
+- The Lock-in worktree offline suite covers 166 tests and passes in the minimal
+  environment with two matplotlib rendering tests skipped; source compilation
+  passes without hardware. The plotting code is unchanged from its prior
+  rendered validation.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in
   `PROJECT_HANDOFF.md`.

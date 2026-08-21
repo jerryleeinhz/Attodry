@@ -7,6 +7,7 @@ from pathlib import Path
 import tomllib
 from typing import Any, Mapping
 
+from .lockin_autorange import AutorangePolicy
 from .models import LockinRole
 from .safety import MagnetLimits
 from .sr830_settings import (
@@ -97,6 +98,11 @@ class LockinConfig:
     filter_slope_db_oct: int
     sensitivity_mode: SensitivityMode
     sensitivity_full_scale_v: float
+    autorange_min_full_scale_v: float | None
+    autorange_max_full_scale_v: float | None
+    autorange_target_occupancy: float | None
+    autorange_stable_samples: int | None
+    autorange_max_steps: int | None
     settle_time_constants: float
 
 
@@ -405,6 +411,16 @@ def _parse_lockin(
     }
     if role is LockinRole.XY:
         expected.add("external_reference_edge")
+    if table.get("sensitivity_mode") == SensitivityMode.BOUNDED_AUTO.value:
+        expected.update(
+            {
+                "autorange_min_full_scale_v",
+                "autorange_max_full_scale_v",
+                "autorange_target_occupancy",
+                "autorange_stable_samples",
+                "autorange_max_steps",
+            }
+        )
     _strict_keys(
         table,
         name,
@@ -465,6 +481,50 @@ def _parse_lockin(
     sensitivity_full_scale_v = _positive_number(
         table["sensitivity_full_scale_v"], f"{name}.sensitivity_full_scale_v"
     )
+    autorange_min_full_scale_v = None
+    autorange_max_full_scale_v = None
+    autorange_target_occupancy = None
+    autorange_stable_samples = None
+    autorange_max_steps = None
+    if sensitivity_mode is SensitivityMode.BOUNDED_AUTO:
+        if role is not LockinRole.XX:
+            raise ConfigError("lockin_xy sensitivity_mode must remain 'fixed'.")
+        autorange_min_full_scale_v = _positive_number(
+            table["autorange_min_full_scale_v"],
+            f"{name}.autorange_min_full_scale_v",
+        )
+        autorange_max_full_scale_v = _positive_number(
+            table["autorange_max_full_scale_v"],
+            f"{name}.autorange_max_full_scale_v",
+        )
+        autorange_target_occupancy = _number(
+            table["autorange_target_occupancy"],
+            f"{name}.autorange_target_occupancy",
+        )
+        autorange_stable_samples = _integer(
+            table["autorange_stable_samples"],
+            f"{name}.autorange_stable_samples",
+            minimum=1,
+        )
+        autorange_max_steps = _integer(
+            table["autorange_max_steps"],
+            f"{name}.autorange_max_steps",
+            minimum=1,
+        )
+        try:
+            AutorangePolicy(
+                autorange_min_full_scale_v,
+                autorange_max_full_scale_v,
+                autorange_target_occupancy,
+                autorange_stable_samples,
+                autorange_max_steps,
+            )
+        except ValueError as exc:
+            raise ConfigError(f"{name}: {exc}") from exc
+        if sensitivity_full_scale_v != autorange_min_full_scale_v:
+            raise ConfigError(
+                f"{name}.sensitivity_full_scale_v must equal the autorange minimum."
+            )
     settle_time_constants = _positive_number(
         table["settle_time_constants"], f"{name}.settle_time_constants"
     )
@@ -499,6 +559,11 @@ def _parse_lockin(
         filter_slope_db_oct=filter_slope_db_oct,
         sensitivity_mode=sensitivity_mode,
         sensitivity_full_scale_v=sensitivity_full_scale_v,
+        autorange_min_full_scale_v=autorange_min_full_scale_v,
+        autorange_max_full_scale_v=autorange_max_full_scale_v,
+        autorange_target_occupancy=autorange_target_occupancy,
+        autorange_stable_samples=autorange_stable_samples,
+        autorange_max_steps=autorange_max_steps,
         settle_time_constants=settle_time_constants,
     )
 

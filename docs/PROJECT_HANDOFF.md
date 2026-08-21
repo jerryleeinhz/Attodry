@@ -166,6 +166,15 @@ Completed in Stage 3:
   original 1 mV XX sensitivity, and zero final status/error words on both units.
   The frequency and excitation device-only sweeps are now both commissioned;
   their accepted raw JSON files remain only on the ignored control-computer path.
+- Completed the Lock-in L0--L3 offline module on `codex/module-lockin`. XY is
+  fixed at 1 mV; XX starts at 10 mV and is bounded at 20 mV with target occupancy
+  0.85, two consecutive fit samples before narrowing, and one adjustment per
+  condition preflight. The pure policy is deterministic and fail-closed. The
+  fake-VISA transition path separately gates `SENS` writes and `LIAS?/ERRS?`
+  consumption, performs exact readback and two five-time-constant waits, retains
+  transition/verification samples, and freezes the formal range. Failure lowers
+  excitation to the software minimum and attempts sensitivity restoration. No
+  real VISA resource was opened or command sent for this offline stage.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -269,8 +278,8 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 140 tests and passes in the minimal
-  environment with one matplotlib rendering test skipped. Source compilation
+- The Lock-in worktree hardware-free suite contains 166 tests and passes in the
+  minimal environment with two matplotlib rendering tests skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt

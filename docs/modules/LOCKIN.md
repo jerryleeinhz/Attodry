@@ -47,8 +47,13 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-sensitivity_mode = "fixed"
-sensitivity_full_scale_v = 0.001
+sensitivity_mode = "bounded_auto"
+sensitivity_full_scale_v = 0.01
+autorange_min_full_scale_v = 0.01
+autorange_max_full_scale_v = 0.02
+autorange_target_occupancy = 0.85
+autorange_stable_samples = 2
+autorange_max_steps = 1
 settle_time_constants = 5.0
 
 [lockin_xy]
@@ -64,9 +69,10 @@ sensitivity_full_scale_v = 0.001
 settle_time_constants = 5.0
 ```
 
-推荐第一版仍以固定 1 mV 为默认。`bounded_auto` 只能作为显式选择，并要求
-每台仪器分别配置最窄/最宽 full-scale、目标占比和最大步数。未确认的自动量程
-边界不能由代码猜测。
+2026-08-21 用户确认：XY 固定 1 mV；XX 以 10 mV 为启动和最窄量程，20 mV
+为最宽量程，目标占比 0.85，缩窄前需要两个连续安全样本，每个实验条件的预备
+阶段最多调整一次。10 mV 对已记录最大 Vxx 5.384 mV 的占比约 53.8%，但这不
+保证新的温度、磁场、门压或频率条件不会超过 8.5 mV 阈值。
 
 ## Lock-in 实验经验和必须落实的规则
 
@@ -134,29 +140,31 @@ settle_time_constants = 5.0
 
 ## 实施计划（2026-08-21 记录）
 
-本轮推进不接仪器的 L0--L2 固定设置切片，计划和权限边界如下：
+本轮推进不接仪器的 L0--L3 配置、相位和受限量程切片，计划和权限边界如下：
 
 1. 以最后一次真实验收值作为严格配置默认值：A-B、Float、AC、300 ms、
    24 dB/oct、1 mV full-scale、至少 5 个时间常数；XY 额外要求 TTL 上升沿。
 2. 新增独立的物理量到 SR830 代码纯映射，配置层只接受本项目当前确认过的值；
    映射本身不打开 VISA，也不发送命令。
-3. `sensitivity_mode` 第一版只接受 `fixed`。在用户分别确认 XX/XY 的最窄和
-   最宽量程、目标占比、稳定样本数和最大步数前，`bounded_auto` 明确失败。
+3. XY 只接受固定 1 mV；XX 受限量程只接受用户确认的 10--20 mV、0.85、
+   两个稳定样本和单步调整，不扩展到其他范围或策略。
 4. 用严格配置和纯映射单元测试覆盖缺失、未知、不支持值、角色/TTL 边沿错误，
    然后运行完整离线测试。
 5. L2 只用 fake VISA 验证诊断、固定设置、精确读回、等待和失败恢复；真实只读、
    清锁存和任何设置写入仍分别等待新授权。
+6. L3 将纯决策与 I/O 分离；量程变化需要独立的写授权和锁存消费授权，变化后
+   两次等待至少 5 tau，保留 transition/verification 样本后才冻结正式量程。
 
 该计划不把 TOML 期望值当作当前仪器读回，也不改变已经验收的真实台架状态。
 
-### L0 - contract（当前：固定设置契约完成；bounded_auto 参数待确认）
+### L0 - contract（当前：complete）
 
 - 确认上述配置字段、TTL 上升沿、固定 300 ms 和固定 1 mV 默认值。
 - 用户分别确认 XX/XY 自动量程允许边界；未确认前自动量程默认关闭。
 - 完成条件：配置命名和权限边界无歧义，不接仪器。
 
-2026-08-21：固定设置字段、TTL 上升沿和权限边界已落实；自动量程参数仍未
-确认，因此配置层只接受 `fixed`，L0 的自动量程部分保持待确认。
+2026-08-21：固定设置字段、TTL 上升沿和权限边界已落实；随后用户确认 XY 固定
+1 mV 和 XX 10--20 mV 的完整受限量程参数，L0 契约已闭合。
 
 ### L1 - strict configuration（当前：fixed offline complete）
 
@@ -186,12 +194,20 @@ settle_time_constants = 5.0
 分析加载和 CSV 往返保留。未授权和等待不足测试均证明零 VISA 查询/写入；本阶段
 只使用 fake VISA，没有打开真实资源、读取/清除状态锁存或发送硬件命令。
 
-### L3 - bounded auto range（offline）
+### L3 - bounded auto range（当前：offline complete）
 
 - 新增纯决策模块，例如 `lockin_autorange.py`；策略与 VISA I/O 分离。
 - 测试扩大、缩小、迟滞、边界、最大步数、过载、低信号和无法收敛。
 - 集成后每次变化都读回、等待、记录转换锁存并冻结正式量程。
 - 完成条件：所有状态转换确定、可重放，失败时不产生 accepted 样本。
+
+2026-08-21：新增纯 `lockin_autorange.py` 状态机。XX 在 10 mV 上达到 0.85
+占比或过载时立即放宽到 20 mV；在 20 mV 上只有连续两个样本都不超过 8.5 mV
+才缩回 10 mV。每个预备阶段最多改变一次，达到 20 mV 后仍超阈值则失败关闭；
+XY 固定 1 mV，不进入状态机。fake-VISA 执行层在写前验证原量程，写后精确读回，
+执行两次至少 1.5 s 等待，保留 transition 和严格 verification 样本并冻结正式
+量程；异常时将 XX 激励降到软件最小值并尽力恢复原量程。未提供写授权或锁存
+消费授权时零 I/O。本阶段未打开 VISA，也未发送真实 `SENS` 或读取真实锁存。
 
 ### L4 - target offline validation
 

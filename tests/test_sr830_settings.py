@@ -60,6 +60,21 @@ class Sr830SettingMappingTests(unittest.TestCase):
                 sensitivity_full_scale_v=0.001,
             )
 
+    def test_maps_confirmed_xx_autorange_full_scales(self) -> None:
+        for full_scale_v, expected_code in ((0.01, 20), (0.02, 21)):
+            with self.subTest(full_scale_v=full_scale_v):
+                codes = map_sr830_settings(
+                    reference_source=ReferenceSource.INTERNAL,
+                    external_reference_edge=None,
+                    input_mode=InputMode.A_MINUS_B,
+                    shield_grounding=ShieldGrounding.FLOAT,
+                    input_coupling=InputCoupling.AC,
+                    time_constant_s=0.3,
+                    filter_slope_db_oct=24,
+                    sensitivity_full_scale_v=full_scale_v,
+                )
+                self.assertEqual(codes.sensitivity, expected_code)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,11 @@ import tempfile
 import unittest
 
 from attodry_control.lockin_test import _consume_sensitivity_transition, run
+from attodry_control.lockin_autorange import (
+    AutorangeAction,
+    AutorangeDecision,
+    AutorangeState,
+)
 from attodry_control.models import LockinRole
 from attodry_control.sr830 import (
     AuthorizationRequired,
@@ -16,6 +21,7 @@ from attodry_control.sr830 import (
     configure_fixed_settings_pair,
     configure_minimum_excitation_pair,
     decode_lia_status,
+    execute_autorange_transition,
 )
 from attodry_control.sr830_settings import (
     ExternalReferenceEdge,
@@ -380,6 +386,80 @@ class Sr830Tests(unittest.TestCase):
         self.assertTrue(status.output_overload)
         self.assertTrue(status.reference_unlocked)
         self.assertTrue(status.any_overload)
+
+    def test_autorange_transition_requires_both_authorizations_before_io(self) -> None:
+        resource = FakeVisaResource(responses(reference_mode=1))
+        decision = AutorangeDecision(
+            AutorangeAction.WIDEN,
+            AutorangeState(0.02, 1, 0),
+            0.85,
+            "target occupancy reached",
+        )
+        with self.assertRaises(AuthorizationRequired):
+            execute_autorange_transition(
+                Sr830(resource, LockinRole.XX),
+                decision=decision,
+                previous_full_scale_v=0.01,
+                settle_s=1.5,
+                sleeper=lambda _: None,
+                authorize_writes=True,
+                authorize_status_latch_consumption=False,
+            )
+        self.assertEqual(resource.queries, [])
+        self.assertEqual(resource.writes, [])
+
+    def test_autorange_transition_settles_records_and_freezes_range(self) -> None:
+        response_map = responses(reference_mode=1)
+        response_map["SENS?"] = "20\n"
+        response_map["LIAS?"] = ["0\n", "0\n"]
+        resource = FakeVisaResource(response_map)
+        delays: list[float] = []
+        decision = AutorangeDecision(
+            AutorangeAction.WIDEN,
+            AutorangeState(0.02, 1, 0),
+            0.85,
+            "target occupancy reached",
+        )
+        result = execute_autorange_transition(
+            Sr830(resource, LockinRole.XX),
+            decision=decision,
+            previous_full_scale_v=0.01,
+            settle_s=1.5,
+            sleeper=delays.append,
+            authorize_writes=True,
+            authorize_status_latch_consumption=True,
+        )
+        self.assertEqual(resource.writes, ["SENS 21"])
+        self.assertEqual(delays, [1.5, 1.5])
+        self.assertEqual(result.previous_sensitivity_code, 20)
+        self.assertEqual(result.final_sensitivity_code, 21)
+        self.assertTrue(result.formal_range_frozen)
+        self.assertIsNotNone(result.transition_sample)
+        self.assertIsNotNone(result.verification_sample)
+
+    def test_autorange_final_overload_fails_and_restores_previous_range(self) -> None:
+        response_map = responses(reference_mode=1)
+        response_map["SENS?"] = "20\n"
+        response_map["LIAS?"] = ["0\n", "4\n"]
+        resource = FakeVisaResource(response_map)
+        decision = AutorangeDecision(
+            AutorangeAction.WIDEN,
+            AutorangeState(0.02, 1, 0),
+            0.85,
+            "target occupancy reached",
+        )
+        with self.assertRaises(Sr830AcquisitionError):
+            execute_autorange_transition(
+                Sr830(resource, LockinRole.XX),
+                decision=decision,
+                previous_full_scale_v=0.01,
+                settle_s=1.5,
+                sleeper=lambda _: None,
+                authorize_writes=True,
+                authorize_status_latch_consumption=True,
+            )
+        self.assertIn("SLVL 0.004", resource.writes)
+        self.assertEqual(resource.writes[-1], "SENS 20")
 
     def test_configuration_requires_both_explicit_authorizations(self) -> None:
         xx_resource = FakeVisaResource(responses(reference_mode=1))
