@@ -175,6 +175,14 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   constant waits, retained transition/verification samples, and freezes the
   formal range. Failure minimizes excitation and attempts range restoration.
   No real VISA resource was opened.
+- Completed Lock-in L4 target-offline validation on `LK_setup`. Commit `2199460`
+  was cloned into a dedicated Documents directory and validated with the target
+  `lyr` Python 3.12.13. With the clone's `src` explicitly set on `PYTHONPATH` to
+  avoid an unrelated legacy editable install, all 166 tests and source compilation
+  passed. A 79,704-byte no-dependency/no-isolation wheel
+  (`c5ffe7d7daf3c59796a46f4263916162092164aeee902840a9fdde1a843c479c`) contained
+  no local hardware configuration, DLL, run-data, SQLite, or secret file. No VISA
+  resource was opened.
 
 ## Stage 4 - attoDRY real driver
 

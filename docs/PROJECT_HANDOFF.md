@@ -175,6 +175,15 @@ Completed in Stage 3:
   transition/verification samples, and freezes the formal range. Failure lowers
   excitation to the software minimum and attempts sensitivity restoration. No
   real VISA resource was opened or command sent for this offline stage.
+- Completed Lock-in L4 target-offline validation on `LK_setup`. Commit `2199460`
+  was cloned into a dedicated Documents directory and run with `lyr` Python
+  3.12.13. Setting the clone's `src` on `PYTHONPATH` was necessary to avoid an
+  unrelated legacy editable install; with that isolation, all 166 tests and source
+  compilation passed. The 79,704-byte wheel built without dependencies or build
+  isolation had SHA-256
+  `c5ffe7d7daf3c59796a46f4263916162092164aeee902840a9fdde1a843c479c` and contained
+  no local hardware configuration, DLL, run-data, SQLite, or secret file. No VISA
+  resource was opened.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

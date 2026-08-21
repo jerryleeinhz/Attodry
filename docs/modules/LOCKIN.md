@@ -209,11 +209,21 @@ XY 固定 1 mV，不进入状态机。fake-VISA 执行层在写前验证原量�
 量程；异常时将 XX 激励降到软件最小值并尽力恢复原量程。未提供写授权或锁存
 消费授权时零 I/O。本阶段未打开 VISA，也未发送真实 `SENS` 或读取真实锁存。
 
-### L4 - target offline validation
+### L4 - target offline validation（当前：target offline complete）
 
 - 将提交同步到 `LK_setup`，仅用 `lyr` 执行全部离线测试。
 - 检查 wheel 不包含本地配置、DLL 或实验数据。
 - 完成条件：记录提交号、Python 路径、测试数量和结果；不打开 VISA。
+
+2026-08-21：经用户授权，完整 Git bundle 被传至 `LK_setup` 的专用 Documents
+目录并克隆；该副本位于 `C:\Users\LK_Setup\Documents\attodry_control_lockin_l4`，
+提交为 `2199460`。使用
+`C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe`（Python 3.12.13）并显式
+设置该副本的 `PYTHONPATH=src` 后，完整离线测试 166 项全部通过，源码编译通过。
+目标机有一份旧项目会污染默认导入路径，因此 L4 命令必须保留该 `PYTHONPATH`
+设置。用 `--no-deps --no-build-isolation` 构建的 wheel 为 79,704 bytes，SHA-256
+`c5ffe7d7daf3c59796a46f4263916162092164aeee902840a9fdde1a843c479c`；内容检查未
+发现 `hardware.local.toml`、DLL、`run_data`、SQLite 或 secrets。未打开 VISA。
 
 ### L5 - real read-only commissioning
 
