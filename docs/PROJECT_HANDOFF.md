@@ -258,7 +258,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `c4e75e6b014f7da2e8c35d69f96a970175b8434ef9077e32469ba8597a4a9d65`.
+  `67a7a62830b77be5272e93679b1814afe6633018f8db8cb52808abb4608f9cc6`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are
