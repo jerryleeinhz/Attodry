@@ -149,8 +149,10 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 - fake-DLL 已覆盖授权门、越界/过大步长、hold-target、restore-initial、失败后
   disable-control、失败诊断和 Disconnect 失败。
 - 真实写入表明 vendor DLL 的 user-temperature setpoint 和 temperature-control
-  flag 都可能异步更新。相同设定值/控制状态现在是幂等操作，不重复发送命令；
-  新值写入或 toggle 后按本次
+  flag 都可能异步更新。一般相同设定值/控制状态保持幂等；commissioning 动作按
+  人工 GUI 验证得到的设备顺序，先确认温控开启，再写目标温度。若温控刚从关闭
+  切到开启，即使设定值读回已经等于目标，也强制重发一次目标值；其它情况下不
+  重复发送命令。新值写入或 toggle 后按本次
   `poll_interval_s` 轮询完整状态，最多等待固定的 30 s acknowledgement 上限，
   未确认则 fail closed。30 s 是驱动协议安全上限，不是温度稳定判据，也不改变
   用户配置的 1800 s 总稳定超时。
@@ -252,6 +254,13 @@ skipped）。用户随后明确把本次 `max_delta_k` 改为 250 K，实际取�
 0.1054/0.0004 W。`disable-control` 随后确认关闭温控；最终样品 1.7882 K、
 setpoint 仍为 1.8 K、错误码 0，并正常 Disconnect/end。原始 JSON/stderr 保留在
 `LK_setup` ignored 临时路径。T4 仍未通过，不能进入下一阶段。
+
+随后人工操作确认了一个设备顺序要求：必须先开启 full temperature control，再
+设置 sample temperature，温度才会按目标正常响应。commissioning 流程已据此改为
+先 `ensure_temperature_control(True)` 并确认读回，再调用 `set_temperature`。由于
+上次失败清理后控制关闭但 setpoint 仍为 1.8 K，新流程在 off-to-on 情况下会强制
+重发一次 1.8 K，而不是被一般 setpoint 幂等检查跳过。审计记录明确保存动作顺序和
+是否请求了强制重发；PID、2.0 K 终止线和失败关闭逻辑不变。
 
 ## 预计文件所有权
 

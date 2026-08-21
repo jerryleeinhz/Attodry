@@ -399,6 +399,14 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertNotIn("set_temperature", self.dll.events)
 
+    def test_temperature_setpoint_write_can_be_forced(self) -> None:
+        self.connect()
+        self.dll.user_temperature_k = 3.0
+
+        self.driver.set_temperature(3.0, force_write=True)
+
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+
     def test_temperature_setpoint_mismatch_is_rejected(self) -> None:
         self.connect()
 
@@ -732,7 +740,45 @@ failure_policy = "disable-control"
         self.assertTrue(result["final_state"]["temperature_control_enabled"])
         self.assertEqual(self.dll.events.count("set_temperature"), 1)
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
+        self.assertLess(
+            self.dll.events.index("toggle_temperature_control"),
+            self.dll.events.index("set_temperature"),
+        )
+        self.assertTrue(result["setpoint_force_reapply_requested"])
+        self.assertEqual(
+            result["command_actions"],
+            [
+                "temperature_control_confirmed_enabled",
+                "temperature_setpoint_confirmed",
+            ],
+        )
         self.assertTrue(result["disconnected"])
+
+    def test_temperature_cli_reapplies_matching_setpoint_after_enabling_control(
+        self,
+    ) -> None:
+        self.dll.user_temperature_k = 2.1
+        self.dll.temperature_follows_setpoint = True
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            run_temperature_test(
+                self.temperature_args()
+                + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["setpoint_force_reapply_requested"])
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+        self.assertLess(
+            self.dll.events.index("toggle_temperature_control"),
+            self.dll.events.index("set_temperature"),
+        )
 
     def test_temperature_cli_max_delta_uses_initial_sample_sensor(self) -> None:
         self.dll.sample_temperature_k = 1.7244

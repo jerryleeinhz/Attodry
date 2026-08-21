@@ -313,6 +313,7 @@ class AttoDryDriver:
         self,
         temperature_k: float,
         *,
+        force_write: bool = False,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -323,7 +324,10 @@ class AttoDryDriver:
             self.temperature_min_k <= temperature_k <= self.temperature_max_k
         ):
             raise ValueError("Temperature target is outside configured limits.")
-        if math.isclose(state.user_temperature_k, temperature_k, abs_tol=1e-4):
+        if (
+            not force_write
+            and math.isclose(state.user_temperature_k, temperature_k, abs_tol=1e-4)
+        ):
             return
         self._call(
             "setUserTemperature",

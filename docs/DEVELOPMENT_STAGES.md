@@ -331,6 +331,14 @@ uncommissioned and require separate explicit authorization.
   sample/VTI heater power 0.1054/0.0004 W, verified `disable-control` left the
   1.8 K setpoint with control off and error code zero, and disconnect/end succeeded.
   T4 therefore remains failed.
+- Manual GUI operation then established that this controller must enable full
+  temperature control before applying the sample-temperature target. The
+  commissioning order now confirms idempotent control enable first and writes the
+  target second. When control actually starts disabled, the target is deliberately
+  reapplied even if its readback already matches, avoiding the stale 1.8 K setpoint
+  left by failure cleanup. Other matching-state operations remain idempotent;
+  command-order audit fields, DLL checks, the 2.0 K cutoff, and failure-disable
+  behavior are preserved.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

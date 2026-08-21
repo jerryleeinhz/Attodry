@@ -273,6 +273,7 @@ def run(
         "target_samples": [],
         "restore_samples": [],
         "recovery_actions": [],
+        "command_actions": [],
     }
     connected = False
     mutation_attempted = False
@@ -305,12 +306,19 @@ def run(
             )
 
         mutation_attempted = True
-        driver.set_temperature(
-            request.target_k, monotonic=monotonic, sleeper=sleeper
-        )
         driver.ensure_temperature_control(
             True, monotonic=monotonic, sleeper=sleeper
         )
+        record["command_actions"].append("temperature_control_confirmed_enabled")
+        force_setpoint_reapply = not initial_state.temperature_control_enabled
+        record["setpoint_force_reapply_requested"] = force_setpoint_reapply
+        driver.set_temperature(
+            request.target_k,
+            force_write=force_setpoint_reapply,
+            monotonic=monotonic,
+            sleeper=sleeper,
+        )
+        record["command_actions"].append("temperature_setpoint_confirmed")
         target_state = driver.wait_for_temperature(
             request.target_k,
             max_overshoot_k=request.max_overshoot_k,

@@ -149,8 +149,11 @@ range. The initial user setpoint delta is also
 recorded for audit, but a stale setpoint while temperature control is disabled is
 not treated as physical sample movement. A new setpoint or temperature-control
 toggle is confirmed with complete state/error polling for at most 30 seconds because
-the vendor DLL can update both readbacks asynchronously; an already confirmed
-identical target/control state does not cause another command. `restore-initial`
+the vendor DLL can update both readbacks asynchronously. Commissioning first
+confirms full temperature control enabled, then writes the sample-temperature target.
+If control just changed from disabled to enabled, it deliberately reapplies the
+target even when the setpoint readback already matches; otherwise identical target
+and control states remain idempotent. `restore-initial`
 restores the original setpoint and control flag; if the original control was
 disabled, it does not claim
 that the sample temperature returned to the original value. `disable-control`

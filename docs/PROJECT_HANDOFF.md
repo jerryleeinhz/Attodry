@@ -320,6 +320,14 @@ Completed offline in Stage 4:
   with the 1.8 K setpoint retained and error code zero, and disconnected normally.
   Raw JSON/stderr remain only on ignored `LK_setup` temporary paths. T4 remains
   failed and no automatic stage progression is justified.
+- The operator reproduced a controller ordering requirement manually: full
+  temperature control must be toggled on before applying sample temperature. The
+  commissioning path now confirms control enabled first, then writes the target.
+  An off-to-on transition forces one target reapplication even when the setpoint
+  readback already equals 1.8 K, while all other matching-state operations remain
+  idempotent. The audit records the confirmed order and force-reapply decision;
+  PID behavior, the 2.0 K live cutoff, DLL checks, and failure-disable cleanup are
+  unchanged.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
