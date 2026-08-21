@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import math
 from pathlib import Path
@@ -10,7 +10,13 @@ import sys
 import time
 from typing import Callable, Sequence
 
-from .config import RunMode, load_config
+from .config import LockinConfig, RunMode, load_config
+from .lockin_autorange import (
+    AutorangeAction,
+    AutorangePolicy,
+    AutorangeState,
+    decide_autorange,
+)
 from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
@@ -22,7 +28,10 @@ from .sr830 import (
     Sr830Error,
     Sr830HarmonicSample,
     configure_minimum_excitation_pair,
+    verify_fixed_settings_readback,
+    verify_pair_readback,
 )
+from .sr830_settings import Sr830SettingCodes, map_sr830_settings, sensitivity_code
 
 
 DEFAULT_FREQUENCY_SWEEP_HZ = (
@@ -87,6 +96,67 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     diagnose.set_defaults(handler=_run_diagnose)
+
+    set_xx_sensitivity = subparsers.add_parser(
+        "set-xx-sensitivity",
+        help=(
+            "Set only lockin_xx SENS to the strict TOML start range and verify it."
+        ),
+    )
+    _add_pair_arguments(set_xx_sensitivity)
+    set_xx_sensitivity.add_argument(
+        "--settle-s",
+        type=_positive_float,
+        default=1.5,
+        help="Wait after the SENS write and before formal verification. Default: 1.5 s.",
+    )
+    set_xx_sensitivity.add_argument(
+        "--authorize-writes",
+        action="store_true",
+        help="Explicitly authorize only the documented lockin_xx SENS write and recovery writes.",
+    )
+    set_xx_sensitivity.add_argument(
+        "--authorize-status-latch-consumption",
+        action="store_true",
+        help="Explicitly authorize LIAS?/ERRS? queries, which clear latched status bits.",
+    )
+    set_xx_sensitivity.add_argument(
+        "--confirm-xy-sine-disconnected",
+        action="store_true",
+        help="Confirm lockin_xy SINE OUT is physically disconnected.",
+    )
+    set_xx_sensitivity.set_defaults(handler=_run_set_xx_sensitivity)
+
+    commission_autorange_narrow = subparsers.add_parser(
+        "commission-xx-autorange-narrow",
+        help=(
+            "Stage XX at the configured 20 mV maximum, then verify the real "
+            "two-sample bounded-auto narrowing back to 10 mV."
+        ),
+    )
+    _add_pair_arguments(commission_autorange_narrow)
+    commission_autorange_narrow.add_argument(
+        "--settle-s",
+        type=_positive_float,
+        default=1.5,
+        help="Wait after each sensitivity transition and between fit samples. Default: 1.5 s.",
+    )
+    commission_autorange_narrow.add_argument(
+        "--authorize-writes",
+        action="store_true",
+        help="Explicitly authorize only XX SENS 21 staging, SENS 20 narrowing, and recovery writes.",
+    )
+    commission_autorange_narrow.add_argument(
+        "--authorize-status-latch-consumption",
+        action="store_true",
+        help="Explicitly authorize LIAS?/ERRS? queries, which clear latched status bits.",
+    )
+    commission_autorange_narrow.add_argument(
+        "--confirm-xy-sine-disconnected",
+        action="store_true",
+        help="Confirm lockin_xy SINE OUT is physically disconnected.",
+    )
+    commission_autorange_narrow.set_defaults(handler=_run_commission_xx_autorange_narrow)
 
     configure = subparsers.add_parser(
         "configure-minimum",
@@ -235,6 +305,14 @@ def _add_sweep_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--samples-per-point", type=_positive_integer, default=3)
     parser.add_argument("--sample-interval-s", type=_nonnegative_float, default=0.3)
     parser.add_argument(
+        "--all-harmonics",
+        action="store_true",
+        help=(
+            "At every point, acquire harmonics 1, 2, and 3 in order. "
+            "Without this explicit option, the sweep acquires harmonic 1 only."
+        ),
+    )
+    parser.add_argument(
         "--xx-sensitivity-code",
         type=_sensitivity_code,
         default=21,
@@ -302,6 +380,321 @@ def _run_diagnose(args: argparse.Namespace, factory: Callable[[], object]) -> in
                 flush=True,
             )
     return 1 if had_problem else 0
+
+
+def _run_set_xx_sensitivity(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    config = settings["config"]
+    if config is None:
+        raise ValueError("set-xx-sensitivity requires --config with the strict TOML policy.")
+    if not args.authorize_writes:
+        raise AuthorizationRequired("SR830 sensitivity writes were not explicitly authorized.")
+    if not args.authorize_status_latch_consumption:
+        raise AuthorizationRequired(
+            "SR830 LIAS?/ERRS? latch consumption was not explicitly authorized."
+        )
+    if not args.confirm_xy_sine_disconnected:
+        raise AuthorizationRequired(
+            "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+        )
+    if args.settle_s < 1.5:
+        raise Sr830Error("XX sensitivity verification requires at least 1.5 s settling.")
+
+    xx_settings = _setting_codes(config.lockin_xx)
+    xy_settings = _setting_codes(config.lockin_xy)
+    target_code = sensitivity_code(config.lockin_xx.sensitivity_full_scale_v)
+    record: dict[str, object] = {
+        "operation": "set_xx_sensitivity",
+        "target_sensitivity_code": target_code,
+        "target_full_scale_v": config.lockin_xx.sensitivity_full_scale_v,
+        "settle_s": args.settle_s,
+        "safety_status_complete": True,
+    }
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        previous_code: int | None = None
+        write_started = False
+        try:
+            before_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            before_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["before"] = {
+                "lockin_xx": asdict(before_xx),
+                "lockin_xy": asdict(before_xy),
+            }
+            problems = _diagnostic_problems(before_xx, before_xy)
+            if problems:
+                raise Sr830Error("XX sensitivity preflight failed: " + "; ".join(problems))
+            verify_pair_readback(
+                before_xx, before_xy, float(settings["frequency_hz"])
+            )
+            verify_fixed_settings_readback(
+                before_xx,
+                replace(xx_settings, sensitivity=before_xx.sensitivity),
+                before_xx.phase_shift_deg,
+            )
+            verify_fixed_settings_readback(
+                before_xy, xy_settings, before_xy.phase_shift_deg
+            )
+            previous_code = before_xx.sensitivity
+            if previous_code not in (17, target_code):
+                raise Sr830Error(
+                    "lockin_xx sensitivity must be the known 1 mV baseline or the "
+                    "configured 10 mV target before this commissioning command."
+                )
+
+            if previous_code == target_code:
+                record["write_performed"] = False
+                record["completed"] = True
+                print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+                return 0
+
+            write_started = True
+            lockin_xx.set_sensitivity(target_code)
+            time.sleep(args.settle_s)
+            transition_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            transition_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["transition"] = {
+                "lockin_xx": asdict(transition_xx),
+                "lockin_xy": asdict(transition_xy),
+            }
+            problems = _diagnostic_problems(transition_xx, transition_xy)
+            if problems:
+                raise Sr830Error(
+                    "XX sensitivity transition failed: " + "; ".join(problems)
+                )
+            verify_pair_readback(
+                transition_xx, transition_xy, float(settings["frequency_hz"])
+            )
+            verify_fixed_settings_readback(
+                transition_xx, xx_settings, before_xx.phase_shift_deg
+            )
+            verify_fixed_settings_readback(
+                transition_xy, xy_settings, before_xy.phase_shift_deg
+            )
+
+            time.sleep(args.settle_s)
+            after_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            after_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["after"] = {
+                "lockin_xx": asdict(after_xx),
+                "lockin_xy": asdict(after_xy),
+            }
+            problems = _diagnostic_problems(after_xx, after_xy)
+            if problems:
+                raise Sr830Error(
+                    "XX sensitivity formal verification failed: " + "; ".join(problems)
+                )
+            verify_pair_readback(after_xx, after_xy, float(settings["frequency_hz"]))
+            verify_fixed_settings_readback(after_xx, xx_settings, before_xx.phase_shift_deg)
+            verify_fixed_settings_readback(after_xy, xy_settings, before_xy.phase_shift_deg)
+        except BaseException as exc:
+            record["completed"] = False
+            record["error"] = str(exc)
+            record["write_performed"] = write_started
+            if write_started and previous_code is not None:
+                record["cleanup"] = _restore_scan_state(
+                    lockin_xx,
+                    lockin_xy,
+                    baseline_hz=float(settings["frequency_hz"]),
+                    original_xx_sensitivity=previous_code,
+                    restore_sensitivity=True,
+                    restore_frequency=False,
+                    settle_s=args.settle_s,
+                    writes_started=True,
+                )
+            print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+            raise
+
+    record["completed"] = True
+    record["write_performed"] = True
+    print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+    return 0
+
+
+def _run_commission_xx_autorange_narrow(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    """Verify the real two-safe-sample XX narrowing branch without changing excitation."""
+
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    config = settings["config"]
+    if config is None:
+        raise ValueError(
+            "commission-xx-autorange-narrow requires --config with the strict TOML policy."
+        )
+    if not args.authorize_writes:
+        raise AuthorizationRequired("SR830 autorange commissioning writes were not authorized.")
+    if not args.authorize_status_latch_consumption:
+        raise AuthorizationRequired(
+            "SR830 LIAS?/ERRS? latch consumption was not explicitly authorized."
+        )
+    if not args.confirm_xy_sine_disconnected:
+        raise AuthorizationRequired(
+            "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+        )
+    if args.settle_s < 1.5:
+        raise Sr830Error("Autorange commissioning requires at least 1.5 s settling.")
+
+    xx_settings = _setting_codes(config.lockin_xx)
+    xy_settings = _setting_codes(config.lockin_xy)
+    policy = AutorangePolicy(
+        config.lockin_xx.autorange_min_full_scale_v,
+        config.lockin_xx.autorange_max_full_scale_v,
+        config.lockin_xx.autorange_target_occupancy,
+        config.lockin_xx.autorange_stable_samples,
+        config.lockin_xx.autorange_max_steps,
+    )
+    minimum_code = sensitivity_code(policy.minimum_full_scale_v)
+    maximum_code = sensitivity_code(policy.maximum_full_scale_v)
+    if xx_settings.sensitivity != minimum_code:
+        raise Sr830Error("XX fixed start range must equal the autorange minimum.")
+    record: dict[str, object] = {
+        "operation": "commission_xx_autorange_narrow",
+        "minimum_sensitivity_code": minimum_code,
+        "maximum_sensitivity_code": maximum_code,
+        "maximum_range_staged_manually": True,
+        "settle_s": args.settle_s,
+        "safety_status_complete": True,
+    }
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        write_started = False
+        before_xx: Sr830Diagnostic | None = None
+        try:
+            before_xx, before_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=minimum_code,
+                expected_xx_phase=None,
+                expected_xy_phase=None,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="autorange preflight",
+            )
+            record["before"] = {
+                "lockin_xx": asdict(before_xx),
+                "lockin_xy": asdict(before_xy),
+            }
+
+            write_started = True
+            lockin_xx.set_sensitivity(maximum_code)
+            time.sleep(args.settle_s)
+            maximum_transition_xx, maximum_transition_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=maximum_code,
+                expected_xx_phase=before_xx.phase_shift_deg,
+                expected_xy_phase=before_xy.phase_shift_deg,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="maximum-range transition",
+            )
+            record["maximum_range_transition"] = {
+                "lockin_xx": asdict(maximum_transition_xx),
+                "lockin_xy": asdict(maximum_transition_xy),
+            }
+
+            state = AutorangeState(policy.maximum_full_scale_v)
+            decisions: list[dict[str, object]] = []
+            for sample_index in range(2):
+                time.sleep(args.settle_s)
+                xx, xy = _read_verified_autorange_pair(
+                    lockin_xx,
+                    lockin_xy,
+                    xx_settings=xx_settings,
+                    xy_settings=xy_settings,
+                    expected_xx_sensitivity=maximum_code,
+                    expected_xx_phase=before_xx.phase_shift_deg,
+                    expected_xy_phase=before_xy.phase_shift_deg,
+                    expected_frequency_hz=float(settings["frequency_hz"]),
+                    stage=f"maximum-range fit sample {sample_index + 1}",
+                )
+                decision = decide_autorange(
+                    policy,
+                    state,
+                    amplitude_v=xx.amplitude_v,
+                    overload=bool(xx.lia_status and xx.lia_status.any_overload),
+                )
+                decisions.append(
+                    {
+                        "sample_index": sample_index,
+                        "lockin_xx": asdict(xx),
+                        "lockin_xy": asdict(xy),
+                        "decision": asdict(decision),
+                    }
+                )
+                state = decision.state
+                expected_action = (
+                    AutorangeAction.KEEP if sample_index == 0 else AutorangeAction.NARROW
+                )
+                if decision.action is not expected_action:
+                    raise Sr830Error(
+                        "Autorange narrowing commissioning requires two consecutive "
+                        "safe maximum-range samples."
+                    )
+            record["fit_samples"] = decisions
+
+            lockin_xx.set_sensitivity(minimum_code)
+            time.sleep(args.settle_s)
+            narrowing_transition_xx, narrowing_transition_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=minimum_code,
+                expected_xx_phase=before_xx.phase_shift_deg,
+                expected_xy_phase=before_xy.phase_shift_deg,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="automatic-narrowing transition",
+                allow_xx_output_overload=True,
+            )
+            record["narrowing_transition"] = {
+                "lockin_xx": asdict(narrowing_transition_xx),
+                "lockin_xy": asdict(narrowing_transition_xy),
+            }
+
+            time.sleep(args.settle_s)
+            after_xx, after_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=minimum_code,
+                expected_xx_phase=before_xx.phase_shift_deg,
+                expected_xy_phase=before_xy.phase_shift_deg,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="automatic-narrowing formal verification",
+            )
+            record["after"] = {
+                "lockin_xx": asdict(after_xx),
+                "lockin_xy": asdict(after_xy),
+            }
+        except BaseException as exc:
+            record["completed"] = False
+            record["error"] = str(exc)
+            record["write_performed"] = write_started
+            if write_started and before_xx is not None:
+                record["cleanup"] = _restore_scan_state(
+                    lockin_xx,
+                    lockin_xy,
+                    baseline_hz=float(settings["frequency_hz"]),
+                    original_xx_sensitivity=minimum_code,
+                    restore_sensitivity=True,
+                    restore_frequency=False,
+                    settle_s=args.settle_s,
+                    writes_started=True,
+                )
+            print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+            raise
+
+    record["completed"] = True
+    record["write_performed"] = True
+    print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+    return 0
 
 
 def _run_configure(args: argparse.Namespace, factory: Callable[[], object]) -> int:
@@ -430,6 +823,7 @@ def _run_frequency_sweep(
     points = _validate_increasing_points(args.points_hz, "frequency")
     if points[0] < 0.001 or points[-1] > 102_000.0:
         raise ValueError("Frequency sweep points must be within 0.001-102000 Hz.")
+    harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
@@ -460,6 +854,7 @@ def _run_frequency_sweep(
                     "write_performed": wrote_setting,
                     "transition_status": None,
                     "frequency_readback_hz": None,
+                    "harmonic_transition_status": [],
                     "samples": [],
                 }
                 records.append(point_record)
@@ -492,6 +887,8 @@ def _run_frequency_sweep(
                     lockin_xx,
                     lockin_xy,
                     target_frequency_hz=target_hz,
+                    harmonics=harmonics,
+                    harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
@@ -519,6 +916,7 @@ def _run_frequency_sweep(
                 "lockin_xy": asdict(preflight_xy),
             },
             "requested_points_hz": points,
+            "requested_harmonics": harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
@@ -545,6 +943,7 @@ def _run_excitation_sweep(
         raise AuthorizationRequired("Absence of an external 50 ohm termination was not confirmed.")
     points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
+    harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
@@ -573,6 +972,7 @@ def _run_excitation_sweep(
                     "source_readback_v_rms": None,
                     "nominal_current_a_rms": nominal_current_a,
                     "write_performed": wrote_setting,
+                    "harmonic_transition_status": [],
                     "samples": [],
                 }
                 records.append(point_record)
@@ -590,6 +990,8 @@ def _run_excitation_sweep(
                     lockin_xx,
                     lockin_xy,
                     target_frequency_hz=baseline_hz,
+                    harmonics=harmonics,
+                    harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
@@ -617,6 +1019,7 @@ def _run_excitation_sweep(
                 "lockin_xy": asdict(preflight_xy),
             },
             "requested_points_v_rms": points,
+            "requested_harmonics": harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
@@ -641,6 +1044,10 @@ def _require_sweep_authorization(args: argparse.Namespace) -> None:
         raise AuthorizationRequired(
             "Physical disconnection of lockin_xy SINE OUT was not confirmed."
         )
+
+
+def _requested_sweep_harmonics(args: argparse.Namespace) -> tuple[int, ...]:
+    return (1, 2, 3) if args.all_harmonics else (1,)
 
 
 def _validate_increasing_points(
@@ -729,6 +1136,8 @@ def _capture_sweep_point(
     lockin_xy: Sr830,
     *,
     target_frequency_hz: float,
+    harmonics: tuple[int, ...],
+    harmonic_settle_s: float,
     samples: int,
     sample_interval_s: float,
     record: dict[str, object],
@@ -737,41 +1146,121 @@ def _capture_sweep_point(
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
         raise TypeError("Sweep point samples must be a list.")
-    for sample_index in range(samples):
-        if sample_index:
-            time.sleep(sample_interval_s)
-        xx = lockin_xx.read_harmonic_sample(1)
-        xy = lockin_xy.read_harmonic_sample(1)
-        problems: list[str] = []
-        for sample in (xx, xy):
-            role = sample.reading.role.value
-            if sample.lia_status.reference_unlocked:
-                problems.append(f"lockin_{role} reference is unlocked")
-            if sample.lia_status.any_overload:
-                problems.append(f"lockin_{role} reports overload")
-            if sample.error_status:
-                problems.append(
-                    f"lockin_{role} instrument error is {sample.error_status}"
-                )
-        try:
-            _verify_frequency_readbacks(
-                target_frequency_hz,
-                xx.reading.frequency_hz,
-                xy.reading.frequency_hz,
-                rel_tolerance=frequency_rel_tolerance,
+    raw_transitions = record["harmonic_transition_status"]
+    if not isinstance(raw_transitions, list):
+        raise TypeError("Sweep point harmonic transitions must be a list.")
+    for harmonic in harmonics:
+        if harmonic != 1:
+            lockin_xx.set_harmonic(harmonic)
+            lockin_xy.set_harmonic(harmonic)
+            time.sleep(harmonic_settle_s)
+            transition, transition_problems = _consume_harmonic_transition(
+                lockin_xx, lockin_xy, harmonic=harmonic
             )
-        except Sr830Error as exc:
-            problems.append(str(exc))
-        sample_payload = {
-            "sample_index": sample_index,
+            raw_transitions.append(transition)
+            if transition_problems:
+                raise Sr830Error(
+                    "Unsafe harmonic transition: " + "; ".join(transition_problems)
+                )
+            time.sleep(harmonic_settle_s)
+        for sample_index in range(samples):
+            if sample_index:
+                time.sleep(sample_interval_s)
+            xx = lockin_xx.read_harmonic_sample(harmonic)
+            xy = lockin_xy.read_harmonic_sample(harmonic)
+            problems: list[str] = []
+            for sample in (xx, xy):
+                role = sample.reading.role.value
+                if sample.lia_status.reference_unlocked:
+                    problems.append(f"lockin_{role} reference is unlocked")
+                if sample.lia_status.any_overload:
+                    problems.append(f"lockin_{role} reports overload")
+                if sample.error_status:
+                    problems.append(
+                        f"lockin_{role} instrument error is {sample.error_status}"
+                    )
+            try:
+                _verify_frequency_readbacks(
+                    target_frequency_hz,
+                    xx.reading.frequency_hz,
+                    xy.reading.frequency_hz,
+                    rel_tolerance=frequency_rel_tolerance,
+                )
+            except Sr830Error as exc:
+                problems.append(str(exc))
+            sample_payload = {
+                "sample_index": sample_index,
+                "captured_unix_s": time.time(),
+                "lockin_xx": _audited_harmonic_sample_record(xx),
+                "lockin_xy": _audited_harmonic_sample_record(xy),
+                "problems": problems,
+            }
+            raw_samples.append(sample_payload)
+            if problems:
+                raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
+    if harmonics[-1] != 1:
+        lockin_xx.set_harmonic(1)
+        lockin_xy.set_harmonic(1)
+        time.sleep(harmonic_settle_s)
+        transition, transition_problems = _consume_harmonic_transition(
+            lockin_xx, lockin_xy, harmonic=1
+        )
+        raw_transitions.append(transition)
+        if transition_problems:
+            raise Sr830Error(
+                "Unsafe harmonic restoration transition: "
+                + "; ".join(transition_problems)
+            )
+        time.sleep(harmonic_settle_s)
+
+
+def _restore_first_harmonic(instrument: Sr830) -> bool:
+    if instrument.read_harmonic() != 1:
+        instrument.set_harmonic(1)
+        return True
+    return False
+
+
+def _consume_harmonic_transition(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    harmonic: int,
+) -> tuple[dict[str, object], list[str]]:
+    """Record expected filter/reference-range latches after a paired HARM write."""
+
+    xx = lockin_xx.read_harmonic_sample(harmonic)
+    xy = lockin_xy.read_harmonic_sample(harmonic)
+    problems: list[str] = []
+    for sample in (xx, xy):
+        role = sample.reading.role.value
+        if sample.lia_status.reference_unlocked:
+            problems.append(f"lockin_{role} reference unlocked during harmonic transition")
+        if sample.lia_status.input_or_reserve_overload:
+            problems.append(f"lockin_{role} input/reserve overload during harmonic transition")
+        if sample.lia_status.output_overload:
+            problems.append(f"lockin_{role} output overload during harmonic transition")
+        if sample.lia_status.time_constant_changed:
+            problems.append(f"lockin_{role} time constant changed during harmonic transition")
+        if sample.error_status:
+            problems.append(
+                f"lockin_{role} instrument error during harmonic transition is "
+                f"{sample.error_status}"
+            )
+    return (
+        {
+            "harmonic": harmonic,
             "captured_unix_s": time.time(),
+            "expected_transient_latches": [
+                "filter_overload",
+                "frequency_range_changed",
+            ],
             "lockin_xx": _audited_harmonic_sample_record(xx),
             "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
-        }
-        raw_samples.append(sample_payload)
-        if problems:
-            raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
+        },
+        problems,
+    )
 
 
 def _consume_frequency_transition(
@@ -881,6 +1370,7 @@ def _restore_scan_state(
     actions: list[tuple[str, Callable[[], None]]] = [
         ("restore lockin_xx to 4 mVrms", lockin_xx.set_minimum_sine_output)
     ]
+    harmonic_restored = False
     if restore_frequency:
         actions.append(
             (
@@ -893,8 +1383,26 @@ def _restore_scan_state(
             action()
         except BaseException as exc:
             errors.append(f"{label}: {exc}")
+    for label, instrument in (
+        ("restore lockin_xx to first harmonic", lockin_xx),
+        ("restore lockin_xy to first harmonic", lockin_xy),
+    ):
+        try:
+            harmonic_restored = _restore_first_harmonic(instrument) or harmonic_restored
+        except BaseException as exc:
+            errors.append(f"{label}: {exc}")
     transition: dict[str, object] | None = None
+    harmonic_transition: dict[str, object] | None = None
     time.sleep(settle_s)
+    if harmonic_restored:
+        try:
+            harmonic_transition, transition_problems = _consume_harmonic_transition(
+                lockin_xx, lockin_xy, harmonic=1
+            )
+            errors.extend(transition_problems)
+        except BaseException as exc:
+            errors.append(f"harmonic-restoration transition readback: {exc}")
+        time.sleep(settle_s)
     if restore_frequency:
         try:
             transition, transition_problems = _consume_frequency_transition(
@@ -953,6 +1461,7 @@ def _restore_scan_state(
         "attempted": True,
         "verified": not errors,
         "errors": errors,
+        "harmonic_transition_status": harmonic_transition,
         "transition_status": transition,
         "sensitivity_transition_status": sensitivity_transition,
         "final": diagnostics,
@@ -1010,11 +1519,25 @@ def _resolve_pair_settings(args: argparse.Namespace) -> dict[str, object]:
         frequency_hz = 17.777 if config is None else config.lockin_xx.frequency_hz
 
     return {
+        "config": config,
         "xx_address": xx_address,
         "xy_address": xy_address,
         "timeout_ms": timeout_ms,
         "frequency_hz": frequency_hz,
     }
+
+
+def _setting_codes(config: LockinConfig) -> Sr830SettingCodes:
+    return map_sr830_settings(
+        reference_source=config.reference_source,
+        external_reference_edge=config.external_reference_edge,
+        input_mode=config.input_mode,
+        shield_grounding=config.shield_grounding,
+        input_coupling=config.input_coupling,
+        time_constant_s=config.time_constant_s,
+        filter_slope_db_oct=config.filter_slope_db_oct,
+        sensitivity_full_scale_v=config.sensitivity_full_scale_v,
+    )
 
 
 class _PairContext:
@@ -1072,6 +1595,56 @@ def _diagnostic_problems(
                 f"{diagnostic.error_status}"
             )
     return problems
+
+
+def _read_verified_autorange_pair(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    xx_settings: Sr830SettingCodes,
+    xy_settings: Sr830SettingCodes,
+    expected_xx_sensitivity: int,
+    expected_xx_phase: float | None,
+    expected_xy_phase: float | None,
+    expected_frequency_hz: float,
+    stage: str,
+    allow_xx_output_overload: bool = False,
+) -> tuple[Sr830Diagnostic, Sr830Diagnostic]:
+    """Read a complete pair status window and validate the frozen settings."""
+
+    xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+    xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+    problems = _diagnostic_problems(xx, xy)
+    allowed_xx_output_overload = (
+        allow_xx_output_overload
+        and xx.lia_status is not None
+        and xx.lia_status.raw == 4
+    )
+    if allowed_xx_output_overload:
+        problems.remove("lockin_xx reports overload")
+    for diagnostic in (xx, xy):
+        if (
+            diagnostic.lia_status is not None
+            and diagnostic.lia_status.raw != 0
+            and not (diagnostic.role is LockinRole.XX and allowed_xx_output_overload)
+        ):
+            problems.append(
+                f"lockin_{diagnostic.role.value} has a nonzero status latch"
+            )
+    if problems:
+        raise Sr830Error(f"{stage} failed: " + "; ".join(problems))
+    verify_pair_readback(xx, xy, expected_frequency_hz)
+    verify_fixed_settings_readback(
+        xx,
+        replace(xx_settings, sensitivity=expected_xx_sensitivity),
+        xx.phase_shift_deg if expected_xx_phase is None else expected_xx_phase,
+    )
+    verify_fixed_settings_readback(
+        xy,
+        xy_settings,
+        xy.phase_shift_deg if expected_xy_phase is None else expected_xy_phase,
+    )
+    return xx, xy
 
 
 def _validate_distinct_addresses(xx_address: str, xy_address: str) -> None:

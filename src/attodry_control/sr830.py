@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 import math
 from typing import Callable, Protocol
 
+from .lockin_autorange import AutorangeAction, AutorangeDecision
 from .models import LockinReading, LockinRole
-from .sr830_settings import Sr830SettingCodes
+from .sr830_settings import Sr830SettingCodes, sensitivity_code
 
 
 MINIMUM_SINE_OUTPUT_V = 0.004
@@ -132,6 +133,16 @@ class Sr830HarmonicSample:
             raise ValueError("captured_at_utc must be timezone-aware UTC.")
         if self.captured_at_utc.utcoffset().total_seconds() != 0:
             raise ValueError("captured_at_utc must use UTC.")
+
+
+@dataclass(frozen=True, slots=True)
+class AutorangeTransitionResult:
+    decision: AutorangeDecision
+    previous_sensitivity_code: int
+    final_sensitivity_code: int
+    transition_sample: Sr830HarmonicSample | None
+    verification_sample: Sr830HarmonicSample | None
+    formal_range_frozen: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,7 +455,7 @@ def configure_minimum_excitation_pair(
         lockin_xy.configure_xy_external_ttl()
         xx_diagnostic = lockin_xx.read_diagnostic(consume_status_latches=False)
         xy_diagnostic = lockin_xy.read_diagnostic(consume_status_latches=False)
-        _verify_pair_readback(xx_diagnostic, xy_diagnostic, frequency_hz)
+        verify_pair_readback(xx_diagnostic, xy_diagnostic, frequency_hz)
         return PairConfigurationResult(
             before_xx=before_xx,
             before_xy=before_xy,
@@ -498,7 +509,7 @@ def configure_fixed_settings_pair(
             "Both semantic roles returned the same SR830 identity; verify that the "
             "VISA addresses refer to two distinct physical instruments."
         )
-    _verify_pair_readback(before_xx, before_xy, expected_frequency_hz)
+    verify_pair_readback(before_xx, before_xy, expected_frequency_hz)
 
     writes_started = False
     try:
@@ -508,8 +519,8 @@ def configure_fixed_settings_pair(
         sleeper(settle_s)
         after_xx = lockin_xx.read_diagnostic(consume_status_latches=False)
         after_xy = lockin_xy.read_diagnostic(consume_status_latches=False)
-        _verify_fixed_settings_readback(after_xx, xx_settings, before_xx.phase_shift_deg)
-        _verify_fixed_settings_readback(after_xy, xy_settings, before_xy.phase_shift_deg)
+        verify_fixed_settings_readback(after_xx, xx_settings, before_xx.phase_shift_deg)
+        verify_fixed_settings_readback(after_xy, xy_settings, before_xy.phase_shift_deg)
         return FixedSettingsConfigurationResult(
             before_xx=before_xx,
             before_xy=before_xy,
@@ -532,7 +543,7 @@ def configure_fixed_settings_pair(
                         consume_status_latches=False
                     )
                     original = before_xx if instrument.role is LockinRole.XX else before_xy
-                    _verify_fixed_settings_readback(
+                    verify_fixed_settings_readback(
                         restored, settings, original.phase_shift_deg
                     )
                 except BaseException as restore_error:
@@ -543,7 +554,93 @@ def configure_fixed_settings_pair(
         raise
 
 
-def _verify_pair_readback(
+def execute_autorange_transition(
+    instrument: Sr830,
+    *,
+    decision: AutorangeDecision,
+    previous_full_scale_v: float,
+    settle_s: float,
+    sleeper: Callable[[float], None],
+    authorize_writes: bool,
+    authorize_status_latch_consumption: bool,
+) -> AutorangeTransitionResult:
+    """Execute one audited XX range transition before formal sampling."""
+
+    if decision.action is AutorangeAction.FAIL:
+        raise Sr830Error(f"XX autorange failed closed: {decision.reason}")
+    previous_code = sensitivity_code(previous_full_scale_v)
+    final_code = sensitivity_code(decision.state.current_full_scale_v)
+    if decision.action is AutorangeAction.KEEP:
+        if previous_code != final_code:
+            raise Sr830Error("KEEP decision cannot change sensitivity.")
+        return AutorangeTransitionResult(decision, previous_code, final_code, None, None)
+    if not authorize_writes:
+        raise AuthorizationRequired("SR830 sensitivity write was not explicitly authorized.")
+    if not authorize_status_latch_consumption:
+        raise AuthorizationRequired(
+            "SR830 LIAS?/ERRS? latch consumption was not explicitly authorized."
+        )
+    if instrument.role is not LockinRole.XX:
+        raise Sr830Error("Bounded autorange is allowed only for lockin_xx.")
+    if not math.isfinite(settle_s) or settle_s < MINIMUM_FIXED_SETTINGS_SETTLE_S:
+        raise Sr830Error("Autorange requires at least 1.5 s of settling.")
+    actual_before = instrument.read_sensitivity()
+    if actual_before != previous_code:
+        raise Sr830Error(
+            f"lockin_xx sensitivity readback {actual_before} != {previous_code}."
+        )
+
+    write_started = False
+    try:
+        write_started = True
+        instrument.set_sensitivity(final_code)
+        sleeper(settle_s)
+        if instrument.read_sensitivity() != final_code:
+            raise Sr830Error("lockin_xx sensitivity did not reach the target range.")
+        transition_sample = instrument.read_harmonic_sample(1)
+        status = transition_sample.lia_status
+        if (
+            status.reference_unlocked
+            or status.input_or_reserve_overload
+            or status.filter_overload
+            or status.frequency_range_changed
+            or status.time_constant_changed
+            or transition_sample.error_status
+            or (status.output_overload and decision.action is not AutorangeAction.NARROW)
+        ):
+            raise Sr830Error("Unexpected status in autorange transition sample.")
+        sleeper(settle_s)
+        verification_sample = instrument.read_harmonic_sample(1)
+        _validate_harmonic_sample(verification_sample, (verification_sample,))
+        if instrument.read_sensitivity() != final_code:
+            raise Sr830Error("lockin_xx sensitivity changed before range freeze.")
+        return AutorangeTransitionResult(
+            decision,
+            previous_code,
+            final_code,
+            transition_sample,
+            verification_sample,
+        )
+    except BaseException as exc:
+        if write_started:
+            try:
+                instrument.set_minimum_sine_output()
+            except BaseException as cleanup_error:
+                exc.add_note(f"Minimum-output cleanup also failed: {cleanup_error}")
+            try:
+                instrument.set_sensitivity(previous_code)
+                sleeper(settle_s)
+                restored = instrument.read_sensitivity()
+                if restored != previous_code:
+                    raise Sr830Error(
+                        f"restored sensitivity readback {restored} != {previous_code}"
+                    )
+            except BaseException as restore_error:
+                exc.add_note(f"Sensitivity restoration also failed: {restore_error}")
+        raise
+
+
+def verify_pair_readback(
     xx: Sr830Diagnostic, xy: Sr830Diagnostic, expected_frequency_hz: float
 ) -> None:
     problems: list[str] = []
@@ -586,7 +683,7 @@ def _validate_fixed_settings_role(
         )
 
 
-def _verify_fixed_settings_readback(
+def verify_fixed_settings_readback(
     diagnostic: Sr830Diagnostic,
     expected: Sr830SettingCodes,
     expected_phase_shift_deg: float,
@@ -705,7 +802,7 @@ class DualSr830Controller:
         xy = self.lockin_xy.read_diagnostic(consume_status_latches=True)
         if xx.identity == xy.identity:
             raise Sr830Error("Both semantic roles returned the same SR830 identity.")
-        _verify_pair_readback(xx, xy, frequency_hz)
+        verify_pair_readback(xx, xy, frequency_hz)
         problems: list[str] = []
         for diagnostic in (xx, xy):
             if diagnostic.lia_status is None or diagnostic.error_status is None:

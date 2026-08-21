@@ -19,7 +19,9 @@ does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 Open `notebooks/sr830_commissioning_sweeps.ipynb` in the `lyr` environment to
 browse and plot the standalone frequency/excitation JSON records under
 `run_data/commissioning`. The notebook is read-only unless its final
-`SAVE_OUTPUTS` switch is explicitly enabled.
+`SAVE_OUTPUTS` switch is explicitly enabled. Its first controls cell provides
+record/sample filters, the optional native Windows Browse dialog, and the
+complete excitation-path resistance calibration.
 
 The catalog filters record status as `completed`, `rejected`, `diagnostic`,
 `other`, or `invalid`. Ordinary plotting defaults to `completed` only. Loading a
@@ -28,17 +30,39 @@ opt-in. Formal samples can be filtered as `clean`, `problem`, `unlocked`,
 `overload`, or `instrument_error`; transition and cleanup payloads are excluded
 from the plotted rows.
 
-Set `OPEN_BROWSER=True` in the Browse cell to open the native Windows file
-chooser and load a JSON/JSONL file directly. If the notebook kernel is running
-without access to the Windows desktop, set `selected_path = Path(...)` instead.
-Directory discovery remains available in either case.
+Click the notebook's `Browse…` button to open the native Windows file chooser
+and load a JSON/JSONL file directly. It displays the selected path and switches
+the catalog to that file's directory, so the matching frequency/excitation record
+can be found without copying raw data into the Git clone. The visible
+`Only completed records` checkbox defaults to selected; formal-sample status is
+a multi-select UI and rejected records still require the separate audit checkbox.
+After changing a filter or selecting a file, rerun the catalog and subsequent
+plot cells to refresh the figures.
+If the kernel lacks Windows desktop access, set `FREQUENCY_PATHS` and
+`EXCITATION_PATHS` directly instead. Directory discovery remains available in
+either case.
 Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
 opened automatically.
 
-The notebook plots per-point mean and sample standard deviation for XX/XY X, Y,
-R, and phase against frequency, source RMS voltage, or nominal RMS current. Phase
-uses circular rather than arithmetic statistics across the -180/180-degree wrap. CSV,
-PNG, and PDF export is disabled by default and writes only beneath
+The notebook creates six frequency figures and six current--voltage figures:
+separate Vxx/Vxy figures for h1, h2, and h3. Each uses SR830 `R` (voltage
+magnitude) on the left axis and measured phase on the right axis. Frequency is
+logarithmic and its title states the calibrated RMS current. Current--voltage
+plots use the same SINE OUT-derived RMS current on the x axis. A missing harmonic
+is labeled as missing rather than interpolated or combined with another order.
+
+Change `EXTERNAL_SERIES_RESISTANCE_OHM`,
+`SR830_OUTPUT_RESISTANCE_OHM`, and `APPROXIMATE_DEVICE_RESISTANCE_OHM` in that
+first controls cell when the physical path changes. Their current defaults are
+100000 Ω, 50 Ω, and 500 Ω, respectively, for a total of 100550 Ω. The analysis
+uses `I_rms = V_sine_out_rms / total_path_resistance_ohm`; it uses a stored
+SINE OUT readback when available and only falls back to the recorded setpoint for
+older frequency records that lack a readback. These constants are analysis-only:
+changing them sends no instrument command and must not be mistaken for a new
+hardware safety authorization.
+
+Phase uses circular rather than arithmetic statistics across the -180/180-degree
+wrap. CSV, PNG, and PDF export is disabled by default and writes only beneath
 `analysis_output/sr830_commissioning` when explicitly enabled.
 
 ## XY-only frequency and amplitude sweeps

@@ -216,7 +216,7 @@ operator must still confirm both front panels before disconnecting the device.
 ## 8. Frequency and excitation sweeps
 
 These are separate write-authorized device-only tests. The frequency scan uses
-4 mVrms and first-harmonic detection at 17.777, 25, 35.5, 50, 70.7, 100, 141,
+4 mVrms and first-harmonic detection by default at 17.777, 25, 35.5, 50, 70.7, 100, 141,
 200, 282, 398, 562, 794, and 1000 Hz. It writes only the internal frequency on
 `lockin_xx`; `lockin_xy` follows the external TTL reference. After each actual
 frequency change, the tool waits 1.5 seconds, records and clears transition
@@ -244,6 +244,7 @@ failure.
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency `
   --config config\hardware.local.toml `
+  --all-harmonics `
   --authorize-writes `
   --confirm-xy-sine-disconnected
 ```
@@ -262,6 +263,7 @@ python -m attodry_control.lockin_test sweep-excitation `
   --max-device-current-a 0.005 `
   --max-device-voltage-v 5 `
   --xx-sensitivity-code 21 `
+  --all-harmonics `
   --authorize-writes `
   --confirm-xy-sine-disconnected `
   --confirm-no-50ohm-termination
@@ -269,11 +271,23 @@ python -m attodry_control.lockin_test sweep-excitation `
 
 Sensitivity code 21 is the 20 mV range and is applied only to `lockin_xx` for
 the excitation sweep. The original xx sensitivity is recorded and restored;
-`lockin_xy` sensitivity is not changed. Neither sweep writes FMOD, RSLP, HARM,
-ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume `LIAS?`/`ERRS?`, stop
-at the first unsafe or mismatched point, retain the rejected sample, and attempt
-to restore `lockin_xx` to 4 mVrms and 17.777 Hz. A communication failure still
-requires manual front-panel verification.
+`lockin_xy` sensitivity is not changed. With the explicit `--all-harmonics`
+option, each point records h1, h2, and h3 in order: both instruments receive the
+paired `HARM` setting, wait for the configured settling time, and then collect
+the formal samples. It restores both instruments to h1 after each point and on
+cleanup. Without that option, both sweeps remain h1-only. Neither sweep writes
+FMOD, RSLP, ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume
+`LIAS?`/`ERRS?`, stop at the first unsafe or mismatched point, retain the
+rejected sample, and attempt to restore `lockin_xx` to 4 mVrms and 17.777 Hz.
+A communication failure still requires manual front-panel verification.
+
+The HARM transition record is deliberately excluded from formal curves. It may
+contain only a filter-overload and/or frequency-range-change latch while the
+reference moves to the selected detection harmonic. It is consumed, retained,
+and followed by another full settling interval. Reference unlock, input/reserve
+or output overload, a time-constant change, or an instrument error during this
+transition remains a failure; every formal h1/h2/h3 sample rejects every
+unlock, overload, and error bit without exception.
 
 After restoring the original narrow XX sensitivity, cleanup waits, records and
 clears one XX range-transition overload status, waits again, and then performs

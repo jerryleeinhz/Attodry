@@ -166,19 +166,106 @@ Completed in Stage 3:
   original 1 mV XX sensitivity, and zero final status/error words on both units.
   The frequency and excitation device-only sweeps are now both commissioned;
   their accepted raw JSON files remain only on the ignored control-computer path.
-- Completed the Lock-in module's fixed-setting L0 contract and L1 strict
-  configuration slice offline. Both semantic roles now require physical A-B,
-  Float, AC, 300 ms, 24 dB/oct, 1 mV, and five-time-constant settings; `lockin_xy`
-  also requires the TTL rising edge. A pure mapper produces the corresponding
-  SR830 codes without hardware I/O. `bounded_auto` remains rejected until the
-  user confirms its per-role limits and policy; no VISA resource was opened.
-- Completed Lock-in L2 offline. Query-only `SENS?`, `OFLT?`, `OFSL?`, and `PHAS?`
-  support a separately authorized two-role fixed-setting transaction with full
-  preflight, exact post-settle readback, and minimum-output plus best-effort
-  restoration after failure. It never sends `APHS` or writes `PHAS`. Each
-  sequential XX/XY sample now carries its own UTC timestamp, and the phase-shift
-  setting survives JSON, SQLite schema v3, analysis loading, and CSV export. No
-  real VISA resource, status latch, or hardware command was used for this stage.
+- Completed the Lock-in L0--L3 offline module on `codex/module-lockin`. XY is
+  fixed at 1 mV; XX starts at 10 mV and is bounded at 20 mV with target occupancy
+  0.85, two consecutive fit samples before narrowing, and one adjustment per
+  condition preflight. The pure policy is deterministic and fail-closed. The
+  fake-VISA transition path separately gates `SENS` writes and `LIAS?/ERRS?`
+  consumption, performs exact readback and two five-time-constant waits, retains
+  transition/verification samples, and freezes the formal range. Failure lowers
+  excitation to the software minimum and attempts sensitivity restoration. No
+  real VISA resource was opened or command sent for this offline stage.
+- Completed Lock-in L4 target-offline validation on `LK_setup`. Commit `2199460`
+  was cloned into a dedicated Documents directory and run with `lyr` Python
+  3.12.13. Setting the clone's `src` on `PYTHONPATH` was necessary to avoid an
+  unrelated legacy editable install; with that isolation, all 166 tests and source
+  compilation passed. The 79,704-byte wheel built without dependencies or build
+  isolation had SHA-256
+  `c5ffe7d7daf3c59796a46f4263916162092164aeee902840a9fdde1a843c479c` and contained
+  no local hardware configuration, DLL, run-data, SQLite, or secret file. No VISA
+  resource was opened.
+- Completed the explicitly authorized Lock-in L5 real read-only diagnostic on
+  `LK_setup`. The dedicated clone received an ignored local TOML copied from the
+  existing station-local file plus the user-confirmed strict Lock-in fields; the
+  legacy local file was not changed and the new one parsed strictly. The two VISA
+  resources returned distinct SR830 identities. Roles, TTL rising edge, A-B,
+  Float, AC, 300 ms, 24 dB/oct, and XY 1 mV (`SENS=17`) matched the contract.
+  XX instead read back 1 mV (`SENS=17`) while the new bounded policy expects its
+  10 mV start (`SENS=20`); the mismatch was recorded and not corrected. The raw
+  diagnostic and empty stderr file remain only under ignored target `run_data`.
+  No setting command, `APHS`, `LIAS?`, or `ERRS?` was sent, so latch status is
+  explicitly unknown. A separate L6 write authorization is required before any
+  `SENS` change.
+- Completed the fixed-start portion of Lock-in L6 on the isolated `LK_setup`
+  commit `77e7d7e` clone. Its strict policy parsed and all 170 offline tests plus
+  source compilation passed before connection. The explicitly authorized first
+  preflight retained an XY overload latch and therefore failed closed with zero
+  setting writes. Ten subsequent latch-consuming, read-only recovery samples were
+  all clear. One authorized retry then wrote only XX `SENS 20`; all preflight,
+  transition, and formal status windows were clear, XY remained at `SENS=17`, and
+  both `PHAS?` settings remained unchanged. Raw accepted and rejected audit files
+  remain solely under ignored target `run_data`; neither XY writes nor `APHS` were
+  sent. The real bounded-auto narrowing branch remained uncommissioned and needed
+  a distinct authorization.
+- Added an offline-only, separately authorization-gated L6 command to commission
+  the two-safe-sample narrowing branch without raising excitation or changing
+  frequency. From a verified XX 10 mV state it temporarily stages only XX at
+  20 mV, records full dual-SR830 status windows, requires the deterministic
+  `KEEP` then `NARROW` decisions, and returns only XX to 10 mV. Any unsafe sample
+  or nonzero unapproved status latch fails closed to XX 4 mVrms/10 mV cleanup;
+  XY is never written and `APHS` is absent. Fake-VISA cases cover the three
+  authorizations, success, unsuitable samples, and an unexpected transition
+  latch. A new isolated `LK_setup` clone at commit `d1e6201` strictly parsed the
+  policy, passed all 174 offline tests and source compilation, then completed the
+  explicitly authorized real command. XX read back `SENS 20 -> 21 -> 20`; two
+  real maximum-range fit samples gave the required `KEEP` then `NARROW` decisions.
+  XY remained `SENS=17`, every status/error window was clear, and both phase
+  settings stayed unchanged. Raw audit files remain only under ignored target
+  `run_data`. No excitation increase or overload was induced, so the
+  threshold/overload-triggered widening branch alone remains uncommissioned and
+  requires a new explicit authorization when a real qualifying condition exists.
+- Repeated the authorized device-only frequency scan through 100 kHz with ten
+  logarithmic points and three formal samples per point. The initial strict
+  attempts rejected readback quantization at 316.159 Hz and 5622.802 Hz but fully
+  restored the baseline each time. The final accepted grid retained the 100 ppm
+  rule and substituted only the observed 316.1 Hz and 5622 Hz quantization
+  points (about 0.02% deviations); all 30 samples passed and cleanup verified
+  17.777 Hz, 4 mVrms, XX `SENS=20`, XY `SENS=17`, and clear status/error words.
+- Completed the user-authorized 4–400 mVrms device excitation sweep at fixed
+  17.777 Hz. The confirmed 100 kΩ series resistor, approximately 500 Ω device,
+  5 mArms current cap, 0.5 Vrms voltage cap, and no external 50 Ω termination
+  yielded conservative preflight bounds of 3.998 µArms and 0.4 Vrms. Eleven
+  points with three formal samples each completed without sample problems. Only
+  the temporary XX `SENS=21` and SINE OUT setting changed; cleanup verified the
+  4 mVrms/`SENS=20` XX baseline, unchanged XY `SENS=17`, and zero final
+  status/error words. Raw acquisition files remain ignored on the target clone.
+- Extended the offline, read-only Lock-in commissioning analysis. The main sweep
+  notebook now begins with record/sample filters, Browse, and explicit complete
+  excitation-path resistance controls (currently 100000 Ω external series, 50 Ω
+  SR830 output, and 500 Ω approximate device). It produces separate XX/XY ×
+  h1/h2/h3 twin-axis figures for frequency and SINE OUT-current scans, retaining
+  phase on the right axis and avoiding all inferred/mixed missing harmonics.
+  The loader prefers recorded SINE OUT readback and only uses the old frequency
+  setpoint where no readback was recorded. This analysis-only work imports no
+  hardware path and has passed loader, notebook, and matplotlib-render checks.
+- The commissioning notebook now exposes its native-file `Browse…` button and
+  completed-record/status filters as visible Jupyter controls. Selecting a file
+  switches catalog discovery to its raw-data directory while leaving the clone
+  and all instruments untouched.
+- Added an offline-tested `--all-harmonics` switch for the device-only sweeps.
+  It is opt-in (the existing default remains h1-only) and records h1/h2/h3 at
+  every point with paired HARM writes, settling, strict status rejection, and
+  h1/4 mVrms cleanup. Fake-VISA success and h2-failure recovery pass; the new
+  real sweep still needs current physical confirmation and write authorization.
+- The first authorized all-harmonic frequency retry recorded 22 formal pairs
+  before XX `LIAS=18` and XY `LIAS=16` stopped it at 121.122062 Hz/h2. These are
+  retained as a rejected formal sample; excitation did not start. Cleanup was
+  fully verified at h1, XX 4 mVrms/10 mV/17.777 Hz, XY 1 mV, and zero
+  status/error words. The revised offline path separates the observed HARM
+  transition's filter-overload/frequency-range latches into discarded records,
+  consumes them, and waits again before unchanged strict formal sampling. Any
+  other transition problem and every formal nonzero safety bit remain failures;
+  fresh write authorization is required before its real retry.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -298,9 +385,10 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 169 tests and passes in the minimal
-  environment with two matplotlib rendering tests skipped. Source compilation
-  passes. The plotting path is unchanged from its prior rendered validation;
+- The merged main/Lock-in hardware-free suite contains 197 passing tests in the
+  minimal environment, with three matplotlib rendering tests skipped because
+  matplotlib is unavailable. Source compilation passes. The plotting path is
+  unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after

@@ -40,8 +40,13 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-sensitivity_mode = "fixed"
-sensitivity_full_scale_v = 0.001
+sensitivity_mode = "bounded_auto"
+sensitivity_full_scale_v = 0.01
+autorange_min_full_scale_v = 0.01
+autorange_max_full_scale_v = 0.02
+autorange_target_occupancy = 0.85
+autorange_stable_samples = 2
+autorange_max_steps = 1
 settle_time_constants = 5.0
 
 [lockin_xy]
