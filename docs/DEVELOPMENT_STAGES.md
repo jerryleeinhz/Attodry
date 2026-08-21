@@ -159,6 +159,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   fully clear. Cleanup now records and consumes only XX overload latches during
   the sensitivity transition, waits again, and retains strict final status checks.
   A new explicit authorization is required for a completed excitation record.
+- The authorized cleanup-aware retry completed all 11 excitation points and all
+  33 formal samples with zero status/error bits and no problems. At 400 mVrms,
+  nominal current was 3.958 uArms and mean Vxx/Vxy R values were about
+  5.363 mV/1.748 uV. Cleanup recorded the expected XX-only `LIAS=4` transition
+  latch while XY remained clear, then strictly verified 17.777 Hz, 4 mVrms, the
+  original 1 mV XX sensitivity, and zero final status/error words on both units.
+  Frequency and excitation device-only commissioning is complete.
 
 ## Stage 4 - attoDRY real driver
 

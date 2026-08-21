@@ -336,6 +336,14 @@ range, so the raw run remains rejected. A following 10-sample read-only record w
 fully clear. The range-transition cleanup separation above requires a new explicit
 authorization before repeating the excitation scan for a completed record.
 
+The authorized cleanup-aware retry completed all 11 source points and all 33
+formal samples with zero status/error bits and no reported problem. At 400 mVrms,
+nominal current was 3.958 uArms, mean Vxx R was about 5.363 mV, and mean Vxy R
+was about 1.748 uV. Cleanup recorded the expected XX-only `LIAS=4` overload latch
+after restoring the narrow range while XY remained clear, then the strict final
+read verified 17.777 Hz, 4 mVrms, the original 1 mV XX range, and zero status/error
+words on both units. This is the accepted excitation-sweep commissioning record.
+
 At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
 voltage about 3.958 mVrms. The conservative short-circuit current bound is about
 3.998 uArms, and the conservative open-circuit device-voltage bound is 0.4 Vrms;

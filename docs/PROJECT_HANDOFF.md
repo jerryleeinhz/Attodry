@@ -158,6 +158,14 @@ Completed in Stage 3:
   transition after restoring the narrow range, settles again, and retains strict
   final status checks. A new authorization is required for the revised excitation
   scan.
+- The authorized cleanup-aware retry completed all 11 excitation points and all
+  33 formal samples with zero status/error bits and no problems. At 400 mVrms,
+  nominal current was 3.958 uArms, mean Vxx R was about 5.363 mV, and mean Vxy R
+  was about 1.748 uV. Cleanup retained the expected XX-only `LIAS=4` transition
+  latch while XY remained clear, then strictly verified 17.777 Hz, 4 mVrms, the
+  original 1 mV XX sensitivity, and zero final status/error words on both units.
+  The frequency and excitation device-only sweeps are now both commissioned;
+  their accepted raw JSON files remain only on the ignored control-computer path.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
