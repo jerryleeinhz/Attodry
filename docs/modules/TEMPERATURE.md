@@ -4,7 +4,8 @@
 
 attoDRY legacy DLL 适配器已经完成离线 fake-DLL 实现。目标电脑曾在单独授权下
 完成 10 秒真实只读连接：10/10 状态读取成功，sample temperature 约
-1.7251--1.7255 K，VTI 约 1.7146--1.7153 K，控制标志关闭且错误码为零。
+1.7242--1.7246 K，VTI 约 1.7138--1.7143 K，用户设定值为 2.0 K，控制标志
+关闭且错误码为零。
 
 T0 contract audit 和 T1 offline behavior tests 已于 2026-08-21 完成。温度公共
 接口收敛为 `read_state()`、`ensure_temperature_control(enabled)`、
@@ -96,13 +97,15 @@ vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删�
 - 只运行 Git、unittest 和 compileall；未加载 DLL、未调用 `begin/connect`、未
   发送设置写入。验证后已检查绝对路径并删除目标机临时 clone。
 
-### T3 - real read-only commissioning（read-only commissioned：2026-08-20）
+### T3 - real read-only commissioning（read-only commissioned：2026-08-21）
 
 - 需要新的明确连接授权，只读取温度、VTI、setpoint、control 和 error。
 - 完成条件：连续记录完整，Disconnect/end 正常，无写设置或 toggle。
 
-既有授权记录已满足 read-only 边界：10/10 完整状态、零错误、正常
-Disconnect/end、无设置写入。本轮没有重复连接；该结果仍不能证明温控写入。
+本次授权记录满足 read-only 边界：10/10 一秒间隔完整状态、零错误、正常
+Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample temperature
+为 1.7242--1.7246 K，VTI 为 1.7138--1.7143 K，Bx/Bz 读回和设定值均为零，
+温度与磁场控制均关闭；该结果仍不能证明温控写入。
 
 ### T4 - smallest temperature write commissioning（offline tool ready；real write pending）
 

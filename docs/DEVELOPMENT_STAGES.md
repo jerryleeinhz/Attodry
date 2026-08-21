@@ -170,7 +170,7 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 ## Stage 4 - attoDRY real driver
 
 Status: offline implementation, target-computer DLL ABI preflight, and real
-read-only connection validation complete (2026-08-20); setting writes remain
+read-only connection validation complete (2026-08-21); setting writes remain
 uncommissioned and require separate explicit authorization.
 
 - Added safe 64-bit vendor DLL loading and explicit function signatures.
@@ -191,9 +191,10 @@ uncommissioned and require separate explicit authorization.
   and disconnects/ends after sampling. Failed connection initialization now also
   attempts `end()` without masking the original error.
 - The authorized real read-only run completed 10/10 one-second full-state reads
-  with setting writes disabled. Sample temperature was 1.7251--1.7255 K and VTI
-  temperature was 1.7146--1.7153 K; Bx/Bz readbacks and setpoints stayed at zero,
-  temperature and field control stayed disabled, and every error code was zero.
+  with `writes_authorized=false`. Sample temperature was 1.7242--1.7246 K and
+  VTI temperature was 1.7138--1.7143 K; the user setpoint remained 2.0 K,
+  Bx/Bz readbacks and setpoints stayed at zero, temperature and field control
+  stayed disabled, and every error code was zero.
   The run disconnected and ended normally; its raw JSON remains only on the
   ignored control-computer path.
 - Completed the Temperature-module T0 contract audit and T1 offline behavior

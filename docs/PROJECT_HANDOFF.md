@@ -190,9 +190,10 @@ Completed offline in Stage 4:
   after a successful begin now attempts end without masking the primary error.
 - The authorized 10-second real connection completed 10/10 full-state samples
   with `writes_authorized=false`, then disconnected and ended normally. Sample
-  temperature ranged from 1.7251 to 1.7255 K and VTI temperature from 1.7146 to
-  1.7153 K. Bx/Bz readbacks and setpoints remained zero, both control flags
-  remained disabled, and all error codes were zero. Raw output remains only on
+  temperature ranged from 1.7242 to 1.7246 K and VTI temperature from 1.7138 to
+  1.7143 K; the user setpoint remained 2.0 K. Bx/Bz readbacks and setpoints
+  remained zero, both control flags remained disabled, and all error codes were
+  zero. Raw output remains only on
   the ignored control-computer path.
 - Completed the Temperature-module T0 contract audit and T1 offline behavior
   coverage. The public surface is limited to state read, read-before-toggle
