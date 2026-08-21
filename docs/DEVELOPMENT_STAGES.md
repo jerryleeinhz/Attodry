@@ -258,6 +258,16 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   cleanup. Fake-VISA tests cover success and a rejected h2 overload with retained
   partial data, 4 mVrms cleanup, and h1 restoration. Real execution remains
   pending a fresh physical-confirmation and write authorization.
+- The first authorized 10-point real all-harmonic frequency attempt retained
+  22 formal pairs and stopped at 121.122062 Hz/h2 when XX reported `LIAS=18`
+  (filter overload plus frequency-range change) and XY `LIAS=16` (frequency
+  range change). It did not continue to excitation; cleanup strictly restored
+  h1, XX 4 mVrms/10 mV/17.777 Hz, XY 1 mV, and clear final status/error words.
+  The revised offline path records, consumes, and re-settles only these two
+  expected HARM-transition latches; it still rejects unlock, input/reserve or
+  output overload, time-constant change, error, and every nonzero formal-window
+  latch. Fake-VISA success, formal h2 failure cleanup, and observed-transition
+  tests pass. A fresh real authorization is required before retrying.
 
 ## Stage 4 - attoDRY real driver
 

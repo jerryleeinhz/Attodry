@@ -281,6 +281,14 @@ FMOD, RSLP, ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume
 rejected sample, and attempt to restore `lockin_xx` to 4 mVrms and 17.777 Hz.
 A communication failure still requires manual front-panel verification.
 
+The HARM transition record is deliberately excluded from formal curves. It may
+contain only a filter-overload and/or frequency-range-change latch while the
+reference moves to the selected detection harmonic. It is consumed, retained,
+and followed by another full settling interval. Reference unlock, input/reserve
+or output overload, a time-constant change, or an instrument error during this
+transition remains a failure; every formal h1/h2/h3 sample rejects every
+unlock, overload, and error bit without exception.
+
 After restoring the original narrow XX sensitivity, cleanup waits, records and
 clears one XX range-transition overload status, waits again, and then performs
 the strict final diagnostic. Only XX overload latches are expected in that

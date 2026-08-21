@@ -854,6 +854,7 @@ def _run_frequency_sweep(
                     "write_performed": wrote_setting,
                     "transition_status": None,
                     "frequency_readback_hz": None,
+                    "harmonic_transition_status": [],
                     "samples": [],
                 }
                 records.append(point_record)
@@ -971,6 +972,7 @@ def _run_excitation_sweep(
                     "source_readback_v_rms": None,
                     "nominal_current_a_rms": nominal_current_a,
                     "write_performed": wrote_setting,
+                    "harmonic_transition_status": [],
                     "samples": [],
                 }
                 records.append(point_record)
@@ -1144,10 +1146,22 @@ def _capture_sweep_point(
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
         raise TypeError("Sweep point samples must be a list.")
+    raw_transitions = record["harmonic_transition_status"]
+    if not isinstance(raw_transitions, list):
+        raise TypeError("Sweep point harmonic transitions must be a list.")
     for harmonic in harmonics:
         if harmonic != 1:
             lockin_xx.set_harmonic(harmonic)
             lockin_xy.set_harmonic(harmonic)
+            time.sleep(harmonic_settle_s)
+            transition, transition_problems = _consume_harmonic_transition(
+                lockin_xx, lockin_xy, harmonic=harmonic
+            )
+            raw_transitions.append(transition)
+            if transition_problems:
+                raise Sr830Error(
+                    "Unsafe harmonic transition: " + "; ".join(transition_problems)
+                )
             time.sleep(harmonic_settle_s)
         for sample_index in range(samples):
             if sample_index:
@@ -1187,11 +1201,66 @@ def _capture_sweep_point(
     if harmonics[-1] != 1:
         lockin_xx.set_harmonic(1)
         lockin_xy.set_harmonic(1)
+        time.sleep(harmonic_settle_s)
+        transition, transition_problems = _consume_harmonic_transition(
+            lockin_xx, lockin_xy, harmonic=1
+        )
+        raw_transitions.append(transition)
+        if transition_problems:
+            raise Sr830Error(
+                "Unsafe harmonic restoration transition: "
+                + "; ".join(transition_problems)
+            )
+        time.sleep(harmonic_settle_s)
 
 
-def _restore_first_harmonic(instrument: Sr830) -> None:
+def _restore_first_harmonic(instrument: Sr830) -> bool:
     if instrument.read_harmonic() != 1:
         instrument.set_harmonic(1)
+        return True
+    return False
+
+
+def _consume_harmonic_transition(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    harmonic: int,
+) -> tuple[dict[str, object], list[str]]:
+    """Record expected filter/reference-range latches after a paired HARM write."""
+
+    xx = lockin_xx.read_harmonic_sample(harmonic)
+    xy = lockin_xy.read_harmonic_sample(harmonic)
+    problems: list[str] = []
+    for sample in (xx, xy):
+        role = sample.reading.role.value
+        if sample.lia_status.reference_unlocked:
+            problems.append(f"lockin_{role} reference unlocked during harmonic transition")
+        if sample.lia_status.input_or_reserve_overload:
+            problems.append(f"lockin_{role} input/reserve overload during harmonic transition")
+        if sample.lia_status.output_overload:
+            problems.append(f"lockin_{role} output overload during harmonic transition")
+        if sample.lia_status.time_constant_changed:
+            problems.append(f"lockin_{role} time constant changed during harmonic transition")
+        if sample.error_status:
+            problems.append(
+                f"lockin_{role} instrument error during harmonic transition is "
+                f"{sample.error_status}"
+            )
+    return (
+        {
+            "harmonic": harmonic,
+            "captured_unix_s": time.time(),
+            "expected_transient_latches": [
+                "filter_overload",
+                "frequency_range_changed",
+            ],
+            "lockin_xx": _audited_harmonic_sample_record(xx),
+            "lockin_xy": _audited_harmonic_sample_record(xy),
+            "problems": problems,
+        },
+        problems,
+    )
 
 
 def _consume_frequency_transition(
@@ -1301,12 +1370,7 @@ def _restore_scan_state(
     actions: list[tuple[str, Callable[[], None]]] = [
         ("restore lockin_xx to 4 mVrms", lockin_xx.set_minimum_sine_output)
     ]
-    actions.extend(
-        (
-            ("restore lockin_xx to first harmonic", lambda: _restore_first_harmonic(lockin_xx)),
-            ("restore lockin_xy to first harmonic", lambda: _restore_first_harmonic(lockin_xy)),
-        )
-    )
+    harmonic_restored = False
     if restore_frequency:
         actions.append(
             (
@@ -1319,8 +1383,26 @@ def _restore_scan_state(
             action()
         except BaseException as exc:
             errors.append(f"{label}: {exc}")
+    for label, instrument in (
+        ("restore lockin_xx to first harmonic", lockin_xx),
+        ("restore lockin_xy to first harmonic", lockin_xy),
+    ):
+        try:
+            harmonic_restored = _restore_first_harmonic(instrument) or harmonic_restored
+        except BaseException as exc:
+            errors.append(f"{label}: {exc}")
     transition: dict[str, object] | None = None
+    harmonic_transition: dict[str, object] | None = None
     time.sleep(settle_s)
+    if harmonic_restored:
+        try:
+            harmonic_transition, transition_problems = _consume_harmonic_transition(
+                lockin_xx, lockin_xy, harmonic=1
+            )
+            errors.extend(transition_problems)
+        except BaseException as exc:
+            errors.append(f"harmonic-restoration transition readback: {exc}")
+        time.sleep(settle_s)
     if restore_frequency:
         try:
             transition, transition_problems = _consume_frequency_transition(
@@ -1379,6 +1461,7 @@ def _restore_scan_state(
         "attempted": True,
         "verified": not errors,
         "errors": errors,
+        "harmonic_transition_status": harmonic_transition,
         "transition_status": transition,
         "sensitivity_transition_status": sensitivity_transition,
         "final": diagnostics,

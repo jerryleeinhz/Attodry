@@ -257,6 +257,15 @@ Completed in Stage 3:
   every point with paired HARM writes, settling, strict status rejection, and
   h1/4 mVrms cleanup. Fake-VISA success and h2-failure recovery pass; the new
   real sweep still needs current physical confirmation and write authorization.
+- The first authorized all-harmonic frequency retry recorded 22 formal pairs
+  before XX `LIAS=18` and XY `LIAS=16` stopped it at 121.122062 Hz/h2. These are
+  retained as a rejected formal sample; excitation did not start. Cleanup was
+  fully verified at h1, XX 4 mVrms/10 mV/17.777 Hz, XY 1 mV, and zero
+  status/error words. The revised offline path separates the observed HARM
+  transition's filter-overload/frequency-range latches into discarded records,
+  consumes them, and waits again before unchanged strict formal sampling. Any
+  other transition problem and every formal nonzero safety bit remain failures;
+  fresh write authorization is required before its real retry.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

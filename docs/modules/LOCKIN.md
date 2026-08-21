@@ -353,12 +353,18 @@ cleanup 再次验证上述基线。频率扫描期间 XX 临时为 20 mV；XY �
 使用保存的 SINE OUT 读回，旧扫频记录没有读回时才采用记录的 4 mV 设定值；不打开
 VISA、不读取状态锁存、不写设置。
 
-2026-08-21：为即将重做的 1/2/3 阶扫频和扫幅增加离线验证的显式
+2026-08-21：为重做的 1/2/3 阶扫频和扫幅增加离线验证的显式
 `--all-harmonics` 选项。默认 sweep 仍只测 h1；只有提供该旗标时，才会在每个
 扫描点依次对两台仪器写 h2、h3，分别等待完整 `settle_s`，采样并在下一个点前
-恢复 h1。任何阶次的 unlock、overload、error 或频率不匹配都会保留部分样本并
-fail-closed；cleanup 还会检查并恢复两台 h1、XX 4 mVrms、扫频的 17.777 Hz 和
-原 XX 量程。fake-VISA 成功与二阶失败恢复已通过；尚未在真实仪器执行。
+恢复 h1。首次真实三阶扫频在 121.122062 Hz 的 h2 第一个正式样本停下：XX
+`LIAS=18`（filter overload + frequency range changed），XY `LIAS=16`
+（frequency range changed），没有 unlock 或 instrument error。部分样本已保留；
+cleanup 严格验证 h1、XX 4 mVrms / 10 mV / 17.777 Hz、XY 1 mV 和零状态字，幅值
+扫描未启动。修订后每个 HARM 转换会把仅有的 filter-overload / frequency-range
+changed 锁存作为 discarded transition 记录、消费并再次等待；unlock、input/reserve
+或 output overload、time-constant change、error 仍立即失败，之后的正式样本对全部
+状态位保持零容忍。fake-VISA 覆盖成功、二阶正式失败恢复和这组观察到的转换锁存；
+修订后的真实三阶扫频仍需新的明确授权。
 
 ## 预计文件所有权
 

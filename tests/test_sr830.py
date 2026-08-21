@@ -1161,6 +1161,10 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["requested_harmonics"], [1, 2, 3])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
+            [transition["harmonic"] for transition in result["points"][0]["harmonic_transition_status"]],
+            [2, 3, 1],
+        )
+        self.assertEqual(
             [sample["lockin_xx"]["reading"]["harmonic"] for sample in result["points"][0]["samples"]],
             [1, 2, 3],
         )
@@ -1178,7 +1182,7 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "1\n"] + ["0\n"] * 6
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "1\n"] + ["0\n"] * 8
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -1213,6 +1217,47 @@ class Sr830Tests(unittest.TestCase):
         self.assertIn("HARM 1", xy_resource.writes)
         self.assertIn("SLVL 0.004", xx_resource.writes)
         self.assertTrue(result["cleanup"]["verified"])
+
+    def test_cli_frequency_sweep_all_harmonics_records_observed_transition_latches(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["LIAS?"] = ["0\n", "0\n", "18\n"] + ["0\n"] * 11
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = ["0\n", "0\n", "16\n"] + ["0\n"] * 11
+        xx_resource = TrackingVisaResource(
+            xx_responses, shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--all-harmonics",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        transition = result["points"][0]["harmonic_transition_status"][0]
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(transition["harmonic"], 2)
+        self.assertEqual(transition["lockin_xx"]["lia_status"]["raw"], 18)
+        self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 16)
+        self.assertEqual(transition["problems"], [])
 
     def test_cli_frequency_sweep_separates_transition_latches_from_sample_window(self) -> None:
         shared_frequency = {"hz": 17.777}
