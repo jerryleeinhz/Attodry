@@ -268,6 +268,16 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   output overload, time-constant change, error, and every nonzero formal-window
   latch. Fake-VISA success, formal h2 failure cleanup, and observed-transition
   tests pass. A fresh real authorization is required before retrying.
+- Added offline-tested phase-quality display handling for the read-only
+  commissioning notebook: it retains raw circular phase statistics, omits only
+  display points below an explicit 1 µVrms amplitude or above a 5-degree
+  within-point circular spread, and unwraps qualified contiguous segments at
+  ±180 degrees. The controls are visible and adjustable; raw JSON/CSV values are
+  never changed. The excitation-sweep acquisition path now rejects `--settle-s`
+  below 1.5 s before VISA opens and records a two-interval source-step wait
+  (3.0 s at the current 300 ms/24 dB/oct configuration) after each actual SINE
+  OUT change. This was tested only against fake VISA and offline matplotlib;
+  no new hardware command was issued.
 
 ## Stage 4 - attoDRY real driver
 

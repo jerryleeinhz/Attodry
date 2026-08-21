@@ -281,6 +281,15 @@ FMOD, RSLP, ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume
 rejected sample, and attempt to restore `lockin_xx` to 4 mVrms and 17.777 Hz.
 A communication failure still requires manual front-panel verification.
 
+`--settle-s` is a transition-settling interval. The excitation command refuses
+an interval below 1.5 s before opening either VISA resource. At the current
+300 ms / 24 dB/oct bench setting, every actual `SLVL` (SINE OUT) change waits two
+intervals before the output readback and formal h1 sample: 3.0 s by default.
+This duration is recorded as root-level `source_step_settle_s` and for each
+written source point; a 4 mVrms baseline point that did not write `SLVL` records
+zero for its point-specific value. It is an acquisition-settling parameter, not
+a safety limit or an automatic phase correction.
+
 The HARM transition record is deliberately excluded from formal curves. It may
 contain only a filter-overload and/or frequency-range-change latch while the
 reference moves to the selected detection harmonic. It is consumed, retained,

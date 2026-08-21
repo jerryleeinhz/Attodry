@@ -266,6 +266,17 @@ Completed in Stage 3:
   consumes them, and waits again before unchanged strict formal sampling. Any
   other transition problem and every formal nonzero safety bit remain failures;
   fresh write authorization is required before its real retry.
+- Added a read-only phase-quality view to the commissioning notebook. It retains
+  all raw circular phase statistics, but the displayed phase defaults to R at
+  least 1 µVrms and within-point circular spread at most 5 degrees; qualifying
+  contiguous sections unwrap at ±180 degrees without bridging omitted points.
+  Both controls are visible and can be set to `0.0`/`None` for raw-phase audit.
+  No phase setting or raw record is modified. The offline-only acquisition
+  correction also requires `--settle-s >= 1.5` s before VISA opens and waits two
+  intervals after every actual SINE OUT change (3.0 s at the current 300 ms,
+  24 dB/oct setting), recording `source_step_settle_s` in the JSON. Fake-VISA
+  and offline matplotlib tests cover the behavior; no new hardware command was
+  issued.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

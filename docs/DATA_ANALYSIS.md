@@ -62,8 +62,17 @@ changing them sends no instrument command and must not be mistaken for a new
 hardware safety authorization.
 
 Phase uses circular rather than arithmetic statistics across the -180/180-degree
-wrap. CSV, PNG, and PDF export is disabled by default and writes only beneath
-`analysis_output/sr830_commissioning` when explicitly enabled.
+wrap. The commissioning notebook exposes two display-only quality controls:
+`PHASE_MINIMUM_AMPLITUDE_V` (default 1 µVrms) and
+`PHASE_MAXIMUM_STANDARD_DEVIATION_DEG` (default 5 degrees). A plotted phase point
+must satisfy both controls; the remaining contiguous qualified segments are
+unwrapped across the ±180-degree boundary, but never across an omitted point.
+This prevents a low-amplitude or internally unstable phase from looking like a
+physical discontinuity while leaving every raw phase value available for audit.
+Set the amplitude control to `0.0` and the standard-deviation control to `None`
+to display all raw phase points. CSV, PNG, and PDF export is disabled by default
+and writes only beneath `analysis_output/sr830_commissioning` when explicitly
+enabled.
 
 ## XY-only frequency and amplitude sweeps
 

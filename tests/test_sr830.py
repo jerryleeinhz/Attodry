@@ -1360,7 +1360,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-excitation",
@@ -1371,7 +1371,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "5",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--authorize-writes",
@@ -1400,6 +1400,66 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xy_resource.writes, [])
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
 
+    def test_cli_excitation_sweep_requires_one_settle_interval_and_waits_two_after_source_step(self) -> None:
+        manager = FakeResourceManager({})
+        with self.assertRaisesRegex(Sr830Error, "at least 1.5 s"):
+            run(
+                [
+                    "sweep-excitation",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--series-resistance-ohm", "100000",
+                    "--device-resistance-ohm", "500",
+                    "--max-device-current-a", "0.005",
+                    "--max-device-voltage-v", "0.5",
+                    "--settle-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                    "--confirm-no-50ohm-termination",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+        self.assertEqual(manager.opened, [])
+
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+        with (
+            patch("attodry_control.lockin_test.time.sleep") as sleeper,
+            redirect_stdout(output),
+        ):
+            run(
+                [
+                    "sweep-excitation",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,0.4",
+                    "--series-resistance-ohm", "100000",
+                    "--device-resistance-ohm", "500",
+                    "--max-device-current-a", "0.005",
+                    "--max-device-voltage-v", "0.5",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                    "--confirm-no-50ohm-termination",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        self.assertIn(3.0, [call.args[0] for call in sleeper.call_args_list])
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["source_step_settle_s"], 3.0)
+        self.assertEqual(result["points"][1]["source_step_settle_s"], 3.0)
+
     def test_cli_excitation_sweep_all_harmonics_records_each_order_and_restores_first(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
@@ -1411,7 +1471,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-excitation",
@@ -1422,7 +1482,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "500",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "0.5",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--all-harmonics",
@@ -1458,7 +1518,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-excitation",
@@ -1469,7 +1529,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "5",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--authorize-writes",
@@ -1515,7 +1575,11 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "overload"):
+        with (
+            patch("attodry_control.lockin_test.time.sleep"),
+            redirect_stdout(output),
+            self.assertRaisesRegex(Sr830Error, "overload"),
+        ):
             run(
                 [
                     "sweep-excitation",
@@ -1526,7 +1590,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "5",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--authorize-writes",

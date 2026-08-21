@@ -63,6 +63,8 @@ DEFAULT_EXCITATION_SWEEP_V = (
     0.400,
 )
 SR830_OUTPUT_RESISTANCE_OHM = 50.0
+MINIMUM_EXCITATION_SETTLE_S = 1.5
+EXCITATION_SOURCE_STEP_SETTLE_INTERVALS = 2
 # The external SR830 frequency readback showed 54 ppm jitter at 50 Hz while
 # remaining locked and error-free. This sweep-only tolerance leaves measured
 # margin for that jitter; unlock and error status remain unconditional failures.
@@ -301,7 +303,15 @@ def _add_pair_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_sweep_arguments(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--settle-s", type=_nonnegative_float, default=1.5)
+    parser.add_argument(
+        "--settle-s",
+        type=_nonnegative_float,
+        default=1.5,
+        help=(
+            "Transition-settle interval in seconds. Excitation source steps use "
+            "two intervals and require at least 1.5 s. Default: 1.5 s."
+        ),
+    )
     parser.add_argument("--samples-per-point", type=_positive_integer, default=3)
     parser.add_argument("--sample-interval-s", type=_nonnegative_float, default=0.3)
     parser.add_argument(
@@ -941,10 +951,16 @@ def _run_excitation_sweep(
     _require_sweep_authorization(args)
     if not args.confirm_no_50ohm_termination:
         raise AuthorizationRequired("Absence of an external 50 ohm termination was not confirmed.")
+    if args.settle_s < MINIMUM_EXCITATION_SETTLE_S:
+        raise Sr830Error(
+            "Excitation sweep requires at least 1.5 s per settle interval; "
+            "each SINE OUT step waits two intervals."
+        )
     points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
     harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
+    source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         controller = DualSr830Controller(lockin_xx, lockin_xy)
@@ -970,6 +986,9 @@ def _run_excitation_sweep(
                     "target_frequency_hz": baseline_hz,
                     "source_v_rms": source_v,
                     "source_readback_v_rms": None,
+                    "source_step_settle_s": (
+                        source_step_settle_s if wrote_setting else 0.0
+                    ),
                     "nominal_current_a_rms": nominal_current_a,
                     "write_performed": wrote_setting,
                     "harmonic_transition_status": [],
@@ -978,7 +997,9 @@ def _run_excitation_sweep(
                 records.append(point_record)
                 if wrote_setting:
                     lockin_xx.set_sine_output(source_v)
-                time.sleep(args.settle_s)
+                    time.sleep(source_step_settle_s)
+                else:
+                    time.sleep(args.settle_s)
                 output_readback = lockin_xx.read_sine_output()
                 point_record["source_readback_v_rms"] = output_readback
                 if not math.isclose(output_readback, source_v, rel_tol=1e-6, abs_tol=0.001):
@@ -1022,6 +1043,7 @@ def _run_excitation_sweep(
             "requested_harmonics": harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
             "settle_s": args.settle_s,
+            "source_step_settle_s": source_step_settle_s,
             "samples_per_point": args.samples_per_point,
             "sample_interval_s": args.sample_interval_s,
             "safety": safety,
