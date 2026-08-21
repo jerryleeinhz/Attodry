@@ -14,6 +14,31 @@ python -m pip install -e ".[analysis]"
 The project pins matplotlib 3.10.9 for reproducible offline wheelhouses. Analysis
 does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 
+## Standalone SR830 commissioning sweeps
+
+Open `notebooks/sr830_commissioning_sweeps.ipynb` in the `lyr` environment to
+browse and plot the standalone frequency/excitation JSON records under
+`run_data/commissioning`. The notebook is read-only unless its final
+`SAVE_OUTPUTS` switch is explicitly enabled.
+
+The catalog filters record status as `completed`, `rejected`, `diagnostic`,
+`other`, or `invalid`. Ordinary plotting defaults to `completed` only. Loading a
+rejected or incomplete sweep requires the separate `include_rejected=True` audit
+opt-in. Formal samples can be filtered as `clean`, `problem`, `unlocked`,
+`overload`, or `instrument_error`; transition and cleanup payloads are excluded
+from the plotted rows.
+
+Set `OPEN_BROWSER=True` in the Browse cell to open the native Windows file
+chooser and load a JSON/JSONL file directly. If the notebook kernel is running
+without access to the Windows desktop, set `selected_path = Path(...)` instead.
+Directory discovery remains available in either case.
+
+The notebook plots per-point mean and sample standard deviation for XX/XY X, Y,
+R, and phase against frequency, source RMS voltage, or nominal RMS current. Phase
+uses circular rather than arithmetic statistics across the -180/180-degree wrap. CSV,
+PNG, and PDF export is disabled by default and writes only beneath
+`analysis_output/sr830_commissioning` when explicitly enabled.
+
 ## CSV and a single trace
 
 ```powershell

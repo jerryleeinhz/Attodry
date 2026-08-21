@@ -224,6 +224,14 @@ Completed offline in Stage 6:
   opt-in, CSV export, accepted gate-leakage loading, Bx/Bz/magnitude/angle
   metadata, transport traces, and 2D gate-map preparation/plotting.
 - Added `attodry-analyze` and a notebook that imports only the analysis surface.
+- Added a separate read-only SR830 commissioning analysis module and
+  `sr830_commissioning_sweeps.ipynb`. It recursively catalogs JSON/JSONL files,
+  provides a native Windows Browse/open path, defaults to completed records and
+  clean formal samples, requires explicit rejected-data audit opt-in, and filters
+  problem/unlock/overload/instrument-error samples without mixing transition or
+  cleanup payloads into curves. It plots XX/XY X/Y/R/phase mean and sample standard
+  deviation versus frequency, source voltage, or nominal current and can export
+  CSV/PNG/PDF only when explicitly enabled.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   results, with an explicit generated/skipped manifest and fit summary.
@@ -238,14 +246,14 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 129 tests and passes in the minimal
+- The complete hardware-free suite contains 134 tests and passes in the minimal
   environment with one matplotlib rendering test skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `b353b1ee401f204bb1882c359d7850128a33528a48756079949b1a1286b2b221`.
+  `6ce910190a216f05b35fea1842354b8f0ccedaa1862683df5d6df216bee8264f`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are

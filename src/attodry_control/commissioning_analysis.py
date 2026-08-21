@@ -1,0 +1,513 @@
+from __future__ import annotations
+
+import csv
+from dataclasses import dataclass, fields
+import json
+import math
+from pathlib import Path
+from statistics import fmean, stdev
+from typing import Callable, Iterable, Mapping, Sequence
+
+
+RECORD_STATUSES = frozenset(
+    {"completed", "rejected", "diagnostic", "other", "invalid"}
+)
+SAMPLE_STATUSES = frozenset(
+    {"clean", "problem", "unlocked", "overload", "instrument_error"}
+)
+SWEEP_METRICS = frozenset({"x_v", "y_v", "amplitude_v", "phase_deg"})
+SWEEP_X_AXES = frozenset(
+    {"target_frequency_hz", "source_v_rms", "nominal_current_a_rms"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CommissioningRecordSummary:
+    path: Path
+    scan_type: str
+    record_status: str
+    completed: bool | None
+    sample_count: int
+    problem_count: int
+    modified_ns: int
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CommissioningSample:
+    source_path: str
+    record_status: str
+    scan_type: str
+    point_index: int
+    sample_index: int
+    target_frequency_hz: float
+    source_v_rms: float
+    nominal_current_a_rms: float | None
+    role: str
+    harmonic: int
+    x_v: float
+    y_v: float
+    amplitude_v: float
+    phase_deg: float
+    reference_frequency_hz: float
+    locked: bool
+    overload: bool
+    lia_status_raw: int
+    error_status: int
+    statuses: tuple[str, ...]
+    problems: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class SweepStatistic:
+    x_value: float
+    role: str
+    metric: str
+    mean: float
+    standard_deviation: float
+    count: int
+
+
+def load_commissioning_file(
+    path: str | Path,
+) -> dict[str, object] | tuple[dict[str, object], ...]:
+    """Open one commissioning JSON or JSONL file without modifying it."""
+
+    source = Path(path)
+    if source.suffix.lower() == ".json":
+        with source.open(encoding="utf-8") as file:
+            payload = json.load(file)
+        if not isinstance(payload, dict):
+            raise ValueError("Commissioning JSON root must be an object.")
+        return payload
+    if source.suffix.lower() == ".jsonl":
+        records: list[dict[str, object]] = []
+        with source.open(encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ValueError(
+                        f"Commissioning JSONL line {line_number} is not an object."
+                    )
+                records.append(record)
+        return tuple(records)
+    raise ValueError("Commissioning data file must end in .json or .jsonl.")
+
+
+def summarize_commissioning_file(path: str | Path) -> CommissioningRecordSummary:
+    source = Path(path)
+    try:
+        payload = load_commissioning_file(source)
+        if isinstance(payload, tuple):
+            return CommissioningRecordSummary(
+                path=source,
+                scan_type="diagnostic",
+                record_status="diagnostic",
+                completed=None,
+                sample_count=len(payload),
+                problem_count=sum(bool(record.get("problems")) for record in payload),
+                modified_ns=source.stat().st_mtime_ns,
+            )
+        completed_value = payload.get("completed")
+        completed = completed_value if isinstance(completed_value, bool) else None
+        status = (
+            "completed"
+            if completed is True
+            else "rejected"
+            if completed is False
+            else "other"
+        )
+        samples = tuple(_formal_sample_payloads(payload))
+        return CommissioningRecordSummary(
+            path=source,
+            scan_type=str(payload.get("scan", "unknown")),
+            record_status=status,
+            completed=completed,
+            sample_count=len(samples),
+            problem_count=sum(bool(sample.get("problems")) for sample in samples),
+            modified_ns=source.stat().st_mtime_ns,
+            error=(None if payload.get("error") is None else str(payload["error"])),
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        modified_ns = source.stat().st_mtime_ns if source.exists() else 0
+        return CommissioningRecordSummary(
+            path=source,
+            scan_type="unknown",
+            record_status="invalid",
+            completed=None,
+            sample_count=0,
+            problem_count=0,
+            modified_ns=modified_ns,
+            error=str(exc),
+        )
+
+
+def discover_commissioning_records(
+    directory: str | Path,
+    *,
+    record_statuses: Iterable[str] | None = None,
+    scan_types: Iterable[str] | None = None,
+) -> tuple[CommissioningRecordSummary, ...]:
+    """Recursively catalog JSON/JSONL files and apply explicit record filters."""
+
+    root = Path(directory)
+    selected_statuses = _validated_filter(record_statuses, RECORD_STATUSES, "record")
+    selected_scans = None if scan_types is None else frozenset(scan_types)
+    paths = tuple(root.rglob("*.json")) + tuple(root.rglob("*.jsonl"))
+    summaries = [summarize_commissioning_file(path) for path in paths]
+    summaries = [
+        summary
+        for summary in summaries
+        if (selected_statuses is None or summary.record_status in selected_statuses)
+        and (selected_scans is None or summary.scan_type in selected_scans)
+    ]
+    return tuple(sorted(summaries, key=lambda item: item.modified_ns, reverse=True))
+
+
+def browse_commissioning_file(
+    initial_directory: str | Path,
+    *,
+    chooser: Callable[[Path], str | Path | None] | None = None,
+) -> Path | None:
+    """Open a native file chooser; an injectable chooser keeps this testable."""
+
+    initial = Path(initial_directory)
+    if chooser is not None:
+        selected = chooser(initial)
+    else:
+        try:
+            from tkinter import Tk, filedialog
+
+            root = Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            try:
+                selected = filedialog.askopenfilename(
+                    title="Open SR830 commissioning data",
+                    initialdir=str(initial),
+                    filetypes=(
+                        ("Commissioning data", "*.json *.jsonl"),
+                        ("JSON", "*.json"),
+                        ("JSON Lines", "*.jsonl"),
+                    ),
+                )
+            finally:
+                root.destroy()
+        except Exception as exc:
+            raise RuntimeError(
+                "The native file chooser is unavailable. Set the data Path "
+                "directly in the notebook instead."
+            ) from exc
+    if not selected:
+        return None
+    path = Path(selected)
+    if path.suffix.lower() not in {".json", ".jsonl"}:
+        raise ValueError("Selected commissioning file must be JSON or JSONL.")
+    return path
+
+
+def browse_and_load_commissioning_file(
+    initial_directory: str | Path,
+    *,
+    chooser: Callable[[Path], str | Path | None] | None = None,
+) -> tuple[Path, dict[str, object] | tuple[dict[str, object], ...]] | None:
+    path = browse_commissioning_file(initial_directory, chooser=chooser)
+    return None if path is None else (path, load_commissioning_file(path))
+
+
+def load_sweep_samples(
+    path: str | Path,
+    *,
+    include_rejected: bool = False,
+    sample_statuses: Iterable[str] | None = None,
+    roles: Iterable[str] | None = None,
+) -> tuple[CommissioningSample, ...]:
+    payload = load_commissioning_file(path)
+    if not isinstance(payload, dict) or payload.get("scan") not in {
+        "frequency",
+        "excitation",
+    }:
+        raise ValueError("Selected file is not a frequency or excitation sweep.")
+    completed = payload.get("completed") is True
+    if not completed and not include_rejected:
+        raise ValueError(
+            "Rejected or incomplete sweep data requires include_rejected=True."
+        )
+    selected_statuses = _validated_filter(
+        sample_statuses, SAMPLE_STATUSES, "sample"
+    )
+    selected_roles = None if roles is None else frozenset(roles)
+    unknown_roles = set() if selected_roles is None else selected_roles - {"xx", "xy"}
+    if unknown_roles:
+        raise ValueError(f"Unknown roles: {sorted(unknown_roles)}")
+    record_status = "completed" if completed else "rejected"
+    rows: list[CommissioningSample] = []
+    points = payload.get("points", [])
+    if not isinstance(points, list):
+        raise ValueError("Sweep points must be a list.")
+    for point in points:
+        if not isinstance(point, dict):
+            raise ValueError("Each sweep point must be an object.")
+        samples = point.get("samples", [])
+        if not isinstance(samples, list):
+            raise ValueError("Sweep point samples must be a list.")
+        for sample in samples:
+            if not isinstance(sample, dict):
+                raise ValueError("Each sweep sample must be an object.")
+            problems = tuple(str(problem) for problem in sample.get("problems", []))
+            for role in ("xx", "xy"):
+                if selected_roles is not None and role not in selected_roles:
+                    continue
+                row = _commissioning_sample(
+                    path=Path(path),
+                    record_status=record_status,
+                    scan_type=str(payload["scan"]),
+                    point=point,
+                    sample=sample,
+                    role=role,
+                    problems=problems,
+                )
+                if selected_statuses is None or not selected_statuses.isdisjoint(
+                    row.statuses
+                ):
+                    rows.append(row)
+    return tuple(rows)
+
+
+def aggregate_sweep_samples(
+    rows: Sequence[CommissioningSample],
+    *,
+    metric: str = "amplitude_v",
+    x_axis: str | None = None,
+) -> tuple[SweepStatistic, ...]:
+    if metric not in SWEEP_METRICS:
+        raise ValueError(f"Unsupported metric: {metric}")
+    if not rows:
+        raise ValueError("No sweep samples match the selected filters.")
+    scan_types = {row.scan_type for row in rows}
+    if len(scan_types) != 1:
+        raise ValueError("Aggregate one sweep type at a time.")
+    if x_axis is None:
+        x_axis = (
+            "target_frequency_hz"
+            if next(iter(scan_types)) == "frequency"
+            else "source_v_rms"
+        )
+    if x_axis not in SWEEP_X_AXES:
+        raise ValueError(f"Unsupported x axis: {x_axis}")
+    grouped: dict[tuple[float, str], list[float]] = {}
+    for row in rows:
+        raw_x = getattr(row, x_axis)
+        if raw_x is None:
+            raise ValueError(f"Selected x axis {x_axis} contains missing values.")
+        grouped.setdefault((float(raw_x), row.role), []).append(
+            float(getattr(row, metric))
+        )
+    statistics: list[SweepStatistic] = []
+    for (x_value, role), values in sorted(grouped.items()):
+        mean, spread = _mean_and_standard_deviation(values, metric=metric)
+        statistics.append(
+            SweepStatistic(
+                x_value=x_value,
+                role=role,
+                metric=metric,
+                mean=mean,
+                standard_deviation=spread,
+                count=len(values),
+            )
+        )
+    return tuple(statistics)
+
+
+def plot_commissioning_sweep(
+    rows: Sequence[CommissioningSample],
+    *,
+    metric: str = "amplitude_v",
+    x_axis: str | None = None,
+    log_x: bool | None = None,
+    destination: str | Path | None = None,
+):
+    """Plot per-point mean and sample standard deviation for XX and XY."""
+
+    statistics = aggregate_sweep_samples(rows, metric=metric, x_axis=x_axis)
+    scan_type = rows[0].scan_type
+    resolved_x_axis = x_axis or (
+        "target_frequency_hz" if scan_type == "frequency" else "source_v_rms"
+    )
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise RuntimeError(
+            "Plotting requires: python -m pip install -e '.[analysis]'"
+        ) from exc
+    figure, axis = plt.subplots(figsize=(6.6, 4.4), constrained_layout=True)
+    for role in ("xx", "xy"):
+        selected = [item for item in statistics if item.role == role]
+        if not selected:
+            continue
+        axis.errorbar(
+            [item.x_value for item in selected],
+            [item.mean for item in selected],
+            yerr=[item.standard_deviation for item in selected],
+            marker="o",
+            linewidth=1.2,
+            capsize=3,
+            label=role.upper(),
+        )
+    use_log_x = log_x if log_x is not None else scan_type == "frequency"
+    if use_log_x:
+        axis.set_xscale("log")
+    axis.set_xlabel(
+        {
+            "target_frequency_hz": "Frequency (Hz)",
+            "source_v_rms": "Source voltage (V RMS)",
+            "nominal_current_a_rms": "Nominal current (A RMS)",
+        }[resolved_x_axis]
+    )
+    axis.set_ylabel(
+        {
+            "x_v": "X (V)",
+            "y_v": "Y (V)",
+            "amplitude_v": "R (V)",
+            "phase_deg": "Phase (degree)",
+        }[metric]
+    )
+    axis.set_title(f"SR830 {scan_type} sweep")
+    axis.grid(True, alpha=0.25)
+    axis.legend()
+    if destination is not None:
+        figure.savefig(destination, dpi=200)
+    return figure
+
+
+def export_commissioning_csv(
+    rows: Sequence[CommissioningSample], destination: str | Path
+) -> None:
+    names = [field.name for field in fields(CommissioningSample)]
+    with Path(destination).open("w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=names)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {
+                    name: (
+                        "|".join(getattr(row, name))
+                        if isinstance(getattr(row, name), tuple)
+                        else getattr(row, name)
+                    )
+                    for name in names
+                }
+            )
+
+
+def _formal_sample_payloads(payload: Mapping[str, object]):
+    points = payload.get("points", [])
+    if not isinstance(points, list):
+        return
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        samples = point.get("samples", [])
+        if isinstance(samples, list):
+            yield from (sample for sample in samples if isinstance(sample, dict))
+
+
+def _commissioning_sample(
+    *,
+    path: Path,
+    record_status: str,
+    scan_type: str,
+    point: Mapping[str, object],
+    sample: Mapping[str, object],
+    role: str,
+    problems: tuple[str, ...],
+) -> CommissioningSample:
+    instrument = sample.get(f"lockin_{role}")
+    if not isinstance(instrument, dict):
+        raise ValueError(f"Sweep sample is missing lockin_{role} data.")
+    reading = instrument.get("reading")
+    lia_status = instrument.get("lia_status")
+    if not isinstance(reading, dict) or not isinstance(lia_status, dict):
+        raise ValueError(f"lockin_{role} sample is missing reading/status data.")
+    unlocked = bool(lia_status.get("reference_unlocked")) or not bool(
+        reading.get("locked")
+    )
+    overload = bool(reading.get("overload")) or any(
+        bool(lia_status.get(name))
+        for name in (
+            "input_or_reserve_overload",
+            "filter_overload",
+            "output_overload",
+        )
+    )
+    error_status = int(instrument.get("error_status", 0))
+    statuses: list[str] = []
+    if problems:
+        statuses.append("problem")
+    if unlocked:
+        statuses.append("unlocked")
+    if overload:
+        statuses.append("overload")
+    if error_status:
+        statuses.append("instrument_error")
+    if not statuses:
+        statuses.append("clean")
+    nominal_current = point.get("nominal_current_a_rms")
+    return CommissioningSample(
+        source_path=str(path),
+        record_status=record_status,
+        scan_type=scan_type,
+        point_index=int(point.get("point_index", 0)),
+        sample_index=int(sample.get("sample_index", 0)),
+        target_frequency_hz=float(point["target_frequency_hz"]),
+        source_v_rms=float(point["source_v_rms"]),
+        nominal_current_a_rms=(
+            None if nominal_current is None else float(nominal_current)
+        ),
+        role=role,
+        harmonic=int(reading["harmonic"]),
+        x_v=float(reading["x_v"]),
+        y_v=float(reading["y_v"]),
+        amplitude_v=float(reading["amplitude_v"]),
+        phase_deg=float(reading["phase_deg"]),
+        reference_frequency_hz=float(reading["frequency_hz"]),
+        locked=bool(reading["locked"]),
+        overload=overload,
+        lia_status_raw=int(lia_status.get("raw", 0)),
+        error_status=error_status,
+        statuses=tuple(statuses),
+        problems=problems,
+    )
+
+
+def _validated_filter(
+    selected: Iterable[str] | None,
+    allowed: frozenset[str],
+    label: str,
+) -> frozenset[str] | None:
+    if selected is None:
+        return None
+    values = frozenset(selected)
+    unknown = values - allowed
+    if unknown:
+        raise ValueError(f"Unknown {label} statuses: {sorted(unknown)}")
+    return values
+
+
+def _mean_and_standard_deviation(
+    values: Sequence[float], *, metric: str
+) -> tuple[float, float]:
+    if metric != "phase_deg":
+        return fmean(values), stdev(values) if len(values) > 1 else 0.0
+    sine_mean = fmean(math.sin(math.radians(value)) for value in values)
+    cosine_mean = fmean(math.cos(math.radians(value)) for value in values)
+    mean = math.degrees(math.atan2(sine_mean, cosine_mean))
+    resultant = min(1.0, math.hypot(sine_mean, cosine_mean))
+    spread = (
+        180.0
+        if resultant <= 0.0
+        else math.degrees(math.sqrt(-2.0 * math.log(resultant)))
+    )
+    return mean, spread

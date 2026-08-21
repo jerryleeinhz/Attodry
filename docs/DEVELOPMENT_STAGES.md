@@ -226,6 +226,12 @@ Status: offline implementation and rendering QA complete (2026-08-20).
 - Added Bx, Bz, resultant field, and signed angle-from-+Z metadata and axes.
 - Added the `attodry-analyze` batch CLI and a read-only analysis notebook that
   imports no hardware-control modules.
+- Added a dedicated read-only SR830 commissioning browser/analysis module and
+  notebook. It opens JSON/JSONL files through directory discovery or a native
+  Windows Browse dialog, defaults to completed records and clean formal samples,
+  requires explicit rejected-data audit opt-in, filters unsafe sample statuses,
+  excludes transition/cleanup payloads from curves, and plots/exports XX/XY
+  X/Y/R/phase statistics for frequency and excitation scans.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   outputs. Every generated or unsupported result is recorded in a JSON manifest.
@@ -244,7 +250,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 129 tests and passes in the minimal environment
+- The full offline suite covers 134 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

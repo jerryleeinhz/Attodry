@@ -65,6 +65,12 @@ python -m attodry_control.attodry_test --help
 python -m attodry_control.lockin_test --help
 ```
 
+已完成的独立扫频和激励JSON可用
+[`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)
+浏览和绘图。Notebook默认只选择 `completed` 记录和 `clean` 正式样本；可通过
+Windows Browse 对话框直接打开文件，也可显式切换到 rejected/diagnostic 或
+unlock/overload/error 审计筛选。转换期和cleanup数据不会进入默认曲线。
+
 ## 目录
 
 ```text

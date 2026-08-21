@@ -1,0 +1,211 @@
+import json
+from dataclasses import replace
+from pathlib import Path
+import tempfile
+import unittest
+
+from attodry_control.commissioning_analysis import (
+    aggregate_sweep_samples,
+    browse_and_load_commissioning_file,
+    discover_commissioning_records,
+    export_commissioning_csv,
+    load_sweep_samples,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+class CommissioningAnalysisTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.paths: list[Path] = []
+        self.addCleanup(self._cleanup_files)
+
+    def test_catalog_filters_completed_rejected_and_diagnostic_records(self) -> None:
+        completed = self._write_json("completed.json", self._sweep(completed=True))
+        self._write_json("rejected.json", self._sweep(completed=False))
+        diagnostic = self._temporary_path(".jsonl")
+        diagnostic.write_text(
+            json.dumps({"sample_index": 0, "problems": []}) + "\n",
+            encoding="utf-8",
+        )
+
+        catalog = discover_commissioning_records(PROJECT_ROOT)
+        by_path = {record.path: record for record in catalog}
+        self.assertEqual(by_path[completed].record_status, "completed")
+        self.assertEqual(by_path[diagnostic].record_status, "diagnostic")
+        accepted = discover_commissioning_records(
+            PROJECT_ROOT,
+            record_statuses={"completed"},
+            scan_types={"frequency"},
+        )
+        self.assertIn(completed, [record.path for record in accepted])
+        diagnostics = discover_commissioning_records(
+            PROJECT_ROOT, record_statuses={"diagnostic"}
+        )
+        self.assertIn(diagnostic, [record.path for record in diagnostics])
+
+    def test_rejected_sweep_requires_explicit_audit_mode_and_filters_status(self) -> None:
+        path = self._write_json(
+            "rejected.json", self._sweep(completed=False, xy_lia_raw=8)
+        )
+        with self.assertRaisesRegex(ValueError, "include_rejected=True"):
+            load_sweep_samples(path)
+
+        rows = load_sweep_samples(path, include_rejected=True)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            [row.role for row in load_sweep_samples(
+                path, include_rejected=True, sample_statuses={"clean"}
+            )],
+            ["xx"],
+        )
+        unlocked = load_sweep_samples(
+            path, include_rejected=True, sample_statuses={"unlocked"}
+        )
+        self.assertEqual([row.role for row in unlocked], ["xy"])
+
+    def test_formal_loader_excludes_transition_and_aggregates_samples(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["points"][0]["transition_status"] = {
+            "lockin_xy": self._instrument("xy", 9.0, lia_raw=8)
+        }
+        second = self._sample(xx_amplitude=3.0, xy_amplitude=0.4)
+        second["sample_index"] = 1
+        payload["points"][0]["samples"].append(second)
+        path = self._write_json("completed.json", payload)
+
+        rows = load_sweep_samples(path)
+        self.assertEqual(len(rows), 4)
+        xx_statistics = [
+            item
+            for item in aggregate_sweep_samples(rows)
+            if item.role == "xx"
+        ]
+        self.assertEqual(len(xx_statistics), 1)
+        self.assertEqual(xx_statistics[0].mean, 2.0)
+        self.assertEqual(xx_statistics[0].count, 2)
+
+        xx_rows = [row for row in rows if row.role == "xx"]
+        phase_rows = (
+            replace(xx_rows[0], phase_deg=179.0),
+            replace(xx_rows[1], phase_deg=-179.0),
+        )
+        phase = aggregate_sweep_samples(phase_rows, metric="phase_deg")[0]
+        self.assertAlmostEqual(abs(phase.mean), 180.0)
+        self.assertLess(phase.standard_deviation, 2.0)
+
+    def test_csv_export_and_injected_browse_open_data_directly(self) -> None:
+        source = self._write_json("completed.json", self._sweep(completed=True))
+        browsed = browse_and_load_commissioning_file(
+            PROJECT_ROOT, chooser=lambda initial: source
+        )
+        self.assertIsNotNone(browsed)
+        selected, payload = browsed
+        self.assertEqual(selected, source)
+        self.assertIsInstance(payload, dict)
+
+        destination = self._temporary_path(".csv")
+        export_commissioning_csv(load_sweep_samples(source), destination)
+        text = destination.read_text(encoding="utf-8")
+        self.assertIn("record_status", text)
+        self.assertIn("clean", text)
+
+    def test_notebook_is_valid_json_and_all_code_cells_compile(self) -> None:
+        path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"
+        notebook = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(notebook["nbformat"], 4)
+        code_cells = [
+            cell for cell in notebook["cells"] if cell["cell_type"] == "code"
+        ]
+        self.assertGreaterEqual(len(code_cells), 6)
+        for index, cell in enumerate(code_cells):
+            compile("".join(cell["source"]), f"notebook-cell-{index}", "exec")
+
+    def _write_json(self, _name: str, payload: dict[str, object]) -> Path:
+        path = self._temporary_path(".json")
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def _temporary_path(self, suffix: str) -> Path:
+        temporary = tempfile.NamedTemporaryFile(
+            dir=PROJECT_ROOT,
+            prefix="commissioning_analysis_",
+            suffix=suffix,
+            delete=False,
+        )
+        temporary.close()
+        path = Path(temporary.name)
+        self.paths.append(path)
+        return path
+
+    def _cleanup_files(self) -> None:
+        for path in self.paths:
+            if path.exists():
+                path.unlink()
+
+    def _sweep(
+        self, *, completed: bool, xy_lia_raw: int = 0
+    ) -> dict[str, object]:
+        return {
+            "scan": "frequency",
+            "completed": completed,
+            "error": None if completed else "injected rejection",
+            "points": [
+                {
+                    "point_index": 0,
+                    "target_frequency_hz": 17.777,
+                    "source_v_rms": 0.004,
+                    "nominal_current_a_rms": None,
+                    "samples": [self._sample(xy_lia_raw=xy_lia_raw)],
+                }
+            ],
+        }
+
+    def _sample(
+        self,
+        *,
+        xx_amplitude: float = 1.0,
+        xy_amplitude: float = 0.2,
+        xy_lia_raw: int = 0,
+    ) -> dict[str, object]:
+        return {
+            "sample_index": 0,
+            "lockin_xx": self._instrument("xx", xx_amplitude),
+            "lockin_xy": self._instrument("xy", xy_amplitude, lia_raw=xy_lia_raw),
+            "problems": [],
+        }
+
+    @staticmethod
+    def _instrument(
+        role: str, amplitude: float, *, lia_raw: int = 0
+    ) -> dict[str, object]:
+        unlocked = bool(lia_raw & 8)
+        return {
+            "reading": {
+                "role": role,
+                "harmonic": 1,
+                "x_v": amplitude,
+                "y_v": 0.0,
+                "amplitude_v": amplitude,
+                "phase_deg": 0.0,
+                "frequency_hz": 17.777,
+                "locked": not unlocked,
+                "overload": False,
+            },
+            "lia_status": {
+                "raw": lia_raw,
+                "input_or_reserve_overload": False,
+                "filter_overload": False,
+                "output_overload": False,
+                "reference_unlocked": unlocked,
+                "frequency_range_changed": False,
+                "time_constant_changed": False,
+                "triggered": False,
+            },
+            "error_status": 0,
+        }
+
+
+if __name__ == "__main__":
+    unittest.main()
