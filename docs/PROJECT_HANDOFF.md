@@ -272,6 +272,15 @@ Completed offline in Stage 4:
   Setpoint remained 1.75 K, temperature control stayed enabled, errors stayed zero,
   and field readbacks/setpoints stayed zero. Heater output is therefore not zero;
   this short diagnostic does not establish temperature stability or PID correctness.
+- A subsequent GUI-disconnected 601-sample, 600.622-second read-only monitor then
+  completed with no writes, empty stderr, and normal disconnect/end. Sample
+  temperature rose from 1.7342 to 1.7369 K and ranged 1.7335--1.7372 K (3.70 mK
+  peak-to-peak); setpoint stayed 1.75 K, temperature control stayed enabled, errors
+  and field readbacks/setpoints stayed zero, sample-heater power was 0.2106--0.2217
+  W, and VTI-heater power was 0.0004 W. All 601 samples were nevertheless below
+  the 1.74 K lower edge of the configured tolerance, so T4 remains a real stability
+  failure. Do not advance the temperature stage or infer a PID/heater correction;
+  manual diagnosis or a separately authorized control-setting change is required.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

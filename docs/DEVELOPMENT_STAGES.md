@@ -282,6 +282,16 @@ uncommissioned and require separate explicit authorization.
   temperature control remained enabled, all error codes were zero, and field
   readbacks/setpoints remained zero. This rules out zero heater output but does not
   establish temperature stability or PID correctness from a ten-second record.
+- A following GUI-disconnected, connection-authorized 601-sample read-only monitor
+  spanned 600.622 s and disconnected normally with an empty stderr record. It sent
+  no write: sample temperature rose from 1.7342 to 1.7369 K (range
+  1.7335--1.7372 K; 3.70 mK peak-to-peak), while the 1.75 K setpoint, enabled
+  temperature control, zero errors, and zero field readbacks/setpoints persisted.
+  Sample-heater power was 0.2106--0.2217 W and VTI-heater power 0.0004 W. The
+  range/control portions of the criterion passed, but all 601 samples were below
+  the 1.74 K tolerance lower bound. T4 stability therefore remains failed; do not
+  claim progression or alter PID/heater settings without a separately authorized
+  manual diagnosis or control change.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

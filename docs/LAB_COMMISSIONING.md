@@ -78,6 +78,15 @@ power was 0.2036--0.2037 W and VTI-heater power was 0.0004 W. Sample temperature
 was 1.7335--1.7340 K with a constant 1.75 K setpoint, enabled temperature control,
 zero errors, and zero field readbacks/setpoints. No write was authorized or sent.
 
+Stability-monitor record (2026-08-21): after GUI Disconnect, a separate authorized
+601-sample, 600.622-second run completed with empty stderr and normal
+Disconnect/end. It sent no write. Temperature rose from 1.7342 to 1.7369 K and
+ranged 1.7335--1.7372 K (3.70 mK peak-to-peak); sample-heater power was
+0.2106--0.2217 W, VTI-heater power was 0.0004 W, control stayed enabled, and
+setpoint/errors/field values remained valid. However, all samples were below 1.74 K,
+the configured lower tolerance edge. This is a failed temperature-stability record,
+not authorization to change PID, heater configuration, or setpoint.
+
 ## 3. Gate SMU zero-bias validation
 
 This stage cannot be coded until the exact SMU models are supplied. After the

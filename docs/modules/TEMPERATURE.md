@@ -174,6 +174,13 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
   1.7335--1.7340 K，setpoint 始终 1.75 K、温控始终开启、错误码始终为零，
   Bx/Bz 读回与设定均为零。该结果排除“heater output 为零”，但 10 秒记录不能
   证明温度稳定或 PID 正确；诊断未授权或发送任何 setpoint、toggle 或 heater 设置。
+- 随后在 GUI Disconnect 后进行 601 个一秒样本的 600.622 s 纯只读稳定性检测。
+  完整记录正常 Disconnect/end，stderr 为空，且没有任何写命令：温度从
+  1.7342 K 升至 1.7369 K，范围为 1.7335--1.7372 K（peak-to-peak 3.70 mK）；
+  所有样本均保持 1.75 K setpoint、温控开启、零错误和零磁场读回/设定。Sample
+  heater 为 0.2106--0.2217 W，VTI heater 为 0.0004 W。范围和连续控制判据满足，
+  但 601/601 样本都低于 1.74 K 容差下限，故 T4 温度稳定性仍然失败，不能进入
+  “已稳定”后的下一阶段，也不能据此自动调整 PID 或 heater 参数。
 
 ### T4 参数含义
 
