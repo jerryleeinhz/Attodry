@@ -57,6 +57,20 @@ class ConfigurationTests(unittest.TestCase):
             config.lockin_xy.external_reference_edge, ExternalReferenceEdge.RISING
         )
         self.assertEqual(config.magnet.limits.experiment_vector_max_t, 3.0)
+        self.assertEqual(config.lockin_sweep.harmonics, (1, 2, 3))
+        self.assertEqual(len(config.lockin_sweep.frequency_points_hz), 10)
+        self.assertEqual(config.lockin_sweep.frequency_points_hz[-1], 100000.0)
+        self.assertEqual(config.lockin_sweep.excitation_points_v_rms[-1], 0.4)
+        self.assertEqual(
+            config.lockin_sweep.temporary_xx_sensitivity_full_scale_v, 0.02
+        )
+        self.assertEqual(config.lockin_sweep.external_series_resistance_ohm, 100000.0)
+        self.assertEqual(config.lockin_sweep.approximate_device_resistance_ohm, 500.0)
+        self.assertFalse(config.lockin_sweep.external_50_ohm_termination)
+        self.assertEqual(
+            config.lockin_sweep.output_directory,
+            Path("../run_data/commissioning"),
+        )
         self.assertIsNone(config.visa)
 
     def test_loads_hardware_template_without_opening_hardware(self) -> None:
@@ -204,6 +218,30 @@ class ConfigurationTests(unittest.TestCase):
     def test_malformed_toml_is_reported_as_configuration_error(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Invalid TOML"):
             self.load_text('[project\nmode = "simulation"')
+
+    def test_lockin_sweep_rejects_external_50_ohm_termination(self) -> None:
+        text = self.simulation_text().replace(
+            "external_50_ohm_termination = false",
+            "external_50_ohm_termination = true",
+        )
+        with self.assertRaisesRegex(ConfigError, "must be false"):
+            self.load_text(text)
+
+    def test_lockin_sweep_rejects_rooted_output_directory(self) -> None:
+        text = self.simulation_text().replace(
+            'output_directory = "../run_data/commissioning"',
+            'output_directory = "C:/outside"',
+        )
+        with self.assertRaisesRegex(ConfigError, "non-rooted relative directory"):
+            self.load_text(text)
+
+    def test_lockin_sweep_rejects_config_directory_as_output_directory(self) -> None:
+        text = self.simulation_text().replace(
+            'output_directory = "../run_data/commissioning"',
+            'output_directory = "."',
+        )
+        with self.assertRaisesRegex(ConfigError, "non-rooted relative directory"):
+            self.load_text(text)
 
 
 if __name__ == "__main__":

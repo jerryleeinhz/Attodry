@@ -410,6 +410,20 @@ XX h1 在 11/11 点达到默认相位质量门槛（R >= 1 µVrms 且三次样�
 在宣称物理机制前仍需用已知电阻/短路、屏蔽与接地、以及串扰控制实验区分真实响应、
 电缆/输入电容传递函数和激励源谐波失真。
 
+2026-08-22：将重复的 sweep 参数集中到严格的 `[lockin_sweep]` TOML 表。当前站点
+配置固定保存 17.777 Hz--100 kHz 的十个对数等距频点、4--400 mVrms 的十一个幅值点、
+h1/h2/h3、有界高频跳过、XX 临时 20 mV、1.5 s settle、每点三个样本、0.3 s 间隔，
+以及 100 kΩ 外部串联、50 Ω SR830 输出、约 500 Ω 器件、5 mArms/0.5 Vrms 上限和
+无外部 50 Ω 端接。sweep 现在必须使用严格 hardware TOML；两个逐次接线 confirm 不再
+是运行参数。日常只需 `sweep-frequency` 或 `sweep-excitation`；严格预检失败时不会开始
+扫描，但 TOML 不能替代对 XY SINE OUT 实际断开的物理检查。每次已打开双机的尝试都会原子
+保存到 `output_directory`（默认仓库根 `run_data/commissioning`），带
+`completed`/`rejected`/`interrupted` 状态。JSON 的无 VISA 地址
+`measurement_config` 是已解析 TOML 请求；实际读回保留在 preflight、point 和 cleanup。
+扫频点也记录由配置的 4 mVrms 与完整串联路径算出的名义电流。未连接真实仪器或发出写命令。
+日常操作顺序和所有 `[lockin_sweep]` 字段说明见
+[`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。
+
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。

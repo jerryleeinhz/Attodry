@@ -18,6 +18,7 @@ from .sr830_settings import (
     SensitivityMode,
     ShieldGrounding,
     map_sr830_settings,
+    sensitivity_code,
 )
 from .stability import StabilityCriteria
 
@@ -107,6 +108,24 @@ class LockinConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class LockinSweepConfig:
+    frequency_points_hz: tuple[float, ...]
+    excitation_points_v_rms: tuple[float, ...]
+    harmonics: tuple[int, ...]
+    skip_unsupported_harmonics: bool
+    temporary_xx_sensitivity_full_scale_v: float
+    settle_s: float
+    samples_per_point: int
+    sample_interval_s: float
+    external_series_resistance_ohm: float
+    approximate_device_resistance_ohm: float
+    max_device_current_a_rms: float
+    max_device_voltage_v_rms: float
+    external_50_ohm_termination: bool
+    output_directory: Path
+
+
+@dataclass(frozen=True, slots=True)
 class GateConfig:
     role: str
     compliance_a: float | None
@@ -129,6 +148,7 @@ class ControlConfig:
     cleanup: CleanupConfig
     lockin_xx: LockinConfig
     lockin_xy: LockinConfig
+    lockin_sweep: LockinSweepConfig
     gate_top: GateConfig
     gate_bottom: GateConfig
     visa: VisaConfig | None = None
@@ -193,6 +213,7 @@ def load_config(path: str | Path) -> ControlConfig:
             "cleanup",
             "lockin_xx",
             "lockin_xy",
+            "lockin_sweep",
             "gate_top",
             "gate_bottom",
         }
@@ -215,6 +236,7 @@ def load_config(path: str | Path) -> ControlConfig:
             _table(document, "lockin_xy"), LockinRole.XY, "lockin_xy"
         )
         _validate_lockin_pair(lockin_xx, lockin_xy)
+        lockin_sweep = _parse_lockin_sweep(_table(document, "lockin_sweep"))
         gate_top = _parse_gate(
             _table(document, "gate_top"), "top", project.mode, "gate_top"
         )
@@ -239,6 +261,7 @@ def load_config(path: str | Path) -> ControlConfig:
         cleanup=cleanup,
         lockin_xx=lockin_xx,
         lockin_xy=lockin_xy,
+        lockin_sweep=lockin_sweep,
         gate_top=gate_top,
         gate_bottom=gate_bottom,
         visa=visa,
@@ -575,6 +598,107 @@ def _validate_lockin_pair(xx: LockinConfig, xy: LockinConfig) -> None:
         raise ConfigError("lockin_xx and lockin_xy frequencies must match.")
 
 
+def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
+    name = "lockin_sweep"
+    _strict_keys(
+        table,
+        name,
+        {
+            "frequency_points_hz",
+            "excitation_points_v_rms",
+            "harmonics",
+            "skip_unsupported_harmonics",
+            "temporary_xx_sensitivity_full_scale_v",
+            "settle_s",
+            "samples_per_point",
+            "sample_interval_s",
+            "external_series_resistance_ohm",
+            "approximate_device_resistance_ohm",
+            "max_device_current_a_rms",
+            "max_device_voltage_v_rms",
+            "external_50_ohm_termination",
+            "output_directory",
+        },
+    )
+    frequency_points_hz = _positive_number_tuple(
+        table["frequency_points_hz"], f"{name}.frequency_points_hz"
+    )
+    excitation_points_v_rms = _positive_number_tuple(
+        table["excitation_points_v_rms"], f"{name}.excitation_points_v_rms"
+    )
+    _require_strictly_increasing(frequency_points_hz, f"{name}.frequency_points_hz")
+    _require_strictly_increasing(
+        excitation_points_v_rms, f"{name}.excitation_points_v_rms"
+    )
+    if frequency_points_hz[0] < 0.001 or frequency_points_hz[-1] > 102_000:
+        raise ConfigError(
+            f"{name}.frequency_points_hz must remain within 0.001-102000 Hz."
+        )
+    if excitation_points_v_rms[0] < 0.004 or excitation_points_v_rms[-1] > 5.0:
+        raise ConfigError(
+            f"{name}.excitation_points_v_rms must remain within 0.004-5 V RMS."
+        )
+    harmonics = _integer_tuple(table["harmonics"], f"{name}.harmonics", minimum=1)
+    if harmonics != (1, 2, 3):
+        raise ConfigError(f"{name}.harmonics must be exactly [1, 2, 3].")
+    sensitivity_full_scale_v = _positive_number(
+        table["temporary_xx_sensitivity_full_scale_v"],
+        f"{name}.temporary_xx_sensitivity_full_scale_v",
+    )
+    try:
+        sensitivity_code(sensitivity_full_scale_v)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: {exc}") from exc
+    settle_s = _positive_number(table["settle_s"], f"{name}.settle_s")
+    if settle_s < 1.5:
+        raise ConfigError(f"{name}.settle_s must be at least 1.5 seconds.")
+    external_termination = _boolean(
+        table["external_50_ohm_termination"],
+        f"{name}.external_50_ohm_termination",
+    )
+    if external_termination:
+        raise ConfigError(
+            f"{name}.external_50_ohm_termination must be false for this wiring."
+        )
+    return LockinSweepConfig(
+        frequency_points_hz=frequency_points_hz,
+        excitation_points_v_rms=excitation_points_v_rms,
+        harmonics=harmonics,
+        skip_unsupported_harmonics=_boolean(
+            table["skip_unsupported_harmonics"],
+            f"{name}.skip_unsupported_harmonics",
+        ),
+        temporary_xx_sensitivity_full_scale_v=sensitivity_full_scale_v,
+        settle_s=settle_s,
+        samples_per_point=_integer(
+            table["samples_per_point"], f"{name}.samples_per_point", minimum=1
+        ),
+        sample_interval_s=_nonnegative_number(
+            table["sample_interval_s"], f"{name}.sample_interval_s"
+        ),
+        external_series_resistance_ohm=_positive_number(
+            table["external_series_resistance_ohm"],
+            f"{name}.external_series_resistance_ohm",
+        ),
+        approximate_device_resistance_ohm=_nonnegative_number(
+            table["approximate_device_resistance_ohm"],
+            f"{name}.approximate_device_resistance_ohm",
+        ),
+        max_device_current_a_rms=_positive_number(
+            table["max_device_current_a_rms"],
+            f"{name}.max_device_current_a_rms",
+        ),
+        max_device_voltage_v_rms=_positive_number(
+            table["max_device_voltage_v_rms"],
+            f"{name}.max_device_voltage_v_rms",
+        ),
+        external_50_ohm_termination=external_termination,
+        output_directory=_relative_directory(
+            table["output_directory"], f"{name}.output_directory"
+        ),
+    )
+
+
 def _parse_gate(
     table: Mapping[str, Any], role: str, mode: RunMode, name: str
 ) -> GateConfig:
@@ -686,6 +810,35 @@ def _nonnegative_number(value: Any, name: str) -> float:
     if converted < 0:
         raise ConfigError(f"{name} must be non-negative.")
     return converted
+
+
+def _relative_directory(value: Any, name: str) -> Path:
+    path = Path(_string(value, name))
+    if path == Path(".") or path.is_absolute() or path.anchor:
+        raise ConfigError(
+            f"{name} must name a non-rooted relative directory."
+        )
+    return path
+
+
+def _positive_number_tuple(value: Any, name: str) -> tuple[float, ...]:
+    if not isinstance(value, list) or not value:
+        raise ConfigError(f"{name} must be a non-empty array of numbers.")
+    return tuple(_positive_number(item, f"{name}[{index}]") for index, item in enumerate(value))
+
+
+def _integer_tuple(value: Any, name: str, *, minimum: int) -> tuple[int, ...]:
+    if not isinstance(value, list) or not value:
+        raise ConfigError(f"{name} must be a non-empty array of integers.")
+    return tuple(
+        _integer(item, f"{name}[{index}]", minimum=minimum)
+        for index, item in enumerate(value)
+    )
+
+
+def _require_strictly_increasing(values: tuple[float, ...], name: str) -> None:
+    if any(current <= previous for previous, current in zip(values, values[1:])):
+        raise ConfigError(f"{name} must be strictly increasing.")
 
 
 def _integer(value: Any, name: str, minimum: int) -> int:

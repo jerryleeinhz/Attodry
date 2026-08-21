@@ -2,11 +2,16 @@ from contextlib import redirect_stdout
 import io
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from attodry_control.lockin_test import _consume_sensitivity_transition, run
+from attodry_control.lockin_test import (
+    _consume_sensitivity_transition,
+    build_parser,
+    run,
+)
 from attodry_control.lockin_autorange import (
     AutorangeAction,
     AutorangeDecision,
@@ -196,6 +201,7 @@ class Sr830Tests(unittest.TestCase):
         temporary = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
         temporary.close()
         path = Path(temporary.name)
+        output_directory = f"run_data/lockin_commissioning_{path.stem}"
         template = Path("config/hardware.example.toml").read_text(encoding="utf-8")
         configured = (
             template.replace(
@@ -204,9 +210,14 @@ class Sr830Tests(unittest.TestCase):
             .replace("CHANGE_ME_SR830_XY_VISA_ADDRESS", "GPIB0::9::INSTR")
             .replace("timeout_ms = 5000", "timeout_ms = 4321")
             .replace("frequency_hz = 17.777", f"frequency_hz = {frequency_hz:g}")
+            .replace(
+                'output_directory = "../run_data/commissioning"',
+                f'output_directory = "{output_directory}"',
+            )
         )
         path.write_text(configured, encoding="utf-8")
         self.addCleanup(path.unlink)
+        self.addCleanup(shutil.rmtree, path.parent / output_directory, ignore_errors=True)
         return path
 
     def test_diagnostic_without_status_only_sends_queries(self) -> None:
@@ -1072,22 +1083,113 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xx_resource.writes[-2:], ["HARM 1", "SLVL 0.004"])
         self.assertEqual(xy_resource.writes[-2:], ["HARM 1", "SLVL 0.004"])
 
-    def test_cli_sweeps_refuse_unauthorized_writes_before_opening_resources(self) -> None:
+    def test_sweep_commands_default_to_station_local_hardware_config(self) -> None:
+        parser = build_parser()
         for command in ("sweep-frequency", "sweep-excitation"):
-            manager = FakeResourceManager({})
-            arguments = [command, "--xx-address", "XX", "--xy-address", "XY"]
-            if command == "sweep-excitation":
-                arguments.extend(
-                    [
-                        "--series-resistance-ohm", "100000",
-                        "--device-resistance-ohm", "1000",
-                        "--max-device-current-a", "0.005",
-                        "--max-device-voltage-v", "5",
-                    ]
-                )
-            with self.assertRaises(AuthorizationRequired):
-                run(arguments, resource_manager_factory=lambda: manager)
-            self.assertEqual(manager.opened, [])
+            with self.subTest(command=command):
+                args = parser.parse_args([command])
+                self.assertEqual(args.config, Path("config/hardware.local.toml"))
+
+    def test_frequency_sweep_saves_completed_record_with_resolved_config(self) -> None:
+        config_path = self._hardware_config()
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(config_path),
+                    "--points-hz", "17.777",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        record_directory = config_path.parent / "run_data" / (
+            f"lockin_commissioning_{config_path.stem}"
+        )
+        record_paths = list(record_directory.glob("*_frequency_completed.json"))
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(record_paths), 1)
+        self.assertEqual(json.loads(record_paths[0].read_text(encoding="utf-8")), result)
+        self.assertEqual(result["outcome"], "completed")
+        self.assertEqual(result["requested_harmonics"], [1, 2, 3])
+        self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
+        self.assertEqual(
+            result["measurement_config"]["source"], "resolved_hardware_toml"
+        )
+
+    def test_frequency_sweep_saves_preflight_rejection(self) -> None:
+        config_path = self._hardware_config()
+        xx_responses = responses(reference_mode=1)
+        xx_responses["LIAS?"] = "1\n"
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "overload"):
+            run(
+                [
+                    "sweep-frequency",
+                    "--config", str(config_path),
+                    "--points-hz", "17.777",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {
+                        "GPIB0::8::INSTR": TrackingVisaResource(
+                            xx_responses,
+                            shared_frequency={"hz": 17.777},
+                            name="xx",
+                        ),
+                        "GPIB0::9::INSTR": TrackingVisaResource(
+                            responses(reference_mode=0),
+                            shared_frequency={"hz": 17.777},
+                            name="xy",
+                        ),
+                    }
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        record_directory = config_path.parent / "run_data" / (
+            f"lockin_commissioning_{config_path.stem}"
+        )
+        record_paths = list(record_directory.glob("*_frequency_rejected.json"))
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertIsNone(result["preflight"]["lockin_xx"])
+        self.assertEqual(len(record_paths), 1)
+
+    def test_sweep_rejects_output_outside_station_config_before_opening(self) -> None:
+        config_path = self._hardware_config()
+        configured = config_path.read_text(encoding="utf-8")
+        config_path.write_text(
+            configured.replace(
+                f'output_directory = "run_data/lockin_commissioning_{config_path.stem}"',
+                'output_directory = "../outside"',
+            ),
+            encoding="utf-8",
+        )
+        manager = FakeResourceManager({})
+
+        with self.assertRaisesRegex(ValueError, "must resolve within"):
+            run(
+                ["sweep-frequency", "--config", str(config_path)],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(manager.opened, [])
 
     def test_cli_frequency_sweep_records_points_and_restores_baseline(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -1104,14 +1206,14 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,1000",
                     "--settle-s", "0",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
+                    "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1150,15 +1252,13 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,1000",
                     "--settle-s", "0",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--all-harmonics",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1167,6 +1267,12 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["completed"])
         self.assertEqual(result["requested_harmonics"], [1, 2, 3])
+        self.assertEqual(
+            result["points"][0]["nominal_current_a_rms"],
+            0.004 / 100550.0,
+        )
+        self.assertEqual(result["measurement_config"]["schema_version"], 1)
+        self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
             [transition["harmonic"] for transition in result["points"][0]["harmonic_transition_status"]],
@@ -1204,6 +1310,7 @@ class Sr830Tests(unittest.TestCase):
             run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address",
                     "XX",
                     "--xy-address",
@@ -1211,8 +1318,7 @@ class Sr830Tests(unittest.TestCase):
                     "--points-hz",
                     "17.777,38310.4813",
                     "--all-harmonics",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
+                    "--fail-on-unsupported-harmonics",
                 ],
                 resource_manager_factory=unopened_factory,
             )
@@ -1236,6 +1342,7 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address",
                     "XX",
                     "--xy-address",
@@ -1250,8 +1357,6 @@ class Sr830Tests(unittest.TestCase):
                     "0",
                     "--all-harmonics",
                     "--skip-unsupported-harmonics",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1295,6 +1400,7 @@ class Sr830Tests(unittest.TestCase):
             run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
@@ -1302,8 +1408,6 @@ class Sr830Tests(unittest.TestCase):
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--all-harmonics",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1336,6 +1440,7 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
@@ -1343,8 +1448,6 @@ class Sr830Tests(unittest.TestCase):
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--all-harmonics",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1377,14 +1480,14 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,25",
                     "--settle-s", "0",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
+                    "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1419,14 +1522,13 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-frequency",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,50",
                     "--settle-s", "0",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1455,6 +1557,7 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-excitation",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
@@ -1465,9 +1568,7 @@ class Sr830Tests(unittest.TestCase):
                     "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
-                    "--confirm-no-50ohm-termination",
+                    "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1497,6 +1598,7 @@ class Sr830Tests(unittest.TestCase):
             run(
                 [
                     "sweep-excitation",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--series-resistance-ohm", "100000",
@@ -1504,9 +1606,6 @@ class Sr830Tests(unittest.TestCase):
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "0.5",
                     "--settle-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
-                    "--confirm-no-50ohm-termination",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1527,6 +1626,7 @@ class Sr830Tests(unittest.TestCase):
             run(
                 [
                     "sweep-excitation",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
@@ -1537,9 +1637,6 @@ class Sr830Tests(unittest.TestCase):
                     "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
-                    "--confirm-no-50ohm-termination",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"XX": xx_resource, "XY": xy_resource}
@@ -1566,20 +1663,13 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-excitation",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
-                    "--series-resistance-ohm", "100000",
-                    "--device-resistance-ohm", "500",
-                    "--max-device-current-a", "0.005",
-                    "--max-device-voltage-v", "0.5",
                     "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--all-harmonics",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
-                    "--confirm-no-50ohm-termination",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1588,6 +1678,16 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["completed"])
         self.assertEqual(result["requested_harmonics"], [1, 2, 3])
+        self.assertEqual(result["safety"]["series_resistance_ohm"], 100000.0)
+        self.assertEqual(
+            result["safety"]["approximate_device_resistance_ohm"], 500.0
+        )
+        self.assertFalse(
+            result["measurement_config"]["excitation_path"][
+                "external_50_ohm_termination"
+            ]
+        )
+        self.assertNotIn("address", result["measurement_config"]["lockin_xy"])
         self.assertEqual(len(result["points"][1]["samples"]), 3)
         self.assertEqual(
             [sample["lockin_xy"]["reading"]["harmonic"] for sample in result["points"][1]["samples"]],
@@ -1613,6 +1713,7 @@ class Sr830Tests(unittest.TestCase):
             exit_code = run(
                 [
                     "sweep-excitation",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
@@ -1623,9 +1724,7 @@ class Sr830Tests(unittest.TestCase):
                     "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
-                    "--confirm-no-50ohm-termination",
+                    "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -1674,6 +1773,7 @@ class Sr830Tests(unittest.TestCase):
             run(
                 [
                     "sweep-excitation",
+                    "--config", str(self._hardware_config()),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
@@ -1684,9 +1784,7 @@ class Sr830Tests(unittest.TestCase):
                     "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
-                    "--authorize-writes",
-                    "--confirm-xy-sine-disconnected",
-                    "--confirm-no-50ohm-termination",
+                    "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
             )

@@ -81,6 +81,18 @@ python -m attodry_control.temperature_test --help
 python -m attodry_control.lockin_test --help
 ```
 
+实际 sweep 参数统一保存在 ignored 的 `config\hardware.local.toml` 的
+`[lockin_sweep]` 中。配置完成后，频率扫描和幅值扫描分别直接运行：
+
+```powershell
+python -m attodry_control.lockin_test sweep-frequency
+python -m attodry_control.lockin_test sweep-excitation
+```
+
+两条命令默认读取 `config\hardware.local.toml`；仅当配置文件位于其他位置时才
+附加 `--config <path>`。日常参数、严格预检、自动 JSON 归档和故障后的人工确认流程见
+[`docs/LOCKIN_DAILY_OPERATION.md`](docs/LOCKIN_DAILY_OPERATION.md)。
+
 已完成的独立扫频和激励JSON可用
 [`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)
 浏览和绘图。Notebook默认只选择 `completed` 记录和 `clean` 正式样本；可通过

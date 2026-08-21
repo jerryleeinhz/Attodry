@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 ## Current stage
 
@@ -310,6 +310,18 @@ Completed in Stage 3:
   frequency and crossed the ±180-degree wrap. Raw low-amplitude phase remains
   available for audit, but is intentionally omitted from the default plots and
   must not be interpreted physically without a higher-SNR control measurement.
+
+- On 2026-08-22, the device-only frequency/excitation sweep contract moved into
+  strict `[lockin_sweep]` hardware TOML: the requested grids, h1/h2/h3 coverage,
+  bounded high-frequency skips, temporary 20 mV XX range, timing, 100 kohm +
+  50 ohm + approximately 500 ohm path, 5 mArms/0.5 Vrms limits, and absence of
+  external 50 ohm termination. Daily sweep commands now default to that config
+  without per-run confirm/authorize flags; they preflight the pair, fail closed,
+  and atomically archive each opened-pair attempt as `completed`, `rejected`, or
+  `interrupted` under the configured `run_data/commissioning` directory. Every
+  result embeds an address-free resolved-TOML `measurement_config`, while actual
+  readbacks remain in the preflight/point/cleanup records. This change was
+  verified without connecting to real instruments or issuing setting writes.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

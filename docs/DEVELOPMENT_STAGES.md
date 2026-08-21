@@ -310,6 +310,15 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   sufficient for phase interpretation; follow-up wiring/pickup controls are
   required before assigning physical meaning to the low-SNR phase.
 
+- Consolidated the current frequency/excitation sweep grids, h1/h2/h3 policy,
+  temporary XX range, sampling timing, complete excitation path, and device
+  limits in a strict `[lockin_sweep]` hardware-TOML table (2026-08-22).
+  Daily sweep commands now default to that validated config without per-run
+  confirm/authorize flags. Each opened-pair attempt is atomically archived under
+  the configured `run_data/commissioning` directory with its outcome and an
+  address-free resolved-TOML `measurement_config`; no real instrument connection
+  was made for this change.
+
 ## Stage 4 - attoDRY real driver
 
 Status: offline implementation, target-computer DLL ABI preflight, and real
