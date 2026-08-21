@@ -127,6 +127,24 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 - fake-DLL 已覆盖授权门、越界/过大步长、hold-target、restore-initial、超时恢复、
   hold-current 和 Disconnect 失败。真实执行仍必须等待用户给值并逐项授权。
 
+### T4 参数含义
+
+| 参数 | 单位 | 含义和安全作用 |
+| --- | --- | --- |
+| `target_k` | K | 本次动作的目标样品温度。必须落在 `hardware.local.toml` 配置的温区内；稳定判据检查样品温度是否围绕它。它不是初始温度的自动推断值。 |
+| `max_delta_k` | K | 相对连接后初始 `user_temperature_k` 设定值允许的最大绝对步长。若 `abs(target_k - initial_setpoint) > max_delta_k`，在任何写命令前终止；它不替代温区上下限。 |
+| `tolerance_k` | K | 稳定窗口内每个样品温度样本与 `target_k` 的最大允许绝对误差；必须为正。 |
+| `stable_range_k` | K | 同一连续 dwell 窗口内样品温度的 peak-to-peak 最大允许范围，即 `max(sample) - min(sample)`；可为零。 |
+| `dwell_s` | s | 连续稳定窗口的最短时间跨度。窗口还必须有至少 3 个样本；控制中断、错误或通信失败会清空窗口。 |
+| `poll_interval_s` | s | 两次状态采样之间的轮询间隔；只影响采样频率，不放宽 tolerance、stable range 或 dwell 判据。 |
+| `timeout_s` | s | 等待目标稳定的总超时；必须覆盖 `dwell_s`。超时即失败，不声称已稳定。 |
+| `success_policy` | — | `hold-target`：目标稳定后保持目标设定值且温控开启；`restore-initial`：目标稳定后恢复连接前的用户设定值和温控开关状态（若原来开启，还等待恢复温度稳定）。 |
+| `failure_policy` | — | `hold-current`：失败后不主动改变当前温度设定/控制状态；`restore-initial`：写入已发生且动作失败时，尝试恢复初始设定值和控制状态。恢复失败会保留原始错误并记录恢复错误。 |
+| `--authorize-connection` | — | 明确允许本次连接/读取。缺少时在加载 DLL 前拒绝。 |
+| `--authorize-temperature-write` | — | 明确允许本次温度 setpoint 和温控开关写入。缺少时在加载 DLL 前拒绝；只读授权不能替代它。 |
+
+其中，`target_k` 用于样品温度稳定判据，而 `max_delta_k` 只保护“从当前用户设定值到新设定值”的动作幅度；两者必须同时满足。
+
 ## 预计文件所有权
 
 - `src/attodry_control/attodry.py`
