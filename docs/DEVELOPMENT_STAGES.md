@@ -204,6 +204,15 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   XY remained `SENS=17` and both phase settings were unchanged. Raw accepted and
   rejected audit files remain only in ignored target `run_data`. The real bounded
   auto-range transition remains pending a new, separately scoped authorization.
+- Added the separately gated L6 narrowing-branch commissioning command offline.
+  It starts only from the verified 10 mV XX baseline, temporarily stages XX at
+  20 mV, requires two real safe maximum-range samples to produce the policy's
+  `KEEP` then `NARROW` decisions, and returns only XX to 10 mV. Every state
+  window reads both instruments and consumes status latches; the final window
+  requires all status bits clear. No XY write or `APHS` path exists. Unsafe
+  samples or any nonzero unapproved latch retain raw output and restore 4 mVrms/
+  10 mV. Fake-VISA authorization, success, unsafe-sample, and nonzero-latch
+  cases pass; target-offline validation and real execution remain pending.
 
 ## Stage 4 - attoDRY real driver
 

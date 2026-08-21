@@ -207,6 +207,15 @@ Completed in Stage 3:
   remain solely under ignored target `run_data`; neither XY writes nor `APHS` were
   sent. Real bounded-auto transitions remain uncommissioned and need a distinct
   authorization.
+- Added an offline-only, separately authorization-gated L6 command to commission
+  the two-safe-sample narrowing branch without raising excitation or changing
+  frequency. From a verified XX 10 mV state it temporarily stages only XX at
+  20 mV, records full dual-SR830 status windows, requires the deterministic
+  `KEEP` then `NARROW` decisions, and returns only XX to 10 mV. Any unsafe sample
+  or nonzero unapproved status latch fails closed to XX 4 mVrms/10 mV cleanup;
+  XY is never written and `APHS` is absent. Fake-VISA cases cover the three
+  authorizations, success, unsuitable samples, and an unexpected transition
+  latch. Target-offline validation and real execution remain pending.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

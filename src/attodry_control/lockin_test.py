@@ -11,6 +11,12 @@ import time
 from typing import Callable, Sequence
 
 from .config import LockinConfig, RunMode, load_config
+from .lockin_autorange import (
+    AutorangeAction,
+    AutorangePolicy,
+    AutorangeState,
+    decide_autorange,
+)
 from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
@@ -120,6 +126,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirm lockin_xy SINE OUT is physically disconnected.",
     )
     set_xx_sensitivity.set_defaults(handler=_run_set_xx_sensitivity)
+
+    commission_autorange_narrow = subparsers.add_parser(
+        "commission-xx-autorange-narrow",
+        help=(
+            "Stage XX at the configured 20 mV maximum, then verify the real "
+            "two-sample bounded-auto narrowing back to 10 mV."
+        ),
+    )
+    _add_pair_arguments(commission_autorange_narrow)
+    commission_autorange_narrow.add_argument(
+        "--settle-s",
+        type=_positive_float,
+        default=1.5,
+        help="Wait after each sensitivity transition and between fit samples. Default: 1.5 s.",
+    )
+    commission_autorange_narrow.add_argument(
+        "--authorize-writes",
+        action="store_true",
+        help="Explicitly authorize only XX SENS 21 staging, SENS 20 narrowing, and recovery writes.",
+    )
+    commission_autorange_narrow.add_argument(
+        "--authorize-status-latch-consumption",
+        action="store_true",
+        help="Explicitly authorize LIAS?/ERRS? queries, which clear latched status bits.",
+    )
+    commission_autorange_narrow.add_argument(
+        "--confirm-xy-sine-disconnected",
+        action="store_true",
+        help="Confirm lockin_xy SINE OUT is physically disconnected.",
+    )
+    commission_autorange_narrow.set_defaults(handler=_run_commission_xx_autorange_narrow)
 
     configure = subparsers.add_parser(
         "configure-minimum",
@@ -454,6 +491,190 @@ def _run_set_xx_sensitivity(
                     lockin_xy,
                     baseline_hz=float(settings["frequency_hz"]),
                     original_xx_sensitivity=previous_code,
+                    restore_sensitivity=True,
+                    restore_frequency=False,
+                    settle_s=args.settle_s,
+                    writes_started=True,
+                )
+            print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+            raise
+
+    record["completed"] = True
+    record["write_performed"] = True
+    print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+    return 0
+
+
+def _run_commission_xx_autorange_narrow(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    """Verify the real two-safe-sample XX narrowing branch without changing excitation."""
+
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    config = settings["config"]
+    if config is None:
+        raise ValueError(
+            "commission-xx-autorange-narrow requires --config with the strict TOML policy."
+        )
+    if not args.authorize_writes:
+        raise AuthorizationRequired("SR830 autorange commissioning writes were not authorized.")
+    if not args.authorize_status_latch_consumption:
+        raise AuthorizationRequired(
+            "SR830 LIAS?/ERRS? latch consumption was not explicitly authorized."
+        )
+    if not args.confirm_xy_sine_disconnected:
+        raise AuthorizationRequired(
+            "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+        )
+    if args.settle_s < 1.5:
+        raise Sr830Error("Autorange commissioning requires at least 1.5 s settling.")
+
+    xx_settings = _setting_codes(config.lockin_xx)
+    xy_settings = _setting_codes(config.lockin_xy)
+    policy = AutorangePolicy(
+        config.lockin_xx.autorange_min_full_scale_v,
+        config.lockin_xx.autorange_max_full_scale_v,
+        config.lockin_xx.autorange_target_occupancy,
+        config.lockin_xx.autorange_stable_samples,
+        config.lockin_xx.autorange_max_steps,
+    )
+    minimum_code = sensitivity_code(policy.minimum_full_scale_v)
+    maximum_code = sensitivity_code(policy.maximum_full_scale_v)
+    if xx_settings.sensitivity != minimum_code:
+        raise Sr830Error("XX fixed start range must equal the autorange minimum.")
+    record: dict[str, object] = {
+        "operation": "commission_xx_autorange_narrow",
+        "minimum_sensitivity_code": minimum_code,
+        "maximum_sensitivity_code": maximum_code,
+        "maximum_range_staged_manually": True,
+        "settle_s": args.settle_s,
+        "safety_status_complete": True,
+    }
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        write_started = False
+        before_xx: Sr830Diagnostic | None = None
+        try:
+            before_xx, before_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=minimum_code,
+                expected_xx_phase=None,
+                expected_xy_phase=None,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="autorange preflight",
+            )
+            record["before"] = {
+                "lockin_xx": asdict(before_xx),
+                "lockin_xy": asdict(before_xy),
+            }
+
+            write_started = True
+            lockin_xx.set_sensitivity(maximum_code)
+            time.sleep(args.settle_s)
+            maximum_transition_xx, maximum_transition_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=maximum_code,
+                expected_xx_phase=before_xx.phase_shift_deg,
+                expected_xy_phase=before_xy.phase_shift_deg,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="maximum-range transition",
+            )
+            record["maximum_range_transition"] = {
+                "lockin_xx": asdict(maximum_transition_xx),
+                "lockin_xy": asdict(maximum_transition_xy),
+            }
+
+            state = AutorangeState(policy.maximum_full_scale_v)
+            decisions: list[dict[str, object]] = []
+            for sample_index in range(2):
+                time.sleep(args.settle_s)
+                xx, xy = _read_verified_autorange_pair(
+                    lockin_xx,
+                    lockin_xy,
+                    xx_settings=xx_settings,
+                    xy_settings=xy_settings,
+                    expected_xx_sensitivity=maximum_code,
+                    expected_xx_phase=before_xx.phase_shift_deg,
+                    expected_xy_phase=before_xy.phase_shift_deg,
+                    expected_frequency_hz=float(settings["frequency_hz"]),
+                    stage=f"maximum-range fit sample {sample_index + 1}",
+                )
+                decision = decide_autorange(
+                    policy,
+                    state,
+                    amplitude_v=xx.amplitude_v,
+                    overload=bool(xx.lia_status and xx.lia_status.any_overload),
+                )
+                decisions.append(
+                    {
+                        "sample_index": sample_index,
+                        "lockin_xx": asdict(xx),
+                        "lockin_xy": asdict(xy),
+                        "decision": asdict(decision),
+                    }
+                )
+                state = decision.state
+                expected_action = (
+                    AutorangeAction.KEEP if sample_index == 0 else AutorangeAction.NARROW
+                )
+                if decision.action is not expected_action:
+                    raise Sr830Error(
+                        "Autorange narrowing commissioning requires two consecutive "
+                        "safe maximum-range samples."
+                    )
+            record["fit_samples"] = decisions
+
+            lockin_xx.set_sensitivity(minimum_code)
+            time.sleep(args.settle_s)
+            narrowing_transition_xx, narrowing_transition_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=minimum_code,
+                expected_xx_phase=before_xx.phase_shift_deg,
+                expected_xy_phase=before_xy.phase_shift_deg,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="automatic-narrowing transition",
+                allow_xx_output_overload=True,
+            )
+            record["narrowing_transition"] = {
+                "lockin_xx": asdict(narrowing_transition_xx),
+                "lockin_xy": asdict(narrowing_transition_xy),
+            }
+
+            time.sleep(args.settle_s)
+            after_xx, after_xy = _read_verified_autorange_pair(
+                lockin_xx,
+                lockin_xy,
+                xx_settings=xx_settings,
+                xy_settings=xy_settings,
+                expected_xx_sensitivity=minimum_code,
+                expected_xx_phase=before_xx.phase_shift_deg,
+                expected_xy_phase=before_xy.phase_shift_deg,
+                expected_frequency_hz=float(settings["frequency_hz"]),
+                stage="automatic-narrowing formal verification",
+            )
+            record["after"] = {
+                "lockin_xx": asdict(after_xx),
+                "lockin_xy": asdict(after_xy),
+            }
+        except BaseException as exc:
+            record["completed"] = False
+            record["error"] = str(exc)
+            record["write_performed"] = write_started
+            if write_started and before_xx is not None:
+                record["cleanup"] = _restore_scan_state(
+                    lockin_xx,
+                    lockin_xy,
+                    baseline_hz=float(settings["frequency_hz"]),
+                    original_xx_sensitivity=minimum_code,
                     restore_sensitivity=True,
                     restore_frequency=False,
                     settle_s=args.settle_s,
@@ -1250,6 +1471,56 @@ def _diagnostic_problems(
                 f"{diagnostic.error_status}"
             )
     return problems
+
+
+def _read_verified_autorange_pair(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    xx_settings: Sr830SettingCodes,
+    xy_settings: Sr830SettingCodes,
+    expected_xx_sensitivity: int,
+    expected_xx_phase: float | None,
+    expected_xy_phase: float | None,
+    expected_frequency_hz: float,
+    stage: str,
+    allow_xx_output_overload: bool = False,
+) -> tuple[Sr830Diagnostic, Sr830Diagnostic]:
+    """Read a complete pair status window and validate the frozen settings."""
+
+    xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+    xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+    problems = _diagnostic_problems(xx, xy)
+    allowed_xx_output_overload = (
+        allow_xx_output_overload
+        and xx.lia_status is not None
+        and xx.lia_status.raw == 4
+    )
+    if allowed_xx_output_overload:
+        problems.remove("lockin_xx reports overload")
+    for diagnostic in (xx, xy):
+        if (
+            diagnostic.lia_status is not None
+            and diagnostic.lia_status.raw != 0
+            and not (diagnostic.role is LockinRole.XX and allowed_xx_output_overload)
+        ):
+            problems.append(
+                f"lockin_{diagnostic.role.value} has a nonzero status latch"
+            )
+    if problems:
+        raise Sr830Error(f"{stage} failed: " + "; ".join(problems))
+    verify_pair_readback(xx, xy, expected_frequency_hz)
+    verify_fixed_settings_readback(
+        xx,
+        replace(xx_settings, sensitivity=expected_xx_sensitivity),
+        xx.phase_shift_deg if expected_xx_phase is None else expected_xx_phase,
+    )
+    verify_fixed_settings_readback(
+        xy,
+        xy_settings,
+        xy.phase_shift_deg if expected_xy_phase is None else expected_xy_phase,
+    )
+    return xx, xy
 
 
 def _validate_distinct_addresses(xx_address: str, xy_address: str) -> None:

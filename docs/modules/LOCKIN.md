@@ -303,6 +303,14 @@ TOML 的 XX 起始量程为 10 mV 时允许目标 `SENS 20`。它要求
 `run_data` 目录；没有写 XY、没有发送 `APHS`。这只完成 XX 固定 10 mV 起始量程的
 实机验收；受限 `bounded_auto` 的真实转换（以及任何 `SENS 21`）仍须新的独立授权。
 
+为不改变 4 mVrms 激励而验证低占比缩窄分支，`commission-xx-autorange-narrow` 只接受
+严格 TOML 和与上述写入、锁存消费、XY 断开相同的三重授权。它要求 XX 已在 10 mV，
+暂时写入 20 mV，完成一段完整状态窗口后采集两个间隔至少 1.5 s 的真实安全样本；
+只有状态机依次给出 `KEEP`、`NARROW` 才写回 10 mV。两个转换均有完整双机窗口，缩窄
+转换期只可记录 XX 的 output-overload 锁存，正式窗口仍要求完全清零。任何失败均将 XX
+激励设为 4 mVrms、恢复 10 mV 并记录 rejected 审计数据；不写 XY、不发送 `APHS`。
+该命令不伪造阈值/过载，因此自动放宽分支仍只能在未来真实达到阈值时验收。
+
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。
