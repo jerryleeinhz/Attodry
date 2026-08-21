@@ -46,6 +46,21 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
 
 如果电脑没有 `py` 命令，先安装 64 位 Python 3.11，并在安装器中勾选 Python Launcher。Conda 不是必需条件。更完整的 Codex、虚拟环境和离线 wheelhouse 工作流见 `docs/CODEX_AND_OFFLINE_SETUP.md`。
 
+## 分模块继续开发
+
+后续工作已经整理为可交给独立 Chat 的工作包，总入口是
+[`docs/modules/README.md`](docs/modules/README.md)：
+
+- [`Lock-in`](docs/modules/LOCKIN.md)：双 SR830 配置、相位、量程、自动量程和
+  已完成实验的经验规则；
+- [`Temperature`](docs/modules/TEMPERATURE.md)：attoDRY 温度读回、控制和稳定；
+- [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：X/Z 矢量场、3 T 限制和归零；
+- [`Integration`](docs/modules/INTEGRATION.md)：前三个模块分别验收后的组合流程。
+
+每个工作包都包含当前真实验收边界、目标、非目标、分阶段验收条件、预计文件
+所有权和可复制的新 Chat 启动提示。多个 Chat 并行修改时应使用独立 branch 和
+worktree；同一 checkout 不要并行编辑。
+
 ## 双 SR830 独立器件测试
 
 在接入 attoDRY、磁体或栅极 SMU 之前，先按

@@ -200,6 +200,24 @@ harmonic validation, and the attoDRY read-only connection are complete. attoDRY
 setting writes, SMUs, and real end-to-end acquisition still require staged
 authorization.
 
+Module handoff packages are available under `docs/modules/` for separate Chat
+follow-up:
+
+- `LOCKIN.md` records the dual-SR830 configuration/phase/autorange objectives and
+  turns the completed laboratory experience into implementation and acceptance
+  rules.
+- `TEMPERATURE.md` and `MAGNETIC_FIELD.md` separate their offline, target-offline,
+  real read-only, and future write-commissioning stages without overstating the
+  completed 10-second attoDRY read-only connection.
+- `INTEGRATION.md` requires commit IDs, tests, hardware-action reports, and known
+  limitations from the three device modules before combination.
+- `docs/modules/README.md` defines shared permissions, `lyr` use, branch/worktree
+  isolation, status terminology, and the completion-report format for each Chat.
+
+These files are planning and handoff artifacts. They do not authorize hardware
+connections, status-latch consumption, or setting writes, and no such action was
+performed while creating them.
+
 Stage 5 - gate safety and integrated acquisition: model-independent offline core
 complete; vendor SMU adapters remain pending exact models and safety parameters.
 

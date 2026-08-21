@@ -261,5 +261,13 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in
   `PROJECT_HANDOFF.md`.
+- Added `docs/modules/` work packages for independent Lock-in, Temperature,
+  Magnetic-field, and Integration Chat follow-up. Each package records its
+  current real-hardware boundary, goals/non-goals, staged acceptance criteria,
+  file ownership, safety cautions, and a copyable startup prompt. The Lock-in
+  package converts the completed bench-test experience into explicit rules for
+  wiring, phase preservation, settling, sensitivity transitions, latch handling,
+  frequency tolerance, sequential pair reads, and cleanup. This is a planning
+  and handoff deliverable only; it does not commission any new hardware writes.
 - Pending: exact SMU adapters, real-instrument checks, frozen hardware wheelhouse,
   and offline-control-computer installation verification.
