@@ -129,6 +129,17 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   20 mV xx sensitivity range, without changing the 4 mVrms source, and restore
   the original sensitivity only after frequency restoration and settling. This
   added SENS write requires a new explicit authorization.
+- The SENS-authorized retry first found a stale XY overload latch during preflight
+  before any write; a separate 10-sample read-only recovery was fully clear. The
+  same authorized run then accepted every formal point through 200 Hz using the
+  temporary 20 mV XX range. At the 282 Hz transition read, XY returned `LIAS=26`
+  (filter overload, reference unlock, and frequency range changed), so no formal
+  282 Hz sample was taken. Cleanup fully verified 17.777 Hz, 4 mVrms, the original
+  1 mV XX range, and clear status/error words, and the excitation scan did not
+  start. Transition-only overload latches are now retained and consumed alongside
+  unlock/range-change latches before a second settling interval; the unchanged
+  formal window still rejects every unlock, overload, or instrument error. A new
+  explicit authorization is required for this revised behavior.
 
 ## Stage 4 - attoDRY real driver
 

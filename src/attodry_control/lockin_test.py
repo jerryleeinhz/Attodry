@@ -760,9 +760,10 @@ def _consume_frequency_transition(
 ) -> tuple[dict[str, object], list[str]]:
     """Record and clear status from a deliberate FREQ transition.
 
-    A transient external-reference unlock or frequency-range-change latch is
-    expected while the TTL reference moves. The formal sample window begins only
-    after these latches are consumed and another settling interval has elapsed.
+    Transient unlock, frequency-range-change, or overload latches can occur while
+    the TTL reference and internal filters move. They are discarded, not accepted
+    as data. The formal window begins only after they are recorded, consumed, and
+    followed by another settling interval; any repeated latch then fails normally.
     """
 
     xx = lockin_xx.read_harmonic_sample(1)
@@ -772,8 +773,6 @@ def _consume_frequency_transition(
         problems.append("lockin_xx internal reference unlocked during transition")
     for sample in (xx, xy):
         role = sample.reading.role.value
-        if sample.lia_status.any_overload:
-            problems.append(f"lockin_{role} overloaded during transition")
         if sample.lia_status.time_constant_changed:
             problems.append(f"lockin_{role} time constant changed unexpectedly")
         if sample.error_status:
@@ -787,6 +786,9 @@ def _consume_frequency_transition(
             "expected_transient_latches": [
                 "lockin_xy.reference_unlocked",
                 "frequency_range_changed",
+                "input_or_reserve_overload",
+                "filter_overload",
+                "output_overload",
             ],
             "lockin_xx": asdict(xx),
             "lockin_xy": asdict(xy),

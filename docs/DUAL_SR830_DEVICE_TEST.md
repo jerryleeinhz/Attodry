@@ -221,10 +221,11 @@ These are separate write-authorized device-only tests. The frequency scan uses
 `lockin_xx`; `lockin_xy` follows the external TTL reference. After each actual
 frequency change, the tool waits 1.5 seconds, records and clears transition
 status, waits another 1.5 seconds, then retains three sequential xx/xy samples
-0.3 seconds apart. A transition-period XY unlock or frequency-range-change latch
-is recorded as expected; any overload, instrument error, unexpected setting
-change, XX internal-reference unlock, or renewed XY unlock in the formal sample
-window still fails the scan.
+0.3 seconds apart. Transition-period unlock, frequency-range-change, and overload
+latches are retained as discarded transition data rather than accepted samples.
+An instrument error, unexpected time-constant change, or XX internal-reference
+unlock during transition fails immediately. Any unlock, overload, or error after
+the second settling interval in the formal sample window also fails the scan.
 
 The frequency scan temporarily sets only `lockin_xx` to sensitivity code 21
 (20 mV) before its baseline sample. This prevents a genuine output overload seen
@@ -292,6 +293,18 @@ The following retry stopped on an actual XX output-overload latch in the first
 Final restoration was clear, but the overload attempt remains rejected and the
 excitation scan did not start. The temporary 20 mV xx frequency-sweep range above
 was added from that result and requires a new SENS-write authorization.
+
+The SENS-authorized retry first encountered a stale XY overload latch during
+preflight, before any write. A separate 10-sample read-only recovery record was
+clear throughout, so the same authorized run was retried. With XX temporarily on
+the 20 mV range, every formal point through 200 Hz passed. The transition read at
+282 Hz then returned XY `LIAS=26` (filter overload, reference unlock, and frequency
+range changed), so that implementation rejected the run before collecting a
+formal 282 Hz sample. Cleanup fully verified 17.777 Hz, 4 mVrms, the original
+1 mV XX range, and zero status/error bits on both lock-ins; the excitation scan
+did not start. The retained result motivated treating transition-only overload
+latches like the already separated unlock/range-change latches while keeping the
+formal sample window unchanged and strict.
 
 At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
 voltage about 3.958 mVrms. The conservative short-circuit current bound is about

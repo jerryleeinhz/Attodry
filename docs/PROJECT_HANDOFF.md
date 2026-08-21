@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 ## Current stage
 
@@ -125,6 +125,17 @@ Completed in Stage 3:
   scan did not run. The frequency command now temporarily uses SENS 21 (20 mV)
   and restores the original xx range only after returning to the baseline and
   settling. A new authorization must include this frequency-scan SENS write.
+- The SENS-authorized retry first stopped during preflight on a stale XY overload
+  latch before any write. Its separate 10-sample read-only recovery was entirely
+  clear, and the same authorized run then accepted every formal frequency point
+  through 200 Hz with XX on the temporary 20 mV range. At the 282 Hz transition,
+  XY returned `LIAS=26` (filter overload, reference unlock, and frequency range
+  changed), before any formal 282 Hz sample. Cleanup fully verified the original
+  17.777 Hz/4 mVrms/1 mV state and clear status/error words; the excitation scan
+  did not run. The revised scanner retains and consumes transition-only overload
+  latches together with unlock/range-change latches, then settles again; it still
+  rejects any overload, unlock, or error in the formal sample window. This revised
+  behavior requires a new explicit authorization before another real run.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -204,7 +215,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `bff5a996bbdb7b845f10278c9011b8de5cca5fef41edb548a62517b94d127bfe`.
+  `a335fed7f125799dd843295b58a687498d5f7ad87ce01973b1b48a4a9c2ce71a`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are

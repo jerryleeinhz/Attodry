@@ -583,13 +583,13 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["temporary_xx_sensitivity_code"], 21)
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
 
-    def test_cli_frequency_sweep_separates_transition_unlock_from_sample_window(self) -> None:
+    def test_cli_frequency_sweep_separates_transition_latches_from_sample_window(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
         )
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "0\n", "8\n", "0\n", "8\n", "0\n"]
+        xy_responses["LIAS?"] = ["0\n", "0\n", "26\n", "0\n", "24\n", "0\n"]
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
         )
@@ -616,12 +616,12 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["completed"])
         transition = result["points"][1]["transition_status"]
-        self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 8)
+        self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 26)
         self.assertEqual(
             result["points"][1]["samples"][0]["lockin_xy"]["lia_status"]["raw"],
             0,
         )
-        self.assertEqual(result["cleanup"]["transition_status"]["lockin_xy"]["lia_status"]["raw"], 8)
+        self.assertEqual(result["cleanup"]["transition_status"]["lockin_xy"]["lia_status"]["raw"], 24)
         self.assertTrue(result["cleanup"]["verified"])
 
     def test_cli_frequency_sweep_accepts_locked_external_readback_within_50_ppm(self) -> None:
