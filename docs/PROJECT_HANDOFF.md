@@ -256,6 +256,14 @@ Completed offline in Stage 4:
   1.75 K/control enabled, and disconnected normally. T4 remains uncommissioned;
   manually verify the attoDRY front-panel/GUI temperature mode and heater response
   before another automated attempt. Raw audit files remain on ignored target paths.
+- Manual GUI getter readbacks subsequently showed a configured sample heater:
+  5.00 W maximum power, 115.00 ohm heater resistance, and 3.00 ohm wire resistance.
+  The read-only `attodry_test` path now also queries the vendor sample/VTI heater
+  power getters and records explicit watt-valued fields. It fails on getter return
+  errors, non-finite values, or negative power while preserving the preceding full
+  confirmed state. Local compileall, all 40 attoDRY tests, and all 166 project tests
+  passed (2 optional plotting tests skipped). Target ABI/readback validation is the
+  next step; the offline change loaded no DLL and issued no hardware command.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

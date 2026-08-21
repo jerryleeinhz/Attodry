@@ -160,6 +160,14 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
   1.74--1.76 K 容差带；全部样本的 setpoint 均为 1.75 K、温控均开启、错误码均
   为零。运行按 `hold-current` 不发送恢复动作，最终状态仍为 1.75 K/温控开启，
   Disconnect/end 正常。原始 JSON 保留在目标机 ignored 临时路径。
+- 人工 GUI 只读核查确认 sample-heater 配置并非零：maximum power 5.00 W、
+  heater resistance 115.00 ohm、wire resistance 3.00 ohm。因此“未配置 heater
+  上限/电阻”不能解释样品没有接近 1.75 K；GUI 的设定输入框也不能代替 DLL
+  `getUserTemperature` 读回。
+- `attodry_test` 已离线扩展为每个完整状态样本同时读取 sample/VTI heater power，
+  JSON 使用明确的 `sample_w`、`vti_w` 单位字段。两个 getter 都检查 DLL 返回码，
+  非有限或负值 fail closed，诊断驱动仍固定 `writes_authorized=false`。真实设备 ABI
+  与只读读数尚须在目标机验证；该诊断不授权任何 setpoint、toggle 或 heater 设置。
 
 ### T4 参数含义
 

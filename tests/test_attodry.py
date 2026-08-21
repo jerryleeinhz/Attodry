@@ -31,6 +31,8 @@ class FakeAttoDryDll:
         self.sample_temperatures_k: deque[float] = deque()
         self.user_temperature_k = 2.0
         self.vti_temperature_k = 2.1
+        self.sample_heater_power_w = 0.25
+        self.vti_heater_power_w = 0.5
         self.bx_t = 0.0
         self.bz_t = 0.0
         self.setpoint_x_t = 0.0
@@ -91,6 +93,16 @@ class FakeAttoDryDll:
 
     def AttoDRY_Interface_getVtiTemperature(self, pointer):
         return self._float_getter("get_vti_temperature", pointer, self.vti_temperature_k)
+
+    def AttoDRY_Interface_getSampleHeaterPower(self, pointer):
+        return self._float_getter(
+            "get_sample_heater_power", pointer, self.sample_heater_power_w
+        )
+
+    def AttoDRY_Interface_getVtiHeaterPower(self, pointer):
+        return self._float_getter(
+            "get_vti_heater_power", pointer, self.vti_heater_power_w
+        )
 
     def AttoDRY_Interface_getMagneticFieldX(self, pointer):
         return self._float_getter("get_field_x", pointer, self.bx_t)
@@ -316,6 +328,23 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertIs(self.driver.last_confirmed_state, confirmed)
 
+    def test_heater_power_read_failure_preserves_last_confirmed_state(self) -> None:
+        self.connect()
+        confirmed = self.driver.read_state()
+        self.dll.return_codes["get_vti_heater_power"] = 6
+
+        with self.assertRaisesRegex(AttoDryDllError, "getVtiHeaterPower.*6"):
+            self.driver.read_heater_powers()
+
+        self.assertIs(self.driver.last_confirmed_state, confirmed)
+
+    def test_negative_heater_power_readback_is_rejected(self) -> None:
+        self.connect()
+        self.dll.sample_heater_power_w = -0.1
+
+        with self.assertRaisesRegex(AttoDryError, "cannot be negative"):
+            self.driver.read_heater_powers()
+
     def test_temperature_read_failure_preserves_last_confirmed_state(self) -> None:
         self.connect()
         confirmed = self.driver.read_state()
@@ -513,6 +542,10 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertTrue(result["completed"])
         self.assertFalse(result["writes_authorized"])
         self.assertEqual(len(result["samples"]), 2)
+        self.assertEqual(
+            result["samples"][0]["heater_power"],
+            {"sample_w": 0.25, "vti_w": 0.5},
+        )
         self.assertTrue(result["disconnected"])
         self.assertEqual(self.dll.events[-2:], ["disconnect", "end"])
         self.assertFalse(

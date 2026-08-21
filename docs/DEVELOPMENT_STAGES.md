@@ -266,6 +266,14 @@ uncommissioned and require separate explicit authorization.
   and disconnect/end completed normally. Raw records remain only on ignored target
   paths. T4 is not commissioned; manual front-panel/GUI temperature-mode and heater
   response verification is required before any further automated retry.
+- Manual GUI readback then confirmed the sample-heater configuration is present:
+  5.00 W maximum power, 115.00 ohm heater resistance, and 3.00 ohm wire resistance.
+  Added the two vendor heater-power getters to the connection-authorized read-only
+  CLI, with explicit `sample_w`/`vti_w` output and rejection of DLL errors,
+  non-finite values, or negative power. Local compileall, all 40 attoDRY tests, and
+  all 166 project tests passed (2 optional plotting tests skipped). Target-computer
+  ABI/readback validation remains pending; no hardware command was issued for this
+  offline addition.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

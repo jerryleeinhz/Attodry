@@ -33,6 +33,12 @@ class AttoDryAuthorizationError(AttoDryError):
     pass
 
 
+@dataclass(frozen=True)
+class HeaterPowerState:
+    sample_w: float
+    vti_w: float
+
+
 def load_attodry_dll(path: str | Path) -> object:
     dll_path = Path(path)
     if ctypes.sizeof(ctypes.c_void_p) != 8:
@@ -65,6 +71,14 @@ def configure_attodry_signatures(dll: object) -> None:
             ctypes.c_int,
         ),
         "AttoDRY_Interface_getVtiTemperature": (
+            [ctypes.POINTER(ctypes.c_float)],
+            ctypes.c_int,
+        ),
+        "AttoDRY_Interface_getSampleHeaterPower": (
+            [ctypes.POINTER(ctypes.c_float)],
+            ctypes.c_int,
+        ),
+        "AttoDRY_Interface_getVtiHeaterPower": (
             [ctypes.POINTER(ctypes.c_float)],
             ctypes.c_int,
         ),
@@ -282,6 +296,18 @@ class AttoDryDriver:
         )
         self.last_confirmed_state = state
         return state
+
+    def read_heater_powers(self) -> HeaterPowerState:
+        self._require_connected()
+        sample_w = self._get_float(
+            "getSampleHeaterPower", "AttoDRY_Interface_getSampleHeaterPower"
+        )
+        vti_w = self._get_float(
+            "getVtiHeaterPower", "AttoDRY_Interface_getVtiHeaterPower"
+        )
+        if sample_w < 0 or vti_w < 0:
+            raise AttoDryError("attoDRY heater power readback cannot be negative.")
+        return HeaterPowerState(sample_w=sample_w, vti_w=vti_w)
 
     def set_temperature(
         self,

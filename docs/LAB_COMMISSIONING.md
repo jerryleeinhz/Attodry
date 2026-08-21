@@ -42,9 +42,11 @@ Acceptance record:
 ## 2. attoDRY read-only connection
 
 After explicit connection authorization, connect only long enough to record full
-state: temperatures, Bx/Bz readback and setpoints, control flags, and error code.
-No setting write is authorized by this step. If any read fails, retain the last
-confirmed state and verify the magnet manually.
+state plus sample/VTI heater power: temperatures, Bx/Bz readback and setpoints,
+control flags, error code, `sample_w`, and `vti_w`. No setting write is authorized
+by this step. If any read fails, retain the last confirmed full state and verify
+the magnet manually. Heater-power return errors, non-finite values, and negative
+values fail closed.
 
 After the station-local COM port and DLL path have been confirmed, use:
 
@@ -59,8 +61,8 @@ python -m attodry_control.attodry_test `
 
 The command constructs the driver with `writes_authorized=False`; it cannot call
 temperature, field, control-toggle, or sweep-to-zero setters. It records only
-full-state reads, then calls Disconnect and end. Connection authorization does
-not authorize any later setting write.
+full-state and heater-power reads, then calls Disconnect and end. Connection
+authorization does not authorize any later setting write.
 
 Acceptance record (2026-08-20): the authorized 10-second run completed 10/10
 full-state reads with writes disabled, zero error codes, zero Bx/Bz readbacks and
