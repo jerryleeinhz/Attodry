@@ -41,6 +41,14 @@ uses circular rather than arithmetic statistics across the -180/180-degree wrap.
 PNG, and PDF export is disabled by default and writes only beneath
 `analysis_output/sr830_commissioning` when explicitly enabled.
 
+## XY-only harmonic plots
+
+Use `notebooks/sr830_xy_harmonics.ipynb` for the paired 1/2/3-harmonic JSON.
+`xy_harmonic_analysis` discards XX readings while loading, keeps only the
+selected XY status (clean by default), and annotates each plotted point with
+its harmonic order (`h1`, `h2`, `h3`). The default plots show XY X, Y, R, and
+phase; rejected records require the same explicit audit opt-in.
+
 ## CSV and a single trace
 
 ```powershell

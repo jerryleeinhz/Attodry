@@ -234,6 +234,9 @@ Status: offline implementation and rendering QA complete (2026-08-20).
   X/Y/R/phase statistics for frequency and excitation scans. UTF-8 and
   PowerShell UTF-16/BOM records are detected automatically; displayed figures
   are closed after rendering so executed notebooks contain one copy per plot.
+- Added `xy_harmonic_analysis` and `sr830_xy_harmonics.ipynb` for XY-only
+  harmonic figures. XX is discarded at load time and every point is annotated
+  with its harmonic order.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   outputs. Every generated or unsupported result is recorded in a JSON manifest.
@@ -252,7 +255,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 135 tests and passes in the minimal environment
+- The full offline suite covers 140 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

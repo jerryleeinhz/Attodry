@@ -234,6 +234,9 @@ Completed offline in Stage 6:
   CSV/PNG/PDF only when explicitly enabled. The loader detects both UTF-8 and
   PowerShell UTF-16/BOM commissioning records, and executed notebooks close
   figures after display to prevent duplicate inline output.
+- Added the read-only `xy_harmonic_analysis` module and
+  `sr830_xy_harmonics.ipynb`; it discards XX readings and labels XY points by
+  harmonic order while retaining the clean/rejected audit gate.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   results, with an explicit generated/skipped manifest and fit summary.
@@ -248,7 +251,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 135 tests and passes in the minimal
+- The complete hardware-free suite contains 140 tests and passes in the minimal
   environment with one matplotlib rendering test skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
