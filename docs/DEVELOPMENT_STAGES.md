@@ -147,6 +147,18 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   scan did not start. The sweep-only tolerance is now 100 ppm, leaving measured
   margin above the retained 31 and 54 ppm jitter while preserving strict formal
   unlock, overload, and error rejection. A new explicit authorization is required.
+- The authorized 100 ppm retry completed every formal frequency point through
+  1 kHz and fully verified baseline restoration. The excitation path then had one
+  stale XY preflight overload latch before any write; its 10-sample recovery was
+  fully clear. The retry acquired all 11 points from 4 to 400 mVrms, and all 33
+  formal samples had zero status/error bits and no problems. At 400 mVrms, nominal
+  current was 3.958 uArms and mean Vxx/Vxy R values were about 5.384 mV/1.748 uV.
+  Cleanup restored 4 mVrms and the original 1 mV XX range, but its immediate final
+  read retained an XX `LIAS=4` output-overload latch from the range restoration,
+  so the raw run remains rejected; the following 10-sample read-only record was
+  fully clear. Cleanup now records and consumes only XX overload latches during
+  the sensitivity transition, waits again, and retains strict final status checks.
+  A new explicit authorization is required for a completed excitation record.
 
 ## Stage 4 - attoDRY real driver
 
@@ -225,7 +237,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 127 tests and passes in the minimal environment
+- The full offline suite covers 129 tests and passes in the minimal environment
   with one matplotlib rendering test skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

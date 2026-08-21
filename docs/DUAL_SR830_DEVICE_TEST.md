@@ -275,6 +275,13 @@ at the first unsafe or mismatched point, retain the rejected sample, and attempt
 to restore `lockin_xx` to 4 mVrms and 17.777 Hz. A communication failure still
 requires manual front-panel verification.
 
+After restoring the original narrow XX sensitivity, cleanup waits, records and
+clears one XX range-transition overload status, waits again, and then performs
+the strict final diagnostic. Only XX overload latches are expected in that
+transition record; any XY overload, either reference unlock, unexpected frequency
+or time-constant change, or instrument error still fails cleanup. Any status bit
+that reappears in the final diagnostic also fails cleanup.
+
 The first real frequency attempt stopped at 25 Hz on a transition-period XY
 unlock latch and did not proceed to the excitation scan. The restored settings
 read back correctly, but the retained latch made the immediate cleanup result
@@ -314,6 +321,20 @@ tolerance. Cleanup fully verified 17.777 Hz, 4 mVrms, the original 1 mV XX range
 and clear status/error words on both units; the excitation scan did not start.
 The 100 ppm sweep-only tolerance above provides measured margin for this jitter
 without relaxing any status criterion and requires new explicit authorization.
+
+The next authorized 100 ppm run completed all 13 formal frequency points through
+1 kHz and fully verified restoration to 17.777 Hz, 4 mVrms, and the original
+1 mV XX range with clear final status/error words. The first excitation invocation
+then stopped during preflight on a stale XY overload latch before any write; a
+10-sample read-only recovery was entirely clear. The retry acquired all 11 source
+points from 4 to 400 mVrms and all 33 formal samples had zero status/error bits
+and no reported problem. At 400 mVrms, nominal current was 3.958 uArms, mean Vxx R
+was about 5.384 mV, and mean Vxy R was about 1.748 uV. The source and XX sensitivity
+read back at 4 mVrms and the original 1 mV range after cleanup, but the immediate
+final read retained one XX `LIAS=4` output-overload latch from restoring the narrow
+range, so the raw run remains rejected. A following 10-sample read-only record was
+fully clear. The range-transition cleanup separation above requires a new explicit
+authorization before repeating the excitation scan for a completed record.
 
 At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
 voltage about 3.958 mVrms. The conservative short-circuit current bound is about

@@ -798,6 +798,52 @@ def _consume_frequency_transition(
     )
 
 
+def _consume_sensitivity_transition(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+) -> tuple[dict[str, object], list[str]]:
+    """Record and clear overload latches after restoring the narrow XX range.
+
+    A range change can leave a transient overload latch even after the 4 mVrms
+    baseline is restored. The latch is discarded, not accepted as final status;
+    a second settling interval precedes the strict cleanup readback.
+    """
+
+    xx = lockin_xx.read_harmonic_sample(1)
+    xy = lockin_xy.read_harmonic_sample(1)
+    problems: list[str] = []
+    for sample in (xx, xy):
+        role = sample.reading.role.value
+        if role == "xy" and sample.lia_status.any_overload:
+            problems.append("lockin_xy overloaded during XX sensitivity restoration")
+        if sample.lia_status.reference_unlocked:
+            problems.append(
+                f"lockin_{role} reference unlocked during sensitivity restoration"
+            )
+        if sample.lia_status.frequency_range_changed:
+            problems.append(f"lockin_{role} frequency range changed unexpectedly")
+        if sample.lia_status.time_constant_changed:
+            problems.append(f"lockin_{role} time constant changed unexpectedly")
+        if sample.error_status:
+            problems.append(
+                f"lockin_{role} instrument error status {sample.error_status}"
+            )
+    return (
+        {
+            "captured_unix_s": time.time(),
+            "expected_transient_latches": [
+                "lockin_xx.input_or_reserve_overload",
+                "lockin_xx.filter_overload",
+                "lockin_xx.output_overload",
+            ],
+            "lockin_xx": asdict(xx),
+            "lockin_xy": asdict(xy),
+            "problems": problems,
+        },
+        problems,
+    )
+
+
 def _restore_scan_state(
     lockin_xx: Sr830,
     lockin_xy: Sr830,
@@ -839,11 +885,20 @@ def _restore_scan_state(
         except BaseException as exc:
             errors.append(f"frequency-restoration transition readback: {exc}")
         time.sleep(settle_s)
+    sensitivity_transition: dict[str, object] | None = None
     if restore_sensitivity:
         try:
             lockin_xx.set_sensitivity(original_xx_sensitivity)
         except BaseException as exc:
             errors.append(f"restore lockin_xx sensitivity: {exc}")
+        time.sleep(settle_s)
+        try:
+            sensitivity_transition, transition_problems = (
+                _consume_sensitivity_transition(lockin_xx, lockin_xy)
+            )
+            errors.extend(transition_problems)
+        except BaseException as exc:
+            errors.append(f"sensitivity-restoration transition readback: {exc}")
         time.sleep(settle_s)
     try:
         xx = lockin_xx.read_diagnostic(consume_status_latches=True)
@@ -880,6 +935,7 @@ def _restore_scan_state(
         "verified": not errors,
         "errors": errors,
         "transition_status": transition,
+        "sensitivity_transition_status": sensitivity_transition,
         "final": diagnostics,
     }
 

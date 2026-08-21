@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from attodry_control.lockin_test import run
+from attodry_control.lockin_test import _consume_sensitivity_transition, run
 from attodry_control.models import LockinRole
 from attodry_control.sr830 import (
     AuthorizationRequired,
@@ -589,7 +589,9 @@ class Sr830Tests(unittest.TestCase):
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
         )
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "0\n", "26\n", "0\n", "24\n", "0\n"]
+        xy_responses["LIAS?"] = [
+            "0\n", "0\n", "26\n", "0\n", "24\n", "0\n", "0\n"
+        ]
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
         )
@@ -714,10 +716,67 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xy_resource.writes, [])
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
 
+    def test_cli_excitation_sweep_clears_range_restoration_overload_before_final_status(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "4\n", "0\n"]
+        xx_resource = TrackingVisaResource(
+            xx_responses, shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,0.4",
+                    "--series-resistance-ohm", "100000",
+                    "--device-resistance-ohm", "1000",
+                    "--max-device-current-a", "0.005",
+                    "--max-device-voltage-v", "5",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                    "--confirm-no-50ohm-termination",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        transition = result["cleanup"]["sensitivity_transition_status"]
+        self.assertEqual(transition["lockin_xx"]["lia_status"]["raw"], 4)
+        self.assertEqual(
+            result["cleanup"]["final"]["lockin_xx"]["lia_status"]["raw"], 0
+        )
+
+    def test_sensitivity_transition_does_not_discard_xy_overload(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1), name="xx")
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = "4\n"
+        xy_resource = FakeVisaResource(xy_responses, name="xy")
+
+        record, problems = _consume_sensitivity_transition(
+            Sr830(xx_resource, LockinRole.XX),
+            Sr830(xy_resource, LockinRole.XY),
+        )
+
+        self.assertIn("lockin_xy overloaded during XX sensitivity restoration", problems)
+        self.assertEqual(record["lockin_xy"]["lia_status"]["raw"], 4)
+
     def test_cli_excitation_overload_keeps_rejected_sample_and_cleans_up(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "1\n", "0\n"]
+        xx_responses["LIAS?"] = ["0\n", "0\n", "1\n", "0\n", "0\n"]
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )

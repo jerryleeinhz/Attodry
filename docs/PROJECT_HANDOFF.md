@@ -144,6 +144,20 @@ Completed in Stage 3:
   providing margin over the retained 31 and 54 ppm observations while leaving
   all formal unlock, overload, and error checks unchanged. This tolerance change
   requires new explicit authorization before another real run.
+- The authorized 100 ppm retry completed every formal frequency point through
+  1 kHz and fully verified restoration to 17.777 Hz, 4 mVrms, and the original
+  1 mV XX sensitivity with clear final status/error words. The first excitation
+  invocation then stopped in read-only preflight on a stale XY overload latch; a
+  10-sample recovery was fully clear. Its retry acquired all 11 points from 4 to
+  400 mVrms: all 33 formal samples had zero status/error bits and no problems. At
+  400 mVrms, nominal current was 3.958 uArms, mean Vxx R was about 5.384 mV, and
+  mean Vxy R was about 1.748 uV. Cleanup restored 4 mVrms and the original 1 mV
+  range, but its immediate final read retained XX `LIAS=4` from the sensitivity
+  transition, so the raw run remains rejected; the following 10-sample read-only
+  record was fully clear. Cleanup now records and consumes one XX-only overload
+  transition after restoring the narrow range, settles again, and retains strict
+  final status checks. A new authorization is required for the revised excitation
+  scan.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -216,14 +230,14 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 127 tests and passes in the minimal
+- The complete hardware-free suite contains 129 tests and passes in the minimal
   environment with one matplotlib rendering test skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `3fd5728d8924b819eded1f4882135e091dc551e190c82227b177015ab7975cf6`.
+  `b353b1ee401f204bb1882c359d7850128a33528a48756079949b1a1286b2b221`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are
