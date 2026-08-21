@@ -463,6 +463,10 @@ Completed offline in Stage 4:
   Exact commit `a20fa3f` passed compileall, all 217 tests without skips, and
   `temperature_run --help` on `LK_setup` with 64-bit Python 3.12.13 `lyr`.
   That target validation used no vendor DLL, connection, or hardware command.
+  Follow-up `d045421` makes the daily loader independent of incomplete unrelated
+  Lock-in/SMU tables while strictly validating the shared top level and every
+  temperature-relevant table. It passed compileall and all 218 tests without
+  skips on `LK_setup`; again no DLL or hardware operation ran.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
@@ -549,7 +553,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The merged main/Lock-in/Temperature hardware-free suite contains 217 passing
+- The merged main/Lock-in/Temperature hardware-free suite contains 218 passing
   tests in the minimal environment, with three matplotlib rendering tests skipped
   because matplotlib is unavailable. Source compilation passes. The plotting path is
   unchanged from its prior rendered validation;

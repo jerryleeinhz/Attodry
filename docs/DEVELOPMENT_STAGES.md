@@ -477,6 +477,10 @@ writes remain uncommissioned and require separate explicit authorization.
   new command help on `LK_setup` using 64-bit Python 3.12.13 `lyr`. Only Git,
   Python compilation, unittest, and `--help` ran; no vendor DLL was loaded and
   no connection or hardware command was issued.
+  Follow-up commit `d045421` isolates this daily loader from unrelated Lock-in
+  and SMU table completeness while retaining strict validation of every
+  temperature-relevant table and rejecting unknown top-level tables. It passed
+  compileall and all 218 tests without skips on the same target environment.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
@@ -541,7 +545,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The merged main/Lock-in/Temperature offline suite contains 217 passing tests
+- The merged main/Lock-in/Temperature offline suite contains 218 passing tests
   in the minimal environment, with three matplotlib rendering tests skipped
   because matplotlib is unavailable; source compilation passes without hardware.
 - Built and import-checked the local project wheel without downloading

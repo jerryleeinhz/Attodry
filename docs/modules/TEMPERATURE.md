@@ -43,6 +43,9 @@ commissioned 为 0.2 K 的 `max_overshoot_k` 外，示例保留不可执行的 `
 实现提交 `a20fa3f` 已在 `LK_setup` 的 64 位 Python 3.12.13 `lyr` 上通过
 compileall、全部217项测试（0 skipped）和新命令 help；该验证没有加载 vendor
 DLL、连接设备或发送硬件命令。
+兼容性提交 `d045421` 让日常温控只严格解析同一 `hardware.local.toml` 中与本模块
+有关的表，不要求补写或修改 Lock-in/SMU 参数；未知顶层表仍被拒绝。该提交在
+`LK_setup` 通过 compileall 和全部218项测试（0 skipped），同样没有加载 DLL。
 
 ## 模块目标
 
