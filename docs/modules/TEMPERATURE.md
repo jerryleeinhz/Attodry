@@ -166,8 +166,14 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
   `getUserTemperature` 读回。
 - `attodry_test` 已离线扩展为每个完整状态样本同时读取 sample/VTI heater power，
   JSON 使用明确的 `sample_w`、`vti_w` 单位字段。两个 getter 都检查 DLL 返回码，
-  非有限或负值 fail closed，诊断驱动仍固定 `writes_authorized=false`。真实设备 ABI
-  与只读读数尚须在目标机验证；该诊断不授权任何 setpoint、toggle 或 heater 设置。
+  非有限或负值 fail closed，诊断驱动仍固定 `writes_authorized=false`。目标机的
+  64-bit Python 3.12.13 `lyr` 已通过 compileall、全部 166 个测试（0 skipped）和
+  23 个 DLL 导出符号的无连接加载检查。首次只读连接因 GUI 占用资源而在取样前
+  拒绝，失败 stderr 已保留；GUI Disconnect 后的新记录完成 10/10 样本并正常断开。
+  Sample heater 为 0.2036--0.2037 W，VTI heater 为 0.0004 W；样品温度为
+  1.7335--1.7340 K，setpoint 始终 1.75 K、温控始终开启、错误码始终为零，
+  Bx/Bz 读回与设定均为零。该结果排除“heater output 为零”，但 10 秒记录不能
+  证明温度稳定或 PID 正确；诊断未授权或发送任何 setpoint、toggle 或 heater 设置。
 
 ### T4 参数含义
 

@@ -262,8 +262,16 @@ Completed offline in Stage 4:
   power getters and records explicit watt-valued fields. It fails on getter return
   errors, non-finite values, or negative power while preserving the preceding full
   confirmed state. Local compileall, all 40 attoDRY tests, and all 166 project tests
-  passed (2 optional plotting tests skipped). Target ABI/readback validation is the
-  next step; the offline change loaded no DLL and issued no hardware command.
+  passed (2 optional plotting tests skipped). The exact commit then passed compileall
+  and all 166 tests without skips on 64-bit Python 3.12.13 `lyr`; a no-connect DLL
+  load confirmed all 23 required exports. The first real read-only attempt was
+  rejected before sampling with the GUI-held resource busy, and its stderr remains
+  retained. After GUI Disconnect, a new 10/10-sample record completed with writes
+  disabled and normal disconnect/end: sample-heater output was 0.2036--0.2037 W,
+  VTI-heater output was 0.0004 W, and sample temperature was 1.7335--1.7340 K.
+  Setpoint remained 1.75 K, temperature control stayed enabled, errors stayed zero,
+  and field readbacks/setpoints stayed zero. Heater output is therefore not zero;
+  this short diagnostic does not establish temperature stability or PID correctness.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

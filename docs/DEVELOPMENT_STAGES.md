@@ -271,9 +271,17 @@ uncommissioned and require separate explicit authorization.
   Added the two vendor heater-power getters to the connection-authorized read-only
   CLI, with explicit `sample_w`/`vti_w` output and rejection of DLL errors,
   non-finite values, or negative power. Local compileall, all 40 attoDRY tests, and
-  all 166 project tests passed (2 optional plotting tests skipped). Target-computer
-  ABI/readback validation remains pending; no hardware command was issued for this
-  offline addition.
+  all 166 project tests passed (2 optional plotting tests skipped). On `LK_setup`,
+  64-bit Python 3.12.13 `lyr` passed compileall and all 166 tests with no skips;
+  loading the vendor DLL confirmed all 23 required exports without begin/connect.
+  The first authorized read-only connection was rejected before sampling because
+  the GUI held the resource; that stderr record was retained. After GUI Disconnect,
+  a fresh authorized record completed 10/10 samples with writes disabled and normal
+  disconnect/end. Sample-heater output was 0.2036--0.2037 W and VTI-heater output
+  0.0004 W; sample temperature was 1.7335--1.7340 K while setpoint remained 1.75 K,
+  temperature control remained enabled, all error codes were zero, and field
+  readbacks/setpoints remained zero. This rules out zero heater output but does not
+  establish temperature stability or PID correctness from a ten-second record.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

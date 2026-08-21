@@ -69,6 +69,15 @@ full-state reads with writes disabled, zero error codes, zero Bx/Bz readbacks an
 setpoints, and both control flags disabled. Disconnect and end completed normally.
 The raw JSON and station-local connection details remain on ignored paths only.
 
+Heater-power extension acceptance (2026-08-21): the exact implementation passed
+compileall and all 166 offline tests without skips on 64-bit Python 3.12.13 `lyr`,
+and a no-connect DLL load confirmed all 23 required symbols. A GUI-held-resource
+failure was retained without samples; after GUI Disconnect, a separate authorized
+read-only run completed 10/10 samples and normal disconnect/end. Sample-heater
+power was 0.2036--0.2037 W and VTI-heater power was 0.0004 W. Sample temperature
+was 1.7335--1.7340 K with a constant 1.75 K setpoint, enabled temperature control,
+zero errors, and zero field readbacks/setpoints. No write was authorized or sent.
+
 ## 3. Gate SMU zero-bias validation
 
 This stage cannot be coded until the exact SMU models are supplied. After the
