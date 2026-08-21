@@ -53,10 +53,10 @@ DEFAULT_EXCITATION_SWEEP_V = (
     0.400,
 )
 SR830_OUTPUT_RESISTANCE_OHM = 50.0
-# The external SR830 frequency readback showed 31 ppm jitter at 70.7 Hz while
-# remaining locked. This sweep-only tolerance applies to the measured readback;
-# unlock and error status remain unconditional failures.
-SWEEP_FREQUENCY_REL_TOLERANCE = 50e-6
+# The external SR830 frequency readback showed 54 ppm jitter at 50 Hz while
+# remaining locked and error-free. This sweep-only tolerance leaves measured
+# margin for that jitter; unlock and error status remain unconditional failures.
+SWEEP_FREQUENCY_REL_TOLERANCE = 100e-6
 
 
 def build_parser() -> argparse.ArgumentParser:

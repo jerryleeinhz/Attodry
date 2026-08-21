@@ -114,8 +114,8 @@ Completed in Stage 3:
 - The authorized retry with transition separation accepted 25, 35.5, and 50 Hz,
   then rejected only the third 70.7 Hz sample: XY remained locked and error-free
   but reported 70.6978 Hz, 2.2 mHz or 31 ppm below the source. Cleanup verification
-  completed with both status/error words clear at 17.777 Hz and 4 mVrms. A new
-  50 ppm sweep-only external-readback tolerance covers this measured jitter while
+  completed with both status/error words clear at 17.777 Hz and 4 mVrms. The
+  initial 50 ppm sweep-only external-readback tolerance covered that jitter while
   leaving unlock, overload, error, and non-sweep harmonic criteria unchanged.
   Its real retry and the excitation scan are not yet authorized.
 - The next authorized run passed through 35.5 Hz and stopped at the first 50 Hz
@@ -136,6 +136,14 @@ Completed in Stage 3:
   latches together with unlock/range-change latches, then settles again; it still
   rejects any overload, unlock, or error in the formal sample window. This revised
   behavior requires a new explicit authorization before another real run.
+- The subsequent authorized retry passed 25 and 35.5 Hz, then rejected only the
+  second formal 50 Hz sample: XY was locked, overload-free, and error-free but
+  read 49.9973 Hz, 2.7 mHz or 54 ppm below the requested frequency. Cleanup again
+  fully verified the original 17.777 Hz/4 mVrms/1 mV state and clear status/error
+  words; the excitation scan did not run. The sweep-only tolerance is now 100 ppm,
+  providing margin over the retained 31 and 54 ppm observations while leaving
+  all formal unlock, overload, and error checks unchanged. This tolerance change
+  requires new explicit authorization before another real run.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -215,7 +223,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `a335fed7f125799dd843295b58a687498d5f7ad87ce01973b1b48a4a9c2ce71a`.
+  `3fd5728d8924b819eded1f4882135e091dc551e190c82227b177015ab7975cf6`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are

@@ -118,8 +118,8 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 - The authorized transition-aware retry passed the formal windows at 25, 35.5,
   and 50 Hz, then retained and rejected the third 70.7 Hz sample solely because
   the locked XY frequency readback was 70.6978 Hz (31 ppm low). There were no
-  overloads or instrument errors and final restoration was fully verified. A
-  separate 50 ppm relative tolerance now applies only to frequency-sweep external
+  overloads or instrument errors and final restoration was fully verified. An
+  initial 50 ppm relative tolerance applied only to frequency-sweep external
   readback jitter; all unlock/error checks and the established harmonic-path
   tolerance remain unchanged. Another real retry is pending authorization.
 - The next authorized retry stopped at 50 Hz on a real XX output-overload latch:
@@ -140,6 +140,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   unlock/range-change latches before a second settling interval; the unchanged
   formal window still rejects every unlock, overload, or instrument error. A new
   explicit authorization is required for this revised behavior.
+- The next authorized retry passed 25 and 35.5 Hz, then rejected only the second
+  formal 50 Hz sample because the locked, overload-free, error-free XY readback
+  was 49.9973 Hz, 2.7 mHz or 54 ppm low. Cleanup fully verified the original
+  17.777 Hz/4 mVrms/1 mV state and clear status/error words, and the excitation
+  scan did not start. The sweep-only tolerance is now 100 ppm, leaving measured
+  margin above the retained 31 and 54 ppm jitter while preserving strict formal
+  unlock, overload, and error rejection. A new explicit authorization is required.
 
 ## Stage 4 - attoDRY real driver
 

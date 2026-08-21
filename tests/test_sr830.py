@@ -624,7 +624,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["cleanup"]["transition_status"]["lockin_xy"]["lia_status"]["raw"], 24)
         self.assertTrue(result["cleanup"]["verified"])
 
-    def test_cli_frequency_sweep_accepts_locked_external_readback_within_50_ppm(self) -> None:
+    def test_cli_frequency_sweep_accepts_locked_external_readback_within_100_ppm(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -633,7 +633,7 @@ class Sr830Tests(unittest.TestCase):
             responses(reference_mode=0),
             shared_frequency=shared_frequency,
             name="xy",
-            frequency_scale=70.6978 / 70.7,
+            frequency_scale=49.9973 / 50.0,
         )
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
@@ -644,7 +644,7 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--xx-address", "XX",
                     "--xy-address", "XY",
-                    "--points-hz", "17.777,70.7",
+                    "--points-hz", "17.777,50",
                     "--settle-s", "0",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
@@ -659,7 +659,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertTrue(result["completed"])
         self.assertAlmostEqual(
             result["points"][1]["frequency_readback_hz"]["lockin_xy"],
-            70.6978,
+            49.9973,
             places=4,
         )
 

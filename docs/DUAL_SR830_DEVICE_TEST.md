@@ -234,11 +234,12 @@ when Vxx reached about 1.09 mV at 50 Hz on the 1 mV range. It does not change th
 the wider range is still active, waits through transition clearing and settling,
 then restores the original xx sensitivity and verifies its readback.
 
-The frequency sweep uses a separate 50 ppm relative tolerance, with the existing
-1.01 mHz absolute floor, for the locked XY external-frequency readback. This was
-set from a retained 70.7 Hz sample that read 70.6978 Hz (31 ppm low) with no
-unlock, overload, or instrument error. It does not change the stricter integrated
-harmonic-path comparison and never overrides a status failure.
+The frequency sweep uses a separate 100 ppm relative tolerance, with the existing
+1.01 mHz absolute floor, for the locked XY external-frequency readback. Retained
+formal samples showed 31 ppm jitter at 70.7 Hz and 54 ppm jitter at 50 Hz while
+remaining locked, overload-free, and error-free. The tolerance does not change
+the stricter integrated harmonic-path comparison and never overrides a status
+failure.
 
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency `
@@ -285,7 +286,7 @@ authorized real retry.
 The next transition-aware retry accepted 25, 35.5, and 50 Hz, then stopped on
 the third 70.7 Hz sample solely because the locked XY frequency readback differed
 by 2.2 mHz (31 ppm). Final 17.777 Hz/4 mVrms restoration was fully verified.
-The sweep-only 50 ppm readback tolerance above was added from that retained
+The initial sweep-only 50 ppm readback tolerance was added from that retained
 result and also requires a newly authorized retry.
 
 The following retry stopped on an actual XX output-overload latch in the first
@@ -305,6 +306,14 @@ formal 282 Hz sample. Cleanup fully verified 17.777 Hz, 4 mVrms, the original
 did not start. The retained result motivated treating transition-only overload
 latches like the already separated unlock/range-change latches while keeping the
 formal sample window unchanged and strict.
+
+The next authorized retry accepted 25 and 35.5 Hz, then rejected the second
+formal 50 Hz sample solely because the locked, overload-free, error-free XY
+readback was 49.9973 Hz: 2.7 mHz or 54 ppm low, just beyond the 50 ppm sweep-only
+tolerance. Cleanup fully verified 17.777 Hz, 4 mVrms, the original 1 mV XX range,
+and clear status/error words on both units; the excitation scan did not start.
+The 100 ppm sweep-only tolerance above provides measured margin for this jitter
+without relaxing any status criterion and requires new explicit authorization.
 
 At 400 mVrms the nominal current is about 3.958 uArms and the nominal device
 voltage about 3.958 mVrms. The conservative short-circuit current bound is about
