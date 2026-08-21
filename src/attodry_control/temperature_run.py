@@ -10,7 +10,10 @@ import time
 from typing import Callable, Sequence
 
 from .attodry import AttoDryDriver, AttoDryError, load_attodry_dll
-from .config import TemperatureRunConfig, load_config
+from .config import (
+    TemperatureRunConfig,
+    load_temperature_operation_config,
+)
 from .models import CryostatState
 
 
@@ -59,17 +62,28 @@ def run(
     wall_time: Callable[[], float] = time.time,
 ) -> int:
     args = build_parser().parse_args(argv)
-    config = load_config(args.config)
+    config = load_temperature_operation_config(args.config)
     request = config.temperature_run
-    if request is None:
-        raise ValueError("Hardware configuration is missing [temperature_run].")
-    if config.cryostat.dll_path is None:
+    cryostat = config.cryostat
+    if (
+        cryostat.com_port is None
+        or cryostat.dll_path is None
+        or cryostat.device_type is None
+        or cryostat.connection_timeout_s is None
+    ):
         raise ValueError("Hardware cryostat DLL path is missing.")
 
-    dll = dll_loader(config.cryostat.dll_path)
-    driver = AttoDryDriver.from_config(
-        config,
+    dll = dll_loader(cryostat.dll_path)
+    driver = AttoDryDriver(
         dll=dll,
+        com_port=cryostat.com_port,
+        device_type=cryostat.device_type,
+        connection_timeout_s=cryostat.connection_timeout_s,
+        temperature_min_k=cryostat.temperature_min_k,
+        temperature_max_k=cryostat.temperature_max_k,
+        limits=config.magnet.limits,
+        field_stability=config.magnet.stability,
+        temperature_stability=config.temperature_stability,
         connection_authorized=True,
         writes_authorized=True,
     )

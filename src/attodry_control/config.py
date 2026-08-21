@@ -73,6 +73,14 @@ class TemperatureRunConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TemperatureOperationConfig:
+    cryostat: CryostatConfig
+    magnet: MagnetConfig
+    temperature_stability: StabilityConfig
+    temperature_run: TemperatureRunConfig
+
+
+@dataclass(frozen=True, slots=True)
 class MagnetConfig:
     limits: MagnetLimits
     stability: StabilityConfig
@@ -135,7 +143,6 @@ class ControlConfig:
     cryostat: CryostatConfig
     magnet: MagnetConfig
     temperature_stability: StabilityConfig
-    temperature_run: TemperatureRunConfig | None
     cleanup: CleanupConfig
     lockin_xx: LockinConfig
     lockin_xy: LockinConfig
@@ -184,14 +191,7 @@ class ControlConfig:
 def load_config(path: str | Path) -> ControlConfig:
     """Load and validate TOML without importing or opening hardware drivers."""
 
-    config_path = Path(path)
-    try:
-        with config_path.open("rb") as file:
-            document = tomllib.load(file)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"Invalid TOML in {config_path}: {exc}") from exc
-    except OSError as exc:
-        raise ConfigError(f"Could not read configuration {config_path}: {exc}") from exc
+    document = _load_document(path)
 
     try:
         project = _parse_project(_table(document, "project"))
@@ -207,8 +207,13 @@ def load_config(path: str | Path) -> ControlConfig:
             "gate_bottom",
         }
         if project.mode is RunMode.HARDWARE:
-            expected_tables.update({"visa", "temperature_run"})
-        _strict_keys(document, "top level", expected_tables)
+            expected_tables.add("visa")
+        _strict_keys_with_optional(
+            document,
+            "top level",
+            expected_tables,
+            {"temperature_run"} if project.mode is RunMode.HARDWARE else set(),
+        )
 
         cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
         magnet = _parse_magnet(_table(document, "magnet"))
@@ -216,11 +221,6 @@ def load_config(path: str | Path) -> ControlConfig:
             _table(document, "temperature_stability"),
             "temperature_stability",
             value_prefix="",
-        )
-        temperature_run = (
-            _parse_temperature_run(_table(document, "temperature_run"), cryostat)
-            if project.mode is RunMode.HARDWARE
-            else None
         )
         cleanup = _parse_cleanup(_table(document, "cleanup"))
         lockin_xx = _parse_lockin(
@@ -251,7 +251,6 @@ def load_config(path: str | Path) -> ControlConfig:
         cryostat=cryostat,
         magnet=magnet,
         temperature_stability=temperature_stability,
-        temperature_run=temperature_run,
         cleanup=cleanup,
         lockin_xx=lockin_xx,
         lockin_xy=lockin_xy,
@@ -420,6 +419,69 @@ def _parse_temperature_run(
         pre_measure_wait_s=pre_measure_wait_s,
         poll_interval_s=poll_interval_s,
     )
+
+
+def load_temperature_operation_config(
+    path: str | Path,
+) -> TemperatureOperationConfig:
+    """Load only the strict attoDRY tables needed by daily temperature operation."""
+
+    document = _load_document(path)
+    project = _parse_project(_table(document, "project"))
+    if project.mode is not RunMode.HARDWARE:
+        raise ConfigError("Daily temperature operation requires hardware mode.")
+    known_tables = {
+        "project",
+        "cryostat",
+        "magnet",
+        "temperature_stability",
+        "temperature_run",
+        "cleanup",
+        "visa",
+        "lockin_xx",
+        "lockin_xy",
+        "gate_top",
+        "gate_bottom",
+    }
+    _strict_keys_with_optional(
+        document,
+        "top level",
+        {
+            "project",
+            "cryostat",
+            "magnet",
+            "temperature_stability",
+            "temperature_run",
+        },
+        known_tables,
+    )
+    cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
+    magnet = _parse_magnet(_table(document, "magnet"))
+    temperature_stability = _parse_stability(
+        _table(document, "temperature_stability"),
+        "temperature_stability",
+        value_prefix="",
+    )
+    temperature_run = _parse_temperature_run(
+        _table(document, "temperature_run"), cryostat
+    )
+    return TemperatureOperationConfig(
+        cryostat=cryostat,
+        magnet=magnet,
+        temperature_stability=temperature_stability,
+        temperature_run=temperature_run,
+    )
+
+
+def _load_document(path: str | Path) -> Mapping[str, Any]:
+    config_path = Path(path)
+    try:
+        with config_path.open("rb") as file:
+            return tomllib.load(file)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"Invalid TOML in {config_path}: {exc}") from exc
+    except OSError as exc:
+        raise ConfigError(f"Could not read configuration {config_path}: {exc}") from exc
 
 
 def _parse_cleanup(table: Mapping[str, Any]) -> CleanupConfig:
@@ -708,6 +770,21 @@ def _strict_keys(
     actual = set(table)
     missing = sorted(expected - actual)
     unknown = sorted(actual - expected)
+    if missing:
+        raise ConfigError(f"{name} is missing field(s): {', '.join(missing)}.")
+    if unknown:
+        raise ConfigError(f"{name} has unknown field(s): {', '.join(unknown)}.")
+
+
+def _strict_keys_with_optional(
+    table: Mapping[str, Any],
+    name: str,
+    required: set[str],
+    optional: set[str],
+) -> None:
+    actual = set(table)
+    missing = sorted(required - actual)
+    unknown = sorted(actual - required - optional)
     if missing:
         raise ConfigError(f"{name} is missing field(s): {', '.join(missing)}.")
     if unknown:

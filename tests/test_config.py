@@ -2,7 +2,12 @@ from pathlib import Path
 import unittest
 from unittest.mock import mock_open, patch
 
-from attodry_control.config import ConfigError, RunMode, load_config
+from attodry_control.config import (
+    ConfigError,
+    RunMode,
+    load_config,
+    load_temperature_operation_config,
+)
 from attodry_control.models import LockinRole
 from attodry_control.sr830_settings import (
     ExternalReferenceEdge,
@@ -65,11 +70,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.project.mode, RunMode.HARDWARE)
         self.assertEqual(config.cryostat.backend, "legacy_dll")
         self.assertIsNotNone(config.visa)
-        self.assertIsNotNone(config.temperature_run)
-        self.assertEqual(config.temperature_run.target_k, 1.8)
-        self.assertEqual(config.temperature_run.max_delta_k, 250.0)
-        self.assertEqual(config.temperature_run.max_overshoot_k, 0.2)
-        self.assertEqual(config.temperature_run.pre_measure_wait_s, 1800.0)
         self.assertIsNone(config.gate_top.max_abs_voltage_v)
         with self.assertRaisesRegex(ConfigError, "Hardware configuration is not ready"):
             config.require_hardware_ready()
@@ -212,7 +212,11 @@ class ConfigurationTests(unittest.TestCase):
             "target_k = 1.8\nunknown_option = true",
         )
         with self.assertRaisesRegex(ConfigError, r"temperature_run.*unknown_option"):
-            self.load_text(text)
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
 
     def test_hardware_temperature_run_rejects_overshoot_above_limit(self) -> None:
         text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
@@ -220,7 +224,41 @@ class ConfigurationTests(unittest.TestCase):
             "target_k = 299.9",
         )
         with self.assertRaisesRegex(ConfigError, "max_overshoot_k"):
-            self.load_text(text)
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
+
+    def test_loads_temperature_operation_without_parsing_lockin_fields(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8")
+        for field in (
+            'input_mode = "a_minus_b"\n',
+            'shield_grounding = "float"\n',
+            'input_coupling = "ac"\n',
+            "time_constant_s = 0.3\n",
+            "filter_slope_db_oct = 24\n",
+            'sensitivity_mode = "fixed"\n',
+            'sensitivity_mode = "bounded_auto"\n',
+            "sensitivity_full_scale_v = 0.001\n",
+            "sensitivity_full_scale_v = 0.01\n",
+            "autorange_min_full_scale_v = 0.01\n",
+            "autorange_max_full_scale_v = 0.02\n",
+            "autorange_target_occupancy = 0.85\n",
+            "autorange_stable_samples = 2\n",
+            "autorange_max_steps = 1\n",
+            "settle_time_constants = 5.0\n",
+            'external_reference_edge = "rising"\n',
+        ):
+            text = text.replace(field, "")
+        with patch(
+            "attodry_control.config.Path.open",
+            mock_open(read_data=text.encode("utf-8")),
+        ):
+            config = load_temperature_operation_config("test.toml")
+        self.assertEqual(config.temperature_run.target_k, 1.8)
+        self.assertEqual(config.temperature_run.max_delta_k, 250.0)
+        self.assertEqual(config.temperature_run.max_overshoot_k, 0.2)
 
     def test_malformed_toml_is_reported_as_configuration_error(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Invalid TOML"):
