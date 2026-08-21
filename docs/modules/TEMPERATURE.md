@@ -27,8 +27,10 @@ vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删�
 159 项完整测试全部通过、0 skipped，`compileall` 和新 CLI help 通过；未加载 DLL、
 调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
-当前已经证明连接、读回、异步 setpoint 更新和异步温控开启。连续稳定等待和异常
-恢复尚未完成真实验收，整个 T4 仍不能描述为 commissioned。
+当前已经证明连接、读回、异步 setpoint 更新和异步温控开启。最终 1800 s 稳定
+运行没有达到目标：1799 个样品均未进入 1.75 ± 0.01 K，尽管 setpoint/控制状态
+全程正确且错误码始终为零。因此 T4 未通过，下一步必须先人工核查 attoDRY 前面板/
+GUI 的温控模式和 heater response，不能继续自动重试或描述为 commissioned。
 
 ## 模块目标
 
@@ -120,7 +122,7 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 为 1.7242--1.7246 K，VTI 为 1.7138--1.7143 K，Bx/Bz 读回和设定值均为零，
 温度与磁场控制均关闭；该结果仍不能证明温控写入。
 
-### T4 - smallest temperature write commissioning（real setpoint/control confirmed；stability pending）
+### T4 - smallest temperature write commissioning（real stability failed；manual verification required）
 
 - 需要用户提供最小实际目标、容差、dwell、timeout 和异常时保持/恢复策略，
   并明确授权允许的 setpoint/control 写命令。
@@ -152,6 +154,12 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
   `poll_interval_s` 轮询完整状态，最多等待固定的 30 s acknowledgement 上限，
   未确认则 fail closed。30 s 是驱动协议安全上限，不是温度稳定判据，也不改变
   用户配置的 1800 s 总稳定超时。
+- 最终运行开始时 setpoint 已确认 1.75 K、温控已确认开启，幂等检查没有重复发送
+  setpoint 或 toggle。1800.187 s 内记录 1799 个完整样本：温度范围
+  1.7237--1.7251 K、首值约 1.7240 K、末值约 1.7250 K，零个样本进入
+  1.74--1.76 K 容差带；全部样本的 setpoint 均为 1.75 K、温控均开启、错误码均
+  为零。运行按 `hold-current` 不发送恢复动作，最终状态仍为 1.75 K/温控开启，
+  Disconnect/end 正常。原始 JSON 保留在目标机 ignored 临时路径。
 
 ### T4 参数含义
 
@@ -181,7 +189,8 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 `poll_interval_s=1`、`timeout_s=1800`、成功 `hold-target`、失败
 `hold-current`。TOML 中目标必须写成数值 `1.75`，不能写成字符串 `"1.75K"`。
 这些值已经获得本次真实 T4 的明确连接和温度写入授权。setpoint 和温控开启均已
-由后续只读状态确认；600 s 连续稳定窗口仍待继续验证。
+由后续只读状态确认，但 1800 s 内没有任何样本进入 tolerance，600 s 连续稳定
+窗口未形成。保持这些参数不变，等待人工硬件核查后再决定是否重试。
 
 ## 预计文件所有权
 

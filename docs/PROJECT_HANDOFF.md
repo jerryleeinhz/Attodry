@@ -247,6 +247,15 @@ Completed offline in Stage 4:
   field-control path. Local compilation, all 38 attoDRY tests, and all 164 project
   tests passed (2 optional plotting tests skipped); the continued real T4 stability
   run remains pending target validation.
+- Commit `aaafabc` then passed compileall and all 164 tests without skips on
+  `LK_setup`. Its final authorized T4 run started with 1.75 K/control enabled and
+  correctly sent no duplicate command. Across 1799 samples and 1800.187 s, sample
+  temperature stayed at 1.7237--1.7251 K and never entered the 1.75 +/- 0.01 K
+  band, while setpoint, enabled control, and zero error status remained valid for
+  every sample. It timed out, applied no `hold-current` recovery action, retained
+  1.75 K/control enabled, and disconnected normally. T4 remains uncommissioned;
+  manually verify the attoDRY front-panel/GUI temperature mode and heater response
+  before another automated attempt. Raw audit files remain on ignored target paths.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
@@ -254,9 +263,11 @@ Completed offline in Stage 4:
   removed after its absolute cleanup path was verified.
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
-harmonic validation, and the attoDRY read-only connection are complete. attoDRY
-setting writes, SMUs, and real end-to-end acquisition still require staged
-authorization.
+harmonic validation, and the attoDRY read-only connection are complete. The first
+attoDRY temperature setpoint/control actions were confirmed asynchronously, but
+the sample did not approach target and T4 failed stability; manual hardware
+verification is required before retry. SMUs and real end-to-end acquisition still
+require staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
@@ -447,8 +458,9 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Perform staged attoDRY small-movement commissioning only after a new explicit
-   write authorization and operator-selected smallest practical targets.
+1. Manually verify the attoDRY front-panel/GUI temperature-control mode and heater
+   response while the last confirmed state is 1.75 K/control enabled; do not rerun
+   automated T4 until the lack of sample-temperature response is understood.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Freeze and verify the complete hardware wheelhouse on the offline control

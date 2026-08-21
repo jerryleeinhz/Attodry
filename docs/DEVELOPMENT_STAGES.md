@@ -254,6 +254,18 @@ uncommissioned and require separate explicit authorization.
   polling now covers temperature-control toggles without changing field-control code.
   Local compilation, all 38 attoDRY tests, and all 164 project tests passed
   (2 optional plotting tests skipped).
+- Revalidated commit `aaafabc` on `LK_setup` with 64-bit Python 3.12.13 `lyr`:
+  compileall and all 164 offline tests passed with no skips before the final real run.
+- The final authorized T4 run began with the 1.75 K setpoint and temperature control
+  already confirmed, so the idempotent path sent no redundant setpoint or toggle.
+  It recorded 1799 complete samples through 1800.187 s and timed out: sample
+  temperature was 1.7237--1.7251 K (about 1.7240 K first and 1.7250 K last), and
+  zero samples entered the 1.75 +/- 0.01 K band. Every sample retained the 1.75 K
+  setpoint, enabled temperature control, and zero error code. `hold-current` sent
+  no recovery action; the final confirmed state remained 1.75 K/control enabled,
+  and disconnect/end completed normally. Raw records remain only on ignored target
+  paths. T4 is not commissioned; manual front-panel/GUI temperature-mode and heater
+  response verification is required before any further automated retry.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
