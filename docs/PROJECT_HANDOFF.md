@@ -290,9 +290,10 @@ Completed offline in Stage 4:
   after a successful begin now attempts end without masking the primary error.
 - The authorized 10-second real connection completed 10/10 full-state samples
   with `writes_authorized=false`, then disconnected and ended normally. Sample
-  temperature ranged from 1.7251 to 1.7255 K and VTI temperature from 1.7146 to
-  1.7153 K. Bx/Bz readbacks and setpoints remained zero, both control flags
-  remained disabled, and all error codes were zero. Raw output remains only on
+  temperature ranged from 1.7242 to 1.7246 K and VTI temperature from 1.7138 to
+  1.7143 K; the user setpoint remained 2.0 K. Bx/Bz readbacks and setpoints
+  remained zero, both control flags remained disabled, and all error codes were
+  zero. Raw output remains only on
   the ignored control-computer path.
 - Completed the Temperature-module T0 contract audit and T1 offline behavior
   coverage. The public surface is limited to state read, read-before-toggle
@@ -302,19 +303,168 @@ Completed offline in Stage 4:
   resets the continuous dwell window. Communication failures retain the prior
   `last_confirmed_state`.
 - Added an offline-tested, dual-authorization `attodry-temperature-test` command
-  for the future smallest-movement write stage. Every target, maximum setpoint
-  delta, stability parameter, timeout, and success/failure hold-or-restore policy
+  for the future smallest-movement write stage. Every target, maximum sample-sensor
+  movement, stability parameter, timeout, and success/failure hold-or-restore policy
   is explicit. It retains target/restoration samples and never infers recovery or
   disconnect after failed readback/close. No real attoDRY connection or write was
   performed for this addition.
-- T2 remains pending: SSH read-only inspection confirmed `LK_setup` uses 64-bit
-  Python 3.12.13 in `lyr`, but no repository copy exists there and no private
-  source/test snapshot was transferred without separate authorization.
+- Added `config/temperature_commissioning.example.toml`, copied only to the
+  ignored station-local counterpart for a T4 attempt. It places every per-attempt
+  parameter in one editable top table, separate from hardware paths and limits.
+  The CLI rejects placeholders, malformed fields, or any mixture of that file
+  with direct parameter options before loading the DLL; its dual authorization
+  flags remain mandatory and are not stored in the file.
+- Revalidated this parameter-file entry point on `LK_setup` at commit `609b456`
+  using Python 3.12.13 `lyr`: all 159 offline tests passed with no skips,
+  compileall passed, and the CLI help exposed `--commissioning-config`. No DLL
+  was loaded and no `begin/connect` or hardware command ran; the temporary clone
+  was removed after verification.
+- The ignored local T4 file now contains the operator-selected 1.75 K target,
+  0.05 K maximum sample-sensor movement, 0.01 K tolerance/range, 600 s dwell,
+  1 s polling, 1800 s timeout, `hold-target` success, and `hold-current` failure.
+  `max_delta_k` is checked against the initial sample-temperature sensor reading;
+  the possibly stale initial user-setpoint delta is recorded separately for audit.
+  Local compilation, all 34 attoDRY tests, and all 160 project tests passed
+  (2 optional plotting tests skipped), without DLL loading, connection, or any
+  hardware command. Real setting writes still require new explicit authorization.
+- Revalidated commit `b64eb74` on `LK_setup` with 64-bit Python 3.12.13 `lyr`:
+  compileall and all 160 offline tests passed with no skips. Only Git, compileall,
+  and unittest ran; no vendor DLL, `begin/connect`, or hardware command ran. The
+  verified one-purpose temporary clone was removed and confirmed absent.
+- The first authorized real T4 attempt passed the sample-movement gate from
+  1.7237 K and sent one 1.75 K setpoint write. Immediate readback still reported
+  2.0 K, so it failed closed before the control toggle and disconnected normally.
+  A later five-sample read-only check confirmed the DLL had asynchronously applied
+  1.75 K; sample temperature was 1.7240--1.7241 K, control remained disabled, and
+  errors remained zero. Both raw records remain on the ignored target-computer path.
+- Setpoint writes now treat an already confirmed identical target idempotently and
+  poll complete state/error readback for up to 30 s after a new write. This bounded
+  acknowledgement is separate from temperature stability waiting. A second attempt
+  sent one temperature-control toggle and failed closed when its
+  immediate flag readback still reported disabled; five later read-only samples
+  confirmed the control had asynchronously enabled with zero errors. Temperature
+  control now uses the same bounded acknowledgement polling without changing the
+  field-control path. Local compilation, all 38 attoDRY tests, and all 164 project
+  tests passed (2 optional plotting tests skipped); the continued real T4 stability
+  run remains pending target validation.
+- Commit `aaafabc` then passed compileall and all 164 tests without skips on
+  `LK_setup`. Its final authorized T4 run started with 1.75 K/control enabled and
+  correctly sent no duplicate command. Across 1799 samples and 1800.187 s, sample
+  temperature stayed at 1.7237--1.7251 K and never entered the 1.75 +/- 0.01 K
+  band, while setpoint, enabled control, and zero error status remained valid for
+  every sample. It timed out, applied no `hold-current` recovery action, retained
+  1.75 K/control enabled, and disconnected normally. T4 remains uncommissioned;
+  manually verify the attoDRY front-panel/GUI temperature mode and heater response
+  before another automated attempt. Raw audit files remain on ignored target paths.
+- Manual GUI getter readbacks subsequently showed a configured sample heater:
+  5.00 W maximum power, 115.00 ohm heater resistance, and 3.00 ohm wire resistance.
+  The read-only `attodry_test` path now also queries the vendor sample/VTI heater
+  power getters and records explicit watt-valued fields. It fails on getter return
+  errors, non-finite values, or negative power while preserving the preceding full
+  confirmed state. Local compileall, all 40 attoDRY tests, and all 166 project tests
+  passed (2 optional plotting tests skipped). The exact commit then passed compileall
+  and all 166 tests without skips on 64-bit Python 3.12.13 `lyr`; a no-connect DLL
+  load confirmed all 23 required exports. The first real read-only attempt was
+  rejected before sampling with the GUI-held resource busy, and its stderr remains
+  retained. After GUI Disconnect, a new 10/10-sample record completed with writes
+  disabled and normal disconnect/end: sample-heater output was 0.2036--0.2037 W,
+  VTI-heater output was 0.0004 W, and sample temperature was 1.7335--1.7340 K.
+  Setpoint remained 1.75 K, temperature control stayed enabled, errors stayed zero,
+  and field readbacks/setpoints stayed zero. Heater output is therefore not zero;
+  this short diagnostic does not establish temperature stability or PID correctness.
+- A subsequent GUI-disconnected 601-sample, 600.622-second read-only monitor then
+  completed with no writes, empty stderr, and normal disconnect/end. Sample
+  temperature rose from 1.7342 to 1.7369 K and ranged 1.7335--1.7372 K (3.70 mK
+  peak-to-peak); setpoint stayed 1.75 K, temperature control stayed enabled, errors
+  and field readbacks/setpoints stayed zero, sample-heater power was 0.2106--0.2217
+  W, and VTI-heater power was 0.0004 W. All 601 samples were nevertheless below
+  the 1.74 K lower edge of the configured tolerance, so T4 remains a real stability
+  failure. Do not advance the temperature stage or infer a PID/heater correction;
+  manual diagnosis or a separately authorized control-setting change is required.
+- A further explicitly authorized 1801-sample read-only monitor covered 1801.803 s.
+  A resource-busy pre-sample failure was retained; its retry completed with empty
+  stderr and normal disconnect/end after the competing GUI/connection released the
+  device. Starting at 1.7401 K, the longest continuous tolerance interval was only
+  319.313 s. Sample readback fell to 1.7289 K, then rose continuously to 1.9651 K
+  over about 25 s and slowly decayed to 1.7746 K; the sustained trace rules out a
+  one-sample spike. VTI moved only from roughly 1.717 K to 1.724 K during the event,
+  sample-heater output ranged 0.0927--0.2413 W, and setpoint/control/error/field
+  invariants remained valid. This localized overshoot suggests thermal delay with
+  integral accumulation or a sample-sensor-loop problem, but does not identify
+  whether PID tuning, thermal contact, or sensor behavior is responsible. T4 remains
+  failed; do not advance or change settings without manual diagnosis and new
+  authorization.
+- The operator subsequently confirmed that manual GUI setpoint control works.
+  Offline commissioning behavior now rejects the former `hold-current` failure
+  policy. `disable-control` records trigger time, the last confirmed full state,
+  and sample/VTI heater power before using the existing idempotent read-before-toggle,
+  DLL-return-code checks, and bounded acknowledgement polling to disable temperature
+  control. PID parameters are unchanged.
+- The operator selected `max_overshoot_k=0.2 K` for the 1.8 K retry. The live
+  sample guard records its trigger state and fails at or above 2.0 K, which routes
+  through verified `disable-control`; it also rejects an absolute guard outside
+  configured temperature limits. This explicit 2.0 K line is higher than the prior
+  1.9651 K peak and would not have caught an excursion of the same magnitude.
+- Commit `d4a6487` passed local compileall and all 170 tests (2 optional plotting
+  skips), and then passed compileall plus all 170 tests without skips on
+  `LK_setup`'s Python 3.12.13 `lyr`. The operator explicitly changed
+  `max_delta_k` to 250 K for the real 1.8 K attempt, effectively removing the
+  pre-write step restriction while retaining the 2.0 K live cutoff. A read-only
+  preflight confirmed sample 1.7242 K, old setpoint 1.7000 K, control enabled,
+  zero errors, and sample/VTI heater power 0.0091/0.0004 W. The authorized run
+  recorded 1799 samples over 1800.079 s: sample temperature rose from 1.7241 K to
+  a 1.7886 K maximum near 1776 s and ended at 1.7883 K. No sample entered the
+  1.79--1.81 K tolerance band or reached 2.0 K; the 1.8 K setpoint, enabled control,
+  and zero error code persisted throughout. Timeout diagnostics recorded
+  sample/VTI heater power 0.1054/0.0004 W, verified temperature control disabled
+  with the 1.8 K setpoint retained and error code zero, and disconnected normally.
+  Raw JSON/stderr remain only on ignored `LK_setup` temporary paths. T4 remains
+  failed and no automatic stage progression is justified.
+- The operator reproduced a controller ordering requirement manually: full
+  temperature control must be toggled on before applying sample temperature. The
+  commissioning path now confirms control enabled first, then writes the target.
+  An off-to-on transition forces one target reapplication even when the setpoint
+  readback already equals 1.8 K, while all other matching-state operations remain
+  idempotent. The audit records the confirmed order and force-reapply decision;
+  PID behavior, the 2.0 K live cutoff, DLL checks, and failure-disable cleanup are
+  unchanged.
+- Commit `eaa3ba0` passed local compileall/all 172 tests (2 optional plotting
+  skips) and `LK_setup` compileall/all 172 tests without skips. Two resource-busy
+  preflights failed before any sample or write until the GUI disconnected. A first
+  real run started with control already enabled and setpoint 1.6 K, so it confirmed
+  control and then wrote 1.8 K without a toggle/forced reapply. Its 1800 samples
+  over 1800.969 s reached 1.7785 K and timed out; verified cleanup disabled control
+  while retaining 1.8 K. The resulting exact off/1.8 K initial state then exercised
+  the new sequence: audit recorded control initially false and forced reapply true,
+  followed by confirmed enable and confirmed setpoint. Its 1799 samples over
+  1800.016 s rose from 1.7254 K to 1.7893 K, approximately 10.8 mK higher than the
+  first run, but zero samples entered the 1.79--1.81 K band or reached 2.0 K.
+  Timeout diagnostics recorded sample/VTI heater power 0.1059/0.0004 W, verified
+  control disabled with setpoint 1.8 K and zero error, and disconnected normally.
+  Both raw JSON/stderr pairs remain on ignored `LK_setup` temporary paths. The
+  controller-order effect is supported, but T4 remains failed.
+- On 2026-08-21 the operator accepted T4 using the experiment's operational
+  criterion: the control-first command order produces measurable warming and the
+  actual sample temperature is recorded, so measurement may begin after the
+  30-minute wait without requiring the former strict stability window. The
+  commissioned `max_overshoot_k` is 0.2 K. This acceptance does not reinterpret
+  setpoint as measured temperature or erase the retained stability failures;
+  Integration must persist `sample_temperature_k` for every measurement.
+- Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
+  `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
+  offline tests passed without skips, and compileall passed. No vendor DLL was
+  loaded, no `begin/connect` or hardware command ran, and the temporary clone was
+  removed after its absolute cleanup path was verified.
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
-harmonic validation, and the attoDRY read-only connection are complete. attoDRY
-setting writes, SMUs, and real end-to-end acquisition still require staged
-authorization.
+harmonic validation, and the attoDRY read-only connection are complete. The first
+attoDRY temperature setpoint/control actions, control-first ordering, actual sensor
+recording, and heater-driven warming are operator-accepted for this experiment.
+The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; that
+fact remains diagnostic rather than being rewritten as stability. The commissioned
+0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Future real
+temperature writes still require explicit authorization. SMUs and real end-to-end
+acquisition still require staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
@@ -385,9 +535,9 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The merged main/Lock-in hardware-free suite contains 197 passing tests in the
-  minimal environment, with three matplotlib rendering tests skipped because
-  matplotlib is unavailable. Source compilation passes. The plotting path is
+- The merged main/Lock-in/Temperature hardware-free suite contains 213 passing
+  tests in the minimal environment, with three matplotlib rendering tests skipped
+  because matplotlib is unavailable. Source compilation passes. The plotting path is
   unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
@@ -506,8 +656,9 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Perform staged attoDRY small-movement commissioning only after a new explicit
-   write authorization and operator-selected smallest practical targets.
+1. Review the failed 1.8 K trace and decide explicitly whether the slow response
+   requires a longer timeout, different stability target, or manual thermal/PID
+   diagnosis; do not infer or alter PID values automatically.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Freeze and verify the complete hardware wheelhouse on the offline control

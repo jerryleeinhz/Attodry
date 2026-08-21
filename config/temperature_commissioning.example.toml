@@ -1,0 +1,27 @@
+# Copy this file to temperature_commissioning.local.toml on LK_setup.
+# Replace every CHANGE_ME placeholder before a commissioning attempt.
+# This file contains the per-attempt temperature parameters, not hardware paths.
+# The command still requires both explicit authorization flags for every run.
+
+[temperature_commissioning]
+# Target read by the sample-temperature sensor during the stability check (K).
+target_k = "CHANGE_ME"
+# Maximum allowed movement from the initial sample-temperature sensor reading (K).
+max_delta_k = "CHANGE_ME"
+# Maximum live sample-temperature rise above target_k before control is disabled (K).
+# The commissioned project guard is 0.2 K.
+max_overshoot_k = 0.2
+# Maximum error of every sensor sample from target_k (K).
+tolerance_k = "CHANGE_ME"
+# Maximum sensor peak-to-peak range over the dwell window (K).
+stable_range_k = "CHANGE_ME"
+# Minimum continuous stable window duration (s).
+dwell_s = "CHANGE_ME"
+# Interval between full attoDRY state reads (s).
+poll_interval_s = "CHANGE_ME"
+# Total time permitted to reach the stable target (s); must cover dwell_s.
+timeout_s = "CHANGE_ME"
+# One of: hold-target, restore-initial.
+success_policy = "CHANGE_ME"
+# One of: disable-control, restore-initial.
+failure_policy = "CHANGE_ME"

@@ -79,6 +79,7 @@ def run(
                     "sample_index": index,
                     "captured_unix_s": time.time(),
                     "state": asdict(driver.read_state()),
+                    "heater_power": asdict(driver.read_heater_powers()),
                 }
             )
     except BaseException as exc:

@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 import io
 import json
 import math
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -30,6 +31,8 @@ class FakeAttoDryDll:
         self.sample_temperatures_k: deque[float] = deque()
         self.user_temperature_k = 2.0
         self.vti_temperature_k = 2.1
+        self.sample_heater_power_w = 0.25
+        self.vti_heater_power_w = 0.5
         self.bx_t = 0.0
         self.bz_t = 0.0
         self.setpoint_x_t = 0.0
@@ -90,6 +93,16 @@ class FakeAttoDryDll:
 
     def AttoDRY_Interface_getVtiTemperature(self, pointer):
         return self._float_getter("get_vti_temperature", pointer, self.vti_temperature_k)
+
+    def AttoDRY_Interface_getSampleHeaterPower(self, pointer):
+        return self._float_getter(
+            "get_sample_heater_power", pointer, self.sample_heater_power_w
+        )
+
+    def AttoDRY_Interface_getVtiHeaterPower(self, pointer):
+        return self._float_getter(
+            "get_vti_heater_power", pointer, self.vti_heater_power_w
+        )
 
     def AttoDRY_Interface_getMagneticFieldX(self, pointer):
         return self._float_getter("get_field_x", pointer, self.bx_t)
@@ -232,6 +245,49 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
 
+    def test_temperature_control_waits_for_delayed_toggle_readback(self) -> None:
+        self.connect()
+        control_readbacks = iter([0, 0, 1])
+
+        def delayed_getter(pointer):
+            return self.dll._int_getter(
+                "is_temperature_control", pointer, next(control_readbacks)
+            )
+
+        def delayed_toggle():
+            return self.dll._code("toggle_temperature_control")
+
+        self.dll.AttoDRY_Interface_isControllingTemperature = delayed_getter
+        self.dll.AttoDRY_Interface_toggleFullTemperatureControl = delayed_toggle
+        sleeps = []
+
+        self.driver.ensure_temperature_control(
+            True,
+            monotonic=iter([0.0, 0.0]).__next__,
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(sleeps, [1.0])
+        self.assertTrue(self.driver.last_confirmed_state.temperature_control_enabled)
+
+    def test_temperature_control_toggle_readback_timeout_fails_closed(self) -> None:
+        self.connect()
+
+        def ignored_toggle():
+            return self.dll._code("toggle_temperature_control")
+
+        self.dll.AttoDRY_Interface_toggleFullTemperatureControl = ignored_toggle
+
+        with self.assertRaisesRegex(AttoDryTimeout, "readback did not reach True"):
+            self.driver.ensure_temperature_control(
+                True,
+                monotonic=iter([0.0, 30.0]).__next__,
+                sleeper=lambda _: None,
+            )
+
+        self.assertFalse(self.driver.last_confirmed_state.temperature_control_enabled)
+        self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
+
     def test_invalid_temperature_control_state_blocks_toggle(self) -> None:
         self.connect()
         self.dll.temperature_control = 2
@@ -272,6 +328,23 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertIs(self.driver.last_confirmed_state, confirmed)
 
+    def test_heater_power_read_failure_preserves_last_confirmed_state(self) -> None:
+        self.connect()
+        confirmed = self.driver.read_state()
+        self.dll.return_codes["get_vti_heater_power"] = 6
+
+        with self.assertRaisesRegex(AttoDryDllError, "getVtiHeaterPower.*6"):
+            self.driver.read_heater_powers()
+
+        self.assertIs(self.driver.last_confirmed_state, confirmed)
+
+    def test_negative_heater_power_readback_is_rejected(self) -> None:
+        self.connect()
+        self.dll.sample_heater_power_w = -0.1
+
+        with self.assertRaisesRegex(AttoDryError, "cannot be negative"):
+            self.driver.read_heater_powers()
+
     def test_temperature_read_failure_preserves_last_confirmed_state(self) -> None:
         self.connect()
         confirmed = self.driver.read_state()
@@ -291,6 +364,49 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertIsNotNone(confirmed)
         self.assertAlmostEqual(confirmed.user_temperature_k, 3.0)
 
+    def test_temperature_setpoint_write_waits_for_delayed_readback(self) -> None:
+        self.connect()
+        user_readbacks = iter([2.0, 2.0, 3.0])
+
+        def delayed_getter(pointer):
+            return self.dll._float_getter(
+                "get_user_temperature", pointer, next(user_readbacks)
+            )
+
+        def delayed_setter(value):
+            return self.dll._code("set_temperature")
+
+        self.dll.AttoDRY_Interface_getUserTemperature = delayed_getter
+        self.dll.AttoDRY_Interface_setUserTemperature = delayed_setter
+        sleeps = []
+
+        self.driver.set_temperature(
+            3.0,
+            monotonic=iter([0.0, 0.0]).__next__,
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(sleeps, [1.0])
+        self.assertAlmostEqual(
+            self.driver.last_confirmed_state.user_temperature_k, 3.0
+        )
+
+    def test_temperature_setpoint_write_is_idempotent(self) -> None:
+        self.connect()
+        self.dll.user_temperature_k = 3.0
+
+        self.driver.set_temperature(3.0)
+
+        self.assertNotIn("set_temperature", self.dll.events)
+
+    def test_temperature_setpoint_write_can_be_forced(self) -> None:
+        self.connect()
+        self.dll.user_temperature_k = 3.0
+
+        self.driver.set_temperature(3.0, force_write=True)
+
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+
     def test_temperature_setpoint_mismatch_is_rejected(self) -> None:
         self.connect()
 
@@ -299,8 +415,12 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.dll.AttoDRY_Interface_setUserTemperature = ignore_temperature_write
 
-        with self.assertRaisesRegex(AttoDryError, "setpoint readback"):
-            self.driver.set_temperature(3.0)
+        with self.assertRaisesRegex(AttoDryTimeout, "setpoint readback"):
+            self.driver.set_temperature(
+                3.0,
+                monotonic=iter([0.0, 30.0]).__next__,
+                sleeper=lambda _: None,
+            )
 
     def test_temperature_stability_requires_continuous_controlled_dwell(self) -> None:
         self.connect()
@@ -354,6 +474,26 @@ class AttoDryDriverTests(unittest.TestCase):
             self.driver.wait_for_temperature(float("nan"))
 
         self.assertEqual(self.dll.events, before)
+
+    def test_temperature_wait_records_and_rejects_overshoot(self) -> None:
+        self.connect()
+        self.dll.temperature_control = 1
+        self.dll.sample_temperature_k = 2.31
+        recorded = []
+
+        with self.assertRaisesRegex(AttoDryError, "overshoot limit"):
+            self.driver.wait_for_temperature(
+                2.1,
+                max_overshoot_k=0.2,
+                monotonic=iter([0.0, 0.0]).__next__,
+                sleeper=lambda _: None,
+                on_sample=lambda state, elapsed: recorded.append(
+                    (state.sample_temperature_k, elapsed)
+                ),
+            )
+
+        self.assertEqual(len(recorded), 1)
+        self.assertAlmostEqual(recorded[0][0], 2.31, delta=1e-4)
 
     def test_field_stability_uses_control_error_and_full_dwell_window(self) -> None:
         self.connect()
@@ -430,6 +570,10 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertTrue(result["completed"])
         self.assertFalse(result["writes_authorized"])
         self.assertEqual(len(result["samples"]), 2)
+        self.assertEqual(
+            result["samples"][0]["heater_power"],
+            {"sample_w": 0.25, "vti_w": 0.5},
+        )
         self.assertTrue(result["disconnected"])
         self.assertEqual(self.dll.events[-2:], ["disconnect", "end"])
         self.assertFalse(
@@ -443,7 +587,7 @@ class AttoDryDriverTests(unittest.TestCase):
     def temperature_args(
         *,
         success_policy: str = "hold-target",
-        failure_policy: str = "hold-current",
+        failure_policy: str = "disable-control",
         timeout_s: str = "5",
     ) -> list[str]:
         return [
@@ -452,6 +596,8 @@ class AttoDryDriverTests(unittest.TestCase):
             "--target-k",
             "2.1",
             "--max-delta-k",
+            "0.2",
+            "--max-overshoot-k",
             "0.2",
             "--tolerance-k",
             "0.01",
@@ -475,6 +621,84 @@ class AttoDryDriverTests(unittest.TestCase):
 
         with self.assertRaises(AttoDryAuthorizationError):
             run_temperature_test(args, dll_loader=lambda path: loaded.append(path))
+
+        self.assertEqual(loaded, [])
+
+    def test_temperature_cli_reads_parameters_from_commissioning_config(self) -> None:
+        self.dll.temperature_follows_setpoint = True
+        output = io.StringIO()
+        request_path = Path(".test-tmp") / "temperature_commissioning.toml"
+        request_path.parent.mkdir(exist_ok=True)
+        self.addCleanup(request_path.unlink, missing_ok=True)
+        request_path.write_text(
+            """[temperature_commissioning]
+target_k = 2.1
+max_delta_k = 0.2
+max_overshoot_k = 0.2
+tolerance_k = 0.01
+stable_range_k = 0.005
+dwell_s = 2.0
+poll_interval_s = 1.0
+timeout_s = 5.0
+success_policy = "hold-target"
+failure_policy = "disable-control"
+""",
+            encoding="utf-8",
+        )
+        with redirect_stdout(output):
+            exit_code = run_temperature_test(
+                [
+                    "--config",
+                    "config/hardware.example.toml",
+                    "--commissioning-config",
+                    str(request_path),
+                    "--authorize-connection",
+                    "--authorize-temperature-write",
+                ],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertAlmostEqual(result["request"]["target_k"], 2.1)
+        self.assertGreaterEqual(len(result["target_samples"]), 3)
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+
+    def test_temperature_cli_rejects_mixed_parameter_sources_before_dll_load(self) -> None:
+        loaded = []
+        args = self.temperature_args() + [
+            "--commissioning-config",
+            "config/temperature_commissioning.example.toml",
+            "--authorize-connection",
+            "--authorize-temperature-write",
+        ]
+
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            run_temperature_test(args, dll_loader=lambda path: loaded.append(path))
+
+        self.assertEqual(loaded, [])
+
+    def test_temperature_cli_rejects_placeholder_commissioning_config_before_dll_load(
+        self,
+    ) -> None:
+        loaded = []
+
+        with self.assertRaisesRegex(ValueError, "target_k must be a number"):
+            run_temperature_test(
+                [
+                    "--config",
+                    "config/hardware.example.toml",
+                    "--commissioning-config",
+                    "config/temperature_commissioning.example.toml",
+                    "--authorize-connection",
+                    "--authorize-temperature-write",
+                ],
+                dll_loader=lambda path: loaded.append(path),
+            )
 
         self.assertEqual(loaded, [])
 
@@ -516,7 +740,70 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertTrue(result["final_state"]["temperature_control_enabled"])
         self.assertEqual(self.dll.events.count("set_temperature"), 1)
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
+        self.assertLess(
+            self.dll.events.index("toggle_temperature_control"),
+            self.dll.events.index("set_temperature"),
+        )
+        self.assertTrue(result["setpoint_force_reapply_requested"])
+        self.assertEqual(
+            result["command_actions"],
+            [
+                "temperature_control_confirmed_enabled",
+                "temperature_setpoint_confirmed",
+            ],
+        )
         self.assertTrue(result["disconnected"])
+
+    def test_temperature_cli_reapplies_matching_setpoint_after_enabling_control(
+        self,
+    ) -> None:
+        self.dll.user_temperature_k = 2.1
+        self.dll.temperature_follows_setpoint = True
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            run_temperature_test(
+                self.temperature_args()
+                + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["setpoint_force_reapply_requested"])
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+        self.assertLess(
+            self.dll.events.index("toggle_temperature_control"),
+            self.dll.events.index("set_temperature"),
+        )
+
+    def test_temperature_cli_max_delta_uses_initial_sample_sensor(self) -> None:
+        self.dll.sample_temperature_k = 1.7244
+        self.dll.user_temperature_k = 2.0
+        self.dll.temperature_follows_setpoint = True
+        args = self.temperature_args()
+        args[args.index("--target-k") + 1] = "1.75"
+        args[args.index("--max-delta-k") + 1] = "0.05"
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            run_temperature_test(
+                args + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        check = result["prewrite_check"]
+        self.assertTrue(check["passed"])
+        self.assertAlmostEqual(check["sample_target_delta_k"], 0.0256, places=4)
+        self.assertAlmostEqual(check["user_setpoint_target_delta_k"], 0.25)
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
 
     def test_temperature_cli_rejects_excessive_step_before_write(self) -> None:
         args = self.temperature_args()
@@ -524,7 +811,7 @@ class AttoDryDriverTests(unittest.TestCase):
         output = io.StringIO()
 
         with redirect_stdout(output), self.assertRaisesRegex(
-            ValueError, "exceeds.*max-delta-k"
+            ValueError, "sample-temperature movement exceeds.*max-delta-k"
         ):
             run_temperature_test(
                 args + ["--authorize-connection", "--authorize-temperature-write"],
@@ -591,7 +878,9 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertEqual(self.dll.events.count("set_temperature"), 2)
         self.assertTrue(result["disconnected"])
 
-    def test_temperature_cli_hold_failure_policy_sends_no_recovery_write(self) -> None:
+    def test_temperature_cli_failure_disables_control_and_records_diagnostic(
+        self,
+    ) -> None:
         output = io.StringIO()
 
         with redirect_stdout(output), self.assertRaises(AttoDryTimeout):
@@ -607,11 +896,130 @@ class AttoDryDriverTests(unittest.TestCase):
         result = json.loads(output.getvalue())
         self.assertFalse(result["completed"])
         self.assertEqual(self.dll.events.count("set_temperature"), 1)
-        self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
+        self.assertEqual(self.dll.events.count("toggle_temperature_control"), 2)
         self.assertAlmostEqual(
             result["final_state"]["user_temperature_k"], 2.1, delta=1e-4
         )
-        self.assertTrue(result["final_state"]["temperature_control_enabled"])
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+        self.assertEqual(
+            result["failure_diagnostic"]["heater_power"],
+            {"sample_w": 0.25, "vti_w": 0.5},
+        )
+        self.assertAlmostEqual(
+            result["failure_diagnostic"]["trigger_state"][
+                "sample_temperature_k"
+            ],
+            2.0,
+        )
+        self.assertAlmostEqual(
+            result["failure_diagnostic"]["trigger_state"]["vti_temperature_k"],
+            2.1,
+            delta=1e-4,
+        )
+
+    def test_temperature_cli_overshoot_disables_control(self) -> None:
+        self.dll.sample_temperatures_k = deque([2.0, 2.0, 2.0, 2.0, 2.31])
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            AttoDryError, "overshoot limit"
+        ):
+            run_temperature_test(
+                self.temperature_args()
+                + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertAlmostEqual(
+            result["target_samples"][-1]["state"]["sample_temperature_k"],
+            2.31,
+            delta=1e-4,
+        )
+        self.assertAlmostEqual(
+            result["failure_diagnostic"]["trigger_state"][
+                "sample_temperature_k"
+            ],
+            2.31,
+            delta=1e-4,
+        )
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+
+    def test_temperature_config_rejects_obsolete_hold_current_policy(self) -> None:
+        loaded = []
+        request_path = Path(".test-tmp") / "temperature_hold_current.toml"
+        request_path.parent.mkdir(exist_ok=True)
+        self.addCleanup(request_path.unlink, missing_ok=True)
+        request_path.write_text(
+            """[temperature_commissioning]
+target_k = 2.1
+max_delta_k = 0.2
+max_overshoot_k = 0.2
+tolerance_k = 0.01
+stable_range_k = 0.005
+dwell_s = 2.0
+poll_interval_s = 1.0
+timeout_s = 5.0
+success_policy = "hold-target"
+failure_policy = "hold-current"
+""",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ValueError, "disable-control, restore-initial"):
+            run_temperature_test(
+                [
+                    "--config",
+                    "config/hardware.example.toml",
+                    "--commissioning-config",
+                    str(request_path),
+                    "--authorize-connection",
+                    "--authorize-temperature-write",
+                ],
+                dll_loader=lambda path: loaded.append(path),
+            )
+
+        self.assertEqual(loaded, [])
+
+    def test_temperature_failure_keeps_primary_error_if_heater_read_fails(
+        self,
+    ) -> None:
+        self.dll.return_codes["get_vti_heater_power"] = 6
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaises(AttoDryTimeout):
+            run_temperature_test(
+                self.temperature_args(timeout_s="2")
+                + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertIn("timed out", result["error"])
+        self.assertIn(
+            "getVtiHeaterPower",
+            result["failure_diagnostic"]["heater_power_read_error"],
+        )
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
 
     def test_temperature_cli_does_not_claim_disconnect_after_close_failure(self) -> None:
         self.dll.temperature_follows_setpoint = True

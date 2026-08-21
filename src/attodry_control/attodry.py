@@ -14,6 +14,9 @@ from .safety import MagnetLimits, validate_vector_field
 from .stability import TimedValue, evaluate_stability
 
 
+TEMPERATURE_COMMAND_ACK_TIMEOUT_S = 30.0
+
+
 class AttoDryError(RuntimeError):
     pass
 
@@ -28,6 +31,12 @@ class AttoDryTimeout(AttoDryError):
 
 class AttoDryAuthorizationError(AttoDryError):
     pass
+
+
+@dataclass(frozen=True)
+class HeaterPowerState:
+    sample_w: float
+    vti_w: float
 
 
 def load_attodry_dll(path: str | Path) -> object:
@@ -62,6 +71,14 @@ def configure_attodry_signatures(dll: object) -> None:
             ctypes.c_int,
         ),
         "AttoDRY_Interface_getVtiTemperature": (
+            [ctypes.POINTER(ctypes.c_float)],
+            ctypes.c_int,
+        ),
+        "AttoDRY_Interface_getSampleHeaterPower": (
+            [ctypes.POINTER(ctypes.c_float)],
+            ctypes.c_int,
+        ),
+        "AttoDRY_Interface_getVtiHeaterPower": (
             [ctypes.POINTER(ctypes.c_float)],
             ctypes.c_int,
         ),
@@ -280,7 +297,26 @@ class AttoDryDriver:
         self.last_confirmed_state = state
         return state
 
-    def set_temperature(self, temperature_k: float) -> None:
+    def read_heater_powers(self) -> HeaterPowerState:
+        self._require_connected()
+        sample_w = self._get_float(
+            "getSampleHeaterPower", "AttoDRY_Interface_getSampleHeaterPower"
+        )
+        vti_w = self._get_float(
+            "getVtiHeaterPower", "AttoDRY_Interface_getVtiHeaterPower"
+        )
+        if sample_w < 0 or vti_w < 0:
+            raise AttoDryError("attoDRY heater power readback cannot be negative.")
+        return HeaterPowerState(sample_w=sample_w, vti_w=vti_w)
+
+    def set_temperature(
+        self,
+        temperature_k: float,
+        *,
+        force_write: bool = False,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._require_write_authorized()
         state = self.read_state()
         self._require_clear_error(state)
@@ -288,6 +324,11 @@ class AttoDryDriver:
             self.temperature_min_k <= temperature_k <= self.temperature_max_k
         ):
             raise ValueError("Temperature target is outside configured limits.")
+        if (
+            not force_write
+            and math.isclose(state.user_temperature_k, temperature_k, abs_tol=1e-4)
+        ):
+            return
         self._call(
             "setUserTemperature",
             "AttoDRY_Interface_setUserTemperature",
@@ -295,12 +336,37 @@ class AttoDryDriver:
         )
         confirmed = self.read_state()
         self._require_clear_error(confirmed)
-        if not math.isclose(
-            confirmed.user_temperature_k, temperature_k, abs_tol=1e-4
-        ):
-            raise AttoDryError("Temperature setpoint readback does not match target.")
+        if math.isclose(confirmed.user_temperature_k, temperature_k, abs_tol=1e-4):
+            return
 
-    def ensure_temperature_control(self, enabled: bool) -> None:
+        started = monotonic()
+        while True:
+            elapsed = monotonic() - started
+            if elapsed >= TEMPERATURE_COMMAND_ACK_TIMEOUT_S:
+                raise AttoDryTimeout(
+                    "Temperature setpoint readback did not reach target within "
+                    f"{TEMPERATURE_COMMAND_ACK_TIMEOUT_S:g} s."
+                )
+            sleeper(
+                min(
+                    self.temperature_stability.poll_interval_s,
+                    TEMPERATURE_COMMAND_ACK_TIMEOUT_S - elapsed,
+                )
+            )
+            confirmed = self.read_state()
+            self._require_clear_error(confirmed)
+            if math.isclose(
+                confirmed.user_temperature_k, temperature_k, abs_tol=1e-4
+            ):
+                return
+
+    def ensure_temperature_control(
+        self,
+        enabled: bool,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._ensure_control(
             enabled=enabled,
             state_attribute="temperature_control_enabled",
@@ -308,6 +374,10 @@ class AttoDryDriver:
             toggle_symbol="AttoDRY_Interface_toggleFullTemperatureControl",
             verify_label="isControllingTemperature",
             verify_symbol="AttoDRY_Interface_isControllingTemperature",
+            acknowledgment_timeout_s=TEMPERATURE_COMMAND_ACK_TIMEOUT_S,
+            acknowledgment_poll_interval_s=self.temperature_stability.poll_interval_s,
+            monotonic=monotonic,
+            sleeper=sleeper,
         )
 
     def ensure_field_control(self, enabled: bool) -> None:
@@ -353,6 +423,7 @@ class AttoDryDriver:
         self,
         target_k: float,
         *,
+        max_overshoot_k: float | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: Callable[[CryostatState, float], None] | None = None,
@@ -361,6 +432,31 @@ class AttoDryDriver:
             self.temperature_min_k <= target_k <= self.temperature_max_k
         ):
             raise ValueError("Temperature target is outside configured limits.")
+        if max_overshoot_k is not None and (
+            not math.isfinite(max_overshoot_k) or max_overshoot_k <= 0
+        ):
+            raise ValueError("max_overshoot_k must be finite and positive.")
+        if (
+            max_overshoot_k is not None
+            and target_k + max_overshoot_k > self.temperature_max_k
+        ):
+            raise ValueError("Temperature overshoot limit is outside configured limits.")
+
+        def record_and_check(state: CryostatState, elapsed_s: float) -> None:
+            if on_sample is not None:
+                on_sample(state, elapsed_s)
+            if state.error_code:
+                return
+            if (
+                max_overshoot_k is not None
+                and state.sample_temperature_k >= target_k + max_overshoot_k
+            ):
+                raise AttoDryError(
+                    "Sample temperature reached the configured overshoot limit: "
+                    f"{state.sample_temperature_k:g} K >= "
+                    f"{target_k + max_overshoot_k:g} K."
+                )
+
         return self._wait_stable(
             target=target_k,
             config=self.temperature_stability,
@@ -369,7 +465,7 @@ class AttoDryDriver:
             label="temperature",
             monotonic=monotonic,
             sleeper=sleeper,
-            on_sample=on_sample,
+            on_sample=record_and_check,
         )
 
     def wait_for_field(
@@ -437,6 +533,10 @@ class AttoDryDriver:
         toggle_symbol: str,
         verify_label: str,
         verify_symbol: str,
+        acknowledgment_timeout_s: float = 0.0,
+        acknowledgment_poll_interval_s: float = 0.0,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         state = self.read_state()
         self._require_clear_error(state)
@@ -444,8 +544,29 @@ class AttoDryDriver:
             return
         self._require_write_authorized()
         self._call(toggle_label, toggle_symbol)
-        if self._get_control_flag(verify_label, verify_symbol) != enabled:
+        if self._get_control_flag(verify_label, verify_symbol) == enabled:
+            return
+        if acknowledgment_timeout_s <= 0:
             raise AttoDryError(f"{state_attribute} readback did not reach {enabled}.")
+
+        started = monotonic()
+        while True:
+            elapsed = monotonic() - started
+            if elapsed >= acknowledgment_timeout_s:
+                raise AttoDryTimeout(
+                    f"{state_attribute} readback did not reach {enabled} within "
+                    f"{acknowledgment_timeout_s:g} s."
+                )
+            sleeper(
+                min(
+                    acknowledgment_poll_interval_s,
+                    acknowledgment_timeout_s - elapsed,
+                )
+            )
+            confirmed = self.read_state()
+            self._require_clear_error(confirmed)
+            if bool(getattr(confirmed, state_attribute)) == enabled:
+                return
 
     def _wait_stable(
         self,
