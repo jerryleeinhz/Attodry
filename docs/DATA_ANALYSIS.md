@@ -41,13 +41,14 @@ uses circular rather than arithmetic statistics across the -180/180-degree wrap.
 PNG, and PDF export is disabled by default and writes only beneath
 `analysis_output/sr830_commissioning` when explicitly enabled.
 
-## XY-only harmonic plots
+## XY-only frequency and amplitude sweeps
 
-Use `notebooks/sr830_xy_harmonics.ipynb` for the paired 1/2/3-harmonic JSON.
-`xy_harmonic_analysis` discards XX readings while loading, keeps only the
-selected XY status (clean by default), and annotates each plotted point with
-its harmonic order (`h1`, `h2`, `h3`). The default plots show XY X, Y, R, and
-phase; rejected records require the same explicit audit opt-in.
+Use `notebooks/sr830_xy_sweeps.ipynb` to plot only XY from the completed
+frequency and excitation-amplitude JSON records. `xy_sweep_analysis` discards
+XX at the loader boundary, retains the completed/clean defaults and rejected
+audit opt-in, and labels every figure with the single harmonic order represented
+by that sweep (for example `XY · h1`). The notebook keeps both scan types and
+plots XY X, Y, R, and phase for each.
 
 ## CSV and a single trace
 

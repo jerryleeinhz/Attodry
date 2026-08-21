@@ -234,9 +234,9 @@ Completed offline in Stage 6:
   CSV/PNG/PDF only when explicitly enabled. The loader detects both UTF-8 and
   PowerShell UTF-16/BOM commissioning records, and executed notebooks close
   figures after display to prevent duplicate inline output.
-- Added the read-only `xy_harmonic_analysis` module and
-  `sr830_xy_harmonics.ipynb`; it discards XX readings and labels XY points by
-  harmonic order while retaining the clean/rejected audit gate.
+- Added the read-only `xy_sweep_analysis` module and `sr830_xy_sweeps.ipynb`;
+  it discards XX while retaining both frequency and excitation-amplitude scans,
+  labels each XY figure by harmonic order, and preserves the clean/rejected gate.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   results, with an explicit generated/skipped manifest and fit summary.

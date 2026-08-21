@@ -71,10 +71,10 @@ python -m attodry_control.lockin_test --help
 Windows Browse 对话框直接打开文件，也可显式切换到 rejected/diagnostic 或
 unlock/overload/error 审计筛选。转换期和cleanup数据不会进入默认曲线。
 
-两台锁相的谐波验收JSON可用
-[`notebooks/sr830_xy_harmonics.ipynb`](notebooks/sr830_xy_harmonics.ipynb)
-单独绘制 XY。该 Notebook 在读取阶段丢弃 XX，只显示 XY 的 X/Y/R/相位，
-并在每个点标记 `h1`、`h2`、`h3` 等谐波阶数。
+只查看频率扫描和幅值扫描中的 XY 信号时，使用
+[`notebooks/sr830_xy_sweeps.ipynb`](notebooks/sr830_xy_sweeps.ipynb)。
+该 Notebook 在读取阶段丢弃 XX，保留 completed/clean 和 Browse 筛选，
+分别绘制 XY 的频率扫描与幅值扫描，并在图例和标题中标记谐波阶数。
 
 ## 目录
 

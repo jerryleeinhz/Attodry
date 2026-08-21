@@ -234,9 +234,9 @@ Status: offline implementation and rendering QA complete (2026-08-20).
   X/Y/R/phase statistics for frequency and excitation scans. UTF-8 and
   PowerShell UTF-16/BOM records are detected automatically; displayed figures
   are closed after rendering so executed notebooks contain one copy per plot.
-- Added `xy_harmonic_analysis` and `sr830_xy_harmonics.ipynb` for XY-only
-  harmonic figures. XX is discarded at load time and every point is annotated
-  with its harmonic order.
+- Added `xy_sweep_analysis` and `sr830_xy_sweeps.ipynb` for XY-only frequency
+  and excitation-amplitude figures. XX is discarded at load time; both sweep
+  types remain available and every figure identifies the harmonic order.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   outputs. Every generated or unsupported result is recorded in a JSON manifest.
