@@ -87,6 +87,17 @@ setpoint/errors/field values remained valid. However, all samples were below 1.7
 the configured lower tolerance edge. This is a failed temperature-stability record,
 not authorization to change PID, heater configuration, or setpoint.
 
+Thirty-minute follow-up (2026-08-21): after retaining a resource-busy pre-sample
+failure and releasing the competing GUI/connection, the read-only retry recorded
+1801 samples over 1801.803 s, empty stderr, and normal Disconnect/end. It began at
+1.7401 K, but no 600 s stable window formed; the longest continuous tolerance
+interval was 319.313 s. Sample readback reached 1.7289 K and then rose continuously
+to 1.9651 K in about 25 s before decaying to 1.7746 K. VTI changed only from about
+1.717 K to 1.724 K during the event, and sample-heater output was
+0.0927--0.2413 W. Setpoint, temperature-control, error, and field invariants stayed
+valid. Treat this as a failed stability/overshoot diagnostic requiring manual PID,
+thermal-contact, and sensor-loop review; it is not permission to alter settings.
+
 ## 3. Gate SMU zero-bias validation
 
 This stage cannot be coded until the exact SMU models are supplied. After the

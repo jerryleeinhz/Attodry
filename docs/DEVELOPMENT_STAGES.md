@@ -292,6 +292,20 @@ uncommissioned and require separate explicit authorization.
   the 1.74 K tolerance lower bound. T4 stability therefore remains failed; do not
   claim progression or alter PID/heater settings without a separately authorized
   manual diagnosis or control change.
+- A separately authorized 1801-sample follow-up spanned 1801.803 s. Its first
+  connection was rejected before sampling by a busy resource and retained for
+  audit; after the GUI/other connection released the resource, the retry completed
+  with empty stderr and normal disconnect/end. The run began at 1.7401 K, but the
+  longest continuous in-tolerance interval was only 319.313 s. Sample readback
+  reached a 1.7289 K minimum and then rose continuously to 1.9651 K over about
+  25 s, excluding a single-sample spike; it ended at 1.7746 K. VTI changed only
+  from about 1.717 K to 1.724 K around the event. Sample-heater output ranged
+  0.0927--0.2413 W while setpoint, enabled control, zero errors, and zero field
+  states stayed valid. The localized overshoot and slow decay are consistent with
+  thermal delay/integral accumulation or a sample-sensor-loop issue, but the
+  read-only evidence cannot distinguish PID tuning, thermal contact, and sensor
+  behavior. T4 remains failed and no automatic progression or control change is
+  permitted.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
