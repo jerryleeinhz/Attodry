@@ -224,6 +224,13 @@ Completed in Stage 3:
   `run_data`. No excitation increase or overload was induced, so the
   threshold/overload-triggered widening branch alone remains uncommissioned and
   requires a new explicit authorization when a real qualifying condition exists.
+- Repeated the authorized device-only frequency scan through 100 kHz with ten
+  logarithmic points and three formal samples per point. The initial strict
+  attempts rejected readback quantization at 316.159 Hz and 5622.802 Hz but fully
+  restored the baseline each time. The final accepted grid retained the 100 ppm
+  rule and substituted only the observed 316.1 Hz and 5622 Hz quantization
+  points (about 0.02% deviations); all 30 samples passed and cleanup verified
+  17.777 Hz, 4 mVrms, XX `SENS=20`, XY `SENS=17`, and clear status/error words.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

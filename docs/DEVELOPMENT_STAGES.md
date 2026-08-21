@@ -220,6 +220,14 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   settings were unchanged. Raw audit files remain only in ignored target
   `run_data`. The threshold/overload-triggered widening branch was not induced
   and requires a new authorization when a real qualifying condition exists.
+- Repeated the authorized device-only frequency scan from 17.777 Hz to 100 kHz
+  at ten logarithmic points and three formal samples per point. Two strict,
+  rejected attempts exposed SR830 readback quantization at 316.159 Hz and
+  5622.802 Hz; cleanup was fully verified after each. Keeping the 100 ppm
+  acceptance rule unchanged, those two requested values were replaced with the
+  observed 316.1 Hz and 5622 Hz quantization points (each about 0.02% from the
+  mathematical grid). The final scan accepted all 30 samples and restored
+  17.777 Hz, 4 mVrms, XX `SENS=20`, XY `SENS=17`, and zero status/error words.
 
 ## Stage 4 - attoDRY real driver
 
