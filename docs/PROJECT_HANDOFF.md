@@ -328,6 +328,21 @@ Completed offline in Stage 4:
   idempotent. The audit records the confirmed order and force-reapply decision;
   PID behavior, the 2.0 K live cutoff, DLL checks, and failure-disable cleanup are
   unchanged.
+- Commit `eaa3ba0` passed local compileall/all 172 tests (2 optional plotting
+  skips) and `LK_setup` compileall/all 172 tests without skips. Two resource-busy
+  preflights failed before any sample or write until the GUI disconnected. A first
+  real run started with control already enabled and setpoint 1.6 K, so it confirmed
+  control and then wrote 1.8 K without a toggle/forced reapply. Its 1800 samples
+  over 1800.969 s reached 1.7785 K and timed out; verified cleanup disabled control
+  while retaining 1.8 K. The resulting exact off/1.8 K initial state then exercised
+  the new sequence: audit recorded control initially false and forced reapply true,
+  followed by confirmed enable and confirmed setpoint. Its 1799 samples over
+  1800.016 s rose from 1.7254 K to 1.7893 K, approximately 10.8 mK higher than the
+  first run, but zero samples entered the 1.79--1.81 K band or reached 2.0 K.
+  Timeout diagnostics recorded sample/VTI heater power 0.1059/0.0004 W, verified
+  control disabled with setpoint 1.8 K and zero error, and disconnected normally.
+  Both raw JSON/stderr pairs remain on ignored `LK_setup` temporary paths. The
+  controller-order effect is supported, but T4 remains failed.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

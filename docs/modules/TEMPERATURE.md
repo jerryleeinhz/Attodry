@@ -262,6 +262,24 @@ setpoint 仍为 1.8 K、错误码 0，并正常 Disconnect/end。原始 JSON/std
 重发一次 1.8 K，而不是被一般 setpoint 幂等检查跳过。审计记录明确保存动作顺序和
 是否请求了强制重发；PID、2.0 K 终止线和失败关闭逻辑不变。
 
+提交 `eaa3ba0` 在本地通过全部 172 个测试（2 个可选绘图测试 skipped），并在
+`LK_setup` 的 Python 3.12.13 `lyr` 上通过 compileall 和全部 172 个测试（0
+skipped）。第一次真实预检因 GUI 资源占用连续两次在采样/写入前被 Connect
+错误拒绝；GUI Disconnect 后预检正常。此时样品 1.7241 K、setpoint 1.6000 K、
+温控已经开启，所以第一轮只确认控制开启再写 1.8 K，没有 toggle 或 forced
+reapply。1800 个样本覆盖 1800.969 s，样品范围 1.7240--1.7785 K，零样本进入
+1.79--1.81 K；超时后确认温控关闭、错误码 0、正常断开。
+
+该清理形成了关键初态：温控关闭而 setpoint 保留 1.8 K。第二轮审计确认初始控制
+为 false、`setpoint_force_reapply_requested=true`，因此实际执行了 off-to-on
+toggle、确认开启、再强制重发相同的 1.8 K。1799 个样本覆盖 1800.016 s，样品
+范围 1.7245--1.7893 K，最高约在 1781 s；仍无样本达到 1.7900 K 容差下限，且
+无样本达到 2.0 K。等待期间 setpoint/control/error 均保持 1.8 K/开启/零错误。
+超时快照 sample/VTI heater 为 0.1059/0.0004 W；最终样品 1.7893 K、setpoint
+1.8 K、温控确认关闭、错误码 0，并正常 Disconnect/end。该顺序比未发生 toggle
+的第一轮最高值提高约 10.8 mK，但仍未满足稳定判据，不能将 T4 标为通过。两轮
+JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
+
 ## 预计文件所有权
 
 - `src/attodry_control/attodry.py`

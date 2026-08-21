@@ -339,6 +339,19 @@ uncommissioned and require separate explicit authorization.
   left by failure cleanup. Other matching-state operations remain idempotent;
   command-order audit fields, DLL checks, the 2.0 K cutoff, and failure-disable
   behavior are preserved.
+- Commit `eaa3ba0` passed local compileall/all 172 tests (2 optional plotting
+  skips) and `LK_setup` compileall/all 172 tests without skips. Two resource-busy
+  preflights were rejected before sampling or writes until the GUI disconnected.
+  The first real run began with control already enabled and a 1.6 K setpoint, so it
+  confirmed control then wrote 1.8 K without a toggle/forced reapply; 1800 samples
+  over 1800.969 s reached only 1.7785 K and timed out. Its verified cleanup left
+  control disabled and setpoint 1.8 K, enabling an exact second test. That audit
+  records initial control false and forced reapply true: it toggled/confirmed
+  control, then resent 1.8 K. Across 1799 samples and 1800.016 s, temperature rose
+  from 1.7254 K to 1.7893 K, about 10.8 mK higher than the first run, but never
+  reached the 1.7900 K tolerance edge. No sample reached 2.0 K; setpoint, control,
+  and zero errors held during both waits. Both timeouts verified control disabled,
+  retained setpoint 1.8 K, and disconnected normally. T4 remains failed.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
