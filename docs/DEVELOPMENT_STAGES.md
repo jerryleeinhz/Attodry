@@ -203,7 +203,7 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   transition, and formal verification windows were all lock/overload/error-free;
   XY remained `SENS=17` and both phase settings were unchanged. Raw accepted and
   rejected audit files remain only in ignored target `run_data`. The real bounded
-  auto-range transition remains pending a new, separately scoped authorization.
+  auto-range narrowing branch remained pending a separately scoped authorization.
 - Added the separately gated L6 narrowing-branch commissioning command offline.
   It starts only from the verified 10 mV XX baseline, temporarily stages XX at
   20 mV, requires two real safe maximum-range samples to produce the policy's
@@ -212,7 +212,14 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   requires all status bits clear. No XY write or `APHS` path exists. Unsafe
   samples or any nonzero unapproved latch retain raw output and restore 4 mVrms/
   10 mV. Fake-VISA authorization, success, unsafe-sample, and nonzero-latch
-  cases pass; target-offline validation and real execution remain pending.
+  cases passed locally. A new isolated `LK_setup` clone at commit `d1e6201`
+  strictly parsed the policy, passed all 174 offline tests and source compilation,
+  then completed the explicitly authorized real narrowing run. XX read back
+  `SENS 20 -> 21 -> 20`; its two real fit samples generated `KEEP` then `NARROW`.
+  XY remained `SENS=17`, every status/error window was clear, and both phase
+  settings were unchanged. Raw audit files remain only in ignored target
+  `run_data`. The threshold/overload-triggered widening branch was not induced
+  and requires a new authorization when a real qualifying condition exists.
 
 ## Stage 4 - attoDRY real driver
 

@@ -205,8 +205,8 @@ Completed in Stage 3:
   transition, and formal status windows were clear, XY remained at `SENS=17`, and
   both `PHAS?` settings remained unchanged. Raw accepted and rejected audit files
   remain solely under ignored target `run_data`; neither XY writes nor `APHS` were
-  sent. Real bounded-auto transitions remain uncommissioned and need a distinct
-  authorization.
+  sent. The real bounded-auto narrowing branch remained uncommissioned and needed
+  a distinct authorization.
 - Added an offline-only, separately authorization-gated L6 command to commission
   the two-safe-sample narrowing branch without raising excitation or changing
   frequency. From a verified XX 10 mV state it temporarily stages only XX at
@@ -215,7 +215,15 @@ Completed in Stage 3:
   or nonzero unapproved status latch fails closed to XX 4 mVrms/10 mV cleanup;
   XY is never written and `APHS` is absent. Fake-VISA cases cover the three
   authorizations, success, unsuitable samples, and an unexpected transition
-  latch. Target-offline validation and real execution remain pending.
+  latch. A new isolated `LK_setup` clone at commit `d1e6201` strictly parsed the
+  policy, passed all 174 offline tests and source compilation, then completed the
+  explicitly authorized real command. XX read back `SENS 20 -> 21 -> 20`; two
+  real maximum-range fit samples gave the required `KEEP` then `NARROW` decisions.
+  XY remained `SENS=17`, every status/error window was clear, and both phase
+  settings stayed unchanged. Raw audit files remain only under ignored target
+  `run_data`. No excitation increase or overload was induced, so the
+  threshold/overload-triggered widening branch alone remains uncommissioned and
+  requires a new explicit authorization when a real qualifying condition exists.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
