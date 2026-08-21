@@ -138,7 +138,7 @@ python -m attodry_control.temperature_test `
 
 The parameter file accepts the same values that the previous direct options did;
 the two sources cannot be mixed. `success_policy` is `hold-target` or
-`restore-initial`; `failure_policy` is `hold-current` or `restore-initial`. The
+`restore-initial`; `failure_policy` is `disable-control` or `restore-initial`. The
 tool rejects placeholders, malformed parameter files, configured-range violations,
 and requested movements from the initial sample-temperature sensor reading larger
 than `max_delta_k` before any write. The initial user setpoint delta is also
@@ -149,8 +149,13 @@ the vendor DLL can update both readbacks asynchronously; an already confirmed
 identical target/control state does not cause another command. `restore-initial`
 restores the original setpoint and control flag; if the original control was
 disabled, it does not claim
-that the sample temperature returned to the original value. Any communication or
-close failure requires manual verification of setpoint and control state.
+that the sample temperature returned to the original value. `disable-control`
+leaves the last requested setpoint in place but uses an idempotent read-before-toggle
+operation and bounded readback confirmation to turn full temperature control off.
+Before recovery, failures capture the last confirmed complete state and sample/VTI
+heater powers; a diagnostic read failure is recorded without hiding the primary
+error. Any communication, recovery, final-read, or close failure requires manual
+verification of setpoint and control state.
 
 ## 5. End-to-end run and deliberate safe failure
 

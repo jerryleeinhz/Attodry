@@ -294,6 +294,14 @@ Completed offline in Stage 4:
   whether PID tuning, thermal contact, or sensor behavior is responsible. T4 remains
   failed; do not advance or change settings without manual diagnosis and new
   authorization.
+- The operator subsequently confirmed that manual GUI setpoint control works.
+  Offline commissioning behavior now rejects the former `hold-current` failure
+  policy. `disable-control` records trigger time, the last confirmed full state,
+  and sample/VTI heater power before using the existing idempotent read-before-toggle,
+  DLL-return-code checks, and bounded acknowledgement polling to disable temperature
+  control. PID parameters are unchanged. A real 1.8 K attempt is not yet safe to
+  start: the prior 1.9651 K rise occurred before the 30-minute timeout, while the
+  current code has no runtime temperature-abort boundary.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
@@ -302,10 +310,11 @@ Completed offline in Stage 4:
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
 harmonic validation, and the attoDRY read-only connection are complete. The first
-attoDRY temperature setpoint/control actions were confirmed asynchronously, but
-the sample did not approach target and T4 failed stability; manual hardware
-verification is required before retry. SMUs and real end-to-end acquisition still
-require staged authorization.
+attoDRY temperature setpoint/control actions were confirmed asynchronously, manual
+GUI setting works, and T4 still failed stability with a later overshoot. The
+failure-disable/diagnostic path is implemented offline; a real 1.8 K retry remains
+blocked pending an explicit runtime temperature-abort boundary. SMUs and real
+end-to-end acquisition still require staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
@@ -496,9 +505,8 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Manually verify the attoDRY front-panel/GUI temperature-control mode and heater
-   response while the last confirmed state is 1.75 K/control enabled; do not rerun
-   automated T4 until the lack of sample-temperature response is understood.
+1. Define and implement the maximum allowed live sample-temperature excursion for
+   a 1.8 K attempt; do not rerun automated T4 without this pre-timeout abort gate.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Freeze and verify the complete hardware wheelhouse on the offline control

@@ -146,8 +146,8 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
   实际移动。
 - 记录初始状态、目标/恢复的每个滚动窗口样本、恢复动作、最终状态和断开结果；
   读回、恢复或 close 失败均保留原始错误且不虚构稳定/恢复/断开成功。
-- fake-DLL 已覆盖授权门、越界/过大步长、hold-target、restore-initial、超时恢复、
-  hold-current 和 Disconnect 失败。
+- fake-DLL 已覆盖授权门、越界/过大步长、hold-target、restore-initial、失败后
+  disable-control、失败诊断和 Disconnect 失败。
 - 真实写入表明 vendor DLL 的 user-temperature setpoint 和 temperature-control
   flag 都可能异步更新。相同设定值/控制状态现在是幂等操作，不重复发送命令；
   新值写入或 toggle 后按本次
@@ -158,7 +158,8 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
   setpoint 或 toggle。1800.187 s 内记录 1799 个完整样本：温度范围
   1.7237--1.7251 K、首值约 1.7240 K、末值约 1.7250 K，零个样本进入
   1.74--1.76 K 容差带；全部样本的 setpoint 均为 1.75 K、温控均开启、错误码均
-  为零。运行按 `hold-current` 不发送恢复动作，最终状态仍为 1.75 K/温控开启，
+  为零。该历史运行当时按 `hold-current` 不发送恢复动作，最终状态仍为
+  1.75 K/温控开启，
   Disconnect/end 正常。原始 JSON 保留在目标机 ignored 临时路径。
 - 人工 GUI 只读核查确认 sample-heater 配置并非零：maximum power 5.00 W、
   heater resistance 115.00 ohm、wire resistance 3.00 ohm。因此“未配置 heater
@@ -204,7 +205,7 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 | `poll_interval_s` | s | 两次状态采样之间的轮询间隔；只影响采样频率，不放宽 tolerance、stable range 或 dwell 判据。 |
 | `timeout_s` | s | 等待目标稳定的总超时；必须覆盖 `dwell_s`。超时即失败，不声称已稳定。 |
 | `success_policy` | — | `hold-target`：目标稳定后保持目标设定值且温控开启；`restore-initial`：目标稳定后恢复连接前的用户设定值和温控开关状态（若原来开启，还等待恢复温度稳定）。 |
-| `failure_policy` | — | `hold-current`：失败后不主动改变当前温度设定/控制状态；`restore-initial`：写入已发生且动作失败时，尝试恢复初始设定值和控制状态。恢复失败会保留原始错误并记录恢复错误。 |
+| `failure_policy` | — | `disable-control`：写入已发生且动作失败时，保留当前设定值但幂等关闭温控并验证读回；`restore-initial`：尝试恢复初始设定值和控制状态。两者在恢复失败时都保留原始错误并记录恢复错误。原 `hold-current` 已因可能长期保持失控加热而移除。 |
 | `--authorize-connection` | — | 明确允许本次连接/读取。缺少时在加载 DLL 前拒绝。 |
 | `--authorize-temperature-write` | — | 明确允许本次温度 setpoint 和温控开关写入。缺少时在加载 DLL 前拒绝；只读授权不能替代它。 |
 
@@ -218,10 +219,19 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 用户为首次 T4 提供的候选参数为：`target_k=1.75`、`max_delta_k=0.05`、
 `tolerance_k=0.01`、`stable_range_k=0.01`、`dwell_s=600`、
 `poll_interval_s=1`、`timeout_s=1800`、成功 `hold-target`、失败
-`hold-current`。TOML 中目标必须写成数值 `1.75`，不能写成字符串 `"1.75K"`。
+历史失败策略为 `hold-current`。TOML 中目标必须写成数值 `1.75`，不能写成
+字符串 `"1.75K"`。
 这些值已经获得本次真实 T4 的明确连接和温度写入授权。setpoint 和温控开启均已
 由后续只读状态确认，但 1800 s 内没有任何样本进入 tolerance，600 s 连续稳定
 窗口未形成。保持这些参数不变，等待人工硬件核查后再决定是否重试。
+
+人工 GUI 设温已确认可工作。随后离线代码把失败策略收紧为
+`disable-control`：异常发生时先记录最后确认的完整状态（含样品/VTI 温度）、
+sample/VTI heater power 和触发时间，再通过现有 read-before-toggle、DLL 返回码检查
+和异步读回确认关闭温控；最终状态仍会再次读取。PID 参数没有被读取或修改。
+下一候选目标为 1.8 K，但此前 1.75 K 控制曾在 timeout 前升到 1.9651 K；当前
+`max_delta_k` 只保护写入前的起始步长，尚无运行中温度终止阈值。因此在明确并实现
+实时异常终止边界前，不得执行真实 1.8 K 写入。
 
 ## 预计文件所有权
 

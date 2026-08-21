@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--failure-policy",
-        choices=("hold-current", "restore-initial"),
+        choices=("disable-control", "restore-initial"),
     )
     parser.add_argument("--authorize-connection", action="store_true")
     parser.add_argument("--authorize-temperature-write", action="store_true")
@@ -167,7 +167,7 @@ def _load_request_config(path: Path) -> TemperatureCommissioningRequest:
         failure_policy=_config_policy(
             table["failure_policy"],
             "failure_policy",
-            ("hold-current", "restore-initial"),
+            ("disable-control", "restore-initial"),
         ),
     )
 
@@ -328,24 +328,39 @@ def run(
         record["completed"] = True
     except BaseException as exc:
         record["error"] = str(exc)
+        if connected:
+            _record_failure_diagnostic(
+                record,
+                driver,
+                wall_time=wall_time,
+            )
         if (
             connected
             and mutation_attempted
             and not restoration_started
             and initial_state is not None
-            and request.failure_policy == "restore-initial"
         ):
             try:
-                _restore_initial(
-                    driver,
-                    initial_state,
-                    wait_for_stability=False,
-                    samples=record["restore_samples"],
-                    actions=record["recovery_actions"],
-                    monotonic=monotonic,
-                    sleeper=sleeper,
-                    wall_time=wall_time,
-                )
+                if request.failure_policy == "disable-control":
+                    driver.ensure_temperature_control(
+                        False,
+                        monotonic=monotonic,
+                        sleeper=sleeper,
+                    )
+                    record["recovery_actions"].append(
+                        "temperature_control_disabled_after_failure"
+                    )
+                else:
+                    _restore_initial(
+                        driver,
+                        initial_state,
+                        wait_for_stability=False,
+                        samples=record["restore_samples"],
+                        actions=record["recovery_actions"],
+                        monotonic=monotonic,
+                        sleeper=sleeper,
+                        wall_time=wall_time,
+                    )
             except BaseException as recovery_error:
                 record["recovery_error"] = str(recovery_error)
                 exc.add_note(f"Temperature recovery also failed: {recovery_error}")
@@ -376,6 +391,27 @@ def run(
     record["disconnected"] = True
     print(json.dumps(record, indent=2, ensure_ascii=False))
     return 0
+
+
+def _record_failure_diagnostic(
+    record: dict[str, object],
+    driver: AttoDryDriver,
+    *,
+    wall_time: Callable[[], float],
+) -> None:
+    diagnostic: dict[str, object] = {
+        "captured_unix_s": wall_time(),
+        "trigger_state": (
+            None
+            if driver.last_confirmed_state is None
+            else asdict(driver.last_confirmed_state)
+        ),
+    }
+    try:
+        diagnostic["heater_power"] = asdict(driver.read_heater_powers())
+    except BaseException as read_error:
+        diagnostic["heater_power_read_error"] = str(read_error)
+    record["failure_diagnostic"] = diagnostic
 
 
 def _restore_initial(

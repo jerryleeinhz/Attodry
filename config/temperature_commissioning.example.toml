@@ -20,5 +20,5 @@ poll_interval_s = "CHANGE_ME"
 timeout_s = "CHANGE_ME"
 # One of: hold-target, restore-initial.
 success_policy = "CHANGE_ME"
-# One of: hold-current, restore-initial.
+# One of: disable-control, restore-initial.
 failure_policy = "CHANGE_ME"

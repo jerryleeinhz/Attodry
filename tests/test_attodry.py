@@ -559,7 +559,7 @@ class AttoDryDriverTests(unittest.TestCase):
     def temperature_args(
         *,
         success_policy: str = "hold-target",
-        failure_policy: str = "hold-current",
+        failure_policy: str = "disable-control",
         timeout_s: str = "5",
     ) -> list[str]:
         return [
@@ -610,7 +610,7 @@ dwell_s = 2.0
 poll_interval_s = 1.0
 timeout_s = 5.0
 success_policy = "hold-target"
-failure_policy = "hold-current"
+failure_policy = "disable-control"
 """,
             encoding="utf-8",
         )
@@ -809,7 +809,9 @@ failure_policy = "hold-current"
         self.assertEqual(self.dll.events.count("set_temperature"), 2)
         self.assertTrue(result["disconnected"])
 
-    def test_temperature_cli_hold_failure_policy_sends_no_recovery_write(self) -> None:
+    def test_temperature_cli_failure_disables_control_and_records_diagnostic(
+        self,
+    ) -> None:
         output = io.StringIO()
 
         with redirect_stdout(output), self.assertRaises(AttoDryTimeout):
@@ -825,11 +827,93 @@ failure_policy = "hold-current"
         result = json.loads(output.getvalue())
         self.assertFalse(result["completed"])
         self.assertEqual(self.dll.events.count("set_temperature"), 1)
-        self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
+        self.assertEqual(self.dll.events.count("toggle_temperature_control"), 2)
         self.assertAlmostEqual(
             result["final_state"]["user_temperature_k"], 2.1, delta=1e-4
         )
-        self.assertTrue(result["final_state"]["temperature_control_enabled"])
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+        self.assertEqual(
+            result["failure_diagnostic"]["heater_power"],
+            {"sample_w": 0.25, "vti_w": 0.5},
+        )
+        self.assertAlmostEqual(
+            result["failure_diagnostic"]["trigger_state"][
+                "sample_temperature_k"
+            ],
+            2.0,
+        )
+        self.assertAlmostEqual(
+            result["failure_diagnostic"]["trigger_state"]["vti_temperature_k"],
+            2.1,
+            delta=1e-4,
+        )
+
+    def test_temperature_config_rejects_obsolete_hold_current_policy(self) -> None:
+        loaded = []
+        request_path = Path(".test-tmp") / "temperature_hold_current.toml"
+        request_path.parent.mkdir(exist_ok=True)
+        self.addCleanup(request_path.unlink, missing_ok=True)
+        request_path.write_text(
+            """[temperature_commissioning]
+target_k = 2.1
+max_delta_k = 0.2
+tolerance_k = 0.01
+stable_range_k = 0.005
+dwell_s = 2.0
+poll_interval_s = 1.0
+timeout_s = 5.0
+success_policy = "hold-target"
+failure_policy = "hold-current"
+""",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ValueError, "disable-control, restore-initial"):
+            run_temperature_test(
+                [
+                    "--config",
+                    "config/hardware.example.toml",
+                    "--commissioning-config",
+                    str(request_path),
+                    "--authorize-connection",
+                    "--authorize-temperature-write",
+                ],
+                dll_loader=lambda path: loaded.append(path),
+            )
+
+        self.assertEqual(loaded, [])
+
+    def test_temperature_failure_keeps_primary_error_if_heater_read_fails(
+        self,
+    ) -> None:
+        self.dll.return_codes["get_vti_heater_power"] = 6
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaises(AttoDryTimeout):
+            run_temperature_test(
+                self.temperature_args(timeout_s="2")
+                + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertIn("timed out", result["error"])
+        self.assertIn(
+            "getVtiHeaterPower",
+            result["failure_diagnostic"]["heater_power_read_error"],
+        )
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
 
     def test_temperature_cli_does_not_claim_disconnect_after_close_failure(self) -> None:
         self.dll.temperature_follows_setpoint = True

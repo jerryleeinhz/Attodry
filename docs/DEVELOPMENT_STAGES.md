@@ -306,6 +306,14 @@ uncommissioned and require separate explicit authorization.
   read-only evidence cannot distinguish PID tuning, thermal contact, and sensor
   behavior. T4 remains failed and no automatic progression or control change is
   permitted.
+- After the operator confirmed that manual GUI temperature setting works, the
+  commissioning failure path was tightened offline. Obsolete `hold-current` is
+  rejected; `disable-control` now captures the trigger time, last confirmed full
+  state (including sample/VTI temperature), and both heater powers, then uses the
+  existing idempotent read-before-toggle and bounded readback checks to disable
+  temperature control. PID values remain untouched. The requested 1.8 K real test
+  remains gated because the earlier 1.9651 K excursion occurred before timeout and
+  the current implementation has no runtime temperature-abort threshold.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
