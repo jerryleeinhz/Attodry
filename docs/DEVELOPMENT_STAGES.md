@@ -246,6 +246,11 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   notebook defaults are 100000/50/500 Ω. No hardware module is imported or
   connected. Loader, current-calibration, notebook-syntax, and matplotlib-render
   checks passed.
+- Replaced the notebook's manual Browse switch with an interactive `Browse…`
+  button and visible `Only completed records` checkbox, plus formal-sample
+  status multi-select and rejected-audit checkbox. Selecting a JSON file changes
+  the catalog to its directory so the paired sweep can be found without copying
+  raw data into the analysis clone. The controls remain read-only.
 
 ## Stage 4 - attoDRY real driver
 

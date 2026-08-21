@@ -343,8 +343,10 @@ cleanup 再次验证上述基线。频率扫描期间 XX 临时为 20 mV；XY �
 `SENS=21` 和 XX SINE OUT；没有写 XY 或发送 `APHS`。原始审计 JSON 和 stderr 仅保留
 在隔离 target clone 的忽略 `run_data` 中。
 
-2026-08-21：扩展只读 commissioning 分析。主 notebook 现在在开头提供 record/sample
-筛选、Windows Browse 和完整激励路径电阻 controls；默认 completed/clean。它为频率
+2026-08-21：扩展只读 commissioning 分析。主 notebook 现在在开头提供可点击的
+`Browse…` 按键、`Only completed records` checkbox、record/sample 筛选和完整激励路径
+电阻 controls；默认 completed/clean。选择文件后 catalog 自动切到该文件目录，重新运行
+其下的 catalog/plot cells 即可找到配对扫描。它为频率
 扫描和电流--电压扫描分别生成 XX/XY × h1/h2/h3 的六张双 y 轴图：左轴为 SR830 R
 电压幅值，右轴为相位。频率标题给出由 SINE OUT 算得的 RMS 电流；电流--电压横轴
 使用同一计算。若扫频/扫幅记录没有某个谐波，只明确标记缺失而不推断。计算优先

@@ -248,6 +248,10 @@ Completed in Stage 3:
   The loader prefers recorded SINE OUT readback and only uses the old frequency
   setpoint where no readback was recorded. This analysis-only work imports no
   hardware path and has passed loader, notebook, and matplotlib-render checks.
+- The commissioning notebook now exposes its native-file `Browse…` button and
+  completed-record/status filters as visible Jupyter controls. Selecting a file
+  switches catalog discovery to its raw-data directory while leaving the clone
+  and all instruments untouched.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

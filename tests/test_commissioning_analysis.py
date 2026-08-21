@@ -191,6 +191,20 @@ class CommissioningAnalysisTests(unittest.TestCase):
         for index, cell in enumerate(code_cells):
             compile("".join(cell["source"]), f"notebook-cell-{index}", "exec")
 
+    def test_notebook_exposes_browse_button_and_completed_filter(self) -> None:
+        path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"
+        notebook = json.loads(path.read_text(encoding="utf-8"))
+        code = "\n".join(
+            "".join(cell["source"])
+            for cell in notebook["cells"]
+            if cell["cell_type"] == "code"
+        )
+
+        self.assertIn("widgets.Button", code)
+        self.assertIn("completed_only_widget", code)
+        self.assertIn("browse_button.on_click", code)
+        self.assertIn("browse_and_load_commissioning_file", code)
+
     def _write_json(self, _name: str, payload: dict[str, object]) -> Path:
         path = self._temporary_path(".json")
         path.write_text(json.dumps(payload), encoding="utf-8")

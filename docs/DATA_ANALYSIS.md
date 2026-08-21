@@ -30,10 +30,17 @@ opt-in. Formal samples can be filtered as `clean`, `problem`, `unlocked`,
 `overload`, or `instrument_error`; transition and cleanup payloads are excluded
 from the plotted rows.
 
-Set `OPEN_BROWSER=True` in the Browse cell to open the native Windows file
-chooser and load a JSON/JSONL file directly. If the notebook kernel is running
-without access to the Windows desktop, set `selected_path = Path(...)` instead.
-Directory discovery remains available in either case.
+Click the notebook's `Browse…` button to open the native Windows file chooser
+and load a JSON/JSONL file directly. It displays the selected path and switches
+the catalog to that file's directory, so the matching frequency/excitation record
+can be found without copying raw data into the Git clone. The visible
+`Only completed records` checkbox defaults to selected; formal-sample status is
+a multi-select UI and rejected records still require the separate audit checkbox.
+After changing a filter or selecting a file, rerun the catalog and subsequent
+plot cells to refresh the figures.
+If the kernel lacks Windows desktop access, set `FREQUENCY_PATHS` and
+`EXCITATION_PATHS` directly instead. Directory discovery remains available in
+either case.
 Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
 opened automatically.
 
