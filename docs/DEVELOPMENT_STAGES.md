@@ -237,6 +237,15 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   4 mVrms and `SENS=20`; XY remained `SENS=17` without writes, and final
   status/error words were clear. The raw audit record remains ignored on the
   control computer.
+- Extended the read-only SR830 commissioning analysis and notebook with explicit
+  record/sample filters, Browse support, and complete excitation-path resistance
+  controls. It now produces six separate XX/XY × h1/h2/h3 twin-axis figures for
+  each frequency and current--voltage scan, never combining or inventing missing
+  harmonics. Current is calculated from recorded SINE OUT RMS voltage and the
+  explicit external-series/SR830-output/device-resistance path; the current
+  notebook defaults are 100000/50/500 Ω. No hardware module is imported or
+  connected. Loader, current-calibration, notebook-syntax, and matplotlib-render
+  checks passed.
 
 ## Stage 4 - attoDRY real driver
 

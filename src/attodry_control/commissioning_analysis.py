@@ -17,8 +17,15 @@ SAMPLE_STATUSES = frozenset(
 )
 SWEEP_METRICS = frozenset({"x_v", "y_v", "amplitude_v", "phase_deg"})
 SWEEP_X_AXES = frozenset(
-    {"target_frequency_hz", "source_v_rms", "nominal_current_a_rms"}
+    {
+        "target_frequency_hz",
+        "source_v_rms",
+        "nominal_current_a_rms",
+        "sine_output_current_a_rms",
+    }
 )
+PLOT_ROLES = ("xx", "xy")
+PLOT_HARMONICS = (1, 2, 3)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +49,7 @@ class CommissioningSample:
     sample_index: int
     target_frequency_hz: float
     source_v_rms: float
+    sine_output_v_rms: float
     nominal_current_a_rms: float | None
     role: str
     harmonic: int
@@ -56,6 +64,39 @@ class CommissioningSample:
     error_status: int
     statuses: tuple[str, ...]
     problems: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExcitationPathResistance:
+    """Known RMS excitation path used only for read-only current estimation."""
+
+    external_series_resistance_ohm: float
+    sr830_output_resistance_ohm: float
+    approximate_device_resistance_ohm: float
+
+    def __post_init__(self) -> None:
+        values = (
+            self.external_series_resistance_ohm,
+            self.sr830_output_resistance_ohm,
+            self.approximate_device_resistance_ohm,
+        )
+        if any(not math.isfinite(value) or value < 0.0 for value in values):
+            raise ValueError("Every excitation-path resistance must be finite and non-negative.")
+        if self.total_resistance_ohm <= 0.0:
+            raise ValueError("Total excitation-path resistance must be positive.")
+
+    @property
+    def total_resistance_ohm(self) -> float:
+        return (
+            self.external_series_resistance_ohm
+            + self.sr830_output_resistance_ohm
+            + self.approximate_device_resistance_ohm
+        )
+
+    def current_from_sine_output(self, sine_output_v_rms: float) -> float:
+        if not math.isfinite(sine_output_v_rms) or sine_output_v_rms < 0.0:
+            raise ValueError("SINE OUT voltage must be finite and non-negative.")
+        return sine_output_v_rms / self.total_resistance_ohm
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,11 +327,39 @@ def load_sweep_samples(
     return tuple(rows)
 
 
+def load_sweep_sample_files(
+    paths: Iterable[str | Path],
+    *,
+    include_rejected: bool = False,
+    sample_statuses: Iterable[str] | None = None,
+    roles: Iterable[str] | None = None,
+) -> tuple[CommissioningSample, ...]:
+    """Load selected sweep files without combining frequency and excitation scans."""
+
+    rows = tuple(
+        row
+        for path in paths
+        for row in load_sweep_samples(
+            path,
+            include_rejected=include_rejected,
+            sample_statuses=sample_statuses,
+            roles=roles,
+        )
+    )
+    if not rows:
+        raise ValueError("At least one selected sweep file with formal samples is required.")
+    scan_types = {row.scan_type for row in rows}
+    if len(scan_types) != 1:
+        raise ValueError("Load frequency and excitation files separately.")
+    return rows
+
+
 def aggregate_sweep_samples(
     rows: Sequence[CommissioningSample],
     *,
     metric: str = "amplitude_v",
     x_axis: str | None = None,
+    excitation_path: ExcitationPathResistance | None = None,
 ) -> tuple[SweepStatistic, ...]:
     if metric not in SWEEP_METRICS:
         raise ValueError(f"Unsupported metric: {metric}")
@@ -309,9 +378,7 @@ def aggregate_sweep_samples(
         raise ValueError(f"Unsupported x axis: {x_axis}")
     grouped: dict[tuple[float, str], list[float]] = {}
     for row in rows:
-        raw_x = getattr(row, x_axis)
-        if raw_x is None:
-            raise ValueError(f"Selected x axis {x_axis} contains missing values.")
+        raw_x = _sweep_x_value(row, x_axis, excitation_path)
         grouped.setdefault((float(raw_x), row.role), []).append(
             float(getattr(row, metric))
         )
@@ -337,11 +404,14 @@ def plot_commissioning_sweep(
     metric: str = "amplitude_v",
     x_axis: str | None = None,
     log_x: bool | None = None,
+    excitation_path: ExcitationPathResistance | None = None,
     destination: str | Path | None = None,
 ):
     """Plot per-point mean and sample standard deviation for XX and XY."""
 
-    statistics = aggregate_sweep_samples(rows, metric=metric, x_axis=x_axis)
+    statistics = aggregate_sweep_samples(
+        rows, metric=metric, x_axis=x_axis, excitation_path=excitation_path
+    )
     scan_type = rows[0].scan_type
     resolved_x_axis = x_axis or (
         "target_frequency_hz" if scan_type == "frequency" else "source_v_rms"
@@ -374,6 +444,7 @@ def plot_commissioning_sweep(
             "target_frequency_hz": "Frequency (Hz)",
             "source_v_rms": "Source voltage (V RMS)",
             "nominal_current_a_rms": "Nominal current (A RMS)",
+            "sine_output_current_a_rms": "SINE OUT current (A RMS)",
         }[resolved_x_axis]
     )
     axis.set_ylabel(
@@ -390,6 +461,129 @@ def plot_commissioning_sweep(
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure
+
+
+def plot_role_harmonic_sweep(
+    rows: Sequence[CommissioningSample],
+    *,
+    role: str,
+    harmonic: int,
+    excitation_path: ExcitationPathResistance,
+    destination: str | Path | None = None,
+):
+    """Plot one role and harmonic with voltage magnitude and phase on twin axes.
+
+    Frequency records retain the calibrated SINE OUT RMS current in the title.
+    Excitation records use that same current calculation as the x axis.
+    """
+
+    if role not in PLOT_ROLES:
+        raise ValueError(f"Unknown role: {role}")
+    if harmonic not in PLOT_HARMONICS:
+        raise ValueError(f"Unsupported harmonic: {harmonic}")
+    if not rows:
+        raise ValueError("No sweep samples match the selected filters.")
+    scan_types = {row.scan_type for row in rows}
+    if len(scan_types) != 1:
+        raise ValueError("Plot one sweep type at a time.")
+    scan_type = next(iter(scan_types))
+    selected = tuple(
+        row for row in rows if row.role == role and row.harmonic == harmonic
+    )
+    x_axis = (
+        "target_frequency_hz"
+        if scan_type == "frequency"
+        else "sine_output_current_a_rms"
+    )
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise RuntimeError(
+            "Plotting requires: python -m pip install -e '.[analysis]'"
+        ) from exc
+    figure, voltage_axis = plt.subplots(figsize=(6.6, 4.4), constrained_layout=True)
+    phase_axis = voltage_axis.twinx()
+    signal_name = f"V{role}"
+    if selected:
+        voltage_statistics = aggregate_sweep_samples(
+            selected,
+            metric="amplitude_v",
+            x_axis=x_axis,
+            excitation_path=excitation_path,
+        )
+        phase_statistics = aggregate_sweep_samples(
+            selected,
+            metric="phase_deg",
+            x_axis=x_axis,
+            excitation_path=excitation_path,
+        )
+        voltage_axis.errorbar(
+            [item.x_value for item in voltage_statistics],
+            [item.mean for item in voltage_statistics],
+            yerr=[item.standard_deviation for item in voltage_statistics],
+            marker="o",
+            linewidth=1.2,
+            capsize=3,
+            color="tab:blue",
+            label=f"{signal_name} R",
+        )
+        phase_axis.errorbar(
+            [item.x_value for item in phase_statistics],
+            [item.mean for item in phase_statistics],
+            yerr=[item.standard_deviation for item in phase_statistics],
+            marker="s",
+            linewidth=1.2,
+            capsize=3,
+            color="tab:orange",
+            label="Phase",
+        )
+    else:
+        voltage_axis.text(
+            0.5,
+            0.5,
+            f"No selected {signal_name} h{harmonic} samples",
+            ha="center",
+            va="center",
+            transform=voltage_axis.transAxes,
+        )
+    if scan_type == "frequency":
+        voltage_axis.set_xscale("log")
+        voltage_axis.set_xlabel("Frequency (Hz)")
+        title_prefix = _current_summary(selected, excitation_path)
+        title = f"Frequency sweep · {signal_name} / phase · h{harmonic} · {title_prefix}"
+    else:
+        voltage_axis.set_xlabel("SINE OUT current (A RMS)")
+        title = f"Current–voltage sweep · {signal_name} / phase · h{harmonic}"
+    voltage_axis.set_ylabel(f"{signal_name} R (V RMS)")
+    phase_axis.set_ylabel("Phase (degree)")
+    voltage_axis.set_title(title)
+    voltage_axis.grid(True, alpha=0.25)
+    left_handles, left_labels = voltage_axis.get_legend_handles_labels()
+    right_handles, right_labels = phase_axis.get_legend_handles_labels()
+    if left_handles or right_handles:
+        voltage_axis.legend(left_handles + right_handles, left_labels + right_labels)
+    if destination is not None:
+        figure.savefig(destination, dpi=200)
+    return figure
+
+
+def plot_six_role_harmonic_sweeps(
+    rows: Sequence[CommissioningSample],
+    *,
+    excitation_path: ExcitationPathResistance,
+) -> dict[tuple[str, int], object]:
+    """Return the requested separate XX/XY × h1/h2/h3 sweep figures."""
+
+    return {
+        (role, harmonic): plot_role_harmonic_sweep(
+            rows,
+            role=role,
+            harmonic=harmonic,
+            excitation_path=excitation_path,
+        )
+        for role in PLOT_ROLES
+        for harmonic in PLOT_HARMONICS
+    }
 
 
 def export_commissioning_csv(
@@ -465,6 +659,9 @@ def _commissioning_sample(
     if not statuses:
         statuses.append("clean")
     nominal_current = point.get("nominal_current_a_rms")
+    sine_output = point.get("source_readback_v_rms")
+    if sine_output is None:
+        sine_output = point["source_v_rms"]
     return CommissioningSample(
         source_path=str(path),
         record_status=record_status,
@@ -473,6 +670,7 @@ def _commissioning_sample(
         sample_index=int(sample.get("sample_index", 0)),
         target_frequency_hz=float(point["target_frequency_hz"]),
         source_v_rms=float(point["source_v_rms"]),
+        sine_output_v_rms=float(sine_output),
         nominal_current_a_rms=(
             None if nominal_current is None else float(nominal_current)
         ),
@@ -504,6 +702,50 @@ def _validated_filter(
     if unknown:
         raise ValueError(f"Unknown {label} statuses: {sorted(unknown)}")
     return values
+
+
+def _sweep_x_value(
+    row: CommissioningSample,
+    x_axis: str,
+    excitation_path: ExcitationPathResistance | None,
+) -> float:
+    if x_axis == "sine_output_current_a_rms":
+        if excitation_path is None:
+            raise ValueError(
+                "SINE OUT current requires an explicit ExcitationPathResistance."
+            )
+        return excitation_path.current_from_sine_output(row.sine_output_v_rms)
+    raw_x = getattr(row, x_axis)
+    if raw_x is None:
+        raise ValueError(f"Selected x axis {x_axis} contains missing values.")
+    return float(raw_x)
+
+
+def _current_summary(
+    rows: Sequence[CommissioningSample],
+    excitation_path: ExcitationPathResistance,
+) -> str:
+    if not rows:
+        return "I_RMS unavailable"
+    currents = [
+        excitation_path.current_from_sine_output(row.sine_output_v_rms)
+        for row in rows
+    ]
+    minimum = min(currents)
+    maximum = max(currents)
+    if math.isclose(minimum, maximum, rel_tol=1e-12, abs_tol=0.0):
+        return f"I_RMS = {_format_engineering(minimum, 'A')}"
+    return (
+        "I_RMS = "
+        f"{_format_engineering(minimum, 'A')}–{_format_engineering(maximum, 'A')}"
+    )
+
+
+def _format_engineering(value: float, unit: str) -> str:
+    for scale, prefix in ((1.0, ""), (1e-3, "m"), (1e-6, "µ"), (1e-9, "n"), (1e-12, "p")):
+        if value >= scale or scale == 1e-12:
+            return f"{value / scale:.4g} {prefix}{unit}"
+    raise AssertionError("Unreachable engineering-format scale.")
 
 
 def _mean_and_standard_deviation(

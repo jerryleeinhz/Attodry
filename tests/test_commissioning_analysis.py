@@ -5,11 +5,15 @@ import tempfile
 import unittest
 
 from attodry_control.commissioning_analysis import (
+    ExcitationPathResistance,
     aggregate_sweep_samples,
     browse_and_load_commissioning_file,
     discover_commissioning_records,
     export_commissioning_csv,
+    load_sweep_sample_files,
     load_sweep_samples,
+    plot_role_harmonic_sweep,
+    plot_six_role_harmonic_sweeps,
 )
 
 
@@ -121,6 +125,60 @@ class CommissioningAnalysisTests(unittest.TestCase):
         rows = load_sweep_samples(source)
 
         self.assertEqual([row.role for row in rows], ["xx", "xy"])
+
+    def test_sine_output_current_uses_readback_and_explicit_path_resistance(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["points"][0]["source_readback_v_rms"] = 0.0039
+        source = self._write_json("completed.json", payload)
+        path = ExcitationPathResistance(
+            external_series_resistance_ohm=100_000.0,
+            sr830_output_resistance_ohm=50.0,
+            approximate_device_resistance_ohm=500.0,
+        )
+
+        rows = load_sweep_sample_files([source])
+        statistics = aggregate_sweep_samples(
+            rows,
+            x_axis="sine_output_current_a_rms",
+            excitation_path=path,
+        )
+
+        self.assertEqual(path.total_resistance_ohm, 100_550.0)
+        self.assertAlmostEqual(rows[0].sine_output_v_rms, 0.0039)
+        self.assertAlmostEqual(
+            statistics[0].x_value, 0.0039 / 100_550.0
+        )
+        with self.assertRaisesRegex(ValueError, "non-negative"):
+            ExcitationPathResistance(-1.0, 50.0, 500.0)
+
+    def test_role_harmonic_plots_have_voltage_and_phase_axes(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        source = self._write_json("completed.json", self._sweep(completed=True))
+        rows = load_sweep_samples(source)
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+
+        figure = plot_role_harmonic_sweep(
+            rows, role="xx", harmonic=1, excitation_path=path
+        )
+        self.addCleanup(plt.close, figure)
+        self.assertEqual(len(figure.axes), 2)
+        self.assertIn("I_RMS = 39.78 nA", figure.axes[0].get_title())
+        self.assertEqual(figure.axes[0].get_ylabel(), "Vxx R (V RMS)")
+        self.assertEqual(figure.axes[1].get_ylabel(), "Phase (degree)")
+
+        figures = plot_six_role_harmonic_sweeps(rows, excitation_path=path)
+        self.addCleanup(lambda: [plt.close(item) for item in figures.values()])
+        self.assertEqual(set(figures), {
+            ("xx", 1), ("xx", 2), ("xx", 3),
+            ("xy", 1), ("xy", 2), ("xy", 3),
+        })
+        self.assertIn(
+            "No selected Vxy h2 samples",
+            figures[("xy", 2)].axes[0].texts[0].get_text(),
+        )
 
     def test_notebook_is_valid_json_and_all_code_cells_compile(self) -> None:
         path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"

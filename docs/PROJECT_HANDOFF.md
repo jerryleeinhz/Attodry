@@ -239,6 +239,15 @@ Completed in Stage 3:
   the temporary XX `SENS=21` and SINE OUT setting changed; cleanup verified the
   4 mVrms/`SENS=20` XX baseline, unchanged XY `SENS=17`, and zero final
   status/error words. Raw acquisition files remain ignored on the target clone.
+- Extended the offline, read-only Lock-in commissioning analysis. The main sweep
+  notebook now begins with record/sample filters, Browse, and explicit complete
+  excitation-path resistance controls (currently 100000 Ω external series, 50 Ω
+  SR830 output, and 500 Ω approximate device). It produces separate XX/XY ×
+  h1/h2/h3 twin-axis figures for frequency and SINE OUT-current scans, retaining
+  phase on the right axis and avoiding all inferred/mixed missing harmonics.
+  The loader prefers recorded SINE OUT readback and only uses the old frequency
+  setpoint where no readback was recorded. This analysis-only work imports no
+  hardware path and has passed loader, notebook, and matplotlib-render checks.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

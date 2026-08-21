@@ -163,6 +163,11 @@ settle_time_constants = 5.0
   电压；任何一项缺失都在打开 VISA 前失败。
 - SR830 的软件最小输出不是电气断开。异常 cleanup 后仍需人工确认实际接线和
   前面板读回。
+- 只读扫频/扫幅分析的电流不是新的独立测量值，而是 `SINE OUT Vrms / 完整串联路径
+  电阻`。在 `notebooks/sr830_commissioning_sweeps.ipynb` 开头的 controls cell 修改
+  `EXTERNAL_SERIES_RESISTANCE_OHM`、`SR830_OUTPUT_RESISTANCE_OHM` 和
+  `APPROXIMATE_DEVICE_RESISTANCE_OHM`；当前为 100000 Ω、50 Ω、500 Ω，总计 100550 Ω。
+  该改动只改变绘图标尺，不写仪器，也不能替代下一次激励扫描所需的安全确认。
 
 ## 阶段和验收条件
 
@@ -337,6 +342,14 @@ cleanup 再次验证上述基线。频率扫描期间 XX 临时为 20 mV；XY �
 `SENS=20`，XY 保持 `SENS=17`，两机最终状态和错误字均为零。期间只临时写 XX
 `SENS=21` 和 XX SINE OUT；没有写 XY 或发送 `APHS`。原始审计 JSON 和 stderr 仅保留
 在隔离 target clone 的忽略 `run_data` 中。
+
+2026-08-21：扩展只读 commissioning 分析。主 notebook 现在在开头提供 record/sample
+筛选、Windows Browse 和完整激励路径电阻 controls；默认 completed/clean。它为频率
+扫描和电流--电压扫描分别生成 XX/XY × h1/h2/h3 的六张双 y 轴图：左轴为 SR830 R
+电压幅值，右轴为相位。频率标题给出由 SINE OUT 算得的 RMS 电流；电流--电压横轴
+使用同一计算。若扫频/扫幅记录没有某个谐波，只明确标记缺失而不推断。计算优先
+使用保存的 SINE OUT 读回，旧扫频记录没有读回时才采用记录的 4 mV 设定值；不打开
+VISA、不读取状态锁存、不写设置。
 
 ## 预计文件所有权
 
