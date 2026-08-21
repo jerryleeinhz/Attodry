@@ -290,6 +290,15 @@ written source point; a 4 mVrms baseline point that did not write `SLVL` records
 zero for its point-specific value. It is an acquisition-settling parameter, not
 a safety limit or an automatic phase correction.
 
+For the operator-selected coverage policy, add
+`--skip-unsupported-harmonics` together with `--all-harmonics`. It retains only
+the supported orders at each point and writes an audited `skipped_harmonics`
+entry for every omission; no missing order is inferred in analysis. On the
+confirmed ten-point 17.777 Hz--100 kHz grid, this yields h1 at all ten points,
+h2 through 38.310 kHz (nine points), and h3 through 14.677 kHz (eight points).
+Without this explicit option, `--all-harmonics` retains the strict pre-VISA
+rejection described above.
+
 The HARM transition record is deliberately excluded from formal curves. It may
 contain only a filter-overload and/or frequency-range-change latch while the
 reference moves to the selected detection harmonic. It is consumed, retained,

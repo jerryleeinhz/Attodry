@@ -1187,6 +1187,97 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["harmonic"], 1)
         self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["harmonic"], 1)
 
+    def test_cli_frequency_sweep_rejects_unsupported_harmonic_before_opening_visa(
+        self,
+    ) -> None:
+        factory_opened = False
+
+        def unopened_factory() -> FakeResourceManager:
+            nonlocal factory_opened
+            factory_opened = True
+            raise AssertionError("VISA must not open for an unsupported harmonic frequency.")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"h3 at 38310.5 Hz requires 114931 Hz",
+        ):
+            run(
+                [
+                    "sweep-frequency",
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-hz",
+                    "17.777,38310.4813",
+                    "--all-harmonics",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=unopened_factory,
+            )
+
+        self.assertFalse(factory_opened)
+
+    def test_cli_frequency_sweep_skips_only_unsupported_harmonics_when_requested(
+        self,
+    ) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-hz",
+                    "38310.4813,100000",
+                    "--settle-s",
+                    "0",
+                    "--samples-per-point",
+                    "1",
+                    "--sample-interval-s",
+                    "0",
+                    "--all-harmonics",
+                    "--skip-unsupported-harmonics",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        first, second = result["points"]
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["skip_unsupported_harmonics"])
+        self.assertEqual(
+            [sample["lockin_xx"]["reading"]["harmonic"] for sample in first["samples"]],
+            [1, 2],
+        )
+        self.assertEqual(
+            [item["harmonic"] for item in first["skipped_harmonics"]], [3]
+        )
+        self.assertEqual(
+            [sample["lockin_xx"]["reading"]["harmonic"] for sample in second["samples"]],
+            [1],
+        )
+        self.assertEqual(
+            [item["harmonic"] for item in second["skipped_harmonics"]], [2, 3]
+        )
+        self.assertNotIn("HARM 3", xx_resource.writes)
+        self.assertNotIn("HARM 3", xy_resource.writes)
+
     def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)

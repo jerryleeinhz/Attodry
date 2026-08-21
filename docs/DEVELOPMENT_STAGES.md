@@ -278,6 +278,19 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   (3.0 s at the current 300 ms/24 dB/oct configuration) after each actual SINE
   OUT change. This was tested only against fake VISA and offline matplotlib;
   no new hardware command was issued.
+- A retained all-harmonic frequency attempt reached 38.3104813 kHz/h3, where
+  the required 114.931 kHz detection frequency exceeds the SR830 102 kHz
+  reference limit and the instrument remained at h2. The record was rejected;
+  its final readback returned h1, 17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero
+  final status/error words, while an XY transient-unlock cleanup record retained
+  the audit failure. The scanner now validates each requested
+  `harmonic * frequency` product before VISA opens.
+- The selected coverage policy preserves the ten-point 17.777 Hz--100 kHz grid:
+  h1 at all ten points, h2 at the supported first nine, and h3 at the supported
+  first eight. `--skip-unsupported-harmonics` requires `--all-harmonics`, records
+  every omitted order with its required detection frequency and the 102 kHz
+  limit, and never writes an unsupported HARM setting. Without that explicit
+  flag, an unsupported all-harmonic grid remains a pre-VISA failure.
 
 ## Stage 4 - attoDRY real driver
 

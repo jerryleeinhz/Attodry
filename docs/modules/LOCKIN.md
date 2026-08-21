@@ -373,6 +373,19 @@ changed 锁存作为 discarded transition 记录、消费并再次等待；unloc
 状态位保持零容忍。fake-VISA 覆盖成功、二阶正式失败恢复和这组观察到的转换锁存；
 修订后的真实三阶扫频仍需新的明确授权。
 
+2026-08-21：随后的真实三阶扫频在 38.3104813 kHz 的 h3 切换被安全拒绝；h3 所需
+检测频率为 114.931 kHz，超过 SR830 102 kHz 上限，仪器保持 h2，78 个此前正式配对
+样本和拒绝尝试均已保留。最终读回确认两机回到 h1、17.777 Hz、XX 4 mVrms/10 mV、
+XY 1 mV 且状态/错误字为零；但 cleanup 过程记录一次 XY transient unlock，因此该
+原始记录不是 completed。新的 fail-fast 预检会在打开 VISA 前验证每个
+`harmonic × frequency <= 102000 Hz`，避免再次对超限点写入 HARM。h3 最高 34 kHz，
+h2 最高 51 kHz；100 kHz 端点只能测 h1。高频段的记录策略需操作者确认。
+
+操作者随后选择覆盖优先策略：保留原 17.777 Hz--100 kHz 十个点，h1 测十点、h2 测
+前九点（至 38.310 kHz）、h3 测前八点（至 14.677 kHz）。为避免隐式缺失，新的
+`--skip-unsupported-harmonics` 只能与 `--all-harmonics` 同用；每个超限阶数都会在
+本点的 `skipped_harmonics` 中记录阶数、所需检测频率、102 kHz 上限与原因。
+不提供这个旗标时，严格 all-harmonics 仍在任何 VISA I/O 前拒绝整张超限网格。
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。

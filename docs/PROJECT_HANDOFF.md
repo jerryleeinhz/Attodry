@@ -277,6 +277,17 @@ Completed in Stage 3:
   24 dB/oct setting), recording `source_step_settle_s` in the JSON. Fake-VISA
   and offline matplotlib tests cover the behavior; no new hardware command was
   issued.
+- A retained all-harmonic scan reached 38.3104813 kHz/h3, which requires
+  114.931 kHz and exceeds the SR830 102 kHz reference limit; XX correctly
+  remained at h2. The attempt is retained as rejected. Its final readback was
+  h1, 17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero final status/error words;
+  the XY transient-unlock cleanup record remains audited.
+- The scanner therefore validates every `harmonic * frequency` product before
+  VISA opens. The selected coverage policy retains h1 at all ten 17.777 Hz--100
+  kHz points, h2 at the supported first nine, and h3 at the supported first
+  eight. `--skip-unsupported-harmonics` requires `--all-harmonics`, records each
+  omitted order and 102 kHz-limit reason, and never writes an unsupported HARM;
+  strict invocations without the flag fail before VISA opens.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
