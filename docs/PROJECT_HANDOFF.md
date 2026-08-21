@@ -227,6 +227,10 @@ Completed offline in Stage 4:
   Local compilation, all 34 attoDRY tests, and all 160 project tests passed
   (2 optional plotting tests skipped), without DLL loading, connection, or any
   hardware command. Real setting writes still require new explicit authorization.
+- Revalidated commit `b64eb74` on `LK_setup` with 64-bit Python 3.12.13 `lyr`:
+  compileall and all 160 offline tests passed with no skips. Only Git, compileall,
+  and unittest ran; no vendor DLL, `begin/connect`, or hardware command ran. The
+  verified one-purpose temporary clone was removed and confirmed absent.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

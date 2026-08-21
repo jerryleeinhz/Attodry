@@ -230,6 +230,11 @@ uncommissioned and require separate explicit authorization.
   Local compilation, all 34 attoDRY tests, and all 160 project tests passed
   (2 optional plotting tests skipped). This was offline only; no DLL was loaded
   and no connection or hardware command was issued.
+- Revalidated commit `b64eb74` on `LK_setup` with 64-bit Python 3.12.13 in
+  `lyr`: source/test compilation and all 160 offline tests passed with no skips.
+  Only Git, compileall, and unittest ran; the vendor DLL was not loaded and no
+  `begin/connect` or hardware command was issued. The exact temporary clone path
+  was verified before removal, and cleanup was confirmed.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
