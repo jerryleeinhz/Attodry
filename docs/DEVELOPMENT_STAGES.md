@@ -208,10 +208,11 @@ uncommissioned and require separate explicit authorization.
   target/restoration sample and action; and never claims successful recovery or
   disconnect after a failed read or close. Fake-DLL tests cover all policies and
   authorization/limit gates. No real connection or setting write was performed.
-- T2 target validation has only confirmed the `LK_setup` `lyr` interpreter as
-  64-bit Python 3.12.13. The target has no project copy, and the source/test
-  snapshot was not transferred without separate authorization, so T2 remains
-  pending.
+- Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
+  `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
+  156 offline tests passed with no skips, and source compilation passed. Only
+  Git, unittest, and compileall ran; the vendor DLL was not loaded and no
+  `begin/connect` or hardware command was issued. The temporary clone was removed.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 

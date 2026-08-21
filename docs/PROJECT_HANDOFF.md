@@ -207,9 +207,11 @@ Completed offline in Stage 4:
   is explicit. It retains target/restoration samples and never infers recovery or
   disconnect after failed readback/close. No real attoDRY connection or write was
   performed for this addition.
-- T2 remains pending: SSH read-only inspection confirmed `LK_setup` uses 64-bit
-  Python 3.12.13 in `lyr`, but no repository copy exists there and no private
-  source/test snapshot was transferred without separate authorization.
+- Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
+  `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
+  offline tests passed without skips, and compileall passed. No vendor DLL was
+  loaded, no `begin/connect` or hardware command ran, and the temporary clone was
+  removed after its absolute cleanup path was verified.
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
 harmonic validation, and the attoDRY read-only connection are complete. attoDRY

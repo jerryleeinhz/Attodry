@@ -11,9 +11,10 @@ T0 contract audit 和 T1 offline behavior tests 已于 2026-08-21 完成。温�
 `set_temperature(target_k)` 和 `wait_for_temperature(target_k)`；不包含 PID、
 磁场或扫描组合。fake-DLL 已覆盖温度读失败、控制状态、setpoint 读回、连续
 稳定窗口、错误和超时。T4 所需的显式授权 commissioning CLI 已完成 fake-DLL
-验证，但真实写入仍未进行。T2 target offline validation 尚未完成：已只读确认
-`LK_setup` 的 `lyr` 是 64 位 Python 3.12.13，但安全审查阻止了在未获得明确
-源码传输授权时复制测试快照；没有在目标机加载项目或调用 `begin/connect`。
+验证，但真实写入仍未进行。T2 target offline validation 已在明确授权下通过
+Git 分支完成：`LK_setup` 的 64 位 Python 3.12.13 `lyr` 对提交 `e9a7b8c`
+运行 35 项温度测试和 156 项完整测试均通过，`compileall` 通过；没有加载
+vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
 这只证明连接和读回。真实温度设定、温控启停、稳定等待和异常恢复尚未进行写入
 验收，不能描述为 commissioned。
@@ -79,17 +80,21 @@ T0 contract audit 和 T1 offline behavior tests 已于 2026-08-21 完成。温�
   passed、2 skipped（缺少 matplotlib）；没有
   加载 vendor DLL、调用 `begin/connect` 或发送真实写命令。
 
-### T2 - target offline validation（pending source-transfer authorization）
+### T2 - target offline validation（target offline complete：2026-08-21）
 
 - 在 `LK_setup` 的 `lyr` 环境运行 fake-DLL 和完整测试。
 - 完成条件：记录提交号、解释器路径和测试结果，不调用 `begin/connect`。
 
-当前进度：
+完成记录：
 
-- 已通过 SSH 只读确认解释器为
-  `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`，Python 3.12.13、64 位。
-- 目标机未找到现成仓库副本；向临时目录复制不含本地硬件配置的源码/测试快照
-  需要单独的数据传输授权。传输未执行，T2 不能标记完成。
+- 分支 `codex/module-temperature`，验证提交
+  `e9a7b8c280e947c921f77dc7095ac50e47c622b2`。
+- 解释器 `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`，Python 3.12.13、
+  64 位。
+- 温度/fake-DLL/stability：35 tests passed；完整套件：156 tests passed、
+  0 skipped；`compileall -q src tests` 通过。
+- 只运行 Git、unittest 和 compileall；未加载 DLL、未调用 `begin/connect`、未
+  发送设置写入。验证后已检查绝对路径并删除目标机临时 clone。
 
 ### T3 - real read-only commissioning（read-only commissioned：2026-08-20）
 
