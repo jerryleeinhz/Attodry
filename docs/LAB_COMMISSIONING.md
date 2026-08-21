@@ -112,7 +112,10 @@ tool rejects placeholders, malformed parameter files, configured-range violation
 and requested movements from the initial sample-temperature sensor reading larger
 than `max_delta_k` before any write. The initial user setpoint delta is also
 recorded for audit, but a stale setpoint while temperature control is disabled is
-not treated as physical sample movement. `restore-initial` restores the original
+not treated as physical sample movement. A new setpoint is confirmed with complete
+state/error polling for at most 30 seconds because the vendor DLL can update its
+user-temperature readback asynchronously; an already confirmed identical target
+does not cause another setpoint write. `restore-initial` restores the original
 setpoint and control flag; if the original control was disabled, it does not claim
 that the sample temperature returned to the original value. Any communication or
 close failure requires manual verification of setpoint and control state.

@@ -292,6 +292,41 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertIsNotNone(confirmed)
         self.assertAlmostEqual(confirmed.user_temperature_k, 3.0)
 
+    def test_temperature_setpoint_write_waits_for_delayed_readback(self) -> None:
+        self.connect()
+        user_readbacks = iter([2.0, 2.0, 3.0])
+
+        def delayed_getter(pointer):
+            return self.dll._float_getter(
+                "get_user_temperature", pointer, next(user_readbacks)
+            )
+
+        def delayed_setter(value):
+            return self.dll._code("set_temperature")
+
+        self.dll.AttoDRY_Interface_getUserTemperature = delayed_getter
+        self.dll.AttoDRY_Interface_setUserTemperature = delayed_setter
+        sleeps = []
+
+        self.driver.set_temperature(
+            3.0,
+            monotonic=iter([0.0, 0.0]).__next__,
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(sleeps, [1.0])
+        self.assertAlmostEqual(
+            self.driver.last_confirmed_state.user_temperature_k, 3.0
+        )
+
+    def test_temperature_setpoint_write_is_idempotent(self) -> None:
+        self.connect()
+        self.dll.user_temperature_k = 3.0
+
+        self.driver.set_temperature(3.0)
+
+        self.assertNotIn("set_temperature", self.dll.events)
+
     def test_temperature_setpoint_mismatch_is_rejected(self) -> None:
         self.connect()
 
@@ -300,8 +335,12 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.dll.AttoDRY_Interface_setUserTemperature = ignore_temperature_write
 
-        with self.assertRaisesRegex(AttoDryError, "setpoint readback"):
-            self.driver.set_temperature(3.0)
+        with self.assertRaisesRegex(AttoDryTimeout, "setpoint readback"):
+            self.driver.set_temperature(
+                3.0,
+                monotonic=iter([0.0, 30.0]).__next__,
+                sleeper=lambda _: None,
+            )
 
     def test_temperature_stability_requires_continuous_controlled_dwell(self) -> None:
         self.connect()

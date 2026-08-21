@@ -231,6 +231,17 @@ Completed offline in Stage 4:
   compileall and all 160 offline tests passed with no skips. Only Git, compileall,
   and unittest ran; no vendor DLL, `begin/connect`, or hardware command ran. The
   verified one-purpose temporary clone was removed and confirmed absent.
+- The first authorized real T4 attempt passed the sample-movement gate from
+  1.7237 K and sent one 1.75 K setpoint write. Immediate readback still reported
+  2.0 K, so it failed closed before the control toggle and disconnected normally.
+  A later five-sample read-only check confirmed the DLL had asynchronously applied
+  1.75 K; sample temperature was 1.7240--1.7241 K, control remained disabled, and
+  errors remained zero. Both raw records remain on the ignored target-computer path.
+- Setpoint writes now treat an already confirmed identical target idempotently and
+  poll complete state/error readback for up to 30 s after a new write. This bounded
+  acknowledgement is separate from temperature stability waiting. Local compilation,
+  all 36 attoDRY tests, and all 162 project tests passed (2 optional plotting tests
+  skipped); the continued real T4 stability run remains pending target validation.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

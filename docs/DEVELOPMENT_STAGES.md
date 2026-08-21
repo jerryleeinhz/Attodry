@@ -235,6 +235,20 @@ uncommissioned and require separate explicit authorization.
   Only Git, compileall, and unittest ran; the vendor DLL was not loaded and no
   `begin/connect` or hardware command was issued. The exact temporary clone path
   was verified before removal, and cleanup was confirmed.
+- The first explicitly authorized real T4 attempt passed the 0.05 K sensor-movement
+  gate from an initial 1.7237 K sample reading and sent one 1.75 K setpoint write.
+  Its immediate setpoint readback remained 2.0 K, so the command failed closed
+  before enabling temperature control, recorded the final confirmed unchanged
+  state, and disconnected normally. A subsequent authorized five-sample read-only
+  check confirmed that the DLL had asynchronously applied the 1.75 K setpoint;
+  sample temperature remained 1.7240--1.7241 K, temperature control remained
+  disabled, and every error code was zero.
+- Updated setpoint confirmation for the observed asynchronous DLL behavior:
+  an already confirmed identical setpoint is idempotent, while a new setpoint is
+  polled through complete state/error reads for at most 30 s using the configured
+  temperature polling interval. Failure still preserves the last confirmed state.
+  Local compilation, all 36 attoDRY tests, and all 162 project tests passed
+  (2 optional plotting tests skipped).
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

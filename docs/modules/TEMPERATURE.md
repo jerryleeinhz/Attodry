@@ -12,7 +12,9 @@ T0 contract audit 和 T1 offline behavior tests 已于 2026-08-21 完成。温�
 `set_temperature(target_k)` 和 `wait_for_temperature(target_k)`；不包含 PID、
 磁场或扫描组合。fake-DLL 已覆盖温度读失败、控制状态、setpoint 读回、连续
 稳定窗口、错误和超时。T4 所需的显式授权 commissioning CLI 已完成 fake-DLL
-验证，但真实写入仍未进行。T2 target offline validation 已在明确授权下通过
+验证。首次真实 T4 尝试已发送一次 1.75 K setpoint，但因 DLL 立即读回仍为
+2.0 K 而 fail closed，未开启温控；随后 5 次只读状态均确认 setpoint 已异步更新为
+1.75 K、温控仍关闭且错误码为零。T2 target offline validation 已在明确授权下通过
 Git 分支完成：`LK_setup` 的 64 位 Python 3.12.13 `lyr` 对提交 `e9a7b8c`
 运行 35 项温度测试和 156 项完整测试均通过，`compileall` 通过；没有加载
 vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
@@ -24,8 +26,8 @@ vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删�
 159 项完整测试全部通过、0 skipped，`compileall` 和新 CLI help 通过；未加载 DLL、
 调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
-这只证明连接和读回。真实温度设定、温控启停、稳定等待和异常恢复尚未进行写入
-验收，不能描述为 commissioned。
+当前已经证明连接、读回和一次异步 setpoint 更新。温控开启、稳定等待和异常恢复
+尚未完成真实验收，整个 T4 仍不能描述为 commissioned。
 
 ## 模块目标
 
@@ -117,7 +119,7 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 为 1.7242--1.7246 K，VTI 为 1.7138--1.7143 K，Bx/Bz 读回和设定值均为零，
 温度与磁场控制均关闭；该结果仍不能证明温控写入。
 
-### T4 - smallest temperature write commissioning（offline tool ready；real write pending）
+### T4 - smallest temperature write commissioning（real setpoint confirmed；control/stability pending）
 
 - 需要用户提供最小实际目标、容差、dwell、timeout 和异常时保持/恢复策略，
   并明确授权允许的 setpoint/control 写命令。
@@ -142,7 +144,12 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 - 记录初始状态、目标/恢复的每个滚动窗口样本、恢复动作、最终状态和断开结果；
   读回、恢复或 close 失败均保留原始错误且不虚构稳定/恢复/断开成功。
 - fake-DLL 已覆盖授权门、越界/过大步长、hold-target、restore-initial、超时恢复、
-  hold-current 和 Disconnect 失败。真实执行仍必须等待用户给值并逐项授权。
+  hold-current 和 Disconnect 失败。
+- 真实首次写入表明 vendor DLL 的 user-temperature setpoint 读回可能异步更新。
+  相同设定值现在是幂等操作，不重复发送写入；新值写入后按本次
+  `poll_interval_s` 轮询完整状态，最多等待固定的 30 s acknowledgement 上限，
+  未确认则 fail closed。30 s 是驱动协议安全上限，不是温度稳定判据，也不改变
+  用户配置的 1800 s 总稳定超时。
 
 ### T4 参数含义
 
@@ -171,7 +178,8 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 `tolerance_k=0.01`、`stable_range_k=0.01`、`dwell_s=600`、
 `poll_interval_s=1`、`timeout_s=1800`、成功 `hold-target`、失败
 `hold-current`。TOML 中目标必须写成数值 `1.75`，不能写成字符串 `"1.75K"`。
-这些值只授权离线准备；真实连接和写入仍等待单独明确授权。
+这些值已经获得本次真实 T4 的明确连接和温度写入授权。首次 setpoint 已确认；
+温控开启和 600 s 连续稳定窗口仍待继续验证。
 
 ## 预计文件所有权
 

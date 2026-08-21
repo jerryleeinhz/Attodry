@@ -14,6 +14,9 @@ from .safety import MagnetLimits, validate_vector_field
 from .stability import TimedValue, evaluate_stability
 
 
+TEMPERATURE_SETPOINT_ACK_TIMEOUT_S = 30.0
+
+
 class AttoDryError(RuntimeError):
     pass
 
@@ -280,7 +283,13 @@ class AttoDryDriver:
         self.last_confirmed_state = state
         return state
 
-    def set_temperature(self, temperature_k: float) -> None:
+    def set_temperature(
+        self,
+        temperature_k: float,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._require_write_authorized()
         state = self.read_state()
         self._require_clear_error(state)
@@ -288,6 +297,8 @@ class AttoDryDriver:
             self.temperature_min_k <= temperature_k <= self.temperature_max_k
         ):
             raise ValueError("Temperature target is outside configured limits.")
+        if math.isclose(state.user_temperature_k, temperature_k, abs_tol=1e-4):
+            return
         self._call(
             "setUserTemperature",
             "AttoDRY_Interface_setUserTemperature",
@@ -295,10 +306,29 @@ class AttoDryDriver:
         )
         confirmed = self.read_state()
         self._require_clear_error(confirmed)
-        if not math.isclose(
-            confirmed.user_temperature_k, temperature_k, abs_tol=1e-4
-        ):
-            raise AttoDryError("Temperature setpoint readback does not match target.")
+        if math.isclose(confirmed.user_temperature_k, temperature_k, abs_tol=1e-4):
+            return
+
+        started = monotonic()
+        while True:
+            elapsed = monotonic() - started
+            if elapsed >= TEMPERATURE_SETPOINT_ACK_TIMEOUT_S:
+                raise AttoDryTimeout(
+                    "Temperature setpoint readback did not reach target within "
+                    f"{TEMPERATURE_SETPOINT_ACK_TIMEOUT_S:g} s."
+                )
+            sleeper(
+                min(
+                    self.temperature_stability.poll_interval_s,
+                    TEMPERATURE_SETPOINT_ACK_TIMEOUT_S - elapsed,
+                )
+            )
+            confirmed = self.read_state()
+            self._require_clear_error(confirmed)
+            if math.isclose(
+                confirmed.user_temperature_k, temperature_k, abs_tol=1e-4
+            ):
+                return
 
     def ensure_temperature_control(self, enabled: bool) -> None:
         self._ensure_control(

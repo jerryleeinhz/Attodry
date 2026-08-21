@@ -296,7 +296,9 @@ def run(
             )
 
         mutation_attempted = True
-        driver.set_temperature(request.target_k)
+        driver.set_temperature(
+            request.target_k, monotonic=monotonic, sleeper=sleeper
+        )
         driver.ensure_temperature_control(True)
         target_state = driver.wait_for_temperature(
             request.target_k,
@@ -390,7 +392,11 @@ def _restore_initial(
     if not initial_state.temperature_control_enabled:
         driver.ensure_temperature_control(False)
         actions.append("temperature_control_restored_disabled")
-    driver.set_temperature(initial_state.user_temperature_k)
+    driver.set_temperature(
+        initial_state.user_temperature_k,
+        monotonic=monotonic,
+        sleeper=sleeper,
+    )
     actions.append("temperature_setpoint_restored")
     if initial_state.temperature_control_enabled:
         driver.ensure_temperature_control(True)
