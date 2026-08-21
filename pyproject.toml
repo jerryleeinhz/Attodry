@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-hardware = ["pyvisa==1.16.2"]
+hardware = ["pyvisa==1.16.2", "qcodes>=0.47,<1"]
 analysis = ["matplotlib==3.10.9"]
 
 [project.scripts]
@@ -20,6 +20,7 @@ attodry-cryostat-test = "attodry_control.attodry_test:main"
 attodry-monitor = "attodry_control.monitor:main"
 attodry-analyze = "attodry_control.analysis:main"
 attodry-simulate = "attodry_control.simulate:main"
+attodry-three-smu = "attodry_control.three_smu_cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

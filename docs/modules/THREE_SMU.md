@@ -2,8 +2,20 @@
 
 ## 当前状态
 
-状态：`planned`。本文件只定义下一 Chat 的目标、接口、安全边界、使用方式和
-验收条件，不代表生产代码、目标电脑安装或真实 SMU 验收已经完成。
+状态：`offline complete`（S0，2026-08-21）。生产代码、fake-instrument
+测试、CLI、两个 Notebook 与审计/分析路径已经完成；尚未在目标电脑 `lyr`
+环境验收，也未连接真实 SMU 或发送任何真实写命令。
+
+S0 交付结果：
+
+- 严格 hardware/scan TOML、语义角色 QCoDeS Keithley 2400 adapter、共享
+  session/generator、无 GUI CLI、实时 Notebook 和 accepted-only 分析 Notebook
+  均已实现；
+- 每个 run 生成 `metadata.json`、`raw.jsonl`、`data.csv`，保留 rejected/
+  partial/interrupted/cleanup 审计，默认 loader 只返回 completed/accepted/clean；
+- 34 个 Three-SMU focused tests 以及 174 项完整离线回归通过（当前环境有两个
+  optional matplotlib 测试跳过）；
+- 真实硬件连接数为 0，真实写命令数为 0。
 
 该模块使用三台 SMU：
 
@@ -62,7 +74,7 @@ bias provider，而不是重写 gate 扫描、记录和分析模块。
 
 ## 配置设计
 
-计划增加两个文件：
+已增加两个文件：
 
 - `config/three_smu_hardware.example.toml`：三台 SMU 的本地硬件模板；
 - `config/three_smu_scan.example.toml`：可复制修改的扫描计划模板。
@@ -105,7 +117,7 @@ four_wire = false
 
 ## QCoDeS 适配器边界
 
-计划增加一个窄的 Keithley 2400 adapter，参考程序中已证实的调用包括：
+已增加一个窄的 Keithley 2400 adapter，参考程序中已证实的调用包括：
 
 ```text
 mode("VOLT"/"CURR")
@@ -147,7 +159,7 @@ rejected/cleanup 记录。
 10. 通信失败不能记录成 0 或 output-off；保留最后确认状态，并明确提示人工查看
     三台 SMU 面板。电脑/内核硬崩溃无法依靠 Python cleanup。
 
-## 计划的代码边界
+## 已实现的代码边界
 
 ```text
 src/attodry_control/three_smu_config.py    strict hardware/scan TOML
@@ -222,6 +234,8 @@ gate leakage、二维 map；不从三 SMU 数据推导 Lock-in 相位或电阻�
 ## 开发与验收阶段
 
 ### S0 - offline implementation
+
+状态：`offline complete`（2026-08-21）。
 
 - 完成严格配置、点生成器、QCoDeS adapter、共享 session、CLI、两个 Notebook。
 - fake instrument 覆盖正常、重复地址/身份、未知 active output、超限目标、

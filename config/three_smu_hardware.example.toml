@@ -1,0 +1,55 @@
+# Copy to three_smu_hardware.local.toml and replace every CHANGE_ME value.
+# This checked-in file is intentionally unusable for hardware.
+
+[smu_bias]
+model = "Keithley2400"
+address = "CHANGE_ME"
+timeout_ms = "CHANGE_ME"
+source_mode = "voltage"
+compliance_current_a = "CHANGE_ME"
+compliance_voltage_v = "CHANGE_ME"
+source_min = "CHANGE_ME"
+source_max = "CHANGE_ME"
+ramp_step = "CHANGE_ME"
+readback_tolerance = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_top]
+model = "Keithley2400"
+address = "CHANGE_ME"
+timeout_ms = "CHANGE_ME"
+source_mode = "voltage"
+compliance_current_a = "CHANGE_ME"
+compliance_voltage_v = "CHANGE_ME"
+source_min = "CHANGE_ME"
+source_max = "CHANGE_ME"
+ramp_step = "CHANGE_ME"
+readback_tolerance = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+leakage_limit_a = "CHANGE_ME"
+
+[gate_bottom]
+model = "Keithley2400"
+address = "CHANGE_ME"
+timeout_ms = "CHANGE_ME"
+source_mode = "voltage"
+compliance_current_a = "CHANGE_ME"
+compliance_voltage_v = "CHANGE_ME"
+source_min = "CHANGE_ME"
+source_max = "CHANGE_ME"
+ramp_step = "CHANGE_ME"
+readback_tolerance = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+leakage_limit_a = "CHANGE_ME"

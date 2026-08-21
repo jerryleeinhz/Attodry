@@ -195,10 +195,12 @@ Completed offline in Stage 4:
   remained disabled, and all error codes were zero. Raw output remains only on
   the ignored control-computer path.
 
-Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
-harmonic validation, and the attoDRY read-only connection are complete. attoDRY
-setting writes, SMUs, and real end-to-end acquisition still require staged
-authorization.
+Current boundary: all hardware-free work through Stage 7, the independent
+Three-SMU QCoDeS S0 module, integrated dual-SR830 harmonic validation, and the
+attoDRY read-only connection are complete. Three-SMU target-computer validation,
+all real SMU connections/writes, attoDRY setting writes, integration of the
+independent SMU module into the main acquisition, and real end-to-end acquisition
+still require staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
@@ -209,11 +211,11 @@ follow-up:
 - `TEMPERATURE.md` and `MAGNETIC_FIELD.md` separate their offline, target-offline,
   real read-only, and future write-commissioning stages without overstating the
   completed 10-second attoDRY read-only connection.
-- `THREE_SMU.md` defines the planned three-Keithley QCoDeS module: semantic bias/
-  top-gate/bottom-gate roles, shared CLI/Notebook engine, retained scan modes,
-  strict operator-filled safety configuration, auditable data and fail-closed
-  cleanup. It is documentation only; no SMU production code or real connection
-  was performed in this worktree.
+- `THREE_SMU.md` now records the three-Keithley QCoDeS S0 module as offline
+  complete: semantic bias/top-gate/bottom-gate roles, one shared CLI/Notebook
+  generator, retained scan modes, strict operator-filled safety configuration,
+  auditable data, accepted-only analysis, and fail-closed cleanup. No real SMU
+  connection or setting write was performed.
 - `INTEGRATION.md` requires commit IDs, tests, hardware-action reports, and known
   limitations from the four device modules before combination.
 - `docs/modules/README.md` defines shared permissions, `lyr` use, branch/worktree
@@ -224,7 +226,8 @@ connections, status-latch consumption, or setting writes, and no such action was
 performed while creating them.
 
 Stage 5 - gate safety and integrated acquisition: model-independent offline core
-complete; vendor SMU adapters remain pending exact models and safety parameters.
+and independent Three-SMU QCoDeS S0 module complete; target/real commissioning
+and main-acquisition integration remain pending.
 
 Completed offline in Stage 5:
 
@@ -236,9 +239,25 @@ Completed offline in Stage 5:
   before any hardware driver can be constructed.
 - Added signed Vxx/I and excitation-current helpers that do not guess the sample
   path impedance, plus explicit linear paired-gate relations.
-- Added a separate `THREE_SMU.md` handoff plan for a future QCoDeS implementation
-  with one bias SMU and two voltage-source gate SMUs. CLI and Jupyter will share
-  one Python session; the first version deliberately excludes Lock-in recording.
+- Added a separate `THREE_SMU.md` QCoDeS work package with one bias SMU and two
+  voltage-source gate SMUs. Its S0 implementation now
+  provides one shared CLI/Jupyter session and deliberately excludes Lock-in
+  recording.
+- Added strict independent Three-SMU hardware/scan TOML, a narrow exception-
+  transparent QCoDeS Keithley 2400 adapter, offline `describe`, write-gated
+  `run`, and a shared safety/session generator. Supported plans cover time,
+  bias I-V, separate or paired gates, one-to-three-channel maps, and software
+  pulses with directional/serpentine options and repeated samples.
+- Each formal point records sequential per-role timestamps, source setpoint,
+  V/I/R, output, compliance, gate leakage, status, scan coordinates, and cleanup
+  results in `metadata.json`, `raw.jsonl`, and `data.csv`. Raw rejected,
+  interrupted, partial, and cleanup events are retained; the new analysis loader
+  and Notebook default to completed/accepted/clean formal rows.
+- Fake instruments validate authorization-before-driver-import, query-only
+  preflight, duplicate address/identity and active-output refusal, ramp bounds,
+  compliance, leakage, readback mismatch, communication failure, Ctrl+C, and
+  ordered zero-disable cleanup. Cleanup uncertainty rejects otherwise clean data
+  and preserves last-confirmed state for manual verification.
 - Added audited simulation execution across SQLite start/raw/complete events,
   retry, resume, checkpoints, normal hold/zero cleanup, and failure cleanup.
 
@@ -277,8 +296,8 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 140 tests and passes in the minimal
-  environment with one matplotlib rendering test skipped. Source compilation
+- The complete hardware-free suite contains 174 tests and passes in the current
+  minimal environment with two optional matplotlib rendering tests skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
@@ -399,7 +418,8 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 1. Perform staged attoDRY small-movement commissioning only after a new explicit
    write authorization and operator-selected smallest practical targets.
-2. Add the two vendor SMU adapters only after exact models, limits, and command
-   references are supplied.
+2. Run Three-SMU S1 target-offline validation in `LK_setup` `lyr`, then fill
+   the ignored local addresses and safety values. Any real connection or setting
+   write still requires a separate plan-specific authorization.
 3. Freeze and verify the complete hardware wheelhouse on the offline control
    computer after its Python/VISA environment is known.

@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、双 SR830 集成 1/2/3 次谐波器件验收，以及 attoDRY 的 10 秒只读连接验收。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。attoDRY 的任何设置写入、SMU 和端到端硬件路径仍需分阶段显式授权；具体 SMU 命令等待确认型号。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 attoDRY 的 10 秒只读连接验收。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。attoDRY 的任何设置写入、真实 SMU 连接/写入、Three-SMU 主 acquisition 集成和端到端硬件路径仍需分阶段显式授权。
 
 ## 已确认硬件
 
@@ -11,7 +11,8 @@
 - 硬件额定值：X 轴 3 T，Z 轴 9 T；本项目所有实验命令额外限制合成场不超过 3 T。
 - SR830 #1：内部参考、SINE OUT 交流激励、测量 Vxx。
 - SR830 #2：从 #1 TTL OUT 获取外参考、测量 Vxy、SINE OUT 物理断开。
-- 两台栅极 SMU、漏电流与 compliance 保护沿用原输运项目的目标。
+- 三台 Keithley 2400 的独立模块使用 `smu_bias`、`gate_top`、
+  `gate_bottom` 语义角色；双栅漏电流与 compliance 保护已离线实现。
 - 无旋转台；场方向由 Bx/Bz 计算。
 
 ## 安全不变量
@@ -111,6 +112,8 @@ python -m attodry_control.monitor --database PATH --run-id RUN_ID
 python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --inject-first-unlock
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --csv analysis_output/run.csv
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --publication-dir analysis_output/RUN_ID --format png --format pdf
+python -m attodry_control.three_smu_cli describe --hardware config/three_smu_hardware.local.toml --plan config/three_smu_scan.local.toml
+python -m attodry_control.three_smu_cli run --help
 ```
 
 这些命令中的状态、仿真、监视和分析路径都不会连接真实仪器。绘图需要安装

@@ -199,8 +199,9 @@ uncommissioned and require separate explicit authorization.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 
-Status: model-independent offline core complete (2026-08-20); real SMU adapters
-require the user's exact models, limits, and command sets.
+Status: model-independent offline core and the independent Three-SMU QCoDeS S0
+module are complete (2026-08-21); target-computer and real-SMU commissioning
+remain pending explicit authorization and operator-filled limits.
 
 - Added an explicitly write-authorized, model-independent gate controller with
   configured absolute-voltage limit, current compliance, stepped ramps, voltage
@@ -213,10 +214,27 @@ require the user's exact models, limits, and command sets.
   hold/zero, Ctrl+C, and exception cleanup orchestration against SQLite.
 - Added a hardware-readiness gate that rejects unresolved VISA/DLL/SMU addresses
   and all six per-gate safety values before any hardware driver can be built.
-- Added the planned `docs/modules/THREE_SMU.md` work package (2026-08-21) for a
-  separate QCoDeS implementation Chat. It defines three semantic roles, shared
-  CLI/Notebook control, scan modes, strict local TOML, raw-data contracts and
-  fail-closed cleanup. No production SMU code or hardware action is claimed.
+- Added `docs/modules/THREE_SMU.md` (2026-08-21) as the independent QCoDeS
+  implementation package; it now records S0 as offline complete.
+- Added independent `smu_bias`, `gate_top`, and `gate_bottom` Keithley 2400
+  configuration and QCoDeS adapter modules. All placeholders, duplicate
+  addresses/identities, non-voltage gate modes, invalid source ranges, and
+  leakage limits above current compliance fail before production writes.
+- Added one shared scan generator/session for time trace, bias I-V, top/bottom
+  transfer, paired gates, one-to-three-channel serpentine maps, and software
+  pulses. CLI and live Notebook consume that same generator; the first version
+  neither connects nor records Lock-in data.
+- Added explicit write authorization, query-only three-device preflight,
+  unknown-active-output refusal, residual-zero verification, compliance/NPLC/
+  autorange/four-wire configuration, step-bounded ramps, sequential timestamped
+  V/I/R reads, compliance/leakage/readback checks, and ordered bias/top/bottom
+  zero-disable cleanup. A cleanup communication failure rejects the run and
+  requires manual front-panel verification.
+- Added per-run `metadata.json`, `raw.jsonl`, and `data.csv` audit artifacts,
+  plus a read-only loader and Notebook that default to completed/accepted/clean
+  formal samples and require explicit rejected/problem audit opt-in.
+- Added 34 focused fake-instrument/config/adapter/CLI/Notebook/analysis tests.
+  No real VISA resource was opened and no real setting command was sent.
 
 ## Stage 6 - analysis and notebook migration
 
@@ -259,8 +277,8 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 140 tests and passes in the minimal environment
-  with one matplotlib rendering test skipped; source compilation passes without
+- The full offline suite covers 174 tests and passes in the current minimal
+  environment with two optional matplotlib rendering tests skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in
@@ -273,5 +291,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   wiring, phase preservation, settling, sensitivity transitions, latch handling,
   frequency tolerance, sequential pair reads, and cleanup. This is a planning
   and handoff deliverable only; it does not commission any new hardware writes.
-- Pending: exact SMU adapters, real-instrument checks, frozen hardware wheelhouse,
-  and offline-control-computer installation verification.
+- Pending: Three-SMU target-`lyr` offline checks, operator-filled local safety
+  configuration, separately authorized real-SMU commissioning, integration into
+  the main acquisition, frozen hardware wheelhouse, and offline-control-computer
+  installation verification.
