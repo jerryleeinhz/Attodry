@@ -6,7 +6,7 @@
 [temperature_commissioning]
 # Target read by the sample-temperature sensor during the stability check (K).
 target_k = "CHANGE_ME"
-# Maximum allowed change from the initial user-temperature setpoint (K).
+# Maximum allowed movement from the initial sample-temperature sensor reading (K).
 max_delta_k = "CHANGE_ME"
 # Maximum error of every sensor sample from target_k (K).
 tolerance_k = "CHANGE_ME"

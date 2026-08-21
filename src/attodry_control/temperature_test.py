@@ -275,13 +275,24 @@ def run(
         connected = True
         initial_state = driver.read_state()
         record["initial_state"] = asdict(initial_state)
-        if (
-            abs(request.target_k - initial_state.user_temperature_k)
-            > request.max_delta_k
-        ):
+        sample_target_delta_k = abs(
+            request.target_k - initial_state.sample_temperature_k
+        )
+        user_setpoint_target_delta_k = abs(
+            request.target_k - initial_state.user_temperature_k
+        )
+        record["prewrite_check"] = {
+            "initial_sample_temperature_k": initial_state.sample_temperature_k,
+            "initial_user_temperature_k": initial_state.user_temperature_k,
+            "sample_target_delta_k": sample_target_delta_k,
+            "user_setpoint_target_delta_k": user_setpoint_target_delta_k,
+            "max_delta_k": request.max_delta_k,
+            "passed": sample_target_delta_k <= request.max_delta_k,
+        }
+        if sample_target_delta_k > request.max_delta_k:
             raise ValueError(
-                "Requested temperature step exceeds the explicitly authorized "
-                "max-delta-k."
+                "Requested sample-temperature movement exceeds the explicitly "
+                "authorized max-delta-k."
             )
 
         mutation_attempted = True

@@ -204,8 +204,8 @@ uncommissioned and require separate explicit authorization.
   continuous stability window. Read and communication failures preserve the
   prior `last_confirmed_state`.
 - Added a separate dual-authorization smallest-temperature-movement CLI for the
-  future T4 commissioning run. It requires explicit target, maximum setpoint
-  delta, stability criteria, timeout, and success/failure policies; records every
+  future T4 commissioning run. It requires explicit target, maximum sample-sensor
+  movement, stability criteria, timeout, and success/failure policies; records every
   target/restoration sample and action; and never claims successful recovery or
   disconnect after a failed read or close. Fake-DLL tests cover all policies and
   authorization/limit gates. No real connection or setting write was performed.
@@ -221,6 +221,15 @@ uncommissioned and require separate explicit authorization.
   parameter-file option. Only Git, unittest, compileall, and help output ran;
   the vendor DLL was not loaded and no `begin/connect` or hardware command was
   issued. The verified temporary clone was removed.
+- Recorded the operator-selected T4 candidate values in the ignored
+  `config/temperature_commissioning.local.toml`: 1.75 K target, 0.05 K maximum
+  sample-sensor movement, 0.01 K tolerance/range, 600 s dwell, 1 s polling,
+  1800 s timeout, `hold-target` success, and `hold-current` failure. The movement
+  gate now compares the target with the initial sample-temperature sensor reading;
+  the initial user-setpoint delta is retained separately in the raw audit record.
+  Local compilation, all 34 attoDRY tests, and all 160 project tests passed
+  (2 optional plotting tests skipped). This was offline only; no DLL was loaded
+  and no connection or hardware command was issued.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

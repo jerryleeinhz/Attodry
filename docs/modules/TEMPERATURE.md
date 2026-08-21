@@ -136,7 +136,9 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 - 参数文件缺失、未知字段、`CHANGE_ME` 占位符或非法数值都会在加载 DLL 前拒绝。
   参数文件不包含授权；每次仍须有 connection 和 temperature-write 两个 CLI 授权。
 - 目标先按配置温区检查；连接后的初始完整状态用于检查
-  `abs(target - initial_setpoint) <= max_delta`，通过前不发送写命令。
+  `abs(target - initial_sample_temperature) <= max_delta`，通过前不发送写命令。
+  初始用户设定值差同时写入审计记录，但温控关闭时的陈旧设定值不被当成样品
+  实际移动。
 - 记录初始状态、目标/恢复的每个滚动窗口样本、恢复动作、最终状态和断开结果；
   读回、恢复或 close 失败均保留原始错误且不虚构稳定/恢复/断开成功。
 - fake-DLL 已覆盖授权门、越界/过大步长、hold-target、restore-initial、超时恢复、
@@ -147,7 +149,7 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 | 参数 | 单位 | 含义和安全作用 |
 | --- | --- | --- |
 | `target_k` | K | 本次动作的目标样品温度。必须落在 `hardware.local.toml` 配置的温区内；稳定判据使用 DLL `getSampleTemperature` 传感器读数检查它，而非仅检查软件设定值。它不是初始温度的自动推断值。 |
-| `max_delta_k` | K | 相对连接后初始 `user_temperature_k` 设定值允许的最大绝对步长。若 `abs(target_k - initial_setpoint) > max_delta_k`，在任何写命令前终止；它不替代温区上下限。 |
+| `max_delta_k` | K | 相对连接后初始 `sample_temperature_k` 传感器读数允许的最大物理移动。若 `abs(target_k - initial_sample_temperature) > max_delta_k`，在任何写命令前终止；初始用户设定值差另行记录，它不替代温区上下限。 |
 | `tolerance_k` | K | 稳定窗口内每个样品温度样本与 `target_k` 的最大允许绝对误差；必须为正。 |
 | `stable_range_k` | K | 同一连续 dwell 窗口内样品温度的 peak-to-peak 最大允许范围，即 `max(sample) - min(sample)`；可为零。 |
 | `dwell_s` | s | 连续稳定窗口的最短时间跨度。窗口还必须有至少 3 个样本；控制中断、错误或通信失败会清空窗口。 |
@@ -158,11 +160,18 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 | `--authorize-connection` | — | 明确允许本次连接/读取。缺少时在加载 DLL 前拒绝。 |
 | `--authorize-temperature-write` | — | 明确允许本次温度 setpoint 和温控开关写入。缺少时在加载 DLL 前拒绝；只读授权不能替代它。 |
 
-其中，`target_k` 用于样品温度稳定判据，而 `max_delta_k` 只保护“从当前用户设定值到新设定值”的动作幅度；两者必须同时满足。
+其中，`target_k` 用于样品温度稳定判据，`max_delta_k` 保护“从当前样品传感器
+读数到目标”的实际温度移动；两者必须同时满足。
 
 推荐在 `config/temperature_commissioning.local.toml` 文件开头修改上表的九个
 本次参数，而不修改 Python 或 `hardware.local.toml`。该 local 文件已被 Git 忽略；
 它存在也不会代替每次的两个命令行授权。
+
+用户为首次 T4 提供的候选参数为：`target_k=1.75`、`max_delta_k=0.05`、
+`tolerance_k=0.01`、`stable_range_k=0.01`、`dwell_s=600`、
+`poll_interval_s=1`、`timeout_s=1800`、成功 `hold-target`、失败
+`hold-current`。TOML 中目标必须写成数值 `1.75`，不能写成字符串 `"1.75K"`。
+这些值只授权离线准备；真实连接和写入仍等待单独明确授权。
 
 ## 预计文件所有权
 

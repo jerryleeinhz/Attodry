@@ -596,13 +596,38 @@ failure_policy = "hold-current"
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
         self.assertTrue(result["disconnected"])
 
+    def test_temperature_cli_max_delta_uses_initial_sample_sensor(self) -> None:
+        self.dll.sample_temperature_k = 1.7244
+        self.dll.user_temperature_k = 2.0
+        self.dll.temperature_follows_setpoint = True
+        args = self.temperature_args()
+        args[args.index("--target-k") + 1] = "1.75"
+        args[args.index("--max-delta-k") + 1] = "0.05"
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            run_temperature_test(
+                args + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        check = result["prewrite_check"]
+        self.assertTrue(check["passed"])
+        self.assertAlmostEqual(check["sample_target_delta_k"], 0.0256, places=4)
+        self.assertAlmostEqual(check["user_setpoint_target_delta_k"], 0.25)
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+
     def test_temperature_cli_rejects_excessive_step_before_write(self) -> None:
         args = self.temperature_args()
         args[args.index("--max-delta-k") + 1] = "0.05"
         output = io.StringIO()
 
         with redirect_stdout(output), self.assertRaisesRegex(
-            ValueError, "exceeds.*max-delta-k"
+            ValueError, "sample-temperature movement exceeds.*max-delta-k"
         ):
             run_temperature_test(
                 args + ["--authorize-connection", "--authorize-temperature-write"],

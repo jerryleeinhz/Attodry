@@ -203,8 +203,8 @@ Completed offline in Stage 4:
   resets the continuous dwell window. Communication failures retain the prior
   `last_confirmed_state`.
 - Added an offline-tested, dual-authorization `attodry-temperature-test` command
-  for the future smallest-movement write stage. Every target, maximum setpoint
-  delta, stability parameter, timeout, and success/failure hold-or-restore policy
+  for the future smallest-movement write stage. Every target, maximum sample-sensor
+  movement, stability parameter, timeout, and success/failure hold-or-restore policy
   is explicit. It retains target/restoration samples and never infers recovery or
   disconnect after failed readback/close. No real attoDRY connection or write was
   performed for this addition.
@@ -219,6 +219,14 @@ Completed offline in Stage 4:
   compileall passed, and the CLI help exposed `--commissioning-config`. No DLL
   was loaded and no `begin/connect` or hardware command ran; the temporary clone
   was removed after verification.
+- The ignored local T4 file now contains the operator-selected 1.75 K target,
+  0.05 K maximum sample-sensor movement, 0.01 K tolerance/range, 600 s dwell,
+  1 s polling, 1800 s timeout, `hold-target` success, and `hold-current` failure.
+  `max_delta_k` is checked against the initial sample-temperature sensor reading;
+  the possibly stale initial user-setpoint delta is recorded separately for audit.
+  Local compilation, all 34 attoDRY tests, and all 160 project tests passed
+  (2 optional plotting tests skipped), without DLL loading, connection, or any
+  hardware command. Real setting writes still require new explicit authorization.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
