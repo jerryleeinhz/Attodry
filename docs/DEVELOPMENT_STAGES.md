@@ -196,6 +196,22 @@ uncommissioned and require separate explicit authorization.
   temperature and field control stayed disabled, and every error code was zero.
   The run disconnected and ended normally; its raw JSON remains only on the
   ignored control-computer path.
+- Completed the Temperature-module T0 contract audit and T1 offline behavior
+  tests. Control flags now accept only explicit 0/1 values, temperature setpoint
+  writes require a full post-write state/error/readback confirmation, invalid
+  wait targets fail before polling, and a disabled-control interval resets the
+  continuous stability window. Read and communication failures preserve the
+  prior `last_confirmed_state`.
+- Added a separate dual-authorization smallest-temperature-movement CLI for the
+  future T4 commissioning run. It requires explicit target, maximum setpoint
+  delta, stability criteria, timeout, and success/failure policies; records every
+  target/restoration sample and action; and never claims successful recovery or
+  disconnect after a failed read or close. Fake-DLL tests cover all policies and
+  authorization/limit gates. No real connection or setting write was performed.
+- T2 target validation has only confirmed the `LK_setup` `lyr` interpreter as
+  64-bit Python 3.12.13. The target has no project copy, and the source/test
+  snapshot was not transferred without separate authorization, so T2 remains
+  pending.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 
@@ -255,8 +271,8 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 140 tests and passes in the minimal environment
-  with one matplotlib rendering test skipped; source compilation passes without
+- The full offline suite covers 156 tests and passes in the minimal environment
+  with two matplotlib rendering tests skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in

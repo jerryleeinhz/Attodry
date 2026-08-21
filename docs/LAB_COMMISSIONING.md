@@ -86,6 +86,35 @@ limits:
 
 At every vector point, enforce `sqrt(Bx^2 + Bz^2) <= 3 T`.
 
+For the temperature movement, review every placeholder and policy before adding
+the two authorization flags. Merely having this command in the repository does
+not authorize a connection or write:
+
+```powershell
+python -m attodry_control.temperature_test `
+  --config config\hardware.local.toml `
+  --target-k TARGET_K `
+  --max-delta-k MAX_AUTHORIZED_DELTA_K `
+  --tolerance-k TOLERANCE_K `
+  --stable-range-k STABLE_RANGE_K `
+  --dwell-s DWELL_S `
+  --poll-interval-s POLL_INTERVAL_S `
+  --timeout-s TIMEOUT_S `
+  --success-policy SUCCESS_POLICY `
+  --failure-policy FAILURE_POLICY `
+  --authorize-connection `
+  --authorize-temperature-write |
+  Tee-Object -FilePath "attodry_temperature_movement.json"
+```
+
+`SUCCESS_POLICY` is `hold-target` or `restore-initial`; `FAILURE_POLICY` is
+`hold-current` or `restore-initial`. The tool rejects a configured-range violation
+before DLL loading and rejects a step larger than `MAX_AUTHORIZED_DELTA_K` after
+the initial read but before any write. `restore-initial` restores the original
+setpoint and control flag; if the original control was disabled, it does not claim
+that the sample temperature returned to the original value. Any communication or
+close failure requires manual verification of setpoint and control state.
+
 ## 5. End-to-end run and deliberate safe failure
 
 Run one low-excitation, zero-gate, near-zero-field condition first. Confirm six

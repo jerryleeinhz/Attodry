@@ -265,16 +265,12 @@ class AttoDryDriver:
             vti_temperature_k=vti_temperature,
             field=field,
             field_setpoint=field_setpoint,
-            temperature_control_enabled=bool(
-                self._get_int(
-                    "isControllingTemperature",
-                    "AttoDRY_Interface_isControllingTemperature",
-                )
+            temperature_control_enabled=self._get_control_flag(
+                "isControllingTemperature",
+                "AttoDRY_Interface_isControllingTemperature",
             ),
-            field_control_enabled=bool(
-                self._get_int(
-                    "isControllingField", "AttoDRY_Interface_isControllingField"
-                )
+            field_control_enabled=self._get_control_flag(
+                "isControllingField", "AttoDRY_Interface_isControllingField"
             ),
             error_code=self._get_int8(
                 "getAttodryErrorStatus",
@@ -297,10 +293,11 @@ class AttoDryDriver:
             "AttoDRY_Interface_setUserTemperature",
             ctypes.c_float(temperature_k),
         )
-        readback = self._get_float(
-            "getUserTemperature", "AttoDRY_Interface_getUserTemperature"
-        )
-        if not math.isclose(readback, temperature_k, abs_tol=1e-4):
+        confirmed = self.read_state()
+        self._require_clear_error(confirmed)
+        if not math.isclose(
+            confirmed.user_temperature_k, temperature_k, abs_tol=1e-4
+        ):
             raise AttoDryError("Temperature setpoint readback does not match target.")
 
     def ensure_temperature_control(self, enabled: bool) -> None:
@@ -358,7 +355,12 @@ class AttoDryDriver:
         *,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
+        on_sample: Callable[[CryostatState, float], None] | None = None,
     ) -> CryostatState:
+        if not math.isfinite(target_k) or not (
+            self.temperature_min_k <= target_k <= self.temperature_max_k
+        ):
+            raise ValueError("Temperature target is outside configured limits.")
         return self._wait_stable(
             target=target_k,
             config=self.temperature_stability,
@@ -367,6 +369,7 @@ class AttoDryDriver:
             label="temperature",
             monotonic=monotonic,
             sleeper=sleeper,
+            on_sample=on_sample,
         )
 
     def wait_for_field(
@@ -441,7 +444,7 @@ class AttoDryDriver:
             return
         self._require_write_authorized()
         self._call(toggle_label, toggle_symbol)
-        if bool(self._get_int(verify_label, verify_symbol)) != enabled:
+        if self._get_control_flag(verify_label, verify_symbol) != enabled:
             raise AttoDryError(f"{state_attribute} readback did not reach {enabled}.")
 
     def _wait_stable(
@@ -454,12 +457,15 @@ class AttoDryDriver:
         label: str,
         monotonic: Callable[[], float],
         sleeper: Callable[[float], None],
+        on_sample: Callable[[CryostatState, float], None] | None = None,
     ) -> CryostatState:
         started = monotonic()
         samples: deque[TimedValue] = deque()
         while True:
             state = self.read_state()
             elapsed = monotonic() - started
+            if on_sample is not None:
+                on_sample(state, elapsed)
             if state.error_code:
                 raise AttoDryError(
                     f"attoDRY error code {state.error_code} while waiting for {label}."
@@ -471,6 +477,8 @@ class AttoDryDriver:
                     samples.popleft()
                 if evaluate_stability(tuple(samples), target, config.criteria):
                     return state
+            else:
+                samples.clear()
             if elapsed >= config.wait_timeout_s:
                 raise AttoDryTimeout(f"{label.capitalize()} stability wait timed out.")
             sleeper(config.poll_interval_s)
@@ -491,6 +499,12 @@ class AttoDryDriver:
         value = ctypes.c_int8()
         self._call(label, symbol, ctypes.byref(value))
         return int(value.value)
+
+    def _get_control_flag(self, label: str, symbol: str) -> bool:
+        value = self._get_int(label, symbol)
+        if value not in (0, 1):
+            raise AttoDryError(f"{label} returned invalid control state {value}.")
+        return bool(value)
 
     def _call(self, label: str, symbol: str, *args: object) -> None:
         code = int(getattr(self.dll, symbol)(*args))
