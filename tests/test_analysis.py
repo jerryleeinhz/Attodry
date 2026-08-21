@@ -136,6 +136,7 @@ class AnalysisTests(unittest.TestCase):
                 y_v=0.0,
                 amplitude_v=abs(x_v),
                 phase_deg=180.0 if x_v < 0 else 0.0,
+                phase_shift_deg=23.5,
                 frequency_hz=17.777,
                 locked=locked,
                 overload=False,
@@ -146,6 +147,8 @@ class AnalysisTests(unittest.TestCase):
         rows = load_analysis_rows(self.path, "analysis-run")
         self.assertEqual(len(rows), 6)
         self.assertTrue(all(row.accepted for row in rows))
+        self.assertTrue(all(row.captured_at_utc == NOW for row in rows))
+        self.assertTrue(all(row.phase_shift_deg == 23.5 for row in rows))
         self.assertAlmostEqual(rows[0].field_magnitude_t, math.sqrt(2))
         self.assertAlmostEqual(rows[0].angle_deg_from_z, 45.0)
 
@@ -176,6 +179,7 @@ class AnalysisTests(unittest.TestCase):
             row for row in records if row["role"] == "xx" and row["harmonic"] == "1"
         )
         self.assertAlmostEqual(float(xx_h1["signed_resistance_ohm"]), -2000.0)
+        self.assertEqual(float(xx_h1["phase_shift_deg"]), 23.5)
 
     def test_gate_map_reorders_serpentine_points_into_rectangular_matrix(self) -> None:
         base = next(

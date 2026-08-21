@@ -13,8 +13,17 @@ from attodry_control.sr830 import (
     Sr830AcquisitionError,
     Sr830,
     Sr830Error,
+    configure_fixed_settings_pair,
     configure_minimum_excitation_pair,
     decode_lia_status,
+)
+from attodry_control.sr830_settings import (
+    ExternalReferenceEdge,
+    InputCoupling,
+    InputMode,
+    ReferenceSource,
+    ShieldGrounding,
+    map_sr830_settings,
 )
 
 
@@ -57,6 +66,16 @@ class FakeVisaResource:
             raise OSError("injected VISA write failure")
         if command.startswith("HARM "):
             self.responses["HARM?"] = command.split()[1] + "\n"
+        for prefix, query in (
+            ("ISRC ", "ISRC?"),
+            ("IGND ", "IGND?"),
+            ("ICPL ", "ICPL?"),
+            ("OFLT ", "OFLT?"),
+            ("OFSL ", "OFSL?"),
+            ("SENS ", "SENS?"),
+        ):
+            if command.startswith(prefix):
+                self.responses[query] = command.split()[1] + "\n"
 
     def close(self) -> None:
         self.closed = True
@@ -129,6 +148,7 @@ def responses(reference_mode: int, *, frequency_hz: float = 17.777) -> dict[str,
         "RMOD?": "1\n",
         "OFLT?": "10\n",
         "OFSL?": "3\n",
+        "PHAS?": "7.5\n",
         "SNAP? 1,2,3,4,9": (
             f"1e-6,2e-7,1.0198e-6,11.31,{frequency_hz:g}\n"
         ),
@@ -138,6 +158,25 @@ def responses(reference_mode: int, *, frequency_hz: float = 17.777) -> dict[str,
 
 
 class Sr830Tests(unittest.TestCase):
+    @staticmethod
+    def _fixed_codes(*, external: bool):
+        return map_sr830_settings(
+            reference_source=(
+                ReferenceSource.EXTERNAL_TTL
+                if external
+                else ReferenceSource.INTERNAL
+            ),
+            external_reference_edge=(
+                ExternalReferenceEdge.RISING if external else None
+            ),
+            input_mode=InputMode.A_MINUS_B,
+            shield_grounding=ShieldGrounding.FLOAT,
+            input_coupling=InputCoupling.AC,
+            time_constant_s=0.3,
+            filter_slope_db_oct=24,
+            sensitivity_full_scale_v=0.001,
+        )
+
     def _hardware_config(self, *, frequency_hz: float = 17.777) -> Path:
         temporary = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
         temporary.close()
@@ -163,10 +202,175 @@ class Sr830Tests(unittest.TestCase):
 
         self.assertEqual(diagnostic.role, LockinRole.XX)
         self.assertAlmostEqual(diagnostic.x_v, 1e-6)
+        self.assertEqual(diagnostic.phase_shift_deg, 7.5)
+        self.assertIn("PHAS?", resource.queries)
         self.assertIsNone(diagnostic.lia_status)
         self.assertNotIn("LIAS?", resource.queries)
         self.assertNotIn("ERRS?", resource.queries)
         self.assertEqual(resource.writes, [])
+
+    def test_fixed_setting_readback_interfaces_are_query_only(self) -> None:
+        resource = FakeVisaResource(responses(reference_mode=1))
+        instrument = Sr830(resource, LockinRole.XX)
+
+        self.assertEqual(instrument.read_sensitivity(), 23)
+        self.assertEqual(instrument.read_time_constant(), 10)
+        self.assertEqual(instrument.read_filter_slope(), 3)
+        self.assertEqual(instrument.read_phase_shift(), 7.5)
+
+        self.assertEqual(resource.writes, [])
+        self.assertEqual(
+            resource.queries, ["SENS?", "OFLT?", "OFSL?", "PHAS?"]
+        )
+
+    def test_fixed_setting_pair_refuses_unauthorized_writes_before_queries(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+
+        with self.assertRaises(AuthorizationRequired):
+            configure_fixed_settings_pair(
+                Sr830(xx_resource, LockinRole.XX),
+                Sr830(xy_resource, LockinRole.XY),
+                xx_settings=self._fixed_codes(external=False),
+                xy_settings=self._fixed_codes(external=True),
+                expected_frequency_hz=17.777,
+                settle_s=1.5,
+                sleeper=lambda _: None,
+                authorize_writes=False,
+                confirm_xy_sine_disconnected=True,
+            )
+
+        self.assertEqual(xx_resource.queries, [])
+        self.assertEqual(xy_resource.queries, [])
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
+
+    def test_fixed_setting_pair_requires_five_time_constants_before_queries(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+
+        with self.assertRaisesRegex(Sr830Error, "at least 1.5 s"):
+            configure_fixed_settings_pair(
+                Sr830(xx_resource, LockinRole.XX),
+                Sr830(xy_resource, LockinRole.XY),
+                xx_settings=self._fixed_codes(external=False),
+                xy_settings=self._fixed_codes(external=True),
+                expected_frequency_hz=17.777,
+                settle_s=1.49,
+                sleeper=lambda _: None,
+                authorize_writes=True,
+                confirm_xy_sine_disconnected=True,
+            )
+
+        self.assertEqual(xx_resource.queries, [])
+        self.assertEqual(xy_resource.queries, [])
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
+
+    def test_fixed_setting_pair_diagnoses_writes_and_verifies_without_auto_phase(self) -> None:
+        events: list[tuple[str, str, str]] = []
+        xx_resource = FakeVisaResource(
+            responses(reference_mode=1), name="xx", events=events
+        )
+        xy_resource = FakeVisaResource(
+            responses(reference_mode=0), name="xy", events=events
+        )
+        delays: list[float] = []
+
+        result = configure_fixed_settings_pair(
+            Sr830(xx_resource, LockinRole.XX),
+            Sr830(xy_resource, LockinRole.XY),
+            xx_settings=self._fixed_codes(external=False),
+            xy_settings=self._fixed_codes(external=True),
+            expected_frequency_hz=17.777,
+            settle_s=1.5,
+            sleeper=delays.append,
+            authorize_writes=True,
+            confirm_xy_sine_disconnected=True,
+        )
+
+        expected_writes = [
+            "ISRC 1",
+            "IGND 0",
+            "ICPL 0",
+            "OFLT 9",
+            "OFSL 3",
+            "SENS 17",
+        ]
+        self.assertEqual(xx_resource.writes, expected_writes)
+        self.assertEqual(xy_resource.writes, expected_writes)
+        self.assertEqual(delays, [1.5])
+        first_write = next(index for index, event in enumerate(events) if event[1] == "write")
+        preflight_identities = [
+            event for event in events[:first_write] if event[1:] == ("query", "*IDN?")
+        ]
+        preflight_snapshots = [
+            event
+            for event in events[:first_write]
+            if event[1:] == ("query", "SNAP? 1,2,3,4,9")
+        ]
+        self.assertEqual(len(preflight_identities), 2)
+        self.assertEqual(len(preflight_snapshots), 2)
+        self.assertEqual(result.after_xx.time_constant, 9)
+        self.assertEqual(result.after_xx.sensitivity, 17)
+        self.assertEqual(result.after_xy.sensitivity, 17)
+        self.assertEqual(result.after_xx.phase_shift_deg, 7.5)
+        self.assertEqual(result.after_xy.phase_shift_deg, 7.5)
+        self.assertFalse(
+            any("APHS" in command for command in xx_resource.writes + xy_resource.writes)
+        )
+
+    def test_fixed_setting_write_failure_minimizes_outputs_and_restores(self) -> None:
+        xx_resource = FakeVisaResource(
+            responses(reference_mode=1), fail_write="OFLT 9"
+        )
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+
+        with self.assertRaisesRegex(OSError, "injected VISA write failure"):
+            configure_fixed_settings_pair(
+                Sr830(xx_resource, LockinRole.XX),
+                Sr830(xy_resource, LockinRole.XY),
+                xx_settings=self._fixed_codes(external=False),
+                xy_settings=self._fixed_codes(external=True),
+                expected_frequency_hz=17.777,
+                settle_s=1.5,
+                sleeper=lambda _: None,
+                authorize_writes=True,
+                confirm_xy_sine_disconnected=True,
+            )
+
+        self.assertIn("SLVL 0.004", xx_resource.writes)
+        self.assertIn("SLVL 0.004", xy_resource.writes)
+        self.assertIn("OFLT 10", xx_resource.writes)
+        self.assertIn("SENS 23", xy_resource.writes)
+        self.assertFalse(
+            any("APHS" in command for command in xx_resource.writes + xy_resource.writes)
+        )
+
+    def test_fixed_setting_rejects_phase_shift_change_and_cleans_up(self) -> None:
+        xx_responses = responses(reference_mode=1)
+        xx_responses["PHAS?"] = ["7.5\n", "8.0\n", "7.5\n"]
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+
+        with self.assertRaisesRegex(Sr830Error, "PHAS shift changed"):
+            configure_fixed_settings_pair(
+                Sr830(xx_resource, LockinRole.XX),
+                Sr830(xy_resource, LockinRole.XY),
+                xx_settings=self._fixed_codes(external=False),
+                xy_settings=self._fixed_codes(external=True),
+                expected_frequency_hz=17.777,
+                settle_s=1.5,
+                sleeper=lambda _: None,
+                authorize_writes=True,
+                confirm_xy_sine_disconnected=True,
+            )
+
+        self.assertIn("SLVL 0.004", xx_resource.writes)
+        self.assertIn("SLVL 0.004", xy_resource.writes)
+        self.assertFalse(
+            any("APHS" in command for command in xx_resource.writes + xy_resource.writes)
+        )
 
     def test_status_bits_decode_unlock_and_overloads(self) -> None:
         status = decode_lia_status(0b0000_1111)
@@ -448,6 +652,13 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["completed"])
         self.assertEqual(len(result["readings"]), 6)
+        self.assertTrue(result["pair_reads_are_sequential"])
+        self.assertTrue(
+            all("captured_at_utc" in reading for reading in result["readings"])
+        )
+        self.assertTrue(
+            all(reading["phase_shift_deg"] == 7.5 for reading in result["readings"])
+        )
         self.assertEqual(result["restored_harmonic"], 1)
         self.assertEqual(xx_resource.responses["HARM?"], "1\n")
         self.assertEqual(xy_resource.responses["HARM?"], "1\n")
@@ -880,6 +1091,22 @@ class Sr830Tests(unittest.TestCase):
         result = controller.measure_harmonics(settle_s=0.0, sleeper=lambda _: None)
 
         self.assertEqual(len(result.readings), 6)
+        self.assertEqual(len(result.samples), 6)
+        self.assertTrue(result.pair_reads_are_sequential)
+        self.assertTrue(
+            all(
+                sample.captured_at_utc.utcoffset().total_seconds() == 0
+                for sample in result.samples
+            )
+        )
+        for index in range(0, len(result.samples), 2):
+            self.assertLessEqual(
+                result.samples[index].captured_at_utc,
+                result.samples[index + 1].captured_at_utc,
+            )
+        self.assertTrue(
+            all(reading.phase_shift_deg == 7.5 for reading in result.readings)
+        )
 
     def test_dual_controller_unlock_fails_closed_with_partial_raw_readings(self) -> None:
         xx_resource = FakeVisaResource(responses(reference_mode=1))

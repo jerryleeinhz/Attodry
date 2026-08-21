@@ -4,6 +4,13 @@ from unittest.mock import mock_open, patch
 
 from attodry_control.config import ConfigError, RunMode, load_config
 from attodry_control.models import LockinRole
+from attodry_control.sr830_settings import (
+    ExternalReferenceEdge,
+    InputCoupling,
+    InputMode,
+    SensitivityMode,
+    ShieldGrounding,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +35,18 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.project.mode, RunMode.SIMULATION)
         self.assertEqual(config.lockin_xx.role, LockinRole.XX)
         self.assertEqual(config.lockin_xy.role, LockinRole.XY)
+        self.assertEqual(config.lockin_xx.input_mode, InputMode.A_MINUS_B)
+        self.assertEqual(config.lockin_xx.shield_grounding, ShieldGrounding.FLOAT)
+        self.assertEqual(config.lockin_xx.input_coupling, InputCoupling.AC)
+        self.assertEqual(config.lockin_xx.time_constant_s, 0.3)
+        self.assertEqual(config.lockin_xx.filter_slope_db_oct, 24)
+        self.assertEqual(config.lockin_xx.sensitivity_mode, SensitivityMode.FIXED)
+        self.assertEqual(config.lockin_xx.sensitivity_full_scale_v, 0.001)
+        self.assertEqual(config.lockin_xx.settle_time_constants, 5.0)
+        self.assertIsNone(config.lockin_xx.external_reference_edge)
+        self.assertEqual(
+            config.lockin_xy.external_reference_edge, ExternalReferenceEdge.RISING
+        )
         self.assertEqual(config.magnet.limits.experiment_vector_max_t, 3.0)
         self.assertIsNone(config.visa)
 
@@ -108,6 +127,47 @@ class ConfigurationTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ConfigError, "4 mVrms"):
+            self.load_text(text)
+
+    def test_lockin_rejects_unconfirmed_or_unsupported_fixed_settings(self) -> None:
+        cases = (
+            ('input_mode = "a_minus_b"', 'input_mode = "a"', "input_mode"),
+            ('shield_grounding = "float"', 'shield_grounding = "ground"', "shield_grounding"),
+            ('input_coupling = "ac"', 'input_coupling = "dc"', "input_coupling"),
+            ("time_constant_s = 0.3", "time_constant_s = 1.0", "time_constant_s"),
+            ("filter_slope_db_oct = 24", "filter_slope_db_oct = 12", "filter_slope"),
+            (
+                "sensitivity_full_scale_v = 0.001",
+                "sensitivity_full_scale_v = 0.02",
+                "sensitivity_full_scale_v",
+            ),
+        )
+        for old, new, expected in cases:
+            with self.subTest(field=expected):
+                text = self.simulation_text().replace(old, new, 1)
+                with self.assertRaisesRegex(ConfigError, expected):
+                    self.load_text(text)
+
+    def test_lockin_xy_requires_confirmed_ttl_rising_edge(self) -> None:
+        text = self.simulation_text().replace(
+            'external_reference_edge = "rising"',
+            'external_reference_edge = "falling"',
+        )
+        with self.assertRaisesRegex(ConfigError, "external_reference_edge"):
+            self.load_text(text)
+
+    def test_lockin_rejects_settling_shorter_than_five_time_constants(self) -> None:
+        text = self.simulation_text().replace(
+            "settle_time_constants = 5.0", "settle_time_constants = 4.9", 1
+        )
+        with self.assertRaisesRegex(ConfigError, "at least 5.0"):
+            self.load_text(text)
+
+    def test_bounded_autorange_remains_disabled_until_bounds_are_confirmed(self) -> None:
+        text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"', 'sensitivity_mode = "bounded_auto"', 1
+        )
+        with self.assertRaisesRegex(ConfigError, "sensitivity_mode"):
             self.load_text(text)
 
     def test_hardware_only_table_is_rejected_in_simulation(self) -> None:

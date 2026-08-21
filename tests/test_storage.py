@@ -60,6 +60,7 @@ def raw(
             y_v=0.0,
             amplitude_v=abs(x_v),
             phase_deg=0.0,
+            phase_shift_deg=-12.5,
             frequency_hz=17.777,
             locked=locked,
             overload=overload,
@@ -173,6 +174,11 @@ class StorageTests(unittest.TestCase):
         accepted = self.store.load_transport_readings("run-001")
         self.assertEqual(len(accepted), 6)
         self.assertTrue(all(reading.accepted for reading in accepted))
+        self.assertTrue(all(reading.phase_shift_deg == -12.5 for reading in accepted))
+        payload = self.store.connection.execute(
+            "SELECT payload_json FROM raw_instrument_samples ORDER BY sample_id LIMIT 1"
+        ).fetchone()[0]
+        self.assertEqual(json.loads(payload)["phase_shift_deg"], -12.5)
 
     def test_rejected_attempt_raw_data_is_retained_but_excluded_by_default(self) -> None:
         attempt_index = self.store.start_attempt(
@@ -417,6 +423,27 @@ class StorageMigrationTests(unittest.TestCase):
             "INSERT INTO conditions VALUES "
             "('old-run','old-condition',0,2.0,0.0,0.0,0.004,17.777,0.0,0.0)"
         )
+        connection.execute(
+            """
+            CREATE TABLE transport_readings (
+                reading_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                condition_id TEXT NOT NULL,
+                attempt_index INTEGER NOT NULL,
+                captured_at_utc TEXT NOT NULL,
+                role TEXT NOT NULL,
+                harmonic INTEGER NOT NULL,
+                x_v REAL NOT NULL,
+                y_v REAL NOT NULL,
+                amplitude_v REAL NOT NULL,
+                phase_deg REAL NOT NULL,
+                frequency_hz REAL NOT NULL,
+                locked INTEGER NOT NULL,
+                overload INTEGER NOT NULL,
+                accepted INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
         connection.commit()
         connection.close()
 
@@ -425,8 +452,15 @@ class StorageMigrationTests(unittest.TestCase):
                 "SELECT scan_id FROM conditions WHERE condition_id='old-condition'"
             ).fetchone()[0]
             version = store.connection.execute("PRAGMA user_version").fetchone()[0]
+            transport_columns = {
+                row["name"]
+                for row in store.connection.execute(
+                    "PRAGMA table_info(transport_readings)"
+                )
+            }
         self.assertEqual(migrated, "legacy")
-        self.assertEqual(version, 2)
+        self.assertIn("phase_shift_deg", transport_columns)
+        self.assertEqual(version, 3)
 
 
 if __name__ == "__main__":

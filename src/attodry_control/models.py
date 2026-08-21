@@ -76,6 +76,7 @@ class LockinReading:
     y_v: float
     amplitude_v: float
     phase_deg: float
+    phase_shift_deg: float
     frequency_hz: float
     locked: bool
     overload: bool
@@ -88,6 +89,7 @@ class LockinReading:
             self.y_v,
             self.amplitude_v,
             self.phase_deg,
+            self.phase_shift_deg,
             self.frequency_hz,
         )
         if any(not math.isfinite(value) for value in values):

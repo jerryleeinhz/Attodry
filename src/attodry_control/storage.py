@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS transport_readings (
     y_v REAL NOT NULL,
     amplitude_v REAL NOT NULL CHECK (amplitude_v >= 0),
     phase_deg REAL NOT NULL,
+    phase_shift_deg REAL NOT NULL,
     frequency_hz REAL NOT NULL CHECK (frequency_hz > 0),
     locked INTEGER NOT NULL CHECK (locked IN (0, 1)),
     overload INTEGER NOT NULL CHECK (overload IN (0, 1)),
@@ -229,6 +230,7 @@ class StoredTransportReading:
     y_v: float
     amplitude_v: float
     phase_deg: float
+    phase_shift_deg: float
     frequency_hz: float
     locked: bool
     overload: bool
@@ -278,7 +280,18 @@ class RunStore:
                     "ALTER TABLE conditions ADD COLUMN scan_id TEXT NOT NULL "
                     "DEFAULT 'legacy'"
                 )
-            self.connection.execute("PRAGMA user_version = 2")
+            transport_columns = {
+                row["name"]
+                for row in self.connection.execute(
+                    "PRAGMA table_info(transport_readings)"
+                )
+            }
+            if "phase_shift_deg" not in transport_columns:
+                self.connection.execute(
+                    "ALTER TABLE transport_readings ADD COLUMN "
+                    "phase_shift_deg REAL NOT NULL DEFAULT 0.0"
+                )
+            self.connection.execute("PRAGMA user_version = 3")
 
     def create_run(
         self,
@@ -376,8 +389,8 @@ class RunStore:
                 INSERT INTO transport_readings(
                     run_id, condition_id, attempt_index, captured_at_utc,
                     role, harmonic, x_v, y_v, amplitude_v, phase_deg,
-                    frequency_hz, locked, overload, accepted
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    phase_shift_deg, frequency_hz, locked, overload, accepted
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
                 (
                     run_id,
@@ -390,6 +403,7 @@ class RunStore:
                     reading.y_v,
                     reading.amplitude_v,
                     reading.phase_deg,
+                    reading.phase_shift_deg,
                     reading.frequency_hz,
                     int(reading.locked),
                     int(reading.overload),
@@ -571,6 +585,7 @@ class RunStore:
                 y_v=row["y_v"],
                 amplitude_v=row["amplitude_v"],
                 phase_deg=row["phase_deg"],
+                phase_shift_deg=row["phase_shift_deg"],
                 frequency_hz=row["frequency_hz"],
                 locked=bool(row["locked"]),
                 overload=bool(row["overload"]),
