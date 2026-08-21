@@ -318,6 +318,19 @@ uncommissioned and require separate explicit authorization.
   `disable-control`. The absolute threshold is validated against configured limits.
   The selected 2.0 K line is above the prior 1.9651 K peak and therefore would not
   have tripped on an excursion of the same size; no tighter margin is inferred.
+- Commit `d4a6487` passed local compileall and all 170 tests (2 optional plotting
+  skips), then passed compileall and all 170 tests without skips on `LK_setup`'s
+  Python 3.12.13 `lyr`. The operator explicitly raised `max_delta_k` to 250 K for
+  the 1.8 K attempt, effectively disabling its pre-write step gate while retaining
+  the 2.0 K live cutoff. A read-only preflight showed sample 1.7242 K, prior
+  setpoint 1.7000 K, control enabled, zero errors, and sample/VTI heater power
+  0.0091/0.0004 W. The authorized write run recorded 1799 samples over 1800.079 s:
+  sample temperature rose from 1.7241 K to a 1.7886 K maximum near 1776 s and ended
+  at 1.7883 K. No sample entered the 1.79--1.81 K tolerance band or reached 2.0 K;
+  setpoint/control/error invariants held throughout. Timeout diagnostics captured
+  sample/VTI heater power 0.1054/0.0004 W, verified `disable-control` left the
+  1.8 K setpoint with control off and error code zero, and disconnect/end succeeded.
+  T4 therefore remains failed.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

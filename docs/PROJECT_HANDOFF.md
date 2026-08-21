@@ -305,6 +305,21 @@ Completed offline in Stage 4:
   through verified `disable-control`; it also rejects an absolute guard outside
   configured temperature limits. This explicit 2.0 K line is higher than the prior
   1.9651 K peak and would not have caught an excursion of the same magnitude.
+- Commit `d4a6487` passed local compileall and all 170 tests (2 optional plotting
+  skips), and then passed compileall plus all 170 tests without skips on
+  `LK_setup`'s Python 3.12.13 `lyr`. The operator explicitly changed
+  `max_delta_k` to 250 K for the real 1.8 K attempt, effectively removing the
+  pre-write step restriction while retaining the 2.0 K live cutoff. A read-only
+  preflight confirmed sample 1.7242 K, old setpoint 1.7000 K, control enabled,
+  zero errors, and sample/VTI heater power 0.0091/0.0004 W. The authorized run
+  recorded 1799 samples over 1800.079 s: sample temperature rose from 1.7241 K to
+  a 1.7886 K maximum near 1776 s and ended at 1.7883 K. No sample entered the
+  1.79--1.81 K tolerance band or reached 2.0 K; the 1.8 K setpoint, enabled control,
+  and zero error code persisted throughout. Timeout diagnostics recorded
+  sample/VTI heater power 0.1054/0.0004 W, verified temperature control disabled
+  with the 1.8 K setpoint retained and error code zero, and disconnected normally.
+  Raw JSON/stderr remain only on ignored `LK_setup` temporary paths. T4 remains
+  failed and no automatic stage progression is justified.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
@@ -314,10 +329,11 @@ Completed offline in Stage 4:
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
 harmonic validation, and the attoDRY read-only connection are complete. The first
 attoDRY temperature setpoint/control actions were confirmed asynchronously, manual
-GUI setting works, and T4 still failed stability with a later overshoot. The
-failure-disable/diagnostic path and the operator-selected 2.0 K live abort line are
-implemented offline; the explicitly authorized 1.8 K retry is the next temperature
-action. SMUs and real end-to-end acquisition still require staged authorization.
+GUI setting works, and both the 1.75 K and 1.8 K automated attempts failed their
+stability criteria. The failure-disable/diagnostic path and the operator-selected
+2.0 K live abort line were verified in the real 1.8 K timeout cleanup. Further
+temperature writes require a new, explicitly reviewed attempt. SMUs and real
+end-to-end acquisition still require staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
@@ -508,8 +524,9 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Offline-validate the 0.2 K live overshoot guard, then perform the explicitly
-   authorized 1.8 K T4 attempt with a 2.0 K automatic temperature-control cutoff.
+1. Review the failed 1.8 K trace and decide explicitly whether the slow response
+   requires a longer timeout, different stability target, or manual thermal/PID
+   diagnosis; do not infer or alter PID values automatically.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Freeze and verify the complete hardware wheelhouse on the offline control

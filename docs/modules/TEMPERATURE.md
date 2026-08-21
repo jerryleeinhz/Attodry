@@ -236,6 +236,23 @@ sample/VTI heater power 和触发时间，再通过现有 read-before-toggle、D
 随后按 `disable-control` 关闭并验证温控。该阈值高于此前 1.9651 K 峰值，所以不会
 对同等幅度的过冲提前动作；这是用户明确接受的限制，而不是软件对安全余量的推断。
 
+提交 `d4a6487` 在本地通过 170 个测试（2 个可选绘图测试 skipped），在
+`LK_setup` 的 Python 3.12.13 `lyr` 上通过 compileall 和全部 170 个测试（0
+skipped）。用户随后明确把本次 `max_delta_k` 改为 250 K，实际取消了 1.8 K
+动作的起始步长限制；运行时 2.0 K 终止线仍保留。真实只读预检为：样品
+1.7242 K、旧设定值 1.7000 K、温控开启、错误码 0、sample/VTI heater
+0.0091/0.0004 W，并正常断开。
+
+真实 1.8 K 运行通过 0.0758 K 的起始差值检查，确认 1.8 K setpoint 和温控开启，
+随后记录 1799 个完整样本、覆盖 1800.079 s。样品从 1.7241 K 缓慢升温，范围
+1.7237--1.7886 K，最高值出现在约 1776 s，末值 1.7883 K；1799 个样本均未进入
+1.79--1.81 K 容差带，也没有样本达到 2.0 K。VTI 范围为
+1.7131--1.7176 K；等待期间 setpoint 始终 1.8 K、温控始终开启、错误码始终为
+零。1800 s 后稳定性超时，失败快照记录样品 1.7883 K、sample/VTI heater
+0.1054/0.0004 W。`disable-control` 随后确认关闭温控；最终样品 1.7882 K、
+setpoint 仍为 1.8 K、错误码 0，并正常 Disconnect/end。原始 JSON/stderr 保留在
+`LK_setup` ignored 临时路径。T4 仍未通过，不能进入下一阶段。
+
 ## 预计文件所有权
 
 - `src/attodry_control/attodry.py`
