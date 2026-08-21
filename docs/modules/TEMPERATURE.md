@@ -40,6 +40,9 @@ commissioned 为 0.2 K 的 `max_overshoot_k` 外，示例保留不可执行的 `
 测量前等待和 1 s 轮询。`attodry-temperature-run` 不要求授权 flags；调用命令本身
 会连接和写温度。它在30分钟监测结束后记录实际 `sample_temperature_k` 并允许进入
 测量，不要求命中严格稳定窗口。完整用户说明见 `docs/TEMPERATURE_RUN_GUIDE.md`。
+实现提交 `a20fa3f` 已在 `LK_setup` 的 64 位 Python 3.12.13 `lyr` 上通过
+compileall、全部217项测试（0 skipped）和新命令 help；该验证没有加载 vendor
+DLL、连接设备或发送硬件命令。
 
 ## 模块目标
 

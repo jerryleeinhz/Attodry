@@ -460,6 +460,9 @@ Completed offline in Stage 4:
   stability. Unsafe or failed monitoring attempts disable temperature control.
   The virtual 1800 s, actual-temperature, command-order, and overshoot-cleanup
   paths pass against the fake DLL; no real DLL was loaded for this addition.
+  Exact commit `a20fa3f` passed compileall, all 217 tests without skips, and
+  `temperature_run --help` on `LK_setup` with 64-bit Python 3.12.13 `lyr`.
+  That target validation used no vendor DLL, connection, or hardware command.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

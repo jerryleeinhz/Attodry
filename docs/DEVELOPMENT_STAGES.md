@@ -473,6 +473,10 @@ writes remain uncommissioned and require separate explicit authorization.
   communication failure prevents readiness and attempts verified control disable.
   Fake-DLL tests cover the virtual 1800 s path, actual-temperature recording,
   command order, and overshoot cleanup without loading real hardware.
+  Commit `a20fa3f` then passed compileall, all 217 tests with no skips, and the
+  new command help on `LK_setup` using 64-bit Python 3.12.13 `lyr`. Only Git,
+  Python compilation, unittest, and `--help` ran; no vendor DLL was loaded and
+  no connection or hardware command was issued.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
