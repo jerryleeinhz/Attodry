@@ -32,6 +32,8 @@ Set `OPEN_BROWSER=True` in the Browse cell to open the native Windows file
 chooser and load a JSON/JSONL file directly. If the notebook kernel is running
 without access to the Windows desktop, set `selected_path = Path(...)` instead.
 Directory discovery remains available in either case.
+Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
+opened automatically.
 
 The notebook plots per-point mean and sample standard deviation for XX/XY X, Y,
 R, and phase against frequency, source RMS voltage, or nominal RMS current. Phase

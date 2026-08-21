@@ -111,6 +111,17 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("record_status", text)
         self.assertIn("clean", text)
 
+    def test_power_shell_utf16_record_is_directly_loadable(self) -> None:
+        source = self._temporary_path(".json")
+        source.write_text(
+            json.dumps(self._sweep(completed=True)),
+            encoding="utf-16",
+        )
+
+        rows = load_sweep_samples(source)
+
+        self.assertEqual([row.role for row in rows], ["xx", "xy"])
+
     def test_notebook_is_valid_json_and_all_code_cells_compile(self) -> None:
         path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"
         notebook = json.loads(path.read_text(encoding="utf-8"))

@@ -71,27 +71,37 @@ class SweepStatistic:
 def load_commissioning_file(
     path: str | Path,
 ) -> dict[str, object] | tuple[dict[str, object], ...]:
-    """Open one commissioning JSON or JSONL file without modifying it."""
+    """Open one commissioning JSON or JSONL file without modifying it.
+
+    Commissioning records created by PowerShell may be UTF-16, while records
+    created by Python are UTF-8.  Decode the BOM before parsing so both remain
+    directly browsable.
+    """
 
     source = Path(path)
+    raw = source.read_bytes()
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        text = raw.decode("utf-32")
+    elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = raw.decode("utf-16")
+    else:
+        text = raw.decode("utf-8-sig")
     if source.suffix.lower() == ".json":
-        with source.open(encoding="utf-8") as file:
-            payload = json.load(file)
+        payload = json.loads(text)
         if not isinstance(payload, dict):
             raise ValueError("Commissioning JSON root must be an object.")
         return payload
     if source.suffix.lower() == ".jsonl":
         records: list[dict[str, object]] = []
-        with source.open(encoding="utf-8") as file:
-            for line_number, line in enumerate(file, start=1):
-                if not line.strip():
-                    continue
-                record = json.loads(line)
-                if not isinstance(record, dict):
-                    raise ValueError(
-                        f"Commissioning JSONL line {line_number} is not an object."
-                    )
-                records.append(record)
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                raise ValueError(
+                    f"Commissioning JSONL line {line_number} is not an object."
+                )
+            records.append(record)
         return tuple(records)
     raise ValueError("Commissioning data file must end in .json or .jsonl.")
 

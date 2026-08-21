@@ -231,7 +231,8 @@ Completed offline in Stage 6:
   problem/unlock/overload/instrument-error samples without mixing transition or
   cleanup payloads into curves. It plots XX/XY X/Y/R/phase mean and sample standard
   deviation versus frequency, source voltage, or nominal current and can export
-  CSV/PNG/PDF only when explicitly enabled.
+  CSV/PNG/PDF only when explicitly enabled. The loader detects both UTF-8 and
+  PowerShell UTF-16/BOM commissioning records.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   results, with an explicit generated/skipped manifest and fit summary.
@@ -246,14 +247,14 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 134 tests and passes in the minimal
+- The complete hardware-free suite contains 135 tests and passes in the minimal
   environment with one matplotlib rendering test skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
   the final offline changes. SHA-256:
-  `6ce910190a216f05b35fea1842354b8f0ccedaa1862683df5d6df216bee8264f`.
+  `cec60b3afcd74a9b682a204e36e7aa472ffe8b31f5df93fb656b8f1262ea0ff7`.
   This is not yet the frozen hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are
