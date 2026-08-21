@@ -196,6 +196,15 @@ Completed in Stage 3:
   No setting command, `APHS`, `LIAS?`, or `ERRS?` was sent, so latch status is
   explicitly unknown. A separate L6 write authorization is required before any
   `SENS` change.
+- Prepared the Lock-in L6 smallest-write command offline. `set-xx-sensitivity`
+  requires strict hardware TOML plus separate write, latch-consumption, and XY
+  SINE OUT disconnection confirmations before it opens VISA. Its successful path
+  writes only XX `SENS 20`, then performs two 1.5-second status-consuming
+  verification windows; it never rewrites XY or sends `APHS`. Any post-write
+  failure retains its raw record, attempts XX 4 mVrms minimum output and restores
+  the previous XX range. Fake-VISA tests cover every authorization gate, unsafe
+  preflight rejection, the XX-only write, and both verification windows. No real
+  VISA resource was opened for this offline implementation.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

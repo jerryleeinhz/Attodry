@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from attodry_control.lockin_test import _consume_sensitivity_transition, run
 from attodry_control.lockin_autorange import (
@@ -605,6 +606,128 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(manager.opened, ["GPIB0::8::INSTR", "GPIB0::9::INSTR"])
         self.assertEqual(xx_resource.timeout, 4321)
         self.assertEqual(xy_resource.timeout, 4321)
+
+    def test_cli_set_xx_sensitivity_requires_all_authorizations_before_opening(self) -> None:
+        for missing_flag in (
+            "--authorize-writes",
+            "--authorize-status-latch-consumption",
+            "--confirm-xy-sine-disconnected",
+        ):
+            with self.subTest(missing_flag=missing_flag):
+                manager = FakeResourceManager({})
+                arguments = [
+                    "set-xx-sensitivity",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ]
+                arguments.remove(missing_flag)
+                with self.assertRaises(AuthorizationRequired):
+                    run(arguments, resource_manager_factory=lambda: manager)
+                self.assertEqual(manager.opened, [])
+
+    def test_cli_set_xx_sensitivity_writes_only_xx_and_verifies_twice(self) -> None:
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["SENS?"] = "17\n"
+        xy_responses["SENS?"] = "17\n"
+        xx_responses["OFLT?"] = "9\n"
+        xy_responses["OFLT?"] = "9\n"
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager(
+            {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output), patch("attodry_control.lockin_test.time.sleep") as sleep:
+            exit_code = run(
+                [
+                    "set-xx-sensitivity",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["write_performed"])
+        self.assertEqual(result["after"]["lockin_xx"]["sensitivity"], 20)
+        self.assertEqual(xx_resource.writes, ["SENS 20"])
+        self.assertEqual(xy_resource.writes, [])
+        self.assertEqual(sleep.call_args_list[0].args, (1.5,))
+        self.assertEqual(sleep.call_args_list[1].args, (1.5,))
+
+    def test_cli_set_xx_sensitivity_rejects_latched_preflight_without_write(self) -> None:
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["SENS?"] = "17\n"
+        xy_responses["SENS?"] = "17\n"
+        xx_responses["OFLT?"] = "9\n"
+        xy_responses["OFLT?"] = "9\n"
+        xy_responses["LIAS?"] = "8\n"
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager(
+            {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+        )
+
+        with redirect_stdout(io.StringIO()), self.assertRaisesRegex(
+            Sr830Error, "preflight failed"
+        ):
+            run(
+                [
+                    "set-xx-sensitivity",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
+
+    def test_cli_set_xx_sensitivity_requires_minimum_output_before_write(self) -> None:
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["SENS?"] = "17\n"
+        xy_responses["SENS?"] = "17\n"
+        xx_responses["OFLT?"] = "9\n"
+        xy_responses["OFLT?"] = "9\n"
+        xx_responses["SLVL?"] = "0.010\n"
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager(
+            {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+        )
+
+        with redirect_stdout(io.StringIO()), self.assertRaisesRegex(
+            Sr830Error, "sine output is not at the 4 mVrms minimum"
+        ):
+            run(
+                [
+                    "set-xx-sensitivity",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
 
     def test_cli_diagnose_accepts_one_millihertz_pair_readback_difference(self) -> None:
         xx_resource = FakeVisaResource(

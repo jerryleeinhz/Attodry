@@ -455,7 +455,7 @@ def configure_minimum_excitation_pair(
         lockin_xy.configure_xy_external_ttl()
         xx_diagnostic = lockin_xx.read_diagnostic(consume_status_latches=False)
         xy_diagnostic = lockin_xy.read_diagnostic(consume_status_latches=False)
-        _verify_pair_readback(xx_diagnostic, xy_diagnostic, frequency_hz)
+        verify_pair_readback(xx_diagnostic, xy_diagnostic, frequency_hz)
         return PairConfigurationResult(
             before_xx=before_xx,
             before_xy=before_xy,
@@ -509,7 +509,7 @@ def configure_fixed_settings_pair(
             "Both semantic roles returned the same SR830 identity; verify that the "
             "VISA addresses refer to two distinct physical instruments."
         )
-    _verify_pair_readback(before_xx, before_xy, expected_frequency_hz)
+    verify_pair_readback(before_xx, before_xy, expected_frequency_hz)
 
     writes_started = False
     try:
@@ -519,8 +519,8 @@ def configure_fixed_settings_pair(
         sleeper(settle_s)
         after_xx = lockin_xx.read_diagnostic(consume_status_latches=False)
         after_xy = lockin_xy.read_diagnostic(consume_status_latches=False)
-        _verify_fixed_settings_readback(after_xx, xx_settings, before_xx.phase_shift_deg)
-        _verify_fixed_settings_readback(after_xy, xy_settings, before_xy.phase_shift_deg)
+        verify_fixed_settings_readback(after_xx, xx_settings, before_xx.phase_shift_deg)
+        verify_fixed_settings_readback(after_xy, xy_settings, before_xy.phase_shift_deg)
         return FixedSettingsConfigurationResult(
             before_xx=before_xx,
             before_xy=before_xy,
@@ -543,7 +543,7 @@ def configure_fixed_settings_pair(
                         consume_status_latches=False
                     )
                     original = before_xx if instrument.role is LockinRole.XX else before_xy
-                    _verify_fixed_settings_readback(
+                    verify_fixed_settings_readback(
                         restored, settings, original.phase_shift_deg
                     )
                 except BaseException as restore_error:
@@ -640,7 +640,7 @@ def execute_autorange_transition(
         raise
 
 
-def _verify_pair_readback(
+def verify_pair_readback(
     xx: Sr830Diagnostic, xy: Sr830Diagnostic, expected_frequency_hz: float
 ) -> None:
     problems: list[str] = []
@@ -683,7 +683,7 @@ def _validate_fixed_settings_role(
         )
 
 
-def _verify_fixed_settings_readback(
+def verify_fixed_settings_readback(
     diagnostic: Sr830Diagnostic,
     expected: Sr830SettingCodes,
     expected_phase_shift_deg: float,
@@ -802,7 +802,7 @@ class DualSr830Controller:
         xy = self.lockin_xy.read_diagnostic(consume_status_latches=True)
         if xx.identity == xy.identity:
             raise Sr830Error("Both semantic roles returned the same SR830 identity.")
-        _verify_pair_readback(xx, xy, frequency_hz)
+        verify_pair_readback(xx, xy, frequency_hz)
         problems: list[str] = []
         for diagnostic in (xx, xy):
             if diagnostic.lia_status is None or diagnostic.error_status is None:

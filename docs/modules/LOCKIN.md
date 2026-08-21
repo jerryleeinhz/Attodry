@@ -275,11 +275,22 @@ XY 固定 1 mV，不进入状态机。fake-VISA 执行层在写前验证原量�
 `run_data` 路径。没有发出写命令、`APHS`、`LIAS?` 或 `ERRS?`，故锁存状态仍未知。
 将 XX 改为 10 mV 属于 L6，仍需要单独写入授权和 XY SINE OUT 物理断开确认。
 
-### L6 - real write commissioning
+### L6 - real write commissioning（当前：最小写入命令离线完成）
 
 - 每一种写命令、量程边界、激励、接线和恢复目标必须重新明确授权。
 - 先固定设置小范围验收，再单独验收受限自动量程；失败后恢复已确认基线。
 - 完成条件：正式窗口状态全清、设置恢复读回通过、失败数据仍保留。
+
+2026-08-21：新增 `set-xx-sensitivity --config ...` 的最小 L6 命令，并仅在
+TOML 的 XX 起始量程为 10 mV 时允许目标 `SENS 20`。它要求
+`--authorize-writes`、`--authorize-status-latch-consumption` 和
+`--confirm-xy-sine-disconnected` 三项独立旗标，缺少任一项即在打开 VISA 前失败。
+成功路径只写 `lockin_xx` 的 `SENS 20`，随后各等待至少 1.5 s，并在转换期和正式
+窗口分别读取完整双机诊断及 `LIAS?`/`ERRS?`。预检、转换和正式窗口均要求角色、
+频率、4 mVrms 输出、输入/滤波/相位读回和状态字通过；不重写 XY，也不发送
+`APHS`。写后失败时，命令记录失败原始数据、尝试 XX 4 mVrms 最小输出和恢复先前
+量程，再作严格的最终读回。fake-VISA 覆盖了三重授权、锁存/输出预检拒绝、XX-only
+写入和两次验证；真实执行前仍须在目标机离线验证并由操作者确认物理接线。
 
 ## 预计文件所有权
 

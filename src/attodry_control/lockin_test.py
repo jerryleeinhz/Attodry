@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import math
 from pathlib import Path
@@ -10,7 +10,7 @@ import sys
 import time
 from typing import Callable, Sequence
 
-from .config import RunMode, load_config
+from .config import LockinConfig, RunMode, load_config
 from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
@@ -22,7 +22,10 @@ from .sr830 import (
     Sr830Error,
     Sr830HarmonicSample,
     configure_minimum_excitation_pair,
+    verify_fixed_settings_readback,
+    verify_pair_readback,
 )
+from .sr830_settings import Sr830SettingCodes, map_sr830_settings, sensitivity_code
 
 
 DEFAULT_FREQUENCY_SWEEP_HZ = (
@@ -87,6 +90,36 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     diagnose.set_defaults(handler=_run_diagnose)
+
+    set_xx_sensitivity = subparsers.add_parser(
+        "set-xx-sensitivity",
+        help=(
+            "Set only lockin_xx SENS to the strict TOML start range and verify it."
+        ),
+    )
+    _add_pair_arguments(set_xx_sensitivity)
+    set_xx_sensitivity.add_argument(
+        "--settle-s",
+        type=_positive_float,
+        default=1.5,
+        help="Wait after the SENS write and before formal verification. Default: 1.5 s.",
+    )
+    set_xx_sensitivity.add_argument(
+        "--authorize-writes",
+        action="store_true",
+        help="Explicitly authorize only the documented lockin_xx SENS write and recovery writes.",
+    )
+    set_xx_sensitivity.add_argument(
+        "--authorize-status-latch-consumption",
+        action="store_true",
+        help="Explicitly authorize LIAS?/ERRS? queries, which clear latched status bits.",
+    )
+    set_xx_sensitivity.add_argument(
+        "--confirm-xy-sine-disconnected",
+        action="store_true",
+        help="Confirm lockin_xy SINE OUT is physically disconnected.",
+    )
+    set_xx_sensitivity.set_defaults(handler=_run_set_xx_sensitivity)
 
     configure = subparsers.add_parser(
         "configure-minimum",
@@ -302,6 +335,137 @@ def _run_diagnose(args: argparse.Namespace, factory: Callable[[], object]) -> in
                 flush=True,
             )
     return 1 if had_problem else 0
+
+
+def _run_set_xx_sensitivity(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    config = settings["config"]
+    if config is None:
+        raise ValueError("set-xx-sensitivity requires --config with the strict TOML policy.")
+    if not args.authorize_writes:
+        raise AuthorizationRequired("SR830 sensitivity writes were not explicitly authorized.")
+    if not args.authorize_status_latch_consumption:
+        raise AuthorizationRequired(
+            "SR830 LIAS?/ERRS? latch consumption was not explicitly authorized."
+        )
+    if not args.confirm_xy_sine_disconnected:
+        raise AuthorizationRequired(
+            "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+        )
+    if args.settle_s < 1.5:
+        raise Sr830Error("XX sensitivity verification requires at least 1.5 s settling.")
+
+    xx_settings = _setting_codes(config.lockin_xx)
+    xy_settings = _setting_codes(config.lockin_xy)
+    target_code = sensitivity_code(config.lockin_xx.sensitivity_full_scale_v)
+    record: dict[str, object] = {
+        "operation": "set_xx_sensitivity",
+        "target_sensitivity_code": target_code,
+        "target_full_scale_v": config.lockin_xx.sensitivity_full_scale_v,
+        "settle_s": args.settle_s,
+        "safety_status_complete": True,
+    }
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        previous_code: int | None = None
+        write_started = False
+        try:
+            before_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            before_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["before"] = {
+                "lockin_xx": asdict(before_xx),
+                "lockin_xy": asdict(before_xy),
+            }
+            problems = _diagnostic_problems(before_xx, before_xy)
+            if problems:
+                raise Sr830Error("XX sensitivity preflight failed: " + "; ".join(problems))
+            verify_pair_readback(
+                before_xx, before_xy, float(settings["frequency_hz"])
+            )
+            verify_fixed_settings_readback(
+                before_xx,
+                replace(xx_settings, sensitivity=before_xx.sensitivity),
+                before_xx.phase_shift_deg,
+            )
+            verify_fixed_settings_readback(
+                before_xy, xy_settings, before_xy.phase_shift_deg
+            )
+            previous_code = before_xx.sensitivity
+            if previous_code not in (17, target_code):
+                raise Sr830Error(
+                    "lockin_xx sensitivity must be the known 1 mV baseline or the "
+                    "configured 10 mV target before this commissioning command."
+                )
+
+            if previous_code == target_code:
+                record["write_performed"] = False
+                record["completed"] = True
+                print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+                return 0
+
+            write_started = True
+            lockin_xx.set_sensitivity(target_code)
+            time.sleep(args.settle_s)
+            transition_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            transition_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["transition"] = {
+                "lockin_xx": asdict(transition_xx),
+                "lockin_xy": asdict(transition_xy),
+            }
+            problems = _diagnostic_problems(transition_xx, transition_xy)
+            if problems:
+                raise Sr830Error(
+                    "XX sensitivity transition failed: " + "; ".join(problems)
+                )
+            verify_pair_readback(
+                transition_xx, transition_xy, float(settings["frequency_hz"])
+            )
+            verify_fixed_settings_readback(
+                transition_xx, xx_settings, before_xx.phase_shift_deg
+            )
+            verify_fixed_settings_readback(
+                transition_xy, xy_settings, before_xy.phase_shift_deg
+            )
+
+            time.sleep(args.settle_s)
+            after_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            after_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["after"] = {
+                "lockin_xx": asdict(after_xx),
+                "lockin_xy": asdict(after_xy),
+            }
+            problems = _diagnostic_problems(after_xx, after_xy)
+            if problems:
+                raise Sr830Error(
+                    "XX sensitivity formal verification failed: " + "; ".join(problems)
+                )
+            verify_pair_readback(after_xx, after_xy, float(settings["frequency_hz"]))
+            verify_fixed_settings_readback(after_xx, xx_settings, before_xx.phase_shift_deg)
+            verify_fixed_settings_readback(after_xy, xy_settings, before_xy.phase_shift_deg)
+        except BaseException as exc:
+            record["completed"] = False
+            record["error"] = str(exc)
+            record["write_performed"] = write_started
+            if write_started and previous_code is not None:
+                record["cleanup"] = _restore_scan_state(
+                    lockin_xx,
+                    lockin_xy,
+                    baseline_hz=float(settings["frequency_hz"]),
+                    original_xx_sensitivity=previous_code,
+                    restore_sensitivity=True,
+                    restore_frequency=False,
+                    settle_s=args.settle_s,
+                    writes_started=True,
+                )
+            print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+            raise
+
+    record["completed"] = True
+    record["write_performed"] = True
+    print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+    return 0
 
 
 def _run_configure(args: argparse.Namespace, factory: Callable[[], object]) -> int:
@@ -1010,11 +1174,25 @@ def _resolve_pair_settings(args: argparse.Namespace) -> dict[str, object]:
         frequency_hz = 17.777 if config is None else config.lockin_xx.frequency_hz
 
     return {
+        "config": config,
         "xx_address": xx_address,
         "xy_address": xy_address,
         "timeout_ms": timeout_ms,
         "frequency_hz": frequency_hz,
     }
+
+
+def _setting_codes(config: LockinConfig) -> Sr830SettingCodes:
+    return map_sr830_settings(
+        reference_source=config.reference_source,
+        external_reference_edge=config.external_reference_edge,
+        input_mode=config.input_mode,
+        shield_grounding=config.shield_grounding,
+        input_coupling=config.input_coupling,
+        time_constant_s=config.time_constant_s,
+        filter_slope_db_oct=config.filter_slope_db_oct,
+        sensitivity_full_scale_v=config.sensitivity_full_scale_v,
+    )
 
 
 class _PairContext:
