@@ -214,6 +214,11 @@ Completed offline in Stage 4:
   The CLI rejects placeholders, malformed fields, or any mixture of that file
   with direct parameter options before loading the DLL; its dual authorization
   flags remain mandatory and are not stored in the file.
+- Revalidated this parameter-file entry point on `LK_setup` at commit `609b456`
+  using Python 3.12.13 `lyr`: all 159 offline tests passed with no skips,
+  compileall passed, and the CLI help exposed `--commissioning-config`. No DLL
+  was loaded and no `begin/connect` or hardware command ran; the temporary clone
+  was removed after verification.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

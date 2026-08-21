@@ -215,6 +215,12 @@ uncommissioned and require separate explicit authorization.
   that strict template or all direct options, never both; placeholders, malformed
   fields, and mixed sources fail before DLL loading. The parameter file contains
   no authorization, so both connection and setting-write flags remain mandatory.
+- Revalidated parameter-file support on `LK_setup` for commit `609b456` with
+  64-bit Python 3.12.13 in `lyr`: all 159 offline tests passed with no skips,
+  source compilation passed, and `temperature_test --help` showed the new
+  parameter-file option. Only Git, unittest, compileall, and help output ran;
+  the vendor DLL was not loaded and no `begin/connect` or hardware command was
+  issued. The verified temporary clone was removed.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

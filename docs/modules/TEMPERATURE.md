@@ -20,6 +20,9 @@ vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删�
 本轮已新增独立的 `temperature_commissioning.local.toml` 参数入口：从示例复制后，
 在文件开头填写本次 T4 参数，不需要查找或修改 Python，也不改硬件 TOML。示例保留
 不可执行的 `CHANGE_ME` 占位符；文件不含授权，连接和写入授权仍须逐次在命令行给出。
+提交 `609b456` 已在 `LK_setup` 的 64 位 Python 3.12.13 `lyr` 上再次完成离线验证：
+159 项完整测试全部通过、0 skipped，`compileall` 和新 CLI help 通过；未加载 DLL、
+调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
 这只证明连接和读回。真实温度设定、温控启停、稳定等待和异常恢复尚未进行写入
 验收，不能描述为 commissioned。
@@ -100,6 +103,9 @@ vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删�
   0 skipped；`compileall -q src tests` 通过。
 - 只运行 Git、unittest 和 compileall；未加载 DLL、未调用 `begin/connect`、未
   发送设置写入。验证后已检查绝对路径并删除目标机临时 clone。
+- 参数文件入口提交 `609b456` 也已在同一环境复验：159 tests passed、0 skipped，
+  `compileall -q src tests` 和 `temperature_test --help` 通过；同样没有加载 DLL、
+  调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
 ### T3 - real read-only commissioning（read-only commissioned：2026-08-21）
 
