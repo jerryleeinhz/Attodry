@@ -24,6 +24,7 @@ from .stability import StabilityCriteria
 class TemperatureCommissioningRequest:
     target_k: float
     max_delta_k: float
+    max_overshoot_k: float
     tolerance_k: float
     stable_range_k: float
     dwell_s: float
@@ -48,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--target-k", type=_positive_float)
     parser.add_argument("--max-delta-k", type=_positive_float)
+    parser.add_argument("--max-overshoot-k", type=_positive_float)
     parser.add_argument("--tolerance-k", type=_positive_float)
     parser.add_argument("--stable-range-k", type=_nonnegative_float)
     parser.add_argument("--dwell-s", type=_positive_float)
@@ -70,6 +72,7 @@ def _resolve_request(args: argparse.Namespace) -> TemperatureCommissioningReques
     direct_values = {
         "--target-k": args.target_k,
         "--max-delta-k": args.max_delta_k,
+        "--max-overshoot-k": args.max_overshoot_k,
         "--tolerance-k": args.tolerance_k,
         "--stable-range-k": args.stable_range_k,
         "--dwell-s": args.dwell_s,
@@ -96,6 +99,7 @@ def _resolve_request(args: argparse.Namespace) -> TemperatureCommissioningReques
     return TemperatureCommissioningRequest(
         target_k=args.target_k,
         max_delta_k=args.max_delta_k,
+        max_overshoot_k=args.max_overshoot_k,
         tolerance_k=args.tolerance_k,
         stable_range_k=args.stable_range_k,
         dwell_s=args.dwell_s,
@@ -123,6 +127,7 @@ def _load_request_config(path: Path) -> TemperatureCommissioningRequest:
     expected = {
         "target_k",
         "max_delta_k",
+        "max_overshoot_k",
         "tolerance_k",
         "stable_range_k",
         "dwell_s",
@@ -147,6 +152,9 @@ def _load_request_config(path: Path) -> TemperatureCommissioningRequest:
         target_k=_config_number(table["target_k"], "target_k", positive=True),
         max_delta_k=_config_number(
             table["max_delta_k"], "max_delta_k", positive=True
+        ),
+        max_overshoot_k=_config_number(
+            table["max_overshoot_k"], "max_overshoot_k", positive=True
         ),
         tolerance_k=_config_number(
             table["tolerance_k"], "tolerance_k", positive=True
@@ -253,6 +261,7 @@ def run(
         "request": {
             "target_k": request.target_k,
             "max_delta_k": request.max_delta_k,
+            "max_overshoot_k": request.max_overshoot_k,
             "tolerance_k": request.tolerance_k,
             "stable_range_k": request.stable_range_k,
             "dwell_s": request.dwell_s,
@@ -304,6 +313,7 @@ def run(
         )
         target_state = driver.wait_for_temperature(
             request.target_k,
+            max_overshoot_k=request.max_overshoot_k,
             monotonic=monotonic,
             sleeper=sleeper,
             on_sample=_sample_recorder(

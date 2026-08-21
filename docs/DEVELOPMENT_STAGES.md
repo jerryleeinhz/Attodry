@@ -311,9 +311,13 @@ uncommissioned and require separate explicit authorization.
   rejected; `disable-control` now captures the trigger time, last confirmed full
   state (including sample/VTI temperature), and both heater powers, then uses the
   existing idempotent read-before-toggle and bounded readback checks to disable
-  temperature control. PID values remain untouched. The requested 1.8 K real test
-  remains gated because the earlier 1.9651 K excursion occurred before timeout and
-  the current implementation has no runtime temperature-abort threshold.
+  temperature control. PID values remain untouched.
+- Added the operator-selected `max_overshoot_k=0.2 K` live guard for the requested
+  1.8 K attempt. Every trigger sample is audited; a sample readback at or above
+  2.0 K raises the primary failure and therefore invokes verified
+  `disable-control`. The absolute threshold is validated against configured limits.
+  The selected 2.0 K line is above the prior 1.9651 K peak and therefore would not
+  have tripped on an excursion of the same size; no tighter margin is inferred.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

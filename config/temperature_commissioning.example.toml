@@ -8,6 +8,8 @@
 target_k = "CHANGE_ME"
 # Maximum allowed movement from the initial sample-temperature sensor reading (K).
 max_delta_k = "CHANGE_ME"
+# Maximum live sample-temperature rise above target_k before control is disabled (K).
+max_overshoot_k = "CHANGE_ME"
 # Maximum error of every sensor sample from target_k (K).
 tolerance_k = "CHANGE_ME"
 # Maximum sensor peak-to-peak range over the dwell window (K).

@@ -299,9 +299,12 @@ Completed offline in Stage 4:
   policy. `disable-control` records trigger time, the last confirmed full state,
   and sample/VTI heater power before using the existing idempotent read-before-toggle,
   DLL-return-code checks, and bounded acknowledgement polling to disable temperature
-  control. PID parameters are unchanged. A real 1.8 K attempt is not yet safe to
-  start: the prior 1.9651 K rise occurred before the 30-minute timeout, while the
-  current code has no runtime temperature-abort boundary.
+  control. PID parameters are unchanged.
+- The operator selected `max_overshoot_k=0.2 K` for the 1.8 K retry. The live
+  sample guard records its trigger state and fails at or above 2.0 K, which routes
+  through verified `disable-control`; it also rejects an absolute guard outside
+  configured temperature limits. This explicit 2.0 K line is higher than the prior
+  1.9651 K peak and would not have caught an excursion of the same magnitude.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
@@ -312,9 +315,9 @@ Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
 harmonic validation, and the attoDRY read-only connection are complete. The first
 attoDRY temperature setpoint/control actions were confirmed asynchronously, manual
 GUI setting works, and T4 still failed stability with a later overshoot. The
-failure-disable/diagnostic path is implemented offline; a real 1.8 K retry remains
-blocked pending an explicit runtime temperature-abort boundary. SMUs and real
-end-to-end acquisition still require staged authorization.
+failure-disable/diagnostic path and the operator-selected 2.0 K live abort line are
+implemented offline; the explicitly authorized 1.8 K retry is the next temperature
+action. SMUs and real end-to-end acquisition still require staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
@@ -505,8 +508,8 @@ A communication failure must not be reported as successful zeroing. A hard proce
 
 ## Immediate next implementation tasks
 
-1. Define and implement the maximum allowed live sample-temperature excursion for
-   a 1.8 K attempt; do not rerun automated T4 without this pre-timeout abort gate.
+1. Offline-validate the 0.2 K live overshoot guard, then perform the explicitly
+   authorized 1.8 K T4 attempt with a 2.0 K automatic temperature-control cutoff.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Freeze and verify the complete hardware wheelhouse on the offline control

@@ -141,7 +141,11 @@ the two sources cannot be mixed. `success_policy` is `hold-target` or
 `restore-initial`; `failure_policy` is `disable-control` or `restore-initial`. The
 tool rejects placeholders, malformed parameter files, configured-range violations,
 and requested movements from the initial sample-temperature sensor reading larger
-than `max_delta_k` before any write. The initial user setpoint delta is also
+than `max_delta_k` before any write. `max_overshoot_k` is a separate live guard:
+each triggering sample is recorded, and a sample temperature greater than or equal
+to `target_k + max_overshoot_k` fails the run and invokes the configured failure
+policy. The resulting absolute limit must remain inside the configured temperature
+range. The initial user setpoint delta is also
 recorded for audit, but a stale setpoint while temperature control is disabled is
 not treated as physical sample movement. A new setpoint or temperature-control
 toggle is confirmed with complete state/error polling for at most 30 seconds because

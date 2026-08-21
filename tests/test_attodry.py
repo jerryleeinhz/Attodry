@@ -467,6 +467,26 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertEqual(self.dll.events, before)
 
+    def test_temperature_wait_records_and_rejects_overshoot(self) -> None:
+        self.connect()
+        self.dll.temperature_control = 1
+        self.dll.sample_temperature_k = 2.31
+        recorded = []
+
+        with self.assertRaisesRegex(AttoDryError, "overshoot limit"):
+            self.driver.wait_for_temperature(
+                2.1,
+                max_overshoot_k=0.2,
+                monotonic=iter([0.0, 0.0]).__next__,
+                sleeper=lambda _: None,
+                on_sample=lambda state, elapsed: recorded.append(
+                    (state.sample_temperature_k, elapsed)
+                ),
+            )
+
+        self.assertEqual(len(recorded), 1)
+        self.assertAlmostEqual(recorded[0][0], 2.31, delta=1e-4)
+
     def test_field_stability_uses_control_error_and_full_dwell_window(self) -> None:
         self.connect()
         self.dll.field_control = 1
@@ -569,6 +589,8 @@ class AttoDryDriverTests(unittest.TestCase):
             "2.1",
             "--max-delta-k",
             "0.2",
+            "--max-overshoot-k",
+            "0.2",
             "--tolerance-k",
             "0.01",
             "--stable-range-k",
@@ -604,6 +626,7 @@ class AttoDryDriverTests(unittest.TestCase):
             """[temperature_commissioning]
 target_k = 2.1
 max_delta_k = 0.2
+max_overshoot_k = 0.2
 tolerance_k = 0.01
 stable_range_k = 0.005
 dwell_s = 2.0
@@ -852,6 +875,42 @@ failure_policy = "disable-control"
             delta=1e-4,
         )
 
+    def test_temperature_cli_overshoot_disables_control(self) -> None:
+        self.dll.sample_temperatures_k = deque([2.0, 2.0, 2.0, 2.0, 2.31])
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            AttoDryError, "overshoot limit"
+        ):
+            run_temperature_test(
+                self.temperature_args()
+                + ["--authorize-connection", "--authorize-temperature-write"],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertAlmostEqual(
+            result["target_samples"][-1]["state"]["sample_temperature_k"],
+            2.31,
+            delta=1e-4,
+        )
+        self.assertAlmostEqual(
+            result["failure_diagnostic"]["trigger_state"][
+                "sample_temperature_k"
+            ],
+            2.31,
+            delta=1e-4,
+        )
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+
     def test_temperature_config_rejects_obsolete_hold_current_policy(self) -> None:
         loaded = []
         request_path = Path(".test-tmp") / "temperature_hold_current.toml"
@@ -861,6 +920,7 @@ failure_policy = "disable-control"
             """[temperature_commissioning]
 target_k = 2.1
 max_delta_k = 0.2
+max_overshoot_k = 0.2
 tolerance_k = 0.01
 stable_range_k = 0.005
 dwell_s = 2.0

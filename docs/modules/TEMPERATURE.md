@@ -199,6 +199,7 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 | --- | --- | --- |
 | `target_k` | K | 本次动作的目标样品温度。必须落在 `hardware.local.toml` 配置的温区内；稳定判据使用 DLL `getSampleTemperature` 传感器读数检查它，而非仅检查软件设定值。它不是初始温度的自动推断值。 |
 | `max_delta_k` | K | 相对连接后初始 `sample_temperature_k` 传感器读数允许的最大物理移动。若 `abs(target_k - initial_sample_temperature) > max_delta_k`，在任何写命令前终止；初始用户设定值差另行记录，它不替代温区上下限。 |
+| `max_overshoot_k` | K | 运行中允许高于目标的最大样品温度增量。每个完整状态样本先写入审计；若 `sample_temperature_k >= target_k + max_overshoot_k`，立即失败并执行 `failure_policy`。阈值本身也必须在配置温区内。 |
 | `tolerance_k` | K | 稳定窗口内每个样品温度样本与 `target_k` 的最大允许绝对误差；必须为正。 |
 | `stable_range_k` | K | 同一连续 dwell 窗口内样品温度的 peak-to-peak 最大允许范围，即 `max(sample) - min(sample)`；可为零。 |
 | `dwell_s` | s | 连续稳定窗口的最短时间跨度。窗口还必须有至少 3 个样本；控制中断、错误或通信失败会清空窗口。 |
@@ -210,9 +211,10 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 | `--authorize-temperature-write` | — | 明确允许本次温度 setpoint 和温控开关写入。缺少时在加载 DLL 前拒绝；只读授权不能替代它。 |
 
 其中，`target_k` 用于样品温度稳定判据，`max_delta_k` 保护“从当前样品传感器
-读数到目标”的实际温度移动；两者必须同时满足。
+读数到目标”的实际温度移动，`max_overshoot_k` 保护运行中的正向过冲；三者必须
+同时满足。
 
-推荐在 `config/temperature_commissioning.local.toml` 文件开头修改上表的九个
+推荐在 `config/temperature_commissioning.local.toml` 文件开头修改上表的十个
 本次参数，而不修改 Python 或 `hardware.local.toml`。该 local 文件已被 Git 忽略；
 它存在也不会代替每次的两个命令行授权。
 
@@ -229,9 +231,10 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 `disable-control`：异常发生时先记录最后确认的完整状态（含样品/VTI 温度）、
 sample/VTI heater power 和触发时间，再通过现有 read-before-toggle、DLL 返回码检查
 和异步读回确认关闭温控；最终状态仍会再次读取。PID 参数没有被读取或修改。
-下一候选目标为 1.8 K，但此前 1.75 K 控制曾在 timeout 前升到 1.9651 K；当前
-`max_delta_k` 只保护写入前的起始步长，尚无运行中温度终止阈值。因此在明确并实现
-实时异常终止边界前，不得执行真实 1.8 K 写入。
+下一候选目标为 1.8 K；用户明确选择 `max_overshoot_k=0.2 K`，因此实时终止线为
+2.0 K。每秒完整状态轮询首次读到样品温度大于等于 2.0 K 时，触发样本会保留，
+随后按 `disable-control` 关闭并验证温控。该阈值高于此前 1.9651 K 峰值，所以不会
+对同等幅度的过冲提前动作；这是用户明确接受的限制，而不是软件对安全余量的推断。
 
 ## 预计文件所有权
 

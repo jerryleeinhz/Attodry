@@ -419,6 +419,7 @@ class AttoDryDriver:
         self,
         target_k: float,
         *,
+        max_overshoot_k: float | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: Callable[[CryostatState, float], None] | None = None,
@@ -427,6 +428,31 @@ class AttoDryDriver:
             self.temperature_min_k <= target_k <= self.temperature_max_k
         ):
             raise ValueError("Temperature target is outside configured limits.")
+        if max_overshoot_k is not None and (
+            not math.isfinite(max_overshoot_k) or max_overshoot_k <= 0
+        ):
+            raise ValueError("max_overshoot_k must be finite and positive.")
+        if (
+            max_overshoot_k is not None
+            and target_k + max_overshoot_k > self.temperature_max_k
+        ):
+            raise ValueError("Temperature overshoot limit is outside configured limits.")
+
+        def record_and_check(state: CryostatState, elapsed_s: float) -> None:
+            if on_sample is not None:
+                on_sample(state, elapsed_s)
+            if state.error_code:
+                return
+            if (
+                max_overshoot_k is not None
+                and state.sample_temperature_k >= target_k + max_overshoot_k
+            ):
+                raise AttoDryError(
+                    "Sample temperature reached the configured overshoot limit: "
+                    f"{state.sample_temperature_k:g} K >= "
+                    f"{target_k + max_overshoot_k:g} K."
+                )
+
         return self._wait_stable(
             target=target_k,
             config=self.temperature_stability,
@@ -435,7 +461,7 @@ class AttoDryDriver:
             label="temperature",
             monotonic=monotonic,
             sleeper=sleeper,
-            on_sample=on_sample,
+            on_sample=record_and_check,
         )
 
     def wait_for_field(
