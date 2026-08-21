@@ -196,15 +196,17 @@ Completed in Stage 3:
   No setting command, `APHS`, `LIAS?`, or `ERRS?` was sent, so latch status is
   explicitly unknown. A separate L6 write authorization is required before any
   `SENS` change.
-- Prepared the Lock-in L6 smallest-write command offline. `set-xx-sensitivity`
-  requires strict hardware TOML plus separate write, latch-consumption, and XY
-  SINE OUT disconnection confirmations before it opens VISA. Its successful path
-  writes only XX `SENS 20`, then performs two 1.5-second status-consuming
-  verification windows; it never rewrites XY or sends `APHS`. Any post-write
-  failure retains its raw record, attempts XX 4 mVrms minimum output and restores
-  the previous XX range. Fake-VISA tests cover every authorization gate, unsafe
-  preflight rejection, the XX-only write, and both verification windows. No real
-  VISA resource was opened for this offline implementation.
+- Completed the fixed-start portion of Lock-in L6 on the isolated `LK_setup`
+  commit `77e7d7e` clone. Its strict policy parsed and all 170 offline tests plus
+  source compilation passed before connection. The explicitly authorized first
+  preflight retained an XY overload latch and therefore failed closed with zero
+  setting writes. Ten subsequent latch-consuming, read-only recovery samples were
+  all clear. One authorized retry then wrote only XX `SENS 20`; all preflight,
+  transition, and formal status windows were clear, XY remained at `SENS=17`, and
+  both `PHAS?` settings remained unchanged. Raw accepted and rejected audit files
+  remain solely under ignored target `run_data`; neither XY writes nor `APHS` were
+  sent. Real bounded-auto transitions remain uncommissioned and need a distinct
+  authorization.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

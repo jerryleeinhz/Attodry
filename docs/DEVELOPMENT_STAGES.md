@@ -193,14 +193,17 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   as a configuration mismatch without a write. Raw output remains only in ignored
   target `run_data`. No setting command, `APHS`, `LIAS?`, or `ERRS?` was sent, so
   the run is read-only commissioned but does not establish latch-clear status.
-- Added the Lock-in L6 smallest-write path offline. `set-xx-sensitivity` accepts
-  only the strict TOML's XX 10 mV target (`SENS 20`), requires write,
-  latch-consumption, and physical-XY-disconnection authorization before VISA is
-  opened, and leaves XY untouched. It verifies clean preflight, transition, and
-  formal windows after two five-time-constant waits; a post-write failure retains
-  raw output and attempts XX minimum-output plus prior-range restoration.
-  Fake-VISA coverage passes; target-offline and real-write commissioning remain
-  pending.
+- Completed the fixed-start portion of Lock-in L6 on `LK_setup`. The dedicated
+  commit `77e7d7e` clone strictly parsed the local policy, passed all 170 offline
+  tests and source compilation, then ran `set-xx-sensitivity` under explicit
+  write, latch-consumption, and physical-XY-disconnection authorization. Its
+  first preflight retained and rejected an XY overload latch before any write.
+  A subsequent ten-sample, latch-consuming, read-only recovery was completely
+  clear; the single authorized retry then wrote only XX `SENS 20`. Its preflight,
+  transition, and formal verification windows were all lock/overload/error-free;
+  XY remained `SENS=17` and both phase settings were unchanged. Raw accepted and
+  rejected audit files remain only in ignored target `run_data`. The real bounded
+  auto-range transition remains pending a new, separately scoped authorization.
 
 ## Stage 4 - attoDRY real driver
 
