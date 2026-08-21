@@ -353,6 +353,13 @@ cleanup 再次验证上述基线。频率扫描期间 XX 临时为 20 mV；XY �
 使用保存的 SINE OUT 读回，旧扫频记录没有读回时才采用记录的 4 mV 设定值；不打开
 VISA、不读取状态锁存、不写设置。
 
+2026-08-21：为即将重做的 1/2/3 阶扫频和扫幅增加离线验证的显式
+`--all-harmonics` 选项。默认 sweep 仍只测 h1；只有提供该旗标时，才会在每个
+扫描点依次对两台仪器写 h2、h3，分别等待完整 `settle_s`，采样并在下一个点前
+恢复 h1。任何阶次的 unlock、overload、error 或频率不匹配都会保留部分样本并
+fail-closed；cleanup 还会检查并恢复两台 h1、XX 4 mVrms、扫频的 17.777 Hz 和
+原 XX 量程。fake-VISA 成功与二阶失败恢复已通过；尚未在真实仪器执行。
+
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。

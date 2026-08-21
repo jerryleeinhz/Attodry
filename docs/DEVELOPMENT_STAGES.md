@@ -251,6 +251,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   status multi-select and rejected-audit checkbox. Selecting a JSON file changes
   the catalog to its directory so the paired sweep can be found without copying
   raw data into the analysis clone. The controls remain read-only.
+- Added an offline-validated, opt-in `--all-harmonics` mode for the existing
+  device-only frequency and excitation sweeps. The default remains h1-only;
+  the flag records h1/h2/h3 at every point, waits after each paired h2/h3
+  setting, and restores both instruments to h1 before the next point and during
+  cleanup. Fake-VISA tests cover success and a rejected h2 overload with retained
+  partial data, 4 mVrms cleanup, and h1 restoration. Real execution remains
+  pending a fresh physical-confirmation and write authorization.
 
 ## Stage 4 - attoDRY real driver
 

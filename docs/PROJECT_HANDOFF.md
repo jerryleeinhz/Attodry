@@ -252,6 +252,11 @@ Completed in Stage 3:
   completed-record/status filters as visible Jupyter controls. Selecting a file
   switches catalog discovery to its raw-data directory while leaving the clone
   and all instruments untouched.
+- Added an offline-tested `--all-harmonics` switch for the device-only sweeps.
+  It is opt-in (the existing default remains h1-only) and records h1/h2/h3 at
+  every point with paired HARM writes, settling, strict status rejection, and
+  h1/4 mVrms cleanup. Fake-VISA success and h2-failure recovery pass; the new
+  real sweep still needs current physical confirmation and write authorization.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

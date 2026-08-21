@@ -1127,6 +1127,93 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["temporary_xx_sensitivity_code"], 21)
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
 
+    def test_cli_frequency_sweep_all_harmonics_records_each_order_and_restores_first(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777,1000",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--all-harmonics",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["requested_harmonics"], [1, 2, 3])
+        self.assertEqual(len(result["points"][0]["samples"]), 3)
+        self.assertEqual(
+            [sample["lockin_xx"]["reading"]["harmonic"] for sample in result["points"][0]["samples"]],
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("HARM ")],
+            ["HARM 2", "HARM 3", "HARM 1", "HARM 2", "HARM 3", "HARM 1"],
+        )
+        self.assertEqual(
+            [write for write in xy_resource.writes if write.startswith("HARM ")],
+            ["HARM 2", "HARM 3", "HARM 1", "HARM 2", "HARM 3", "HARM 1"],
+        )
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["harmonic"], 1)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["harmonic"], 1)
+
+    def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["LIAS?"] = ["0\n", "0\n", "1\n"] + ["0\n"] * 6
+        xx_resource = TrackingVisaResource(
+            xx_responses, shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "overload"):
+            run(
+                [
+                    "sweep-frequency",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--all-harmonics",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertEqual(len(result["points"][0]["samples"]), 2)
+        self.assertEqual(result["points"][0]["samples"][-1]["lockin_xx"]["reading"]["harmonic"], 2)
+        self.assertIn("HARM 1", xx_resource.writes)
+        self.assertIn("HARM 1", xy_resource.writes)
+        self.assertIn("SLVL 0.004", xx_resource.writes)
+        self.assertTrue(result["cleanup"]["verified"])
+
     def test_cli_frequency_sweep_separates_transition_latches_from_sample_window(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
@@ -1259,6 +1346,51 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(xy_resource.writes, [])
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
+
+    def test_cli_excitation_sweep_all_harmonics_records_each_order_and_restores_first(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation",
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,0.4",
+                    "--series-resistance-ohm", "100000",
+                    "--device-resistance-ohm", "500",
+                    "--max-device-current-a", "0.005",
+                    "--max-device-voltage-v", "0.5",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--all-harmonics",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                    "--confirm-no-50ohm-termination",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["requested_harmonics"], [1, 2, 3])
+        self.assertEqual(len(result["points"][1]["samples"]), 3)
+        self.assertEqual(
+            [sample["lockin_xy"]["reading"]["harmonic"] for sample in result["points"][1]["samples"]],
+            [1, 2, 3],
+        )
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["harmonic"], 1)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["harmonic"], 1)
 
     def test_cli_excitation_sweep_clears_range_restoration_overload_before_final_status(self) -> None:
         shared_frequency = {"hz": 17.777}

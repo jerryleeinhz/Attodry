@@ -305,6 +305,14 @@ def _add_sweep_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--samples-per-point", type=_positive_integer, default=3)
     parser.add_argument("--sample-interval-s", type=_nonnegative_float, default=0.3)
     parser.add_argument(
+        "--all-harmonics",
+        action="store_true",
+        help=(
+            "At every point, acquire harmonics 1, 2, and 3 in order. "
+            "Without this explicit option, the sweep acquires harmonic 1 only."
+        ),
+    )
+    parser.add_argument(
         "--xx-sensitivity-code",
         type=_sensitivity_code,
         default=21,
@@ -815,6 +823,7 @@ def _run_frequency_sweep(
     points = _validate_increasing_points(args.points_hz, "frequency")
     if points[0] < 0.001 or points[-1] > 102_000.0:
         raise ValueError("Frequency sweep points must be within 0.001-102000 Hz.")
+    harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
@@ -877,6 +886,8 @@ def _run_frequency_sweep(
                     lockin_xx,
                     lockin_xy,
                     target_frequency_hz=target_hz,
+                    harmonics=harmonics,
+                    harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
@@ -904,6 +915,7 @@ def _run_frequency_sweep(
                 "lockin_xy": asdict(preflight_xy),
             },
             "requested_points_hz": points,
+            "requested_harmonics": harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
@@ -930,6 +942,7 @@ def _run_excitation_sweep(
         raise AuthorizationRequired("Absence of an external 50 ohm termination was not confirmed.")
     points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
+    harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
@@ -975,6 +988,8 @@ def _run_excitation_sweep(
                     lockin_xx,
                     lockin_xy,
                     target_frequency_hz=baseline_hz,
+                    harmonics=harmonics,
+                    harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
@@ -1002,6 +1017,7 @@ def _run_excitation_sweep(
                 "lockin_xy": asdict(preflight_xy),
             },
             "requested_points_v_rms": points,
+            "requested_harmonics": harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
@@ -1026,6 +1042,10 @@ def _require_sweep_authorization(args: argparse.Namespace) -> None:
         raise AuthorizationRequired(
             "Physical disconnection of lockin_xy SINE OUT was not confirmed."
         )
+
+
+def _requested_sweep_harmonics(args: argparse.Namespace) -> tuple[int, ...]:
+    return (1, 2, 3) if args.all_harmonics else (1,)
 
 
 def _validate_increasing_points(
@@ -1114,6 +1134,8 @@ def _capture_sweep_point(
     lockin_xy: Sr830,
     *,
     target_frequency_hz: float,
+    harmonics: tuple[int, ...],
+    harmonic_settle_s: float,
     samples: int,
     sample_interval_s: float,
     record: dict[str, object],
@@ -1122,41 +1144,54 @@ def _capture_sweep_point(
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
         raise TypeError("Sweep point samples must be a list.")
-    for sample_index in range(samples):
-        if sample_index:
-            time.sleep(sample_interval_s)
-        xx = lockin_xx.read_harmonic_sample(1)
-        xy = lockin_xy.read_harmonic_sample(1)
-        problems: list[str] = []
-        for sample in (xx, xy):
-            role = sample.reading.role.value
-            if sample.lia_status.reference_unlocked:
-                problems.append(f"lockin_{role} reference is unlocked")
-            if sample.lia_status.any_overload:
-                problems.append(f"lockin_{role} reports overload")
-            if sample.error_status:
-                problems.append(
-                    f"lockin_{role} instrument error is {sample.error_status}"
+    for harmonic in harmonics:
+        if harmonic != 1:
+            lockin_xx.set_harmonic(harmonic)
+            lockin_xy.set_harmonic(harmonic)
+            time.sleep(harmonic_settle_s)
+        for sample_index in range(samples):
+            if sample_index:
+                time.sleep(sample_interval_s)
+            xx = lockin_xx.read_harmonic_sample(harmonic)
+            xy = lockin_xy.read_harmonic_sample(harmonic)
+            problems: list[str] = []
+            for sample in (xx, xy):
+                role = sample.reading.role.value
+                if sample.lia_status.reference_unlocked:
+                    problems.append(f"lockin_{role} reference is unlocked")
+                if sample.lia_status.any_overload:
+                    problems.append(f"lockin_{role} reports overload")
+                if sample.error_status:
+                    problems.append(
+                        f"lockin_{role} instrument error is {sample.error_status}"
+                    )
+            try:
+                _verify_frequency_readbacks(
+                    target_frequency_hz,
+                    xx.reading.frequency_hz,
+                    xy.reading.frequency_hz,
+                    rel_tolerance=frequency_rel_tolerance,
                 )
-        try:
-            _verify_frequency_readbacks(
-                target_frequency_hz,
-                xx.reading.frequency_hz,
-                xy.reading.frequency_hz,
-                rel_tolerance=frequency_rel_tolerance,
-            )
-        except Sr830Error as exc:
-            problems.append(str(exc))
-        sample_payload = {
-            "sample_index": sample_index,
-            "captured_unix_s": time.time(),
-            "lockin_xx": _audited_harmonic_sample_record(xx),
-            "lockin_xy": _audited_harmonic_sample_record(xy),
-            "problems": problems,
-        }
-        raw_samples.append(sample_payload)
-        if problems:
-            raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
+            except Sr830Error as exc:
+                problems.append(str(exc))
+            sample_payload = {
+                "sample_index": sample_index,
+                "captured_unix_s": time.time(),
+                "lockin_xx": _audited_harmonic_sample_record(xx),
+                "lockin_xy": _audited_harmonic_sample_record(xy),
+                "problems": problems,
+            }
+            raw_samples.append(sample_payload)
+            if problems:
+                raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
+    if harmonics[-1] != 1:
+        lockin_xx.set_harmonic(1)
+        lockin_xy.set_harmonic(1)
+
+
+def _restore_first_harmonic(instrument: Sr830) -> None:
+    if instrument.read_harmonic() != 1:
+        instrument.set_harmonic(1)
 
 
 def _consume_frequency_transition(
@@ -1266,6 +1301,12 @@ def _restore_scan_state(
     actions: list[tuple[str, Callable[[], None]]] = [
         ("restore lockin_xx to 4 mVrms", lockin_xx.set_minimum_sine_output)
     ]
+    actions.extend(
+        (
+            ("restore lockin_xx to first harmonic", lambda: _restore_first_harmonic(lockin_xx)),
+            ("restore lockin_xy to first harmonic", lambda: _restore_first_harmonic(lockin_xy)),
+        )
+    )
     if restore_frequency:
         actions.append(
             (
