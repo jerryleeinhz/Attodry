@@ -209,8 +209,13 @@ follow-up:
 - `TEMPERATURE.md` and `MAGNETIC_FIELD.md` separate their offline, target-offline,
   real read-only, and future write-commissioning stages without overstating the
   completed 10-second attoDRY read-only connection.
+- `THREE_SMU.md` defines the planned three-Keithley QCoDeS module: semantic bias/
+  top-gate/bottom-gate roles, shared CLI/Notebook engine, retained scan modes,
+  strict operator-filled safety configuration, auditable data and fail-closed
+  cleanup. It is documentation only; no SMU production code or real connection
+  was performed in this worktree.
 - `INTEGRATION.md` requires commit IDs, tests, hardware-action reports, and known
-  limitations from the three device modules before combination.
+  limitations from the four device modules before combination.
 - `docs/modules/README.md` defines shared permissions, `lyr` use, branch/worktree
   isolation, status terminology, and the completion-report format for each Chat.
 
@@ -231,6 +236,9 @@ Completed offline in Stage 5:
   before any hardware driver can be constructed.
 - Added signed Vxx/I and excitation-current helpers that do not guess the sample
   path impedance, plus explicit linear paired-gate relations.
+- Added a separate `THREE_SMU.md` handoff plan for a future QCoDeS implementation
+  with one bias SMU and two voltage-source gate SMUs. CLI and Jupyter will share
+  one Python session; the first version deliberately excludes Lock-in recording.
 - Added audited simulation execution across SQLite start/raw/complete events,
   retry, resume, checkpoints, normal hold/zero cleanup, and failure cleanup.
 

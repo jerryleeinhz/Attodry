@@ -213,6 +213,10 @@ require the user's exact models, limits, and command sets.
   hold/zero, Ctrl+C, and exception cleanup orchestration against SQLite.
 - Added a hardware-readiness gate that rejects unresolved VISA/DLL/SMU addresses
   and all six per-gate safety values before any hardware driver can be built.
+- Added the planned `docs/modules/THREE_SMU.md` work package (2026-08-21) for a
+  separate QCoDeS implementation Chat. It defines three semantic roles, shared
+  CLI/Notebook control, scan modes, strict local TOML, raw-data contracts and
+  fail-closed cleanup. No production SMU code or hardware action is claimed.
 
 ## Stage 6 - analysis and notebook migration
 
