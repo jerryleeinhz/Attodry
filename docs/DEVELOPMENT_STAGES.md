@@ -183,6 +183,16 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   (`c5ffe7d7daf3c59796a46f4263916162092164aeee902840a9fdde1a843c479c`) contained
   no local hardware configuration, DLL, run-data, SQLite, or secret file. No VISA
   resource was opened.
+- Completed Lock-in L5 real read-only commissioning under a scope limited to
+  non-latch-clearing queries. An ignored strict local TOML was created only in the
+  dedicated L4 clone by copying the existing station-local config and appending
+  user-confirmed Lock-in fields; its legacy source remained unchanged. Distinct
+  SR830 identities, semantic roles, TTL rising edge, A-B, Float, AC, 300 ms,
+  24 dB/oct, and XY 1 mV (`SENS=17`) matched. XX still read back 1 mV
+  (`SENS=17`) rather than the new policy's 10 mV start (`SENS=20`); it was retained
+  as a configuration mismatch without a write. Raw output remains only in ignored
+  target `run_data`. No setting command, `APHS`, `LIAS?`, or `ERRS?` was sent, so
+  the run is read-only commissioned but does not establish latch-clear status.
 
 ## Stage 4 - attoDRY real driver
 

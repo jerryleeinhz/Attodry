@@ -184,6 +184,18 @@ Completed in Stage 3:
   `c5ffe7d7daf3c59796a46f4263916162092164aeee902840a9fdde1a843c479c` and contained
   no local hardware configuration, DLL, run-data, SQLite, or secret file. No VISA
   resource was opened.
+- Completed the explicitly authorized Lock-in L5 real read-only diagnostic on
+  `LK_setup`. The dedicated clone received an ignored local TOML copied from the
+  existing station-local file plus the user-confirmed strict Lock-in fields; the
+  legacy local file was not changed and the new one parsed strictly. The two VISA
+  resources returned distinct SR830 identities. Roles, TTL rising edge, A-B,
+  Float, AC, 300 ms, 24 dB/oct, and XY 1 mV (`SENS=17`) matched the contract.
+  XX instead read back 1 mV (`SENS=17`) while the new bounded policy expects its
+  10 mV start (`SENS=20`); the mismatch was recorded and not corrected. The raw
+  diagnostic and empty stderr file remain only under ignored target `run_data`.
+  No setting command, `APHS`, `LIAS?`, or `ERRS?` was sent, so latch status is
+  explicitly unknown. A separate L6 write authorization is required before any
+  `SENS` change.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

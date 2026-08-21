@@ -74,6 +74,34 @@ settle_time_constants = 5.0
 阶段最多调整一次。10 mV 对已记录最大 Vxx 5.384 mV 的占比约 53.8%，但这不
 保证新的温度、磁场、门压或频率条件不会超过 8.5 mV 阈值。
 
+## 参数与配置含义（2026-08-21 确认）
+
+所有电压均为 SR830 full-scale 或 RMS 的 SI 单位（V），不是仪器前面板代码。
+代码映射只保存在驱动层：1 mV、10 mV、20 mV 分别对应 `SENS` 代码 17、20、21。
+本地 `hardware.local.toml` 只能由操作者维护且必须忽略提交；模板中的地址占位符
+不能用于连接仪器。
+
+| 字段 | 含义与确认值 | 约束 |
+| --- | --- | --- |
+| `reference_source` | XX 为 `internal`，即 XX 提供激励与参考；XY 为 `external_ttl`。 | 角色不可交换；XY 的 SINE OUT 必须物理断开。 |
+| `external_reference_edge` | XY 的 TTL 外参考边沿，固定为 `rising`。 | 仅 XY 必填；这不是 A-B 电压信号的极性。 |
+| `input_mode` | `a_minus_b`，差分 A-B 测量。 | 两台都固定，避免把共模信号当作输运信号。 |
+| `shield_grounding` | `float`，输入屏蔽浮地。 | 两台都固定。 |
+| `input_coupling` | `ac`，交流耦合。 | 两台都固定。 |
+| `time_constant_s` | 数字滤波时间常数，固定 0.3 s。 | 本模块不自动选择时间常数。 |
+| `filter_slope_db_oct` | 低通滤波斜率，固定 24 dB/oct。 | 与时间常数共同定义带宽，不能在正式采样中变化。 |
+| `settle_time_constants` | 每次连接或设置转换后等待的时间常数个数，固定 5.0。 | 当前最短等待为 `5 × 0.3 s = 1.5 s`；这不是缩短等待的授权。 |
+| `sensitivity_mode` | XX 为 `bounded_auto`；XY 为 `fixed`。 | XY 不自动量程，以免零场噪声底触发追逐；L5 不会执行任何量程写入。 |
+| `sensitivity_full_scale_v` | 固定模式的量程；XX 自动模式的起始且最窄量程。XX 10 mV，XY 1 mV。 | XX 自动模式中必须等于 `autorange_min_full_scale_v`。它是期望策略，实际量程以 `SENS?` 读回为准。 |
+| `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | XX 可用范围为 10 mV / 20 mV。 | 仅 XX 的 `bounded_auto` 使用；不可扩大边界。 |
+| `autorange_target_occupancy` | 0.85，即 XX 10 mV 时的阈值是 8.5 mV。 | 到达或超过阈值、或报告过载时，才允许向 20 mV 放宽；20 mV 仍超阈值则 fail closed。 |
+| `autorange_stable_samples` | 在 20 mV 时，连续 2 个不超过 8.5 mV 的样本才可缩窄到 10 mV。 | 任一不合格样本重置计数；这形成迟滞而不是逐点抖动。 |
+| `autorange_max_steps` | 每个实验条件的预备阶段最多调整 1 次。 | 正式采样前冻结量程；扫描中的大幅变化不会由自动量程追随。 |
+
+`bounded_auto` 是可审计的预备阶段状态机，不是 SR830 的 `AGAN` 命令替代品。
+每次许可的 `SENS` 转换都必须单独获写入授权、读回新代码、保存转换记录、至少等
+待 1.5 s、在已单独授权的前提下消费转换锁存、再次等待，并在正式样本前冻结量程。
+
 ## Lock-in 实验经验和必须落实的规则
 
 ### 接线与参考
@@ -225,11 +253,27 @@ XY 固定 1 mV，不进入状态机。fake-VISA 执行层在写前验证原量�
 `c5ffe7d7daf3c59796a46f4263916162092164aeee902840a9fdde1a843c479c`；内容检查未
 发现 `hardware.local.toml`、DLL、`run_data`、SQLite 或 secrets。未打开 VISA。
 
-### L5 - real read-only commissioning
+### L5 - real read-only commissioning（当前：完成，锁存状态未读取）
 
 - 需要新的明确授权；若读取 `LIAS?/ERRS?`，授权必须单独写明会清锁存。
 - 对比 TOML 期望值和实际 `FMOD/RSLP/ISRC/IGND/ICPL/SENS/OFLT/OFSL/PHAS`。
 - 完成条件：原始记录保存在 ignored 路径，零设置写命令。
+
+本轮 L5 的授权仅限不清锁存的诊断：查询 `*IDN?`、`FMOD?`、`RSLP?`、`FREQ?`、
+`HARM?`、`SLVL?`、`ISRC?`、`IGND?`、`ICPL?`、`ILIN?`、`SENS?`、`RMOD?`、
+`OFLT?`、`OFSL?`、`PHAS?` 和 `SNAP? 1,2,3,4,9`。其中 `PHAS?` 是参考相移设置，
+`SNAP?` 的第 4 项是本次测量相位；两者不能混为一谈。该诊断明确不发送 `APHS`、
+不发送任何设置命令，也不查询会清除状态锁存的 `LIAS?`/`ERRS?`。因此记录会标注
+“安全状态不完整”，不能用来宣布无 unlock、overload 或仪器错误。
+
+2026-08-21：在 `LK_setup` 的 L4 专用 clone 中，从旧的被忽略站点配置复制并补齐
+本节已确认字段；旧配置未修改，新配置严格解析通过。随后完成一次双 SR830 的
+真实只读诊断，两个身份不同，语义角色、TTL 上升沿、A-B、Float、AC、300 ms、
+24 dB/oct 和 XY 的 1 mV（`SENS=17`）均与 TOML 一致。XX 实际仍为 1 mV
+（`SENS=17`），与新策略起始 10 mV（`SENS=20`）不一致；该差异已保留在原始记录
+中，未尝试修正。原始 JSON 和空的标准错误文件仅保存在该 clone 的忽略
+`run_data` 路径。没有发出写命令、`APHS`、`LIAS?` 或 `ERRS?`，故锁存状态仍未知。
+将 XX 改为 10 mV 属于 L6，仍需要单独写入授权和 XY SINE OUT 物理断开确认。
 
 ### L6 - real write commissioning
 
