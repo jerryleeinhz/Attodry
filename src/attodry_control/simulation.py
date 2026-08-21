@@ -244,6 +244,7 @@ class SimulationLockin:
             y_v=y_v,
             amplitude_v=math.hypot(x_v, y_v),
             phase_deg=math.degrees(math.atan2(y_v, x_v)),
+            phase_shift_deg=0.0,
             frequency_hz=self.frequency_hz,
             locked=self.locked,
             overload=self.overload,

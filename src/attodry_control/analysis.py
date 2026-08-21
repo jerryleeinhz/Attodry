@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass, fields
+from datetime import datetime
 import math
 from pathlib import Path
 import sqlite3
@@ -19,6 +20,7 @@ class AnalysisRow:
     sequence_index: int
     attempt_index: int
     accepted: bool
+    captured_at_utc: datetime
     temperature_k: float
     bx_t: float
     bz_t: float
@@ -34,6 +36,7 @@ class AnalysisRow:
     y_v: float
     amplitude_v: float
     phase_deg: float
+    phase_shift_deg: float
     locked: bool
     overload: bool
 
@@ -85,10 +88,11 @@ def load_analysis_rows(
         records = connection.execute(
             f"""
             SELECT c.condition_id, c.scan_id, c.sequence_index, tr.attempt_index,
-                   tr.accepted, c.temperature_k, c.bx_t, c.bz_t,
+                   tr.accepted, tr.captured_at_utc, c.temperature_k, c.bx_t, c.bz_t,
                    c.excitation_v, c.frequency_hz AS condition_frequency_hz,
                    c.gate_top_v, c.gate_bottom_v, tr.role, tr.harmonic,
                    tr.x_v, tr.y_v, tr.amplitude_v, tr.phase_deg,
+                   tr.phase_shift_deg,
                    tr.frequency_hz, tr.locked, tr.overload
             FROM transport_readings AS tr
             JOIN conditions AS c
@@ -322,6 +326,7 @@ def _analysis_row(record: sqlite3.Row) -> AnalysisRow:
         sequence_index=int(record["sequence_index"]),
         attempt_index=int(record["attempt_index"]),
         accepted=bool(record["accepted"]),
+        captured_at_utc=datetime.fromisoformat(record["captured_at_utc"]),
         temperature_k=float(record["temperature_k"]),
         bx_t=bx_t,
         bz_t=bz_t,
@@ -337,6 +342,7 @@ def _analysis_row(record: sqlite3.Row) -> AnalysisRow:
         y_v=float(record["y_v"]),
         amplitude_v=float(record["amplitude_v"]),
         phase_deg=float(record["phase_deg"]),
+        phase_shift_deg=float(record["phase_shift_deg"]),
         locked=bool(record["locked"]),
         overload=bool(record["overload"]),
     )

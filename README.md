@@ -77,6 +77,7 @@ python -m attodry_control.lockin_test measure-harmonics --help
 python -m attodry_control.lockin_test sweep-frequency --help
 python -m attodry_control.lockin_test sweep-excitation --help
 python -m attodry_control.attodry_test --help
+python -m attodry_control.temperature_test --help
 python -m attodry_control.lockin_test --help
 ```
 

@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import UTC, datetime
 import importlib.util
 import json
 import math
@@ -44,6 +45,7 @@ def row(
         sequence_index=sequence_index,
         attempt_index=0,
         accepted=accepted,
+        captured_at_utc=datetime(2026, 8, 20, tzinfo=UTC),
         temperature_k=temperature_k,
         bx_t=bx_t,
         bz_t=bz_t,
@@ -59,6 +61,7 @@ def row(
         y_v=x_v * 0.1,
         amplitude_v=abs(x_v) * math.sqrt(1.01),
         phase_deg=5.0,
+        phase_shift_deg=0.0,
         locked=True,
         overload=False,
     )

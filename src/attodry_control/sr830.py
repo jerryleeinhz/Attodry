@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import math
 from typing import Callable, Protocol
 
 from .models import LockinReading, LockinRole
+from .sr830_settings import Sr830SettingCodes
 
 
 MINIMUM_SINE_OUTPUT_V = 0.004
@@ -12,6 +14,7 @@ MAXIMUM_SINE_OUTPUT_V = 5.0
 MAXIMUM_REFERENCE_FREQUENCY_HZ = 102_000.0
 # Two sequential SR830 readbacks can differ by one 1 mHz display step.
 PAIR_FREQUENCY_ABS_TOLERANCE_HZ = 0.001_01
+MINIMUM_FIXED_SETTINGS_SETTLE_S = 1.5
 
 
 class Sr830Error(RuntimeError):
@@ -24,10 +27,14 @@ class AuthorizationRequired(Sr830Error):
 
 class Sr830AcquisitionError(Sr830Error):
     def __init__(
-        self, message: str, partial_readings: tuple[LockinReading, ...] = ()
+        self, message: str, partial_samples: tuple[Sr830HarmonicSample, ...] = ()
     ) -> None:
         super().__init__(message)
-        self.partial_readings = partial_readings
+        self.partial_samples = partial_samples
+
+    @property
+    def partial_readings(self) -> tuple[LockinReading, ...]:
+        return tuple(sample.reading for sample in self.partial_samples)
 
 
 class VisaResource(Protocol):
@@ -75,6 +82,7 @@ class Sr830Diagnostic:
     reserve_mode: int
     time_constant: int
     filter_slope: int
+    phase_shift_deg: float
     x_v: float
     y_v: float
     amplitude_v: float
@@ -105,16 +113,35 @@ class PairConfigurationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class FixedSettingsConfigurationResult:
+    before_xx: Sr830Diagnostic
+    before_xy: Sr830Diagnostic
+    after_xx: Sr830Diagnostic
+    after_xy: Sr830Diagnostic
+
+
+@dataclass(frozen=True, slots=True)
 class Sr830HarmonicSample:
     reading: LockinReading
     lia_status: LiaStatus
     error_status: int
+    captured_at_utc: datetime
+
+    def __post_init__(self) -> None:
+        if self.captured_at_utc.tzinfo is None or self.captured_at_utc.utcoffset() is None:
+            raise ValueError("captured_at_utc must be timezone-aware UTC.")
+        if self.captured_at_utc.utcoffset().total_seconds() != 0:
+            raise ValueError("captured_at_utc must use UTC.")
 
 
 @dataclass(frozen=True, slots=True)
 class DualSr830Measurement:
-    readings: tuple[LockinReading, ...]
+    samples: tuple[Sr830HarmonicSample, ...]
     pair_reads_are_sequential: bool = True
+
+    @property
+    def readings(self) -> tuple[LockinReading, ...]:
+        return tuple(sample.reading for sample in self.samples)
 
 
 class Sr830:
@@ -145,10 +172,11 @@ class Sr830:
         shield_grounding = self._query_int("IGND?")
         input_coupling = self._query_int("ICPL?")
         line_filter = self._query_int("ILIN?")
-        sensitivity = self._query_int("SENS?")
+        sensitivity = self.read_sensitivity()
         reserve_mode = self._query_int("RMOD?")
-        time_constant = self._query_int("OFLT?")
-        filter_slope = self._query_int("OFSL?")
+        time_constant = self.read_time_constant()
+        filter_slope = self.read_filter_slope()
+        phase_shift_deg = self.read_phase_shift()
         snapshot = self._query_csv_floats("SNAP? 1,2,3,4,9", expected=5)
         lia_status = None
         error_status = None
@@ -171,6 +199,7 @@ class Sr830:
             reserve_mode=reserve_mode,
             time_constant=time_constant,
             filter_slope=filter_slope,
+            phase_shift_deg=phase_shift_deg,
             x_v=snapshot[0],
             y_v=snapshot[1],
             amplitude_v=snapshot[2],
@@ -222,6 +251,34 @@ class Sr830:
             )
         return code
 
+    def read_time_constant(self) -> int:
+        code = self._query_int("OFLT?")
+        if not 0 <= code <= 19:
+            raise Sr830Error(
+                f"lockin_{self.role.value} returned invalid time-constant code {code}."
+            )
+        return code
+
+    def read_filter_slope(self) -> int:
+        code = self._query_int("OFSL?")
+        if not 0 <= code <= 3:
+            raise Sr830Error(
+                f"lockin_{self.role.value} returned invalid filter-slope code {code}."
+            )
+        return code
+
+    def read_phase_shift(self) -> float:
+        return self._query_float("PHAS?")
+
+    def write_fixed_settings(self, settings: Sr830SettingCodes) -> None:
+        _validate_fixed_settings_role(self.role, settings)
+        self._resource.write(f"ISRC {settings.input_mode}")
+        self._resource.write(f"IGND {settings.shield_grounding}")
+        self._resource.write(f"ICPL {settings.input_coupling}")
+        self._resource.write(f"OFLT {settings.time_constant}")
+        self._resource.write(f"OFSL {settings.filter_slope}")
+        self._resource.write(f"SENS {settings.sensitivity}")
+
     def set_harmonic(self, harmonic: int) -> None:
         if harmonic not in (1, 2, 3):
             raise ValueError("Only harmonics 1, 2, and 3 are supported.")
@@ -242,7 +299,9 @@ class Sr830:
                 f"lockin_{self.role.value} harmonic readback is {harmonic}; "
                 f"expected {expected_harmonic}."
             )
+        phase_shift_deg = self.read_phase_shift()
         snapshot = self._query_csv_floats("SNAP? 1,2,3,4,9", expected=5)
+        captured_at_utc = datetime.now(UTC)
         lia_status = decode_lia_status(self._query_int("LIAS?"))
         error_status = self._query_int("ERRS?")
         reading = LockinReading(
@@ -252,11 +311,14 @@ class Sr830:
             y_v=snapshot[1],
             amplitude_v=snapshot[2],
             phase_deg=snapshot[3],
+            phase_shift_deg=phase_shift_deg,
             frequency_hz=snapshot[4],
             locked=not lia_status.reference_unlocked,
             overload=lia_status.any_overload,
         )
-        return Sr830HarmonicSample(reading, lia_status, error_status)
+        return Sr830HarmonicSample(
+            reading, lia_status, error_status, captured_at_utc
+        )
 
     def configure_xx_minimum_excitation(self, frequency_hz: float) -> None:
         if self.role is not LockinRole.XX:
@@ -397,6 +459,90 @@ def configure_minimum_excitation_pair(
         raise
 
 
+def configure_fixed_settings_pair(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    xx_settings: Sr830SettingCodes,
+    xy_settings: Sr830SettingCodes,
+    expected_frequency_hz: float,
+    settle_s: float,
+    sleeper: Callable[[float], None],
+    authorize_writes: bool,
+    confirm_xy_sine_disconnected: bool,
+) -> FixedSettingsConfigurationResult:
+    """Apply only the confirmed fixed input/filter/range settings to both roles."""
+
+    if not authorize_writes:
+        raise AuthorizationRequired(
+            "SR830 fixed-setting writes were not explicitly authorized."
+        )
+    if not confirm_xy_sine_disconnected:
+        raise AuthorizationRequired(
+            "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+        )
+    if lockin_xx.role is not LockinRole.XX or lockin_xy.role is not LockinRole.XY:
+        raise Sr830Error("The SR830 pair must be supplied as lockin_xx then lockin_xy.")
+    _validate_fixed_settings_role(LockinRole.XX, xx_settings)
+    _validate_fixed_settings_role(LockinRole.XY, xy_settings)
+    if not math.isfinite(settle_s) or settle_s < MINIMUM_FIXED_SETTINGS_SETTLE_S:
+        raise Sr830Error(
+            "Fixed-setting verification requires at least 1.5 s (five 300 ms "
+            "time constants) of settling."
+        )
+
+    before_xx = lockin_xx.read_diagnostic(consume_status_latches=False)
+    before_xy = lockin_xy.read_diagnostic(consume_status_latches=False)
+    if before_xx.identity == before_xy.identity:
+        raise Sr830Error(
+            "Both semantic roles returned the same SR830 identity; verify that the "
+            "VISA addresses refer to two distinct physical instruments."
+        )
+    _verify_pair_readback(before_xx, before_xy, expected_frequency_hz)
+
+    writes_started = False
+    try:
+        writes_started = True
+        lockin_xx.write_fixed_settings(xx_settings)
+        lockin_xy.write_fixed_settings(xy_settings)
+        sleeper(settle_s)
+        after_xx = lockin_xx.read_diagnostic(consume_status_latches=False)
+        after_xy = lockin_xy.read_diagnostic(consume_status_latches=False)
+        _verify_fixed_settings_readback(after_xx, xx_settings, before_xx.phase_shift_deg)
+        _verify_fixed_settings_readback(after_xy, xy_settings, before_xy.phase_shift_deg)
+        return FixedSettingsConfigurationResult(
+            before_xx=before_xx,
+            before_xy=before_xy,
+            after_xx=after_xx,
+            after_xy=after_xy,
+        )
+    except BaseException as exc:
+        if writes_started:
+            for error in _attempt_minimum_output(lockin_xx, lockin_xy):
+                exc.add_note(f"Minimum-output cleanup also failed: {error}")
+            originals = (
+                (lockin_xx, _settings_from_diagnostic(before_xx)),
+                (lockin_xy, _settings_from_diagnostic(before_xy)),
+            )
+            for instrument, settings in originals:
+                try:
+                    instrument.write_fixed_settings(settings)
+                    sleeper(settle_s)
+                    restored = instrument.read_diagnostic(
+                        consume_status_latches=False
+                    )
+                    original = before_xx if instrument.role is LockinRole.XX else before_xy
+                    _verify_fixed_settings_readback(
+                        restored, settings, original.phase_shift_deg
+                    )
+                except BaseException as restore_error:
+                    exc.add_note(
+                        f"lockin_{instrument.role.value} fixed-setting restoration "
+                        f"also failed: {restore_error}"
+                    )
+        raise
+
+
 def _verify_pair_readback(
     xx: Sr830Diagnostic, xy: Sr830Diagnostic, expected_frequency_hz: float
 ) -> None:
@@ -423,6 +569,74 @@ def _verify_pair_readback(
             problems.append(f"{diagnostic.role.value} frequency readback does not match")
     if problems:
         raise Sr830Error("SR830 configuration verification failed: " + "; ".join(problems))
+
+
+def _validate_fixed_settings_role(
+    role: LockinRole, settings: Sr830SettingCodes
+) -> None:
+    if role is LockinRole.XX:
+        if settings.reference_source != 1 or settings.external_reference_edge is not None:
+            raise Sr830Error("lockin_xx fixed settings must use internal reference.")
+    elif (
+        settings.reference_source != 0
+        or settings.external_reference_edge != 1
+    ):
+        raise Sr830Error(
+            "lockin_xy fixed settings must use external TTL rising-edge reference."
+        )
+
+
+def _verify_fixed_settings_readback(
+    diagnostic: Sr830Diagnostic,
+    expected: Sr830SettingCodes,
+    expected_phase_shift_deg: float,
+) -> None:
+    problems: list[str] = []
+    checks = (
+        ("reference source", diagnostic.reference_mode, expected.reference_source),
+        ("input mode", diagnostic.input_mode, expected.input_mode),
+        ("shield grounding", diagnostic.shield_grounding, expected.shield_grounding),
+        ("input coupling", diagnostic.input_coupling, expected.input_coupling),
+        ("time constant", diagnostic.time_constant, expected.time_constant),
+        ("filter slope", diagnostic.filter_slope, expected.filter_slope),
+        ("sensitivity", diagnostic.sensitivity, expected.sensitivity),
+    )
+    for label, actual, target in checks:
+        if actual != target:
+            problems.append(f"{label} readback {actual} != {target}")
+    if diagnostic.role is LockinRole.XY and (
+        diagnostic.reference_slope != expected.external_reference_edge
+    ):
+        problems.append("external reference edge readback mismatch")
+    if not math.isclose(
+        diagnostic.phase_shift_deg,
+        expected_phase_shift_deg,
+        rel_tol=0.0,
+        abs_tol=1e-9,
+    ):
+        problems.append("PHAS shift changed during fixed-setting configuration")
+    if problems:
+        raise Sr830Error(
+            f"lockin_{diagnostic.role.value} fixed-setting verification failed: "
+            + "; ".join(problems)
+        )
+
+
+def _settings_from_diagnostic(diagnostic: Sr830Diagnostic) -> Sr830SettingCodes:
+    return Sr830SettingCodes(
+        reference_source=diagnostic.reference_mode,
+        external_reference_edge=(
+            diagnostic.reference_slope
+            if diagnostic.role is LockinRole.XY
+            else None
+        ),
+        input_mode=diagnostic.input_mode,
+        shield_grounding=diagnostic.shield_grounding,
+        input_coupling=diagnostic.input_coupling,
+        time_constant=diagnostic.time_constant,
+        filter_slope=diagnostic.filter_slope,
+        sensitivity=diagnostic.sensitivity,
+    )
 
 
 def _attempt_minimum_output(*instruments: Sr830) -> list[BaseException]:
@@ -527,18 +741,18 @@ class DualSr830Controller:
             )
         if not math.isfinite(settle_s) or settle_s < 0:
             raise ValueError("settle_s must be finite and non-negative.")
-        readings: list[LockinReading] = []
+        samples: list[Sr830HarmonicSample] = []
         try:
             for harmonic in (1, 2, 3):
                 self.lockin_xx.set_harmonic(harmonic)
                 self.lockin_xy.set_harmonic(harmonic)
                 sleeper(settle_s)
                 xx_sample = self.lockin_xx.read_harmonic_sample(harmonic)
-                readings.append(xx_sample.reading)
-                _validate_harmonic_sample(xx_sample, tuple(readings))
+                samples.append(xx_sample)
+                _validate_harmonic_sample(xx_sample, tuple(samples))
                 xy_sample = self.lockin_xy.read_harmonic_sample(harmonic)
-                readings.append(xy_sample.reading)
-                _validate_harmonic_sample(xy_sample, tuple(readings))
+                samples.append(xy_sample)
+                _validate_harmonic_sample(xy_sample, tuple(samples))
                 if not math.isclose(
                     xx_sample.reading.frequency_hz,
                     xy_sample.reading.frequency_hz,
@@ -547,7 +761,7 @@ class DualSr830Controller:
                 ):
                     raise Sr830AcquisitionError(
                         f"xx/xy frequency mismatch at harmonic {harmonic}.",
-                        tuple(readings),
+                        tuple(samples),
                     )
             self.lockin_xx.set_harmonic(1)
             self.lockin_xy.set_harmonic(1)
@@ -556,9 +770,9 @@ class DualSr830Controller:
                 if restored != 1:
                     raise Sr830AcquisitionError(
                         f"lockin_{instrument.role.value} did not restore harmonic 1.",
-                        tuple(readings),
+                        tuple(samples),
                     )
-            return DualSr830Measurement(tuple(readings))
+            return DualSr830Measurement(tuple(samples))
         except BaseException as exc:
             harmonic_errors = _attempt_first_harmonic(
                 self.lockin_xx, self.lockin_xy
@@ -576,25 +790,24 @@ class DualSr830Controller:
                 raise
             raise Sr830AcquisitionError(
                 f"Dual SR830 acquisition failed: {type(exc).__name__}: {exc}",
-                tuple(readings),
+                tuple(samples),
             ) from exc
 
 
 def _validate_harmonic_sample(
     sample: Sr830HarmonicSample,
-    partial_readings: tuple[LockinReading, ...],
+    partial_samples: tuple[Sr830HarmonicSample, ...],
 ) -> None:
     role = sample.reading.role.value
     if sample.lia_status.reference_unlocked:
         raise Sr830AcquisitionError(
-            f"lockin_{role} reference unlocked.", partial_readings
+            f"lockin_{role} reference unlocked.", partial_samples
         )
     if sample.lia_status.any_overload:
         raise Sr830AcquisitionError(
-            f"lockin_{role} reported overload.", partial_readings
+            f"lockin_{role} reported overload.", partial_samples
         )
     if sample.error_status:
         raise Sr830AcquisitionError(
-            f"lockin_{role} error status is {sample.error_status}.",
-            partial_readings,
+            f"lockin_{role} error status is {sample.error_status}.", partial_samples
         )

@@ -39,6 +39,7 @@ def raw_reading(
             y_v=2e-7,
             amplitude_v=1.0198e-6,
             phase_deg=11.31,
+            phase_shift_deg=7.5,
             frequency_hz=17.777,
             locked=locked,
             overload=overload,

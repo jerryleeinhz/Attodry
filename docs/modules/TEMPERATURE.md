@@ -6,6 +6,15 @@ attoDRY legacy DLL 适配器已经完成离线 fake-DLL 实现。目标电脑曾
 完成 10 秒真实只读连接：10/10 状态读取成功，sample temperature 约
 1.7251--1.7255 K，VTI 约 1.7146--1.7153 K，控制标志关闭且错误码为零。
 
+T0 contract audit 和 T1 offline behavior tests 已于 2026-08-21 完成。温度公共
+接口收敛为 `read_state()`、`ensure_temperature_control(enabled)`、
+`set_temperature(target_k)` 和 `wait_for_temperature(target_k)`；不包含 PID、
+磁场或扫描组合。fake-DLL 已覆盖温度读失败、控制状态、setpoint 读回、连续
+稳定窗口、错误和超时。T4 所需的显式授权 commissioning CLI 已完成 fake-DLL
+验证，但真实写入仍未进行。T2 target offline validation 尚未完成：已只读确认
+`LK_setup` 的 `lyr` 是 64 位 Python 3.12.13，但安全审查阻止了在未获得明确
+源码传输授权时复制测试快照；没有在目标机加载项目或调用 `begin/connect`。
+
 这只证明连接和读回。真实温度设定、温控启停、稳定等待和异常恢复尚未进行写入
 验收，不能描述为 commissioned。
 
@@ -37,33 +46,77 @@ attoDRY legacy DLL 适配器已经完成离线 fake-DLL 实现。目标电脑曾
 
 ## 阶段和验收条件
 
-### T0 - contract audit（当前：planned）
+### T0 - contract audit（complete：2026-08-21）
 
 - 对照 `attodry.py`、`stability.py` 和 fake-DLL 测试列出现有接口与缺口。
 - 确认 Integration 需要的最小方法：读状态、确保控制状态、设定温度、等待稳定。
 - 完成条件：不改硬件、不扩大接口到 PID 或未确认功能。
 
-### T1 - offline behavior tests
+审计结果：
+
+- `AttoDryDriver` 已提供上述四个最小方法；DLL 细节保持在适配器内部。
+- `stability.py` 的纯函数负责 tolerance、stable range、dwell 和最少样本数；
+  驱动负责控制标志、错误码、poll interval 和总 timeout。
+- `CryostatController` 通用协议尚未声明稳定等待，而仿真接口当前按
+  `max_polls` 驱动。Integration 组合前需统一这一调用契约，不能让调用方猜测。
+- 未增加 PID、升降温速率、异常时擅自关闭温控等未确认功能。
+
+### T1 - offline behavior tests（offline complete：2026-08-21）
 
 - 补齐返回码、初始化超时、读失败、toggle 幂等、设定读回、稳定/超时测试。
 - 测试通信失败不会覆盖最后确认状态。
 - 完成条件：温度相关测试和完整离线测试通过，零 DLL 真实连接。
 
-### T2 - target offline validation
+完成内容：
+
+- 控制读回只接受明确的 0/1；其它值 fail closed，且不会发送 toggle。
+- 温控切换使用 read-before-toggle，并验证读回；重复请求不重复 toggle。
+- 温度 setpoint 写后读取完整状态、检查错误码并验证设定值；成功状态更新
+  `last_confirmed_state`，读失败或不匹配不虚构确认值。
+- 等待温稳会先检查目标范围；控制关闭会清空已有窗口，不能跨控制中断拼接
+  dwell；错误、通信失败和总超时均失败关闭。
+- 最新本地完整离线套件通过，2 项因缺少 matplotlib 跳过；没有
+  加载 vendor DLL、调用 `begin/connect` 或发送真实写命令。
+
+### T2 - target offline validation（pending source-transfer authorization）
 
 - 在 `LK_setup` 的 `lyr` 环境运行 fake-DLL 和完整测试。
 - 完成条件：记录提交号、解释器路径和测试结果，不调用 `begin/connect`。
 
-### T3 - real read-only commissioning
+当前进度：
+
+- 已通过 SSH 只读确认解释器为
+  `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`，Python 3.12.13、64 位。
+- 目标机未找到现成仓库副本；向临时目录复制不含本地硬件配置的源码/测试快照
+  需要单独的数据传输授权。传输未执行，T2 不能标记完成。
+
+### T3 - real read-only commissioning（read-only commissioned：2026-08-20）
 
 - 需要新的明确连接授权，只读取温度、VTI、setpoint、control 和 error。
 - 完成条件：连续记录完整，Disconnect/end 正常，无写设置或 toggle。
 
-### T4 - smallest temperature write commissioning
+既有授权记录已满足 read-only 边界：10/10 完整状态、零错误、正常
+Disconnect/end、无设置写入。本轮没有重复连接；该结果仍不能证明温控写入。
+
+### T4 - smallest temperature write commissioning（offline tool ready；real write pending）
 
 - 需要用户提供最小实际目标、容差、dwell、timeout 和异常时保持/恢复策略，
   并明确授权允许的 setpoint/control 写命令。
 - 完成条件：写前/写后读回、滚动稳定窗口和原始数据齐全；失败不声称稳定。
+
+离线准备：
+
+- 新增 `attodry-temperature-test` / `python -m
+  attodry_control.temperature_test`。缺少 connection 或 temperature-write 任一授权
+  flag 时，在加载 DLL 前拒绝。
+- 每次运行必须显式给出 target、最大允许步长、tolerance、stable range、dwell、
+  poll interval、timeout，以及成功和失败后的 hold/restore 策略。
+- 目标先按配置温区检查；连接后的初始完整状态用于检查
+  `abs(target - initial_setpoint) <= max_delta`，通过前不发送写命令。
+- 记录初始状态、目标/恢复的每个滚动窗口样本、恢复动作、最终状态和断开结果；
+  读回、恢复或 close 失败均保留原始错误且不虚构稳定/恢复/断开成功。
+- fake-DLL 已覆盖授权门、越界/过大步长、hold-target、restore-initial、超时恢复、
+  hold-current 和 Disconnect 失败。真实执行仍必须等待用户给值并逐项授权。
 
 ## 预计文件所有权
 
@@ -71,6 +124,7 @@ attoDRY legacy DLL 适配器已经完成离线 fake-DLL 实现。目标电脑曾
 - `src/attodry_control/stability.py`
 - `src/attodry_control/models.py`（仅温度状态必要修改）
 - `src/attodry_control/attodry_test.py`（只读验收）
+- `src/attodry_control/temperature_test.py`（写入 commissioning，双重授权）
 - `tests/test_attodry.py`
 - `tests/test_stability.py`
 
@@ -86,4 +140,3 @@ docs/modules/README.md 和 docs/modules/TEMPERATURE.md。检查 git status 和�
 fake DLL，不连接真实 attoDRY，不发送温度设定或 toggle；真实动作等我逐阶段授权。
 LK_setup 上只能使用 lyr。结束时按模块交付格式报告。
 ```
-

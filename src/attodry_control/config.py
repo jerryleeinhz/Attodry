@@ -9,6 +9,15 @@ from typing import Any, Mapping
 
 from .models import LockinRole
 from .safety import MagnetLimits
+from .sr830_settings import (
+    ExternalReferenceEdge,
+    InputCoupling,
+    InputMode,
+    ReferenceSource,
+    SensitivityMode,
+    ShieldGrounding,
+    map_sr830_settings,
+)
 from .stability import StabilityCriteria
 
 
@@ -27,11 +36,6 @@ class RunMode(StrEnum):
 class FieldEndPolicy(StrEnum):
     HOLD = "hold"
     ZERO = "zero"
-
-
-class ReferenceSource(StrEnum):
-    INTERNAL = "internal"
-    EXTERNAL_TTL = "external_ttl"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,9 +86,18 @@ class LockinConfig:
     model: str
     address: str
     reference_source: ReferenceSource
+    external_reference_edge: ExternalReferenceEdge | None
     sine_output_connected: bool
     source_voltage_v: float
     frequency_hz: float
+    input_mode: InputMode
+    shield_grounding: ShieldGrounding
+    input_coupling: InputCoupling
+    time_constant_s: float
+    filter_slope_db_oct: int
+    sensitivity_mode: SensitivityMode
+    sensitivity_full_scale_v: float
+    settle_time_constants: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,23 +387,43 @@ def _parse_visa(table: Mapping[str, Any]) -> VisaConfig:
 def _parse_lockin(
     table: Mapping[str, Any], role: LockinRole, name: str
 ) -> LockinConfig:
+    expected = {
+        "model",
+        "address",
+        "reference_source",
+        "sine_output_connected",
+        "source_voltage_v",
+        "frequency_hz",
+        "input_mode",
+        "shield_grounding",
+        "input_coupling",
+        "time_constant_s",
+        "filter_slope_db_oct",
+        "sensitivity_mode",
+        "sensitivity_full_scale_v",
+        "settle_time_constants",
+    }
+    if role is LockinRole.XY:
+        expected.add("external_reference_edge")
     _strict_keys(
         table,
         name,
-        {
-            "model",
-            "address",
-            "reference_source",
-            "sine_output_connected",
-            "source_voltage_v",
-            "frequency_hz",
-        },
+        expected,
     )
     model = _string(table["model"], f"{name}.model")
     if model != "SR830":
         raise ConfigError(f"{name}.model must be 'SR830'.")
     reference_source = _enum_value(
         ReferenceSource, table["reference_source"], f"{name}.reference_source"
+    )
+    external_reference_edge = (
+        _enum_value(
+            ExternalReferenceEdge,
+            table["external_reference_edge"],
+            f"{name}.external_reference_edge",
+        )
+        if role is LockinRole.XY
+        else None
     )
     connected = _boolean(
         table["sine_output_connected"], f"{name}.sine_output_connected"
@@ -413,14 +446,60 @@ def _parse_lockin(
     frequency_hz = _positive_number(table["frequency_hz"], f"{name}.frequency_hz")
     if frequency_hz > 102_000:
         raise ConfigError(f"{name}.frequency_hz cannot exceed 102000 Hz.")
+    input_mode = _enum_value(InputMode, table["input_mode"], f"{name}.input_mode")
+    shield_grounding = _enum_value(
+        ShieldGrounding, table["shield_grounding"], f"{name}.shield_grounding"
+    )
+    input_coupling = _enum_value(
+        InputCoupling, table["input_coupling"], f"{name}.input_coupling"
+    )
+    time_constant_s = _positive_number(
+        table["time_constant_s"], f"{name}.time_constant_s"
+    )
+    filter_slope_db_oct = _integer(
+        table["filter_slope_db_oct"], f"{name}.filter_slope_db_oct", minimum=1
+    )
+    sensitivity_mode = _enum_value(
+        SensitivityMode, table["sensitivity_mode"], f"{name}.sensitivity_mode"
+    )
+    sensitivity_full_scale_v = _positive_number(
+        table["sensitivity_full_scale_v"], f"{name}.sensitivity_full_scale_v"
+    )
+    settle_time_constants = _positive_number(
+        table["settle_time_constants"], f"{name}.settle_time_constants"
+    )
+    if settle_time_constants < 5.0:
+        raise ConfigError(f"{name}.settle_time_constants must be at least 5.0.")
+    try:
+        map_sr830_settings(
+            reference_source=reference_source,
+            external_reference_edge=external_reference_edge,
+            input_mode=input_mode,
+            shield_grounding=shield_grounding,
+            input_coupling=input_coupling,
+            time_constant_s=time_constant_s,
+            filter_slope_db_oct=filter_slope_db_oct,
+            sensitivity_full_scale_v=sensitivity_full_scale_v,
+        )
+    except ValueError as exc:
+        raise ConfigError(f"{name}: {exc}") from exc
     return LockinConfig(
         role=role,
         model=model,
         address=_string(table["address"], f"{name}.address"),
         reference_source=reference_source,
+        external_reference_edge=external_reference_edge,
         sine_output_connected=connected,
         source_voltage_v=source_voltage_v,
         frequency_hz=frequency_hz,
+        input_mode=input_mode,
+        shield_grounding=shield_grounding,
+        input_coupling=input_coupling,
+        time_constant_s=time_constant_s,
+        filter_slope_db_oct=filter_slope_db_oct,
+        sensitivity_mode=sensitivity_mode,
+        sensitivity_full_scale_v=sensitivity_full_scale_v,
+        settle_time_constants=settle_time_constants,
     )
 
 

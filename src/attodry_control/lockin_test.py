@@ -20,6 +20,7 @@ from .sr830 import (
     Sr830AcquisitionError,
     Sr830Diagnostic,
     Sr830Error,
+    Sr830HarmonicSample,
     configure_minimum_excitation_pair,
 )
 
@@ -373,7 +374,8 @@ def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> i
                             "lockin_xy": asdict(preflight_xy),
                         },
                         "partial_readings": [
-                            asdict(reading) for reading in exc.partial_readings
+                            _harmonic_sample_record(sample)
+                            for sample in exc.partial_samples
                         ],
                     },
                     ensure_ascii=False,
@@ -391,7 +393,10 @@ def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> i
                         "lockin_xx": asdict(preflight_xx),
                         "lockin_xy": asdict(preflight_xy),
                     },
-                    "readings": [asdict(reading) for reading in measurement.readings],
+                    "readings": [
+                        _harmonic_sample_record(sample)
+                        for sample in measurement.samples
+                    ],
                     "pair_reads_are_sequential": measurement.pair_reads_are_sequential,
                     "restored_harmonic": 1,
                 },
@@ -400,6 +405,20 @@ def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> i
             )
         )
     return 0
+
+
+def _harmonic_sample_record(sample: Sr830HarmonicSample) -> dict[str, object]:
+    record = asdict(sample.reading)
+    record["captured_at_utc"] = sample.captured_at_utc.isoformat()
+    return record
+
+
+def _audited_harmonic_sample_record(
+    sample: Sr830HarmonicSample,
+) -> dict[str, object]:
+    record = asdict(sample)
+    record["captured_at_utc"] = sample.captured_at_utc.isoformat()
+    return record
 
 
 def _run_frequency_sweep(
@@ -746,8 +765,8 @@ def _capture_sweep_point(
         sample_payload = {
             "sample_index": sample_index,
             "captured_unix_s": time.time(),
-            "lockin_xx": asdict(xx),
-            "lockin_xy": asdict(xy),
+            "lockin_xx": _audited_harmonic_sample_record(xx),
+            "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
         }
         raw_samples.append(sample_payload)
@@ -790,8 +809,8 @@ def _consume_frequency_transition(
                 "filter_overload",
                 "output_overload",
             ],
-            "lockin_xx": asdict(xx),
-            "lockin_xy": asdict(xy),
+            "lockin_xx": _audited_harmonic_sample_record(xx),
+            "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
         },
         problems,
@@ -836,8 +855,8 @@ def _consume_sensitivity_transition(
                 "lockin_xx.filter_overload",
                 "lockin_xx.output_overload",
             ],
-            "lockin_xx": asdict(xx),
-            "lockin_xy": asdict(xy),
+            "lockin_xx": _audited_harmonic_sample_record(xx),
+            "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
         },
         problems,

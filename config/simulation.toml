@@ -35,14 +35,31 @@ reference_source = "internal"
 sine_output_connected = true
 source_voltage_v = 0.004
 frequency_hz = 17.777
+input_mode = "a_minus_b"
+shield_grounding = "float"
+input_coupling = "ac"
+time_constant_s = 0.3
+filter_slope_db_oct = 24
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.001
+settle_time_constants = 5.0
 
 [lockin_xy]
 model = "SR830"
 address = "SIMULATED::SR830::XY"
 reference_source = "external_ttl"
+external_reference_edge = "rising"
 sine_output_connected = false
 source_voltage_v = 0.004
 frequency_hz = 17.777
+input_mode = "a_minus_b"
+shield_grounding = "float"
+input_coupling = "ac"
+time_constant_s = 0.3
+filter_slope_db_oct = 24
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.001
+settle_time_constants = 5.0
 
 [gate_top]
 backend = "simulation"

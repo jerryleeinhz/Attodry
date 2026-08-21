@@ -166,6 +166,19 @@ Completed in Stage 3:
   original 1 mV XX sensitivity, and zero final status/error words on both units.
   The frequency and excitation device-only sweeps are now both commissioned;
   their accepted raw JSON files remain only on the ignored control-computer path.
+- Completed the Lock-in module's fixed-setting L0 contract and L1 strict
+  configuration slice offline. Both semantic roles now require physical A-B,
+  Float, AC, 300 ms, 24 dB/oct, 1 mV, and five-time-constant settings; `lockin_xy`
+  also requires the TTL rising edge. A pure mapper produces the corresponding
+  SR830 codes without hardware I/O. `bounded_auto` remains rejected until the
+  user confirms its per-role limits and policy; no VISA resource was opened.
+- Completed Lock-in L2 offline. Query-only `SENS?`, `OFLT?`, `OFSL?`, and `PHAS?`
+  support a separately authorized two-role fixed-setting transaction with full
+  preflight, exact post-settle readback, and minimum-output plus best-effort
+  restoration after failure. It never sends `APHS` or writes `PHAS`. Each
+  sequential XX/XY sample now carries its own UTC timestamp, and the phase-shift
+  setting survives JSON, SQLite schema v3, analysis loading, and CSV export. No
+  real VISA resource, status latch, or hardware command was used for this stage.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
@@ -194,6 +207,22 @@ Completed offline in Stage 4:
   1.7153 K. Bx/Bz readbacks and setpoints remained zero, both control flags
   remained disabled, and all error codes were zero. Raw output remains only on
   the ignored control-computer path.
+- Completed the Temperature-module T0 contract audit and T1 offline behavior
+  coverage. The public surface is limited to state read, read-before-toggle
+  temperature-control assurance, bounded setpoint write, and stable wait. Control
+  flags must be exactly 0/1, successful setpoint writes require a complete
+  post-write state/error/readback confirmation, and any disabled-control interval
+  resets the continuous dwell window. Communication failures retain the prior
+  `last_confirmed_state`.
+- Added an offline-tested, dual-authorization `attodry-temperature-test` command
+  for the future smallest-movement write stage. Every target, maximum setpoint
+  delta, stability parameter, timeout, and success/failure hold-or-restore policy
+  is explicit. It retains target/restoration samples and never infers recovery or
+  disconnect after failed readback/close. No real attoDRY connection or write was
+  performed for this addition.
+- T2 remains pending: SSH read-only inspection confirmed `LK_setup` uses 64-bit
+  Python 3.12.13 in `lyr`, but no repository copy exists there and no private
+  source/test snapshot was transferred without separate authorization.
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
 harmonic validation, and the attoDRY read-only connection are complete. attoDRY
@@ -269,8 +298,8 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 140 tests and passes in the minimal
-  environment with one matplotlib rendering test skipped. Source compilation
+- The complete hardware-free suite contains 169 tests and passes in the minimal
+  environment with two matplotlib rendering tests skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
