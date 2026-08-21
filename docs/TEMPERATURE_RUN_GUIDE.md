@@ -91,7 +91,8 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe `
 
 ## 程序实际执行顺序
 
-1. 严格解析整个 `hardware.local.toml`，未知或缺失字段直接停止；
+1. 严格解析 `hardware.local.toml` 中所有温控相关表，未知顶层表或温控字段直接
+   停止；Lock-in/SMU 表由各自模块验证，不会阻止或改变本次温控；
 2. 加载 vendor DLL，连接并读取完整初始状态；
 3. 用初始 `sample_temperature_k` 检查 `max_delta_k`；
 4. 先开启并确认 Full Temperature Control；
