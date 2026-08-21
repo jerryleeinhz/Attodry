@@ -233,6 +233,49 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
 
+    def test_temperature_control_waits_for_delayed_toggle_readback(self) -> None:
+        self.connect()
+        control_readbacks = iter([0, 0, 1])
+
+        def delayed_getter(pointer):
+            return self.dll._int_getter(
+                "is_temperature_control", pointer, next(control_readbacks)
+            )
+
+        def delayed_toggle():
+            return self.dll._code("toggle_temperature_control")
+
+        self.dll.AttoDRY_Interface_isControllingTemperature = delayed_getter
+        self.dll.AttoDRY_Interface_toggleFullTemperatureControl = delayed_toggle
+        sleeps = []
+
+        self.driver.ensure_temperature_control(
+            True,
+            monotonic=iter([0.0, 0.0]).__next__,
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(sleeps, [1.0])
+        self.assertTrue(self.driver.last_confirmed_state.temperature_control_enabled)
+
+    def test_temperature_control_toggle_readback_timeout_fails_closed(self) -> None:
+        self.connect()
+
+        def ignored_toggle():
+            return self.dll._code("toggle_temperature_control")
+
+        self.dll.AttoDRY_Interface_toggleFullTemperatureControl = ignored_toggle
+
+        with self.assertRaisesRegex(AttoDryTimeout, "readback did not reach True"):
+            self.driver.ensure_temperature_control(
+                True,
+                monotonic=iter([0.0, 30.0]).__next__,
+                sleeper=lambda _: None,
+            )
+
+        self.assertFalse(self.driver.last_confirmed_state.temperature_control_enabled)
+        self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
+
     def test_invalid_temperature_control_state_blocks_toggle(self) -> None:
         self.connect()
         self.dll.temperature_control = 2

@@ -247,7 +247,12 @@ uncommissioned and require separate explicit authorization.
   an already confirmed identical setpoint is idempotent, while a new setpoint is
   polled through complete state/error reads for at most 30 s using the configured
   temperature polling interval. Failure still preserves the last confirmed state.
-  Local compilation, all 36 attoDRY tests, and all 162 project tests passed
+  A second attempt then sent one temperature-control toggle; its immediate flag
+  readback remained disabled, so it also failed closed and disconnected normally.
+  Five later read-only samples confirmed the control flag had asynchronously become
+  enabled with the 1.75 K setpoint and zero errors. The same bounded acknowledgement
+  polling now covers temperature-control toggles without changing field-control code.
+  Local compilation, all 38 attoDRY tests, and all 164 project tests passed
   (2 optional plotting tests skipped).
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all

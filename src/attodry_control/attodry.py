@@ -14,7 +14,7 @@ from .safety import MagnetLimits, validate_vector_field
 from .stability import TimedValue, evaluate_stability
 
 
-TEMPERATURE_SETPOINT_ACK_TIMEOUT_S = 30.0
+TEMPERATURE_COMMAND_ACK_TIMEOUT_S = 30.0
 
 
 class AttoDryError(RuntimeError):
@@ -312,15 +312,15 @@ class AttoDryDriver:
         started = monotonic()
         while True:
             elapsed = monotonic() - started
-            if elapsed >= TEMPERATURE_SETPOINT_ACK_TIMEOUT_S:
+            if elapsed >= TEMPERATURE_COMMAND_ACK_TIMEOUT_S:
                 raise AttoDryTimeout(
                     "Temperature setpoint readback did not reach target within "
-                    f"{TEMPERATURE_SETPOINT_ACK_TIMEOUT_S:g} s."
+                    f"{TEMPERATURE_COMMAND_ACK_TIMEOUT_S:g} s."
                 )
             sleeper(
                 min(
                     self.temperature_stability.poll_interval_s,
-                    TEMPERATURE_SETPOINT_ACK_TIMEOUT_S - elapsed,
+                    TEMPERATURE_COMMAND_ACK_TIMEOUT_S - elapsed,
                 )
             )
             confirmed = self.read_state()
@@ -330,7 +330,13 @@ class AttoDryDriver:
             ):
                 return
 
-    def ensure_temperature_control(self, enabled: bool) -> None:
+    def ensure_temperature_control(
+        self,
+        enabled: bool,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._ensure_control(
             enabled=enabled,
             state_attribute="temperature_control_enabled",
@@ -338,6 +344,10 @@ class AttoDryDriver:
             toggle_symbol="AttoDRY_Interface_toggleFullTemperatureControl",
             verify_label="isControllingTemperature",
             verify_symbol="AttoDRY_Interface_isControllingTemperature",
+            acknowledgment_timeout_s=TEMPERATURE_COMMAND_ACK_TIMEOUT_S,
+            acknowledgment_poll_interval_s=self.temperature_stability.poll_interval_s,
+            monotonic=monotonic,
+            sleeper=sleeper,
         )
 
     def ensure_field_control(self, enabled: bool) -> None:
@@ -467,6 +477,10 @@ class AttoDryDriver:
         toggle_symbol: str,
         verify_label: str,
         verify_symbol: str,
+        acknowledgment_timeout_s: float = 0.0,
+        acknowledgment_poll_interval_s: float = 0.0,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         state = self.read_state()
         self._require_clear_error(state)
@@ -474,8 +488,29 @@ class AttoDryDriver:
             return
         self._require_write_authorized()
         self._call(toggle_label, toggle_symbol)
-        if self._get_control_flag(verify_label, verify_symbol) != enabled:
+        if self._get_control_flag(verify_label, verify_symbol) == enabled:
+            return
+        if acknowledgment_timeout_s <= 0:
             raise AttoDryError(f"{state_attribute} readback did not reach {enabled}.")
+
+        started = monotonic()
+        while True:
+            elapsed = monotonic() - started
+            if elapsed >= acknowledgment_timeout_s:
+                raise AttoDryTimeout(
+                    f"{state_attribute} readback did not reach {enabled} within "
+                    f"{acknowledgment_timeout_s:g} s."
+                )
+            sleeper(
+                min(
+                    acknowledgment_poll_interval_s,
+                    acknowledgment_timeout_s - elapsed,
+                )
+            )
+            confirmed = self.read_state()
+            self._require_clear_error(confirmed)
+            if bool(getattr(confirmed, state_attribute)) == enabled:
+                return
 
     def _wait_stable(
         self,

@@ -239,9 +239,14 @@ Completed offline in Stage 4:
   errors remained zero. Both raw records remain on the ignored target-computer path.
 - Setpoint writes now treat an already confirmed identical target idempotently and
   poll complete state/error readback for up to 30 s after a new write. This bounded
-  acknowledgement is separate from temperature stability waiting. Local compilation,
-  all 36 attoDRY tests, and all 162 project tests passed (2 optional plotting tests
-  skipped); the continued real T4 stability run remains pending target validation.
+  acknowledgement is separate from temperature stability waiting. A second attempt
+  sent one temperature-control toggle and failed closed when its
+  immediate flag readback still reported disabled; five later read-only samples
+  confirmed the control had asynchronously enabled with zero errors. Temperature
+  control now uses the same bounded acknowledgement polling without changing the
+  field-control path. Local compilation, all 38 attoDRY tests, and all 164 project
+  tests passed (2 optional plotting tests skipped); the continued real T4 stability
+  run remains pending target validation.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

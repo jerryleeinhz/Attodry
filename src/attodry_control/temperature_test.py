@@ -299,7 +299,9 @@ def run(
         driver.set_temperature(
             request.target_k, monotonic=monotonic, sleeper=sleeper
         )
-        driver.ensure_temperature_control(True)
+        driver.ensure_temperature_control(
+            True, monotonic=monotonic, sleeper=sleeper
+        )
         target_state = driver.wait_for_temperature(
             request.target_k,
             monotonic=monotonic,
@@ -390,7 +392,9 @@ def _restore_initial(
     if not isinstance(samples, list) or not isinstance(actions, list):
         raise TypeError("Temperature audit containers must be lists.")
     if not initial_state.temperature_control_enabled:
-        driver.ensure_temperature_control(False)
+        driver.ensure_temperature_control(
+            False, monotonic=monotonic, sleeper=sleeper
+        )
         actions.append("temperature_control_restored_disabled")
     driver.set_temperature(
         initial_state.user_temperature_k,
@@ -399,7 +403,9 @@ def _restore_initial(
     )
     actions.append("temperature_setpoint_restored")
     if initial_state.temperature_control_enabled:
-        driver.ensure_temperature_control(True)
+        driver.ensure_temperature_control(
+            True, monotonic=monotonic, sleeper=sleeper
+        )
         actions.append("temperature_control_restored_enabled")
         if wait_for_stability:
             driver.wait_for_temperature(
