@@ -209,6 +209,12 @@ uncommissioned and require separate explicit authorization.
   target/restoration sample and action; and never claims successful recovery or
   disconnect after a failed read or close. Fake-DLL tests cover all policies and
   authorization/limit gates. No real connection or setting write was performed.
+- Added an ignored local per-attempt temperature-commissioning TOML template so
+  target, step, stability, timeout, and policy values are editable together
+  without changing Python or the hardware-address TOML. The T4 CLI accepts either
+  that strict template or all direct options, never both; placeholders, malformed
+  fields, and mixed sources fail before DLL loading. The parameter file contains
+  no authorization, so both connection and setting-write flags remain mandatory.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

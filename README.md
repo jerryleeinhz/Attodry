@@ -81,6 +81,11 @@ python -m attodry_control.temperature_test --help
 python -m attodry_control.lockin_test --help
 ```
 
+T4 温度小步长动作的运行参数不写入 `hardware.local.toml`。需复制
+`config/temperature_commissioning.example.toml` 为已忽略的
+`config/temperature_commissioning.local.toml`，在其开头填写本次目标和稳定条件；
+实际连接和温度写入仍需每次在命令行显式授权。
+
 已完成的独立扫频和激励JSON可用
 [`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)
 浏览和绘图。Notebook默认只选择 `completed` 记录和 `clean` 正式样本；可通过

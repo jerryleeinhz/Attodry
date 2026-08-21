@@ -208,6 +208,12 @@ Completed offline in Stage 4:
   is explicit. It retains target/restoration samples and never infers recovery or
   disconnect after failed readback/close. No real attoDRY connection or write was
   performed for this addition.
+- Added `config/temperature_commissioning.example.toml`, copied only to the
+  ignored station-local counterpart for a T4 attempt. It places every per-attempt
+  parameter in one editable top table, separate from hardware paths and limits.
+  The CLI rejects placeholders, malformed fields, or any mixture of that file
+  with direct parameter options before loading the DLL; its dual authorization
+  flags remain mandatory and are not stored in the file.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

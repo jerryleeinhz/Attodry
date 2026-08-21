@@ -86,34 +86,34 @@ limits:
 
 At every vector point, enforce `sqrt(Bx^2 + Bz^2) <= 3 T`.
 
-For the temperature movement, review every placeholder and policy before adding
-the two authorization flags. Merely having this command in the repository does
-not authorize a connection or write:
+For the temperature movement, first make the ignored, station-local parameter
+file. Its first table contains every per-attempt temperature parameter; it is
+separate from the hardware path/address TOML. Replace every placeholder and
+review each policy before adding the two authorization flags. Merely having this
+command in the repository does not authorize a connection or write:
 
 ```powershell
+Copy-Item config\temperature_commissioning.example.toml `
+  config\temperature_commissioning.local.toml
+notepad config\temperature_commissioning.local.toml
+
 python -m attodry_control.temperature_test `
   --config config\hardware.local.toml `
-  --target-k TARGET_K `
-  --max-delta-k MAX_AUTHORIZED_DELTA_K `
-  --tolerance-k TOLERANCE_K `
-  --stable-range-k STABLE_RANGE_K `
-  --dwell-s DWELL_S `
-  --poll-interval-s POLL_INTERVAL_S `
-  --timeout-s TIMEOUT_S `
-  --success-policy SUCCESS_POLICY `
-  --failure-policy FAILURE_POLICY `
+  --commissioning-config config\temperature_commissioning.local.toml `
   --authorize-connection `
   --authorize-temperature-write |
   Tee-Object -FilePath "attodry_temperature_movement.json"
 ```
 
-`SUCCESS_POLICY` is `hold-target` or `restore-initial`; `FAILURE_POLICY` is
-`hold-current` or `restore-initial`. The tool rejects a configured-range violation
-before DLL loading and rejects a step larger than `MAX_AUTHORIZED_DELTA_K` after
-the initial read but before any write. `restore-initial` restores the original
-setpoint and control flag; if the original control was disabled, it does not claim
-that the sample temperature returned to the original value. Any communication or
-close failure requires manual verification of setpoint and control state.
+The parameter file accepts the same values that the previous direct options did;
+the two sources cannot be mixed. `success_policy` is `hold-target` or
+`restore-initial`; `failure_policy` is `hold-current` or `restore-initial`. The
+tool rejects placeholders, malformed parameter files, configured-range violations,
+and steps larger than `max_delta_k` before any write. `restore-initial` restores
+the original setpoint and control flag; if the original control was disabled, it
+does not claim that the sample temperature returned to the original value. Any
+communication or close failure requires manual verification of setpoint and
+control state.
 
 ## 5. End-to-end run and deliberate safe failure
 

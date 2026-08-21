@@ -17,6 +17,10 @@ Git 分支完成：`LK_setup` 的 64 位 Python 3.12.13 `lyr` 对提交 `e9a7b8c
 运行 35 项温度测试和 156 项完整测试均通过，`compileall` 通过；没有加载
 vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
+本轮已新增独立的 `temperature_commissioning.local.toml` 参数入口：从示例复制后，
+在文件开头填写本次 T4 参数，不需要查找或修改 Python，也不改硬件 TOML。示例保留
+不可执行的 `CHANGE_ME` 占位符；文件不含授权，连接和写入授权仍须逐次在命令行给出。
+
 这只证明连接和读回。真实温度设定、温控启停、稳定等待和异常恢复尚未进行写入
 验收，不能描述为 commissioned。
 
@@ -118,8 +122,13 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 - 新增 `attodry-temperature-test` / `python -m
   attodry_control.temperature_test`。缺少 connection 或 temperature-write 任一授权
   flag 时，在加载 DLL 前拒绝。
-- 每次运行必须显式给出 target、最大允许步长、tolerance、stable range、dwell、
-  poll interval、timeout，以及成功和失败后的 hold/restore 策略。
+- 每次运行可选择一个参数来源：直接显式给出 target、最大允许步长、tolerance、
+  stable range、dwell、poll interval、timeout 和 hold/restore 策略，或使用
+  ignored 的 `config/temperature_commissioning.local.toml`。后者从
+  `temperature_commissioning.example.toml` 复制，所有本次参数集中在文件开头；
+  两种来源不能混用。
+- 参数文件缺失、未知字段、`CHANGE_ME` 占位符或非法数值都会在加载 DLL 前拒绝。
+  参数文件不包含授权；每次仍须有 connection 和 temperature-write 两个 CLI 授权。
 - 目标先按配置温区检查；连接后的初始完整状态用于检查
   `abs(target - initial_setpoint) <= max_delta`，通过前不发送写命令。
 - 记录初始状态、目标/恢复的每个滚动窗口样本、恢复动作、最终状态和断开结果；
@@ -131,7 +140,7 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 
 | 参数 | 单位 | 含义和安全作用 |
 | --- | --- | --- |
-| `target_k` | K | 本次动作的目标样品温度。必须落在 `hardware.local.toml` 配置的温区内；稳定判据检查样品温度是否围绕它。它不是初始温度的自动推断值。 |
+| `target_k` | K | 本次动作的目标样品温度。必须落在 `hardware.local.toml` 配置的温区内；稳定判据使用 DLL `getSampleTemperature` 传感器读数检查它，而非仅检查软件设定值。它不是初始温度的自动推断值。 |
 | `max_delta_k` | K | 相对连接后初始 `user_temperature_k` 设定值允许的最大绝对步长。若 `abs(target_k - initial_setpoint) > max_delta_k`，在任何写命令前终止；它不替代温区上下限。 |
 | `tolerance_k` | K | 稳定窗口内每个样品温度样本与 `target_k` 的最大允许绝对误差；必须为正。 |
 | `stable_range_k` | K | 同一连续 dwell 窗口内样品温度的 peak-to-peak 最大允许范围，即 `max(sample) - min(sample)`；可为零。 |
@@ -144,6 +153,10 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 | `--authorize-temperature-write` | — | 明确允许本次温度 setpoint 和温控开关写入。缺少时在加载 DLL 前拒绝；只读授权不能替代它。 |
 
 其中，`target_k` 用于样品温度稳定判据，而 `max_delta_k` 只保护“从当前用户设定值到新设定值”的动作幅度；两者必须同时满足。
+
+推荐在 `config/temperature_commissioning.local.toml` 文件开头修改上表的九个
+本次参数，而不修改 Python 或 `hardware.local.toml`。该 local 文件已被 Git 忽略；
+它存在也不会代替每次的两个命令行授权。
 
 ## 预计文件所有权
 

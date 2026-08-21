@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 import io
 import json
 import math
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -475,6 +476,83 @@ class AttoDryDriverTests(unittest.TestCase):
 
         with self.assertRaises(AttoDryAuthorizationError):
             run_temperature_test(args, dll_loader=lambda path: loaded.append(path))
+
+        self.assertEqual(loaded, [])
+
+    def test_temperature_cli_reads_parameters_from_commissioning_config(self) -> None:
+        self.dll.temperature_follows_setpoint = True
+        output = io.StringIO()
+        request_path = Path(".test-tmp") / "temperature_commissioning.toml"
+        request_path.parent.mkdir(exist_ok=True)
+        self.addCleanup(request_path.unlink, missing_ok=True)
+        request_path.write_text(
+            """[temperature_commissioning]
+target_k = 2.1
+max_delta_k = 0.2
+tolerance_k = 0.01
+stable_range_k = 0.005
+dwell_s = 2.0
+poll_interval_s = 1.0
+timeout_s = 5.0
+success_policy = "hold-target"
+failure_policy = "hold-current"
+""",
+            encoding="utf-8",
+        )
+        with redirect_stdout(output):
+            exit_code = run_temperature_test(
+                [
+                    "--config",
+                    "config/hardware.example.toml",
+                    "--commissioning-config",
+                    str(request_path),
+                    "--authorize-connection",
+                    "--authorize-temperature-write",
+                ],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertAlmostEqual(result["request"]["target_k"], 2.1)
+        self.assertGreaterEqual(len(result["target_samples"]), 3)
+        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+
+    def test_temperature_cli_rejects_mixed_parameter_sources_before_dll_load(self) -> None:
+        loaded = []
+        args = self.temperature_args() + [
+            "--commissioning-config",
+            "config/temperature_commissioning.example.toml",
+            "--authorize-connection",
+            "--authorize-temperature-write",
+        ]
+
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            run_temperature_test(args, dll_loader=lambda path: loaded.append(path))
+
+        self.assertEqual(loaded, [])
+
+    def test_temperature_cli_rejects_placeholder_commissioning_config_before_dll_load(
+        self,
+    ) -> None:
+        loaded = []
+
+        with self.assertRaisesRegex(ValueError, "target_k must be a number"):
+            run_temperature_test(
+                [
+                    "--config",
+                    "config/hardware.example.toml",
+                    "--commissioning-config",
+                    "config/temperature_commissioning.example.toml",
+                    "--authorize-connection",
+                    "--authorize-temperature-write",
+                ],
+                dll_loader=lambda path: loaded.append(path),
+            )
 
         self.assertEqual(loaded, [])
 
