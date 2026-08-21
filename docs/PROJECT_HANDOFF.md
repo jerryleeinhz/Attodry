@@ -343,6 +343,13 @@ Completed offline in Stage 4:
   control disabled with setpoint 1.8 K and zero error, and disconnected normally.
   Both raw JSON/stderr pairs remain on ignored `LK_setup` temporary paths. The
   controller-order effect is supported, but T4 remains failed.
+- On 2026-08-21 the operator accepted T4 using the experiment's operational
+  criterion: the control-first command order produces measurable warming and the
+  actual sample temperature is recorded, so measurement may begin after the
+  30-minute wait without requiring the former strict stability window. The
+  commissioned `max_overshoot_k` is 0.2 K. This acceptance does not reinterpret
+  setpoint as measured temperature or erase the retained stability failures;
+  Integration must persist `sample_temperature_k` for every measurement.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
@@ -351,12 +358,13 @@ Completed offline in Stage 4:
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
 harmonic validation, and the attoDRY read-only connection are complete. The first
-attoDRY temperature setpoint/control actions were confirmed asynchronously, manual
-GUI setting works, and both the 1.75 K and 1.8 K automated attempts failed their
-stability criteria. The failure-disable/diagnostic path and the operator-selected
-2.0 K live abort line were verified in the real 1.8 K timeout cleanup. Further
-temperature writes require a new, explicitly reviewed attempt. SMUs and real
-end-to-end acquisition still require staged authorization.
+attoDRY temperature setpoint/control actions, control-first ordering, actual sensor
+recording, and heater-driven warming are operator-accepted for this experiment.
+The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; that
+fact remains diagnostic rather than being rewritten as stability. The commissioned
+0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Future real
+temperature writes still require explicit authorization. SMUs and real end-to-end
+acquisition still require staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:

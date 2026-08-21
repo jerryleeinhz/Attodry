@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、双 SR830 集成 1/2/3 次谐波器件验收，以及 attoDRY 的 10 秒只读连接验收。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。attoDRY 的任何设置写入、SMU 和端到端硬件路径仍需分阶段显式授权；具体 SMU 命令等待确认型号。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。未来真实温度写入、其它 attoDRY 设置写入、SMU 和端到端硬件路径仍需分阶段显式授权；具体 SMU 命令等待确认型号。
 
 ## 已确认硬件
 

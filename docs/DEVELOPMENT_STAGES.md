@@ -352,6 +352,14 @@ uncommissioned and require separate explicit authorization.
   reached the 1.7900 K tolerance edge. No sample reached 2.0 K; setpoint, control,
   and zero errors held during both waits. Both timeouts verified control disabled,
   retained setpoint 1.8 K, and disconnected normally. T4 remains failed.
+- On 2026-08-21 the operator accepted the Temperature module under the experiment's
+  operational criterion: confirmed control-first setpoint application, measurable
+  heater-driven warming, and storage of the actual sample temperature are sufficient;
+  entering the former strict stability window within 30 minutes is diagnostic rather
+  than a stage gate. T4 is therefore operator-accepted. The commissioned
+  `max_overshoot_k` is 0.2 K, and Integration must persist actual
+  `sample_temperature_k` with each measurement instead of treating the setpoint as
+  the measured temperature. The historical stability failures above remain valid.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

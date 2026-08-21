@@ -21,16 +21,19 @@ Git 分支完成：`LK_setup` 的 64 位 Python 3.12.13 `lyr` 对提交 `e9a7b8c
 vendor DLL、调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
 本轮已新增独立的 `temperature_commissioning.local.toml` 参数入口：从示例复制后，
-在文件开头填写本次 T4 参数，不需要查找或修改 Python，也不改硬件 TOML。示例保留
-不可执行的 `CHANGE_ME` 占位符；文件不含授权，连接和写入授权仍须逐次在命令行给出。
+在文件开头填写本次 T4 参数，不需要查找或修改 Python，也不改硬件 TOML。除已经
+commissioned 为 0.2 K 的 `max_overshoot_k` 外，示例保留不可执行的 `CHANGE_ME`
+占位符；文件不含授权，连接和写入授权仍须逐次在命令行给出。
 提交 `609b456` 已在 `LK_setup` 的 64 位 Python 3.12.13 `lyr` 上再次完成离线验证：
 159 项完整测试全部通过、0 skipped，`compileall` 和新 CLI help 通过；未加载 DLL、
 调用 `begin/connect` 或发送硬件命令，临时 clone 已删除。
 
-当前已经证明连接、读回、异步 setpoint 更新和异步温控开启。最终 1800 s 稳定
-运行没有达到目标：1799 个样品均未进入 1.75 ± 0.01 K，尽管 setpoint/控制状态
-全程正确且错误码始终为零。因此 T4 未通过，下一步必须先人工核查 attoDRY 前面板/
-GUI 的温控模式和 heater response，不能继续自动重试或描述为 commissioned。
+当前已经证明连接、实际温度读回、setpoint 更新、温控开启和 heater 升温响应。
+2026-08-21 操作者据此接受 T4：实验不再以 30 分钟内进入严格稳定窗口作为模块
+通过条件；超过 30 分钟后可按当时的实际样品温度开始测量，但每次测量必须记录
+`sample_temperature_k`，不能把 setpoint 当成实际温度。现有 acquisition/storage
+路径已经同时保存 sample/user/VTI temperature。严格 tolerance/range/dwell 结果
+仍作为诊断数据保留，不删除此前未进入稳定窗口的事实。
 
 ## 模块目标
 
@@ -122,11 +125,13 @@ Disconnect/end、`writes_authorized=false`，无设置写入或 toggle。sample 
 为 1.7242--1.7246 K，VTI 为 1.7138--1.7143 K，Bx/Bz 读回和设定值均为零，
 温度与磁场控制均关闭；该结果仍不能证明温控写入。
 
-### T4 - smallest temperature write commissioning（real stability failed；manual verification required）
+### T4 - smallest temperature write commissioning（operator accepted：2026-08-21）
 
 - 需要用户提供最小实际目标、容差、dwell、timeout 和异常时保持/恢复策略，
   并明确授权允许的 setpoint/control 写命令。
-- 完成条件：写前/写后读回、滚动稳定窗口和原始数据齐全；失败不声称稳定。
+- 完成条件：写前/写后读回、实际升温响应、连续实际温度和原始数据齐全；任何
+  measurement 使用并保存当时的 `sample_temperature_k`，不声称它等于 setpoint。
+- 精密滚动稳定窗口仍可配置和审计，但不再是本实验进入测量的强制门槛。
 
 离线准备：
 
@@ -279,6 +284,12 @@ toggle、确认开启、再强制重发相同的 1.8 K。1799 个样本覆盖 18
 1.8 K、温控确认关闭、错误码 0，并正常 Disconnect/end。该顺序比未发生 toggle
 的第一轮最高值提高约 10.8 mK，但仍未满足稳定判据，不能将 T4 标为通过。两轮
 JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
+
+最终验收决定（2026-08-21）：操作者确认“能够升温并记录当时实际温度”满足本
+实验的 Temperature module 目标，30 分钟后允许进入测量而不要求命中原严格稳定
+窗口。`max_overshoot_k` 的 commissioned 值为 0.2 K；对 1.8 K 目标即 2.0 K
+实时终止线。该决定不改写历史数据，也不表示样品达到 setpoint；Integration 必须
+把每次测量的 `sample_temperature_k` 与 setpoint 一起保存。
 
 ## 预计文件所有权
 
