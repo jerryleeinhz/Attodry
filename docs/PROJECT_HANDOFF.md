@@ -282,8 +282,14 @@ Completed in Stage 3:
   `--skip-unsupported-harmonics` flag requires `--all-harmonics`, records every
   omitted order with its required detection frequency and 102 kHz limit, and
   never writes unsupported HARM values. Without that flag, strict all-harmonic
-  scans remain pre-VISA rejections. Fake-VISA validation passes; the target
-  computer has not yet received this revision.
+  scans remain pre-VISA rejections. The isolated `LK_setup` clone at `8b4a529`
+  passed all 199 offline tests. The authorized real coverage scan completed its
+  ten points with 30/27/24 clean paired h1/h2/h3 samples and three auditable
+  omissions (h3 at 38.310 kHz; h2 and h3 at 100 kHz); cleanup verified h1,
+  17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero status/error words. The
+  authorized 4--400 mVrms excitation scan then completed all 11 points with 33
+  clean paired samples per harmonic. Its 3.998 uArms conservative current bound
+  and baseline cleanup both passed. Raw JSON records remain ignored on the target.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting

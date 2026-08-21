@@ -380,6 +380,14 @@ h2 最高 51 kHz；100 kHz 端点只能测 h1。高频段的记录策略需操�
 本点的 `skipped_harmonics` 中记录阶数、所需检测频率、102 kHz 上限与原因。
 不提供这个旗标时，严格 all-harmonics 仍在任何 VISA I/O 前拒绝整张超限网格。
 
+2026-08-21：隔离的 LK_setup clone 在 `8b4a529` 通过 199 项离线测试后，实机 coverage
+扫频完成：h1/h2/h3 分别取得 30/27/24 个无问题正式 xx/xy 配对样本，审计记录的三个
+跳过项为 38.310 kHz 的 h3，以及 100 kHz 的 h2/h3。cleanup 验证两机 h1、17.777 Hz、
+XX 4 mVrms/10 mV、XY 1 mV、状态/错误字为零。随后固定 17.777 Hz 的 4--400 mVrms
+三阶幅值扫描也完成：11 点、每阶 33 个无问题正式配对样本；100 kΩ 外阻、SR830 50 Ω
+和约 500 Ω 器件对应的最保守电流界限为 3.998 µArms。其 cleanup 也验证相同基线。
+两份原始 JSON 仅在 target clone 的被忽略 `run_data` 中保留。
+
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。

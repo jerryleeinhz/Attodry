@@ -284,7 +284,15 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   emits one auditable omission record per unsupported point/order, and never
   writes an unsupported HARM setting. Strict all-harmonic invocation remains a
   pre-VISA rejection. Fake-VISA tests cover both the strict rejection and the
-  selected partial-order coverage; target-offline validation is pending.
+  selected partial-order coverage. The isolated `LK_setup` clone at `8b4a529`
+  passed all 199 offline tests. The authorized real coverage scan then completed
+  all ten points with 30/27/24 clean paired h1/h2/h3 samples and three explicit
+  skipped-order records (h3 at 38.310 kHz, h2/h3 at 100 kHz). Cleanup verified
+  h1, 17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero final status/error words.
+  The subsequent authorized 4--400 mVrms excitation scan at 17.777 Hz completed
+  all 11 points with 33 clean paired samples at each of h1/h2/h3; its conservative
+  worst-case current bound was 3.998 uArms and cleanup verified the same baseline.
+  Both raw JSON records remain only in ignored target `run_data`.
 
 ## Stage 4 - attoDRY real driver
 
