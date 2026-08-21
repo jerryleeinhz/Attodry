@@ -232,7 +232,8 @@ Status: offline implementation and rendering QA complete (2026-08-20).
   requires explicit rejected-data audit opt-in, filters unsafe sample statuses,
   excludes transition/cleanup payloads from curves, and plots/exports XX/XY
   X/Y/R/phase statistics for frequency and excitation scans. UTF-8 and
-  PowerShell UTF-16/BOM records are detected automatically.
+  PowerShell UTF-16/BOM records are detected automatically; displayed figures
+  are closed after rendering so executed notebooks contain one copy per plot.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   outputs. Every generated or unsupported result is recorded in a JSON manifest.

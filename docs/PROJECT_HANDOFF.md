@@ -232,7 +232,8 @@ Completed offline in Stage 6:
   cleanup payloads into curves. It plots XX/XY X/Y/R/phase mean and sample standard
   deviation versus frequency, source voltage, or nominal current and can export
   CSV/PNG/PDF only when explicitly enabled. The loader detects both UTF-8 and
-  PowerShell UTF-16/BOM commissioning records.
+  PowerShell UTF-16/BOM commissioning records, and executed notebooks close
+  figures after display to prevent duplicate inline output.
 - Added an auditable publication suite for current/harmonic/frequency/
   temperature/field/angle/gamma, T-|B|, gate-resistance, gate-leakage, and n-D
   results, with an explicit generated/skipped manifest and fit summary.
