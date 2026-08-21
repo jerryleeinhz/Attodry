@@ -64,6 +64,15 @@ class StabilityConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TemperatureRunConfig:
+    target_k: float
+    max_delta_k: float
+    max_overshoot_k: float
+    pre_measure_wait_s: float
+    poll_interval_s: float
+
+
+@dataclass(frozen=True, slots=True)
 class MagnetConfig:
     limits: MagnetLimits
     stability: StabilityConfig
@@ -126,6 +135,7 @@ class ControlConfig:
     cryostat: CryostatConfig
     magnet: MagnetConfig
     temperature_stability: StabilityConfig
+    temperature_run: TemperatureRunConfig | None
     cleanup: CleanupConfig
     lockin_xx: LockinConfig
     lockin_xy: LockinConfig
@@ -197,7 +207,7 @@ def load_config(path: str | Path) -> ControlConfig:
             "gate_bottom",
         }
         if project.mode is RunMode.HARDWARE:
-            expected_tables.add("visa")
+            expected_tables.update({"visa", "temperature_run"})
         _strict_keys(document, "top level", expected_tables)
 
         cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
@@ -206,6 +216,11 @@ def load_config(path: str | Path) -> ControlConfig:
             _table(document, "temperature_stability"),
             "temperature_stability",
             value_prefix="",
+        )
+        temperature_run = (
+            _parse_temperature_run(_table(document, "temperature_run"), cryostat)
+            if project.mode is RunMode.HARDWARE
+            else None
         )
         cleanup = _parse_cleanup(_table(document, "cleanup"))
         lockin_xx = _parse_lockin(
@@ -236,6 +251,7 @@ def load_config(path: str | Path) -> ControlConfig:
         cryostat=cryostat,
         magnet=magnet,
         temperature_stability=temperature_stability,
+        temperature_run=temperature_run,
         cleanup=cleanup,
         lockin_xx=lockin_xx,
         lockin_xy=lockin_xy,
@@ -359,6 +375,51 @@ def _parse_stability(
     if wait_timeout_s < criteria.dwell_s:
         raise ConfigError(f"{name}.wait_timeout_s must cover stable_dwell_s.")
     return StabilityConfig(criteria, poll_interval_s, wait_timeout_s)
+
+
+def _parse_temperature_run(
+    table: Mapping[str, Any], cryostat: CryostatConfig
+) -> TemperatureRunConfig:
+    name = "temperature_run"
+    _strict_keys(
+        table,
+        name,
+        {
+            "target_k",
+            "max_delta_k",
+            "max_overshoot_k",
+            "pre_measure_wait_s",
+            "poll_interval_s",
+        },
+    )
+    target_k = _positive_number(table["target_k"], f"{name}.target_k")
+    max_delta_k = _positive_number(table["max_delta_k"], f"{name}.max_delta_k")
+    max_overshoot_k = _positive_number(
+        table["max_overshoot_k"], f"{name}.max_overshoot_k"
+    )
+    pre_measure_wait_s = _positive_number(
+        table["pre_measure_wait_s"], f"{name}.pre_measure_wait_s"
+    )
+    poll_interval_s = _positive_number(
+        table["poll_interval_s"], f"{name}.poll_interval_s"
+    )
+    if not cryostat.temperature_min_k <= target_k <= cryostat.temperature_max_k:
+        raise ConfigError("temperature_run.target_k is outside cryostat limits.")
+    if target_k + max_overshoot_k > cryostat.temperature_max_k:
+        raise ConfigError(
+            "temperature_run target plus max_overshoot_k exceeds the cryostat limit."
+        )
+    if pre_measure_wait_s < poll_interval_s:
+        raise ConfigError(
+            "temperature_run.pre_measure_wait_s must cover poll_interval_s."
+        )
+    return TemperatureRunConfig(
+        target_k=target_k,
+        max_delta_k=max_delta_k,
+        max_overshoot_k=max_overshoot_k,
+        pre_measure_wait_s=pre_measure_wait_s,
+        poll_interval_s=poll_interval_s,
+    )
 
 
 def _parse_cleanup(table: Mapping[str, Any]) -> CleanupConfig:

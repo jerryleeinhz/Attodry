@@ -65,6 +65,11 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.project.mode, RunMode.HARDWARE)
         self.assertEqual(config.cryostat.backend, "legacy_dll")
         self.assertIsNotNone(config.visa)
+        self.assertIsNotNone(config.temperature_run)
+        self.assertEqual(config.temperature_run.target_k, 1.8)
+        self.assertEqual(config.temperature_run.max_delta_k, 250.0)
+        self.assertEqual(config.temperature_run.max_overshoot_k, 0.2)
+        self.assertEqual(config.temperature_run.pre_measure_wait_s, 1800.0)
         self.assertIsNone(config.gate_top.max_abs_voltage_v)
         with self.assertRaisesRegex(ConfigError, "Hardware configuration is not ready"):
             config.require_hardware_ready()
@@ -199,6 +204,22 @@ class ConfigurationTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ConfigError, r"top level.*visa"):
+            self.load_text(text)
+
+    def test_hardware_temperature_run_rejects_unknown_field(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            "target_k = 1.8",
+            "target_k = 1.8\nunknown_option = true",
+        )
+        with self.assertRaisesRegex(ConfigError, r"temperature_run.*unknown_option"):
+            self.load_text(text)
+
+    def test_hardware_temperature_run_rejects_overshoot_above_limit(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            "target_k = 1.8",
+            "target_k = 299.9",
+        )
+        with self.assertRaisesRegex(ConfigError, "max_overshoot_k"):
             self.load_text(text)
 
     def test_malformed_toml_is_reported_as_configuration_error(self) -> None:

@@ -35,6 +35,12 @@ commissioned 为 0.2 K 的 `max_overshoot_k` 外，示例保留不可执行的 `
 路径已经同时保存 sample/user/VTI temperature。严格 tolerance/range/dwell 结果
 仍作为诊断数据保留，不删除此前未进入稳定窗口的事实。
 
+日常运行现已独立于 commissioning：`hardware.local.toml` 的
+`[temperature_run]` 集中保存 target、250 K 最大变化、0.2 K 超温保护、1800 s
+测量前等待和 1 s 轮询。`attodry-temperature-run` 不要求授权 flags；调用命令本身
+会连接和写温度。它在30分钟监测结束后记录实际 `sample_temperature_k` 并允许进入
+测量，不要求命中严格稳定窗口。完整用户说明见 `docs/TEMPERATURE_RUN_GUIDE.md`。
+
 ## 模块目标
 
 1. 独立验证温度状态读取、设定、控制启停和稳定判据。
@@ -298,8 +304,11 @@ JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
 - `src/attodry_control/models.py`（仅温度状态必要修改）
 - `src/attodry_control/attodry_test.py`（只读验收）
 - `src/attodry_control/temperature_test.py`（写入 commissioning，双重授权）
+- `src/attodry_control/temperature_run.py`（无额外授权参数的日常运行入口）
 - `tests/test_attodry.py`
+- `tests/test_config.py`
 - `tests/test_stability.py`
+- `docs/TEMPERATURE_RUN_GUIDE.md`
 
 `attodry.py` 同时服务 Magnetic 模块。若两个 Chat 并行，必须使用不同 worktree，
 并由 Integration 重新运行冲突后的完整测试。

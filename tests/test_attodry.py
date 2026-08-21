@@ -20,6 +20,7 @@ from attodry_control.config import load_config
 from attodry_control.models import VectorField
 from attodry_control.safety import SafetyViolation
 from attodry_control.temperature_test import run as run_temperature_test
+from attodry_control.temperature_run import run as run_temperature_operation
 
 
 class FakeAttoDryDll:
@@ -1042,6 +1043,87 @@ failure_policy = "hold-current"
         self.assertFalse(result["completed"])
         self.assertFalse(result["disconnected"])
         self.assertIn("Disconnect", result["close_error"])
+
+    def temperature_run_config(
+        self, *, target_k: float = 2.1, pre_measure_wait_s: float = 1800.0
+    ) -> Path:
+        path = Path(".test-tmp") / "temperature_run_hardware.toml"
+        path.parent.mkdir(exist_ok=True)
+        self.addCleanup(path.unlink, missing_ok=True)
+        text = Path("config/hardware.example.toml").read_text(encoding="utf-8")
+        text = text.replace("target_k = 1.8", f"target_k = {target_k}")
+        text = text.replace(
+            "pre_measure_wait_s = 1800.0",
+            f"pre_measure_wait_s = {pre_measure_wait_s}",
+        )
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_temperature_run_uses_one_config_and_records_actual_temperature(
+        self,
+    ) -> None:
+        output = io.StringIO()
+        config_path = self.temperature_run_config()
+
+        with redirect_stdout(output):
+            exit_code = run_temperature_operation(
+                ["--config", str(config_path)],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(step_s=600.0),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["measurement_ready"])
+        self.assertAlmostEqual(
+            result["measurement_state"]["sample_temperature_k"], 2.0
+        )
+        self.assertAlmostEqual(
+            result["measurement_state"]["user_temperature_k"], 2.1, delta=1e-4
+        )
+        self.assertGreaterEqual(
+            result["temperature_samples"][-1]["elapsed_s"], 1800.0
+        )
+        self.assertTrue(result["final_state"]["temperature_control_enabled"])
+        self.assertLess(
+            self.dll.events.index("toggle_temperature_control"),
+            self.dll.events.index("set_temperature"),
+        )
+        self.assertEqual(self.dll.events[-2:], ["disconnect", "end"])
+
+    def test_temperature_run_overshoot_disables_control(self) -> None:
+        self.dll.sample_temperature_k = 2.31
+        output = io.StringIO()
+        config_path = self.temperature_run_config(pre_measure_wait_s=2.0)
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            AttoDryError, "overshoot limit"
+        ):
+            run_temperature_operation(
+                ["--config", str(config_path)],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["measurement_ready"])
+        self.assertAlmostEqual(
+            result["temperature_samples"][-1]["state"]["sample_temperature_k"],
+            2.31,
+            delta=1e-4,
+        )
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+        self.assertTrue(result["disconnected"])
 
 
 class StepClock:

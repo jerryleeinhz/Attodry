@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。未来真实温度写入、其它 attoDRY 设置写入、SMU 和端到端硬件路径仍需分阶段显式授权；具体 SMU 命令等待确认型号。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。日常温控使用统一 `hardware.local.toml` 和无额外授权参数的专用命令；其它 attoDRY 设置写入、SMU 和端到端硬件路径仍需分阶段确认，具体 SMU 命令等待确认型号。
 
 ## 已确认硬件
 
@@ -78,13 +78,17 @@ python -m attodry_control.lockin_test sweep-frequency --help
 python -m attodry_control.lockin_test sweep-excitation --help
 python -m attodry_control.attodry_test --help
 python -m attodry_control.temperature_test --help
+python -m attodry_control.temperature_run --help
 python -m attodry_control.lockin_test --help
 ```
 
-T4 温度小步长动作的运行参数不写入 `hardware.local.toml`。需复制
-`config/temperature_commissioning.example.toml` 为已忽略的
-`config/temperature_commissioning.local.toml`，在其开头填写本次目标和稳定条件；
-实际连接和温度写入仍需每次在命令行显式授权。
+日常温控参数统一写在已忽略的 `config/hardware.local.toml` 的
+`[temperature_run]` 表中，通常只修改 `target_k`。运行
+`attodry-temperature-run` 不需要额外授权参数；该命令会先开启温控、再设置目标，
+监测30分钟并记录实际样品温度。详细步骤见
+[`docs/TEMPERATURE_RUN_GUIDE.md`](docs/TEMPERATURE_RUN_GUIDE.md)。原
+`temperature_commissioning.local.toml` 和 `attodry-temperature-test` 仅保留给
+严格稳定性诊断。
 
 已完成的独立扫频和激励JSON可用
 [`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)

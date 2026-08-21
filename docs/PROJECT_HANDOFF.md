@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-21
+Last updated: 2026-08-22
 
 ## Current stage
 
@@ -267,9 +267,9 @@ Completed in Stage 3:
   other transition problem and every formal nonzero safety bit remain failures;
   fresh write authorization is required before its real retry.
 
-Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
-DLL ABI preflight, and real read-only connection validation complete; setting
-writes remain uncommissioned and require separate explicit authorization.
+Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
+DLL ABI preflight and real read-only connection validation are complete. Magnetic
+field writes remain uncommissioned and require separate explicit authorization.
 
 Completed offline in Stage 4:
 
@@ -450,6 +450,16 @@ Completed offline in Stage 4:
   commissioned `max_overshoot_k` is 0.2 K. This acceptance does not reinterpret
   setpoint as measured temperature or erase the retained stability failures;
   Integration must persist `sample_temperature_k` for every measurement.
+- Added the operator-requested daily `attodry-temperature-run` entry point and
+  consolidated its target, 250 K movement limit, 0.2 K overshoot guard, 1800 s
+  pre-measure wait, and 1 s polling in `[temperature_run]` inside the ignored
+  `hardware.local.toml`. The command has no separate authorization flags; invoking
+  it is the explicit action that connects and writes. It preserves the confirmed
+  control-before-setpoint order, records every complete state, and exposes the
+  actual `measurement_state` after the timed wait without imposing strict
+  stability. Unsafe or failed monitoring attempts disable temperature control.
+  The virtual 1800 s, actual-temperature, command-order, and overshoot-cleanup
+  paths pass against the fake DLL; no real DLL was loaded for this addition.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was
@@ -462,9 +472,10 @@ attoDRY temperature setpoint/control actions, control-first ordering, actual sen
 recording, and heater-driven warming are operator-accepted for this experiment.
 The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; that
 fact remains diagnostic rather than being rewritten as stability. The commissioned
-0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Future real
-temperature writes still require explicit authorization. SMUs and real end-to-end
-acquisition still require staged authorization.
+0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Daily
+temperature operation uses the unified hardware TOML and dedicated command without
+additional authorization flags. SMUs and real end-to-end acquisition still require
+staged authorization.
 
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
@@ -535,7 +546,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The merged main/Lock-in/Temperature hardware-free suite contains 213 passing
+- The merged main/Lock-in/Temperature hardware-free suite contains 217 passing
   tests in the minimal environment, with three matplotlib rendering tests skipped
   because matplotlib is unavailable. Source compilation passes. The plotting path is
   unchanged from its prior rendered validation;

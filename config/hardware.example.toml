@@ -33,6 +33,14 @@ stable_dwell_s = 30.0
 poll_interval_s = 1.0
 wait_timeout_s = 7200.0
 
+# Daily temperature operation. Normally only target_k needs to change.
+[temperature_run]
+target_k = 1.8
+max_delta_k = 250.0
+max_overshoot_k = 0.2
+pre_measure_wait_s = 1800.0
+poll_interval_s = 1.0
+
 [cleanup]
 normal_end_field_policy = "hold"
 exception_field_policy = "zero"

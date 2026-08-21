@@ -271,9 +271,9 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 
 ## Stage 4 - attoDRY real driver
 
-Status: offline implementation, target-computer DLL ABI preflight, and real
-read-only connection validation complete (2026-08-21); setting writes remain
-uncommissioned and require separate explicit authorization.
+Status: Temperature operation operator-accepted; target-computer DLL ABI preflight
+and real read-only connection validation complete (2026-08-21). Magnetic-field
+writes remain uncommissioned and require separate explicit authorization.
 
 - Added safe 64-bit vendor DLL loading and explicit function signatures.
 - Added separately authorized COM connection and initialization timeout.
@@ -462,6 +462,17 @@ uncommissioned and require separate explicit authorization.
   `max_overshoot_k` is 0.2 K, and Integration must persist actual
   `sample_temperature_k` with each measurement instead of treating the setpoint as
   the measured temperature. The historical stability failures above remain valid.
+- Added the operator-requested daily `attodry-temperature-run` entry point. Its
+  complete runtime configuration is the strict `[temperature_run]` table in
+  `hardware.local.toml`; normally only `target_k` changes. Invoking the command
+  itself authorizes its connection and temperature writes, so it has no separate
+  authorization flags. It confirms control enabled before applying the target,
+  records complete actual-temperature samples for 1800 s, then returns the actual
+  measurement state without requiring the former strict stability window. A
+  sample at `target_k + 0.2 K`, control loss, setpoint change, device error, or
+  communication failure prevents readiness and attempts verified control disable.
+  Fake-DLL tests cover the virtual 1800 s path, actual-temperature recording,
+  command order, and overshoot cleanup without loading real hardware.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only
@@ -526,7 +537,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The merged main/Lock-in/Temperature offline suite contains 213 passing tests
+- The merged main/Lock-in/Temperature offline suite contains 217 passing tests
   in the minimal environment, with three matplotlib rendering tests skipped
   because matplotlib is unavailable; source compilation passes without hardware.
 - Built and import-checked the local project wheel without downloading
