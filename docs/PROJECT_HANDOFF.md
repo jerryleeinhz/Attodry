@@ -289,6 +289,28 @@ Completed in Stage 3:
   omitted order and 102 kHz-limit reason, and never writes an unsupported HARM;
   strict invocations without the flag fail before VISA opens.
 
+- A later explicitly authorized target-computer run of that bounded policy
+  completed with 81 clean formal xx/xy pairs: h1 at all 10 points, h2 at the
+  supported first 9, and h3 at the supported first 8. The unsupported orders
+  were recorded as skips rather than written to either instrument. Cleanup was
+  verified at h1, 17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, with clear final
+  status/error words.
+- The separately authorized 17.777 Hz, 4--400 mVrms all-harmonic excitation
+  rerun completed all 99 formal xx/xy pairs (11 source points × h1/h2/h3 × 3
+  samples). It used the confirmed 100 kΩ external series resistance, 500 Ω
+  approximate device resistance, 5 mArms/0.5 Vrms device limits, no external
+  50 Ω termination, and the two-interval source-step wait. Its cleanup was
+  likewise verified at the same baseline; raw records remain only in the
+  ignored target `run_data` directory.
+- Analysis of these accepted records confirms that reference lock is not a
+  signal-quality assertion. At fixed 17.777 Hz, XX h1 passed the 1 µVrms and
+  5-degree circular-spread display criteria at all 11 source levels; XY h1
+  passed only at the top two levels, and XY h2/h3 passed nowhere. The frequency
+  response of XX h1 was internally repeatable but phase changed smoothly with
+  frequency and crossed the ±180-degree wrap. Raw low-amplitude phase remains
+  available for audit, but is intentionally omitted from the default plots and
+  must not be interpreted physically without a higher-SNR control measurement.
+
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
 writes remain uncommissioned and require separate explicit authorization.

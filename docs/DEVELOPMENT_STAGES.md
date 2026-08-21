@@ -291,6 +291,24 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   every omitted order with its required detection frequency and the 102 kHz
   limit, and never writes an unsupported HARM setting. Without that explicit
   flag, an unsupported all-harmonic grid remains a pre-VISA failure.
+- A subsequent explicitly authorized target-computer execution validated the
+  bounded policy with 81 clean formal xx/xy pairs (10 h1, 9 h2, and 8 h3
+  conditions, each sampled three times). It completed normally, retained the
+  high-frequency omissions as explicit metadata, and strictly verified cleanup
+  to h1/17.777 Hz/XX 4 mVrms and 10 mV/XY 1 mV with clear status and error
+  words.
+- The following explicitly authorized 4--400 mVrms excitation rerun used the
+  confirmed 100 kΩ external series resistor, 500 Ω approximate device
+  resistance, 5 mArms and 0.5 Vrms device ceilings, and no external 50 Ω
+  termination. All 99 h1/h2/h3 formal xx/xy pairs at 11 source levels completed
+  cleanly. The two-interval (3.0 s) source-step settling rule was exercised on
+  actual SINE OUT changes; cleanup returned the same confirmed baseline.
+- The retained raw records were rendered with the completed-record/clean-sample
+  analysis path. The 1 µVrms and 5-degree circular-spread defaults correctly
+  retain stable XX h1 phase while suppressing low-SNR XY and higher-harmonic
+  phase display values. A locked reference therefore remains necessary but not
+  sufficient for phase interpretation; follow-up wiring/pickup controls are
+  required before assigning physical meaning to the low-SNR phase.
 
 ## Stage 4 - attoDRY real driver
 
