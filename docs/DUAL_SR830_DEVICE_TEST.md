@@ -281,6 +281,13 @@ FMOD, RSLP, ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume
 rejected sample, and attempt to restore `lockin_xx` to 4 mVrms and 17.777 Hz.
 A communication failure still requires manual front-panel verification.
 
+For a frequency sweep, each selected harmonic must satisfy
+`harmonic × fundamental_frequency <= 102000 Hz`, the SR830 reference limit. The
+tool validates every requested point before it opens VISA or writes a setting.
+Thus h3 is limited to 34 kHz and h2 to 51 kHz; for example, h3 at 38.310 kHz
+would require 114.931 kHz and is rejected before the sweep begins. H1-only
+frequency scans may still use the 100 kHz endpoint.
+
 The HARM transition record is deliberately excluded from formal curves. It may
 contain only a filter-overload and/or frequency-range-change latch while the
 reference moves to the selected detection harmonic. It is consumed, retained,

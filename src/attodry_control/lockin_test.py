@@ -21,6 +21,7 @@ from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
     DualSr830Controller,
+    MAXIMUM_REFERENCE_FREQUENCY_HZ,
     PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
     Sr830,
     Sr830AcquisitionError,
@@ -821,9 +822,13 @@ def _run_frequency_sweep(
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _require_sweep_authorization(args)
     points = _validate_increasing_points(args.points_hz, "frequency")
-    if points[0] < 0.001 or points[-1] > 102_000.0:
-        raise ValueError("Frequency sweep points must be within 0.001-102000 Hz.")
+    if points[0] < 0.001 or points[-1] > MAXIMUM_REFERENCE_FREQUENCY_HZ:
+        raise ValueError(
+            "Frequency sweep points must be within "
+            f"0.001-{MAXIMUM_REFERENCE_FREQUENCY_HZ:g} Hz."
+        )
     harmonics = _requested_sweep_harmonics(args)
+    _validate_harmonic_detection_frequencies(points, harmonics)
     baseline_hz = float(settings["frequency_hz"])
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
@@ -1048,6 +1053,29 @@ def _require_sweep_authorization(args: argparse.Namespace) -> None:
 
 def _requested_sweep_harmonics(args: argparse.Namespace) -> tuple[int, ...]:
     return (1, 2, 3) if args.all_harmonics else (1,)
+
+
+def _validate_harmonic_detection_frequencies(
+    points_hz: Sequence[float], harmonics: Sequence[int]
+) -> None:
+    """Reject harmonic/reference products the SR830 cannot represent before VISA I/O."""
+
+    unsupported = [
+        (frequency_hz, harmonic, frequency_hz * harmonic)
+        for frequency_hz in points_hz
+        for harmonic in harmonics
+        if frequency_hz * harmonic > MAXIMUM_REFERENCE_FREQUENCY_HZ
+    ]
+    if not unsupported:
+        return
+    details = "; ".join(
+        f"h{harmonic} at {frequency_hz:g} Hz requires {detection_hz:g} Hz"
+        for frequency_hz, harmonic, detection_hz in unsupported
+    )
+    raise ValueError(
+        "Requested harmonic detection frequency exceeds the SR830 "
+        f"{MAXIMUM_REFERENCE_FREQUENCY_HZ:g} Hz limit: {details}."
+    )
 
 
 def _validate_increasing_points(

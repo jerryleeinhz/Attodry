@@ -268,6 +268,15 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   output overload, time-constant change, error, and every nonzero formal-window
   latch. Fake-VISA success, formal h2 failure cleanup, and observed-transition
   tests pass. A fresh real authorization is required before retrying.
+- A subsequent authorized all-harmonic retry retained 78 formal pairs, then
+  stopped at h3 for 38.3104813 kHz. Its required 114.931 kHz detection frequency
+  exceeds the SR830 102 kHz reference limit, so the instrument remained at h2
+  and the scan rejected the point. The final diagnostic readback confirmed h1,
+  17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero status/error words; a transient
+  XY unlock during cleanup keeps the raw record rejected. The scanner now checks
+  every requested `harmonic * frequency` product before opening VISA, preventing
+  any setting write for unsupported all-harmonic grids. H3 is limited to 34 kHz
+  and h2 to 51 kHz; the high-frequency sampling plan remains operator-selected.
 
 ## Stage 4 - attoDRY real driver
 

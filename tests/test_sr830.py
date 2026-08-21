@@ -1187,6 +1187,38 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["harmonic"], 1)
         self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["harmonic"], 1)
 
+    def test_cli_frequency_sweep_rejects_unsupported_harmonic_before_opening_visa(
+        self,
+    ) -> None:
+        factory_opened = False
+
+        def unopened_factory() -> FakeResourceManager:
+            nonlocal factory_opened
+            factory_opened = True
+            raise AssertionError("VISA must not open for an unsupported harmonic frequency.")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            r"h3 at 38310.5 Hz requires 114931 Hz",
+        ):
+            run(
+                [
+                    "sweep-frequency",
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-hz",
+                    "17.777,38310.4813",
+                    "--all-harmonics",
+                    "--authorize-writes",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=unopened_factory,
+            )
+
+        self.assertFalse(factory_opened)
+
     def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)

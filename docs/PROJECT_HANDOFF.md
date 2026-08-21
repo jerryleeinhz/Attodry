@@ -266,6 +266,16 @@ Completed in Stage 3:
   consumes them, and waits again before unchanged strict formal sampling. Any
   other transition problem and every formal nonzero safety bit remain failures;
   fresh write authorization is required before its real retry.
+- The next authorized all-harmonic retry retained 78 formal pairs and stopped at
+  38.3104813 kHz while switching to h3: its 114.931 kHz detection frequency
+  exceeds the SR830 102 kHz limit, and the XX instrument correctly remained at
+  h2. The retained rejected record's final diagnostic still confirmed h1,
+  17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero final status/error words; one
+  XY transient-unlock cleanup record kept the attempt non-completed. The scanner
+  now rejects every unsupported `harmonic * frequency` combination before VISA
+  opens, so it cannot repeat this write-enabled failure. H3 is limited to 34 kHz
+  and h2 to 51 kHz; choosing the high-frequency acquisition policy remains the
+  next operator decision.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
