@@ -228,6 +228,15 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   observed 316.1 Hz and 5622 Hz quantization points (each about 0.02% from the
   mathematical grid). The final scan accepted all 30 samples and restored
   17.777 Hz, 4 mVrms, XX `SENS=20`, XY `SENS=17`, and zero status/error words.
+- Completed the separately authorized 4–400 mVrms excitation sweep at the
+  17.777 Hz baseline. The operator-confirmed 100 kΩ series resistance, 500 Ω
+  approximate device resistance, 5 mArms current limit, 0.5 Vrms voltage limit,
+  and absence of external 50 Ω termination gave pre-VISA conservative bounds of
+  3.998 µArms and 0.4 Vrms. All 11 points and 33 formal samples were accepted.
+  The temporary XX `SENS=21` setting and SINE OUT changes were fully restored to
+  4 mVrms and `SENS=20`; XY remained `SENS=17` without writes, and final
+  status/error words were clear. The raw audit record remains ignored on the
+  control computer.
 
 ## Stage 4 - attoDRY real driver
 

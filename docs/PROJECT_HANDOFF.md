@@ -231,6 +231,14 @@ Completed in Stage 3:
   rule and substituted only the observed 316.1 Hz and 5622 Hz quantization
   points (about 0.02% deviations); all 30 samples passed and cleanup verified
   17.777 Hz, 4 mVrms, XX `SENS=20`, XY `SENS=17`, and clear status/error words.
+- Completed the user-authorized 4–400 mVrms device excitation sweep at fixed
+  17.777 Hz. The confirmed 100 kΩ series resistor, approximately 500 Ω device,
+  5 mArms current cap, 0.5 Vrms voltage cap, and no external 50 Ω termination
+  yielded conservative preflight bounds of 3.998 µArms and 0.4 Vrms. Eleven
+  points with three formal samples each completed without sample problems. Only
+  the temporary XX `SENS=21` and SINE OUT setting changed; cleanup verified the
+  4 mVrms/`SENS=20` XX baseline, unchanged XY `SENS=17`, and zero final
+  status/error words. Raw acquisition files remain ignored on the target clone.
 
 Stage 4 - attoDRY legacy-DLL adapter: offline implementation, target-computer
 DLL ABI preflight, and real read-only connection validation complete; setting
