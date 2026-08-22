@@ -268,6 +268,60 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   output overload, time-constant change, error, and every nonzero formal-window
   latch. Fake-VISA success, formal h2 failure cleanup, and observed-transition
   tests pass. A fresh real authorization is required before retrying.
+- Added offline-tested phase-quality display handling for the read-only
+  commissioning notebook: it retains raw circular phase statistics, omits only
+  display points below an explicit 1 µVrms amplitude or above a 5-degree
+  within-point circular spread, and unwraps qualified contiguous segments at
+  ±180 degrees. The controls are visible and adjustable; raw JSON/CSV values are
+  never changed. The excitation-sweep acquisition path now rejects `--settle-s`
+  below 1.5 s before VISA opens and records a two-interval source-step wait
+  (3.0 s at the current 300 ms/24 dB/oct configuration) after each actual SINE
+  OUT change. This was tested only against fake VISA and offline matplotlib;
+  no new hardware command was issued.
+- A retained all-harmonic frequency attempt reached 38.3104813 kHz/h3, where
+  the required 114.931 kHz detection frequency exceeds the SR830 102 kHz
+  reference limit and the instrument remained at h2. The record was rejected;
+  its final readback returned h1, 17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero
+  final status/error words, while an XY transient-unlock cleanup record retained
+  the audit failure. The scanner now validates each requested
+  `harmonic * frequency` product before VISA opens.
+- The selected coverage policy preserves the ten-point 17.777 Hz--100 kHz grid:
+  h1 at all ten points, h2 at the supported first nine, and h3 at the supported
+  first eight. `--skip-unsupported-harmonics` requires `--all-harmonics`, records
+  every omitted order with its required detection frequency and the 102 kHz
+  limit, and never writes an unsupported HARM setting. Without that explicit
+  flag, an unsupported all-harmonic grid remains a pre-VISA failure.
+- A subsequent explicitly authorized target-computer execution validated the
+  bounded policy with 81 clean formal xx/xy pairs (10 h1, 9 h2, and 8 h3
+  conditions, each sampled three times). It completed normally, retained the
+  high-frequency omissions as explicit metadata, and strictly verified cleanup
+  to h1/17.777 Hz/XX 4 mVrms and 10 mV/XY 1 mV with clear status and error
+  words.
+- The following explicitly authorized 4--400 mVrms excitation rerun used the
+  confirmed 100 kΩ external series resistor, 500 Ω approximate device
+  resistance, 5 mArms and 0.5 Vrms device ceilings, and no external 50 Ω
+  termination. All 99 h1/h2/h3 formal xx/xy pairs at 11 source levels completed
+  cleanly. The two-interval (3.0 s) source-step settling rule was exercised on
+  actual SINE OUT changes; cleanup returned the same confirmed baseline.
+- The retained raw records were rendered with the completed-record/clean-sample
+  analysis path. The 1 µVrms and 5-degree circular-spread defaults correctly
+  retain stable XX h1 phase while suppressing low-SNR XY and higher-harmonic
+  phase display values. A locked reference therefore remains necessary but not
+  sufficient for phase interpretation; follow-up wiring/pickup controls are
+  required before assigning physical meaning to the low-SNR phase.
+
+- Consolidated the current frequency/excitation sweep grids, h1/h2/h3 policy,
+  temporary XX range, sampling timing, complete excitation path, and device
+  limits in a strict `[lockin_sweep]` hardware-TOML table (2026-08-22).
+  Daily sweep commands now default to that validated config without per-run
+  confirm/authorize flags. Each opened-pair attempt is atomically archived under
+  the configured `run_data/commissioning` directory with its outcome and an
+  address-free resolved-TOML `measurement_config`; no real instrument connection
+  was made for this change.
+- Main integration keeps the temperature-only configuration loader strict while
+  recognizing `[lockin_sweep]` as an unrelated optional table, so the daily
+  temperature command can continue to use the same station-local TOML without
+  parsing or acting on Lock-in fields. The merged full offline suite passed.
 
 ## Stage 4 - attoDRY real driver
 

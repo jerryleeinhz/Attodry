@@ -266,6 +266,66 @@ Completed in Stage 3:
   consumes them, and waits again before unchanged strict formal sampling. Any
   other transition problem and every formal nonzero safety bit remain failures;
   fresh write authorization is required before its real retry.
+- Added a read-only phase-quality view to the commissioning notebook. It retains
+  all raw circular phase statistics, but the displayed phase defaults to R at
+  least 1 µVrms and within-point circular spread at most 5 degrees; qualifying
+  contiguous sections unwrap at ±180 degrees without bridging omitted points.
+  Both controls are visible and can be set to `0.0`/`None` for raw-phase audit.
+  No phase setting or raw record is modified. The offline-only acquisition
+  correction also requires `--settle-s >= 1.5` s before VISA opens and waits two
+  intervals after every actual SINE OUT change (3.0 s at the current 300 ms,
+  24 dB/oct setting), recording `source_step_settle_s` in the JSON. Fake-VISA
+  and offline matplotlib tests cover the behavior; no new hardware command was
+  issued.
+- A retained all-harmonic scan reached 38.3104813 kHz/h3, which requires
+  114.931 kHz and exceeds the SR830 102 kHz reference limit; XX correctly
+  remained at h2. The attempt is retained as rejected. Its final readback was
+  h1, 17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, and zero final status/error words;
+  the XY transient-unlock cleanup record remains audited.
+- The scanner therefore validates every `harmonic * frequency` product before
+  VISA opens. The selected coverage policy retains h1 at all ten 17.777 Hz--100
+  kHz points, h2 at the supported first nine, and h3 at the supported first
+  eight. `--skip-unsupported-harmonics` requires `--all-harmonics`, records each
+  omitted order and 102 kHz-limit reason, and never writes an unsupported HARM;
+  strict invocations without the flag fail before VISA opens.
+
+- A later explicitly authorized target-computer run of that bounded policy
+  completed with 81 clean formal xx/xy pairs: h1 at all 10 points, h2 at the
+  supported first 9, and h3 at the supported first 8. The unsupported orders
+  were recorded as skips rather than written to either instrument. Cleanup was
+  verified at h1, 17.777 Hz, XX 4 mVrms/10 mV, XY 1 mV, with clear final
+  status/error words.
+- The separately authorized 17.777 Hz, 4--400 mVrms all-harmonic excitation
+  rerun completed all 99 formal xx/xy pairs (11 source points × h1/h2/h3 × 3
+  samples). It used the confirmed 100 kΩ external series resistance, 500 Ω
+  approximate device resistance, 5 mArms/0.5 Vrms device limits, no external
+  50 Ω termination, and the two-interval source-step wait. Its cleanup was
+  likewise verified at the same baseline; raw records remain only in the
+  ignored target `run_data` directory.
+- Analysis of these accepted records confirms that reference lock is not a
+  signal-quality assertion. At fixed 17.777 Hz, XX h1 passed the 1 µVrms and
+  5-degree circular-spread display criteria at all 11 source levels; XY h1
+  passed only at the top two levels, and XY h2/h3 passed nowhere. The frequency
+  response of XX h1 was internally repeatable but phase changed smoothly with
+  frequency and crossed the ±180-degree wrap. Raw low-amplitude phase remains
+  available for audit, but is intentionally omitted from the default plots and
+  must not be interpreted physically without a higher-SNR control measurement.
+
+- On 2026-08-22, the device-only frequency/excitation sweep contract moved into
+  strict `[lockin_sweep]` hardware TOML: the requested grids, h1/h2/h3 coverage,
+  bounded high-frequency skips, temporary 20 mV XX range, timing, 100 kohm +
+  50 ohm + approximately 500 ohm path, 5 mArms/0.5 Vrms limits, and absence of
+  external 50 ohm termination. Daily sweep commands now default to that config
+  without per-run confirm/authorize flags; they preflight the pair, fail closed,
+  and atomically archive each opened-pair attempt as `completed`, `rejected`, or
+  `interrupted` under the configured `run_data/commissioning` directory. Every
+  result embeds an address-free resolved-TOML `measurement_config`, while actual
+  readbacks remain in the preflight/point/cleanup records. This change was
+  verified without connecting to real instruments or issuing setting writes.
+- During main integration, the strict temperature-only configuration loader was
+  updated to recognize `[lockin_sweep]` as an unrelated optional table. Daily
+  temperature operation therefore continues to use the unified local TOML
+  without parsing or acting on Lock-in fields; the merged offline suite passed.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic

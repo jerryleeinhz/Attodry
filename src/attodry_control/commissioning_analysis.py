@@ -469,6 +469,8 @@ def plot_role_harmonic_sweep(
     role: str,
     harmonic: int,
     excitation_path: ExcitationPathResistance,
+    phase_minimum_amplitude_v: float = 0.0,
+    phase_maximum_standard_deviation_deg: float | None = None,
     destination: str | Path | None = None,
 ):
     """Plot one role and harmonic with voltage magnitude and phase on twin axes.
@@ -483,6 +485,18 @@ def plot_role_harmonic_sweep(
         raise ValueError(f"Unsupported harmonic: {harmonic}")
     if not rows:
         raise ValueError("No sweep samples match the selected filters.")
+    if (
+        not math.isfinite(phase_minimum_amplitude_v)
+        or phase_minimum_amplitude_v < 0.0
+    ):
+        raise ValueError("Phase minimum amplitude must be finite and non-negative.")
+    if phase_maximum_standard_deviation_deg is not None and (
+        not math.isfinite(phase_maximum_standard_deviation_deg)
+        or phase_maximum_standard_deviation_deg <= 0.0
+    ):
+        raise ValueError(
+            "Phase maximum standard deviation must be finite and positive."
+        )
     scan_types = {row.scan_type for row in rows}
     if len(scan_types) != 1:
         raise ValueError("Plot one sweep type at a time.")
@@ -527,16 +541,41 @@ def plot_role_harmonic_sweep(
             color="tab:blue",
             label=f"{signal_name} R",
         )
-        phase_axis.errorbar(
-            [item.x_value for item in phase_statistics],
-            [item.mean for item in phase_statistics],
-            yerr=[item.standard_deviation for item in phase_statistics],
+        (
+            phase_x_values,
+            phase_values,
+            qualified_phase_x_values,
+            qualified_phase_values,
+            qualified_phase_spreads,
+        ) = _phase_plot_values(
+            phase_statistics,
+            voltage_statistics,
+            minimum_amplitude_v=phase_minimum_amplitude_v,
+            maximum_standard_deviation_deg=phase_maximum_standard_deviation_deg,
+        )
+        qualified_count = len(qualified_phase_x_values)
+        phase_label = (
+            "Phase"
+            if qualified_count == len(phase_statistics)
+            else f"Phase qualified ({qualified_count}/{len(phase_statistics)})"
+        )
+        phase_axis.plot(
+            phase_x_values,
+            phase_values,
             marker="s",
             linewidth=1.2,
-            capsize=3,
             color="tab:orange",
-            label="Phase",
+            label=phase_label,
         )
+        if qualified_phase_x_values:
+            phase_axis.errorbar(
+                qualified_phase_x_values,
+                qualified_phase_values,
+                yerr=qualified_phase_spreads,
+                fmt="none",
+                capsize=3,
+                color="tab:orange",
+            )
     else:
         voltage_axis.text(
             0.5,
@@ -555,7 +594,7 @@ def plot_role_harmonic_sweep(
         voltage_axis.set_xlabel("SINE OUT current (A RMS)")
         title = f"Current–voltage sweep · {signal_name} / phase · h{harmonic}"
     voltage_axis.set_ylabel(f"{signal_name} R (V RMS)")
-    phase_axis.set_ylabel("Phase (degree)")
+    phase_axis.set_ylabel("Unwrapped phase (degree)")
     voltage_axis.set_title(title)
     voltage_axis.grid(True, alpha=0.25)
     left_handles, left_labels = voltage_axis.get_legend_handles_labels()
@@ -571,6 +610,8 @@ def plot_six_role_harmonic_sweeps(
     rows: Sequence[CommissioningSample],
     *,
     excitation_path: ExcitationPathResistance,
+    phase_minimum_amplitude_v: float = 0.0,
+    phase_maximum_standard_deviation_deg: float | None = None,
 ) -> dict[tuple[str, int], object]:
     """Return the requested separate XX/XY × h1/h2/h3 sweep figures."""
 
@@ -580,10 +621,70 @@ def plot_six_role_harmonic_sweeps(
             role=role,
             harmonic=harmonic,
             excitation_path=excitation_path,
+            phase_minimum_amplitude_v=phase_minimum_amplitude_v,
+            phase_maximum_standard_deviation_deg=(
+                phase_maximum_standard_deviation_deg
+            ),
         )
         for role in PLOT_ROLES
         for harmonic in PLOT_HARMONICS
     }
+
+
+def _phase_plot_values(
+    phase_statistics: Sequence[SweepStatistic],
+    voltage_statistics: Sequence[SweepStatistic],
+    *,
+    minimum_amplitude_v: float,
+    maximum_standard_deviation_deg: float | None,
+) -> tuple[list[float], list[float], list[float], list[float], list[float]]:
+    """Unwrap contiguous qualified phase segments without altering raw statistics."""
+
+    amplitude_by_x = {item.x_value: item.mean for item in voltage_statistics}
+    phase_values = [math.nan] * len(phase_statistics)
+    qualified_x_values: list[float] = []
+    qualified_values: list[float] = []
+    qualified_spreads: list[float] = []
+    segment: list[int] = []
+
+    def flush_segment() -> None:
+        if not segment:
+            return
+        previous_wrapped: float | None = None
+        previous_unwrapped: float | None = None
+        for index in segment:
+            wrapped = phase_statistics[index].mean
+            if previous_wrapped is None or previous_unwrapped is None:
+                unwrapped = wrapped
+            else:
+                delta = (wrapped - previous_wrapped + 180.0) % 360.0 - 180.0
+                unwrapped = previous_unwrapped + delta
+            phase_values[index] = unwrapped
+            qualified_x_values.append(phase_statistics[index].x_value)
+            qualified_values.append(unwrapped)
+            qualified_spreads.append(phase_statistics[index].standard_deviation)
+            previous_wrapped = wrapped
+            previous_unwrapped = unwrapped
+        segment.clear()
+
+    for index, statistic in enumerate(phase_statistics):
+        amplitude = amplitude_by_x[statistic.x_value]
+        stable = (
+            maximum_standard_deviation_deg is None
+            or statistic.standard_deviation <= maximum_standard_deviation_deg
+        )
+        if amplitude >= minimum_amplitude_v and stable:
+            segment.append(index)
+        else:
+            flush_segment()
+    flush_segment()
+    return (
+        [item.x_value for item in phase_statistics],
+        phase_values,
+        qualified_x_values,
+        qualified_values,
+        qualified_spreads,
+    )
 
 
 def export_commissioning_csv(

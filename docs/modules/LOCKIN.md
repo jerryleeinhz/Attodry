@@ -2,17 +2,18 @@
 
 ## 当前状态
 
-双 SR830 独立器件验收、1/2/3 次谐波验收、17.777 Hz 到 1 kHz 扫频和
-4--400 mVrms 激励扫描已经完成。当前真实台架最后确认的基线是：
+双 SR830 独立器件验收、1/2/3 次谐波验收、17.777 Hz--100 kHz 有界谐波
+扫频和 4--400 mVrms 激励扫描已经完成。当前真实台架最后确认的基线是：
 
 - `lockin_xx`：内部参考，SINE OUT 驱动器件，测量 Vxx；
 - `lockin_xy`：来自 XX TTL SYNC OUT 的外部 TTL 上升沿参考，测量 Vxy，
   SINE OUT 物理断开；
 - 两台输入均为 A-B、Float；
 - 17.777 Hz、4 mVrms、谐波 1；
-- 两台均为 1 mV full-scale、300 ms、24 dB/oct；
+- XX 为 10 mV full-scale（`SENS=20`）、XY 为 1 mV full-scale
+  （`SENS=17`）、300 ms、24 dB/oct；
 - 100 kohm 外部串联电阻，无额外 50 ohm 终端；计算电流时包括 SR830
-  约 50 ohm 输出电阻和约 1 kohm 器件电阻。
+  约 50 ohm 输出电阻和约 500 ohm 器件电阻。
 
 这些是上次真实读回，不是对当前面板状态的持续保证。受版本控制的硬件和模拟
 TOML 模板现已声明输入、屏蔽、耦合、时间常数、滤波、灵敏度和 TTL 边沿；本地
@@ -122,6 +123,10 @@ settle_time_constants = 5.0
 - 相位平均使用圆周统计，不能把 +179 度和 -179 度普通平均成 0 度。
 - 当 R 接近噪声底时仍保留相位原始值，但应标记低信噪比；此时相位不适合直接
   做物理解释。
+- 主 commissioning notebook 的显示阈值为 `PHASE_MINIMUM_AMPLITUDE_V=1e-6`
+  Vrms 和 `PHASE_MAXIMUM_STANDARD_DEVIATION_DEG=5`；二者只筛选绘图相位，
+  不会删除原始样本。通过的连续段在 ±180 度处展开，断开的低信噪比点不会被
+  跨越连接。将前者改为 `0.0`、后者改为 `None` 可审计全部原始相位。
 - 单台 `SNAP? 1,2,3,4,9` 内部相干，但 XX/XY 是顺序读取。记录中必须保留
   顺序读取事实和可获得的每台时间戳。
 
@@ -129,6 +134,9 @@ settle_time_constants = 5.0
 
 - 最后验收时间常数为 300 ms，滤波为 24 dB/oct。设置或连接改变后至少等待
   5 个时间常数，即当前至少 1.5 s。
+- 对每个实际 SINE OUT (`SLVL`) 幅值改变，激励扫幅使用两个上述 interval：当前
+  至少 3.0 s，才读回输出并采集 h1；`--settle-s` 小于 1.5 s 会在打开 VISA 前
+  失败。JSON 的 `source_step_settle_s` 记录该实际等待时间，不修改任何相位设置。
 - 以 0.3 s 间隔采集的样本仍相关，不能把它们当作完全独立样本计算误差。
 - 第一版不要自动选择时间常数；保持固定噪声带宽，避免额外转换锁存和不可比数据。
 
@@ -365,6 +373,56 @@ changed 锁存作为 discarded transition 记录、消费并再次等待；unloc
 或 output overload、time-constant change、error 仍立即失败，之后的正式样本对全部
 状态位保持零容忍。fake-VISA 覆盖成功、二阶正式失败恢复和这组观察到的转换锁存；
 修订后的真实三阶扫频仍需新的明确授权。
+
+2026-08-21：随后的真实三阶扫频在 38.3104813 kHz 的 h3 切换被安全拒绝；h3 所需
+检测频率为 114.931 kHz，超过 SR830 102 kHz 上限，仪器保持 h2，78 个此前正式配对
+样本和拒绝尝试均已保留。最终读回确认两机回到 h1、17.777 Hz、XX 4 mVrms/10 mV、
+XY 1 mV 且状态/错误字为零；但 cleanup 过程记录一次 XY transient unlock，因此该
+原始记录不是 completed。新的 fail-fast 预检会在打开 VISA 前验证每个
+`harmonic × frequency <= 102000 Hz`，避免再次对超限点写入 HARM。h3 最高 34 kHz，
+h2 最高 51 kHz；100 kHz 端点只能测 h1。高频段的记录策略需操作者确认。
+
+操作者随后选择覆盖优先策略：保留原 17.777 Hz--100 kHz 十个点，h1 测十点、h2 测
+前九点（至 38.310 kHz）、h3 测前八点（至 14.677 kHz）。为避免隐式缺失，新的
+`--skip-unsupported-harmonics` 只能与 `--all-harmonics` 同用；每个超限阶数都会在
+本点的 `skipped_harmonics` 中记录阶数、所需检测频率、102 kHz 上限与原因。
+不提供这个旗标时，严格 all-harmonics 仍在任何 VISA I/O 前拒绝整张超限网格。
+
+2026-08-21：在完成目标机离线验证后，操作者授权按上述有界覆盖策略重新执行真实
+扫频。10 个频点全部完成，每个被支持的阶次采集 3 个正式 xx/xy 配对样本，共 81 个；
+h1 为 10 个条件、h2 为 9 个、h3 为 8 个。超出 102 kHz 检测参考上限的阶次只以
+`skipped_harmonics` 审计元数据保留，未向仪器写入超限 HARM。所有正式窗口没有问题，
+cleanup 严格验证 h1、17.777 Hz、XX 4 mVrms/10 mV、XY 1 mV，以及两台零状态/错误字。
+
+2026-08-21：随后授权的固定 17.777 Hz 幅值扫描使用 4、6、10、16、26、40、64、100、
+160、252、400 mVrms 的 11 个点，逐点采集 h1/h2/h3 各 3 个 xx/xy 配对样本，共 99 个。
+安全计算使用 100 kΩ 外部串联、SR830 约 50 Ω 输出、约 500 Ω 器件、5 mArms 和
+0.5 Vrms 上限；400 mVrms 对应约 3.98 µArms，安全余量充足。每次实际 `SLVL` 改变后
+均等待两个 1.5 s interval。正式窗口全清，cleanup 再次严格验证相同的 XX/XY 基线；
+原始 JSON、stderr 和 PNG 仅存在目标 clone 的忽略 `run_data`，绝不提交。
+
+2026-08-21：这两条 completed 记录也解释了“LOCK 但相位不恒定”的现象。`LOCK` 只说明
+SR830 的参考 PLL 已同步，不能证明被测 R 足够大或相位可用于物理解释。固定频率扫幅的
+XX h1 在 11/11 点达到默认相位质量门槛（R >= 1 µVrms 且三次样本的圆周标准差 <= 5 度），
+而 XY h1 仅在最高两个幅值点达到；XY h2/h3 没有通过点。4 mVrms 扫频的 XX h1 在十点
+均通过且相位随频率平滑变化、跨过 ±180 度包裹；这不是随机失锁。低于阈值的相位保留
+在原始 JSON 中，但默认绘图会留空，不能据此判断器件相位。高频相干 XY 或高幅值 h2/h3
+在宣称物理机制前仍需用已知电阻/短路、屏蔽与接地、以及串扰控制实验区分真实响应、
+电缆/输入电容传递函数和激励源谐波失真。
+
+2026-08-22：将重复的 sweep 参数集中到严格的 `[lockin_sweep]` TOML 表。当前站点
+配置固定保存 17.777 Hz--100 kHz 的十个对数等距频点、4--400 mVrms 的十一个幅值点、
+h1/h2/h3、有界高频跳过、XX 临时 20 mV、1.5 s settle、每点三个样本、0.3 s 间隔，
+以及 100 kΩ 外部串联、50 Ω SR830 输出、约 500 Ω 器件、5 mArms/0.5 Vrms 上限和
+无外部 50 Ω 端接。sweep 现在必须使用严格 hardware TOML；两个逐次接线 confirm 不再
+是运行参数。日常只需 `sweep-frequency` 或 `sweep-excitation`；严格预检失败时不会开始
+扫描，但 TOML 不能替代对 XY SINE OUT 实际断开的物理检查。每次已打开双机的尝试都会原子
+保存到 `output_directory`（默认仓库根 `run_data/commissioning`），带
+`completed`/`rejected`/`interrupted` 状态。JSON 的无 VISA 地址
+`measurement_config` 是已解析 TOML 请求；实际读回保留在 preflight、point 和 cleanup。
+扫频点也记录由配置的 4 mVrms 与完整串联路径算出的名义电流。未连接真实仪器或发出写命令。
+日常操作顺序和所有 `[lockin_sweep]` 字段说明见
+[`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。
 
 ## 预计文件所有权
 

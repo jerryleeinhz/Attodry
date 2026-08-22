@@ -798,6 +798,15 @@ class DualSr830Controller:
             raise AuthorizationRequired(
                 "Physical disconnection of lockin_xy SINE OUT was not confirmed."
             )
+        return self.verify_existing_configuration(frequency_hz=frequency_hz)
+
+    def verify_existing_configuration(
+        self,
+        *,
+        frequency_hz: float,
+    ) -> tuple[Sr830Diagnostic, Sr830Diagnostic]:
+        """Read and validate an existing dual-SR830 configuration without writes."""
+
         xx = self.lockin_xx.read_diagnostic(consume_status_latches=True)
         xy = self.lockin_xy.read_diagnostic(consume_status_latches=True)
         if xx.identity == xy.identity:

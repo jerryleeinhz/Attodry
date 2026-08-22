@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+import math
 from pathlib import Path
 import tempfile
 import unittest
@@ -167,7 +168,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual(len(figure.axes), 2)
         self.assertIn("I_RMS = 39.78 nA", figure.axes[0].get_title())
         self.assertEqual(figure.axes[0].get_ylabel(), "Vxx R (V RMS)")
-        self.assertEqual(figure.axes[1].get_ylabel(), "Phase (degree)")
+        self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (degree)")
 
         figures = plot_six_role_harmonic_sweeps(rows, excitation_path=path)
         self.addCleanup(lambda: [plt.close(item) for item in figures.values()])
@@ -179,6 +180,78 @@ class CommissioningAnalysisTests(unittest.TestCase):
             "No selected Vxy h2 samples",
             figures[("xy", 2)].axes[0].texts[0].get_text(),
         )
+
+    def test_role_harmonic_phase_plot_unwraps_and_omits_unqualified_points(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        source = self._write_json("completed.json", self._sweep(completed=True))
+        base = next(row for row in load_sweep_samples(source) if row.role == "xx")
+        rows = (
+            replace(
+                base,
+                target_frequency_hz=10.0,
+                sample_index=0,
+                amplitude_v=0.5e-6,
+                phase_deg=0.0,
+            ),
+            replace(
+                base,
+                target_frequency_hz=10.0,
+                sample_index=1,
+                amplitude_v=0.5e-6,
+                phase_deg=90.0,
+            ),
+            replace(
+                base,
+                target_frequency_hz=100.0,
+                sample_index=0,
+                amplitude_v=5e-6,
+                phase_deg=179.0,
+            ),
+            replace(
+                base,
+                target_frequency_hz=100.0,
+                sample_index=1,
+                amplitude_v=5e-6,
+                phase_deg=-179.0,
+            ),
+            replace(
+                base,
+                target_frequency_hz=1000.0,
+                sample_index=0,
+                amplitude_v=5e-6,
+                phase_deg=-178.0,
+            ),
+            replace(
+                base,
+                target_frequency_hz=1000.0,
+                sample_index=1,
+                amplitude_v=5e-6,
+                phase_deg=-178.0,
+            ),
+        )
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+
+        figure = plot_role_harmonic_sweep(
+            rows,
+            role="xx",
+            harmonic=1,
+            excitation_path=path,
+            phase_minimum_amplitude_v=1e-6,
+            phase_maximum_standard_deviation_deg=5.0,
+        )
+        self.addCleanup(plt.close, figure)
+        phase_line = next(
+            line for line in figure.axes[1].get_lines() if line.get_marker() == "s"
+        )
+        phase_values = phase_line.get_ydata()
+
+        self.assertTrue(math.isnan(float(phase_values[0])))
+        self.assertAlmostEqual(float(phase_values[1]), 180.0)
+        self.assertAlmostEqual(float(phase_values[2]), 182.0)
+        self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (degree)")
 
     def test_notebook_is_valid_json_and_all_code_cells_compile(self) -> None:
         path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"

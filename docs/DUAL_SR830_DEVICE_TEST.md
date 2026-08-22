@@ -215,9 +215,9 @@ operator must still confirm both front panels before disconnecting the device.
 
 ## 8. Frequency and excitation sweeps
 
-These are separate write-authorized device-only tests. The frequency scan uses
-4 mVrms and first-harmonic detection by default at 17.777, 25, 35.5, 50, 70.7, 100, 141,
-200, 282, 398, 562, 794, and 1000 Hz. It writes only the internal frequency on
+These are separate configuration-controlled device-only tests. The frequency scan uses
+4 mVrms and configured h1/h2/h3 detection at ten logarithmically spaced points
+from 17.777 Hz through 100 kHz. It writes only the internal frequency on
 `lockin_xx`; `lockin_xy` follows the external TTL reference. After each actual
 frequency change, the tool waits 1.5 seconds, records and clears transition
 status, waits another 1.5 seconds, then retains three sequential xx/xy samples
@@ -242,44 +242,88 @@ the stricter integrated harmonic-path comparison and never overrides a status
 failure.
 
 ```powershell
-python -m attodry_control.lockin_test sweep-frequency `
-  --config config\hardware.local.toml `
-  --all-harmonics `
-  --authorize-writes `
-  --confirm-xy-sine-disconnected
+python -m attodry_control.lockin_test sweep-frequency
 ```
 
 The excitation scan is a source-voltage scan with a nominal current calculated
-from the complete supplied series path. Its default source points are 4, 6, 10,
-16, 26, 40, 64, 100, 160, 252, and 400 mVrms. For the confirmed 100 kohm
-external resistor, 50 ohm SR830 output resistance, and approximate 1 kohm device,
-run:
+from the complete configured series path. The confirmed path is a 100 kohm
+external resistor, the SR830 50 ohm output resistance, and an approximate
+500 ohm device. Run:
 
 ```powershell
-python -m attodry_control.lockin_test sweep-excitation `
-  --config config\hardware.local.toml `
-  --series-resistance-ohm 100000 `
-  --device-resistance-ohm 1000 `
-  --max-device-current-a 0.005 `
-  --max-device-voltage-v 5 `
-  --xx-sensitivity-code 21 `
-  --all-harmonics `
-  --authorize-writes `
-  --confirm-xy-sine-disconnected `
-  --confirm-no-50ohm-termination
+python -m attodry_control.lockin_test sweep-excitation
 ```
 
-Sensitivity code 21 is the 20 mV range and is applied only to `lockin_xx` for
-the excitation sweep. The original xx sensitivity is recorded and restored;
-`lockin_xy` sensitivity is not changed. With the explicit `--all-harmonics`
-option, each point records h1, h2, and h3 in order: both instruments receive the
-paired `HARM` setting, wait for the configured settling time, and then collect
-the formal samples. It restores both instruments to h1 after each point and on
-cleanup. Without that option, both sweeps remain h1-only. Neither sweep writes
+Both commands require the strict `[lockin_sweep]` table in
+`config\hardware.local.toml`. The checked-in example documents every field:
+
+- `frequency_points_hz`: ten logarithmically spaced fundamentals from 17.777 Hz
+  to 100 kHz.
+- `excitation_points_v_rms`: 4, 6, 10, 16, 26, 40, 64, 100, 160, 252, and
+  400 mVrms at the fixed 17.777 Hz fundamental.
+- `harmonics = [1, 2, 3]`: acquire all three orders at every supported point.
+- `skip_unsupported_harmonics = true`: at high fundamentals, retain supported
+  orders and record h2/h3 as skipped when their detection frequency would exceed
+  the SR830 102 kHz limit.
+- `temporary_xx_sensitivity_full_scale_v = 0.020`: use sensitivity code 21
+  (20 mV full scale) only for `lockin_xx` during the sweep, then restore the
+  original range. `lockin_xy` remains on its configured fixed 1 mV range.
+- `settle_s`, `samples_per_point`, and `sample_interval_s`: transition settling,
+  number of formal samples per point, and spacing between those samples.
+- `external_series_resistance_ohm`, `approximate_device_resistance_ohm`,
+  `max_device_current_a_rms`, and `max_device_voltage_v_rms`: current conversion
+  and fail-closed device bounds. Current is calculated with the configured
+  external resistor plus the SR830 50 ohm output resistance plus the approximate
+  device resistance.
+- `external_50_ohm_termination = false`: records the confirmed wiring and is
+  rejected by the strict loader if changed to true.
+- `output_directory = "../run_data/commissioning"`: record destination relative
+  to `hardware.local.toml`. The default assumes that TOML is in `config/`, so it
+  aligns with the analysis notebooks' existing root `run_data/commissioning`.
+
+See [`LOCKIN_DAILY_OPERATION.md`](LOCKIN_DAILY_OPERATION.md) for the daily
+sequence and a concise explanation of the full table.
+
+The daily sweep commands no longer accept per-run wiring confirmations or an
+arming flag. `[lockin_sweep]` is the single source for their limits and timing,
+while the strict lock-in TOML still records the semantic reference roles and
+the XY SINE OUT disconnection. This does not replace the operator's physical
+inspection: the preflight can validate readbacks, lock, overload and error
+states, but cannot see a cable. A preflight failure stops the scan before any
+sweep setting is written.
+
+Each point records h1, h2, and h3 in order: both instruments receive the paired
+`HARM` setting, wait for the configured settling time, and then collect the
+formal samples. Cleanup restores both instruments to h1. Neither sweep writes
 FMOD, RSLP, ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume
 `LIAS?`/`ERRS?`, stop at the first unsafe or mismatched point, retain the
 rejected sample, and attempt to restore `lockin_xx` to 4 mVrms and 17.777 Hz.
 A communication failure still requires manual front-panel verification.
+
+Once the VISA pair has opened, every attempted scan writes an atomic JSON result
+under `output_directory`, including `completed`, `rejected`, and `interrupted`
+outcomes. `measurement_config` is an address-free snapshot of the resolved TOML
+request (scan points, harmonics, sensitivity, timing, and circuit/device limits);
+the actual SR830 readbacks remain in `preflight`, each point, and `cleanup`.
+Failure to write the audit file fails the command rather than reporting an
+unarchived measurement as complete.
+
+`--settle-s` is a transition-settling interval. The excitation command refuses
+an interval below 1.5 s before opening either VISA resource. At the current
+300 ms / 24 dB/oct bench setting, every actual `SLVL` (SINE OUT) change waits two
+intervals before the output readback and formal h1 sample: 3.0 s by default.
+This duration is recorded as root-level `source_step_settle_s` and for each
+written source point; a 4 mVrms baseline point that did not write `SLVL` records
+zero for its point-specific value. It is an acquisition-settling parameter, not
+a safety limit or an automatic phase correction.
+
+The daily coverage policy comes from `harmonics = [1, 2, 3]` and
+`skip_unsupported_harmonics = true` in `[lockin_sweep]`. It retains only the
+supported orders at each point and writes an audited `skipped_harmonics` entry
+for every omission; no missing order is inferred in analysis. On the confirmed
+ten-point 17.777 Hz--100 kHz grid, this yields h1 at all ten points, h2 through
+38.310 kHz (nine points), and h3 through 14.677 kHz (eight points). Change the
+TOML before a future scan if that policy needs to change.
 
 The HARM transition record is deliberately excluded from formal curves. It may
 contain only a filter-overload and/or frequency-range-change latch while the
