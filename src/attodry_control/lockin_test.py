@@ -875,6 +875,7 @@ def _run_frequency_sweep(
         controller = DualSr830Controller(lockin_xx, lockin_xy)
         preflight_xx = None
         preflight_xy = None
+        sensitivity_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
         try:
@@ -882,11 +883,22 @@ def _run_frequency_sweep(
                 frequency_hz=baseline_hz,
             )
             writes_started = True
-            lockin_xx.set_sensitivity(args.xx_sensitivity_code)
-            if lockin_xx.read_sensitivity() != args.xx_sensitivity_code:
-                raise Sr830Error(
-                    "lockin_xx sensitivity readback does not match the sweep setting."
-                )
+            sensitivity_setup = _new_sweep_sensitivity_setup(
+                original_xx_sensitivity=preflight_xx.sensitivity,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                target_xx_sensitivity=args.xx_sensitivity_code,
+                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
+            )
+            _configure_sweep_sensitivities(
+                lockin_xx,
+                lockin_xy,
+                sensitivity_setup=sensitivity_setup,
+                original_xx_sensitivity=preflight_xx.sensitivity,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                target_xx_sensitivity=args.xx_sensitivity_code,
+                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
+                settle_s=args.settle_s,
+            )
             for point_index, target_hz in enumerate(points):
                 wrote_setting = not math.isclose(
                     target_hz, baseline_hz, rel_tol=0.0, abs_tol=1e-12
@@ -954,7 +966,13 @@ def _run_frequency_sweep(
                 lockin_xy,
                 baseline_hz=baseline_hz,
                 original_xx_sensitivity=preflight_xx.sensitivity,
-                restore_sensitivity=True,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                restore_sensitivity=_range_write_attempted(
+                    sensitivity_setup, "lockin_xx"
+                ),
+                restore_xy_sensitivity=_range_write_attempted(
+                    sensitivity_setup, "lockin_xy"
+                ),
                 restore_frequency=True,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
@@ -969,6 +987,7 @@ def _run_frequency_sweep(
             "captured_unix_s": time.time(),
             "captured_at_utc": datetime.now(timezone.utc).isoformat(),
             "status_latches_consumed": True,
+            "run_metadata": _sweep_run_metadata(settings),
             "measurement_config": _measurement_config_snapshot(
                 settings,
                 args,
@@ -983,6 +1002,10 @@ def _run_frequency_sweep(
             "requested_harmonics": harmonics,
             "skip_unsupported_harmonics": args.skip_unsupported_harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
+            "configured_xy_sensitivity_code": _configured_xy_sensitivity_code(
+                settings
+            ),
+            "sensitivity_setup": sensitivity_setup,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
             "sample_interval_s": args.sample_interval_s,
@@ -1021,6 +1044,7 @@ def _run_excitation_sweep(
         controller = DualSr830Controller(lockin_xx, lockin_xy)
         preflight_xx = None
         preflight_xy = None
+        sensitivity_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
         try:
@@ -1028,9 +1052,22 @@ def _run_excitation_sweep(
                 frequency_hz=baseline_hz,
             )
             writes_started = True
-            lockin_xx.set_sensitivity(args.xx_sensitivity_code)
-            if lockin_xx.read_sensitivity() != args.xx_sensitivity_code:
-                raise Sr830Error("lockin_xx sensitivity readback does not match the sweep setting.")
+            sensitivity_setup = _new_sweep_sensitivity_setup(
+                original_xx_sensitivity=preflight_xx.sensitivity,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                target_xx_sensitivity=args.xx_sensitivity_code,
+                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
+            )
+            _configure_sweep_sensitivities(
+                lockin_xx,
+                lockin_xy,
+                sensitivity_setup=sensitivity_setup,
+                original_xx_sensitivity=preflight_xx.sensitivity,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                target_xx_sensitivity=args.xx_sensitivity_code,
+                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
+                settle_s=args.settle_s,
+            )
             for point_index, source_v in enumerate(points):
                 wrote_setting = not math.isclose(
                     source_v, baseline_source_v, rel_tol=0.0, abs_tol=1e-12
@@ -1081,7 +1118,13 @@ def _run_excitation_sweep(
                 lockin_xy,
                 baseline_hz=baseline_hz,
                 original_xx_sensitivity=preflight_xx.sensitivity,
-                restore_sensitivity=True,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                restore_sensitivity=_range_write_attempted(
+                    sensitivity_setup, "lockin_xx"
+                ),
+                restore_xy_sensitivity=_range_write_attempted(
+                    sensitivity_setup, "lockin_xy"
+                ),
                 restore_frequency=False,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
@@ -1096,6 +1139,7 @@ def _run_excitation_sweep(
             "captured_unix_s": time.time(),
             "captured_at_utc": datetime.now(timezone.utc).isoformat(),
             "status_latches_consumed": True,
+            "run_metadata": _sweep_run_metadata(settings),
             "measurement_config": _measurement_config_snapshot(
                 settings,
                 args,
@@ -1112,6 +1156,10 @@ def _run_excitation_sweep(
             "requested_points_v_rms": points,
             "requested_harmonics": harmonics,
             "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
+            "configured_xy_sensitivity_code": _configured_xy_sensitivity_code(
+                settings
+            ),
+            "sensitivity_setup": sensitivity_setup,
             "settle_s": args.settle_s,
             "source_step_settle_s": source_step_settle_s,
             "samples_per_point": args.samples_per_point,
@@ -1177,6 +1225,12 @@ def _measurement_config_snapshot(
         "temporary_xx_sensitivity_full_scale_v": sensitivity_full_scale_v(
             args.xx_sensitivity_code
         ),
+        "configured_xy_sensitivity_code": _configured_xy_sensitivity_code(settings),
+        "configured_xy_sensitivity_full_scale_v": (
+            config.lockin_xy.sensitivity_full_scale_v
+        ),
+        "run_name": config.lockin_sweep.run_name,
+        "note": config.lockin_sweep.note,
         "settle_s": args.settle_s,
         "samples_per_point": args.samples_per_point,
         "sample_interval_s": args.sample_interval_s,
@@ -1191,7 +1245,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -1201,6 +1255,13 @@ def _measurement_config_snapshot(
         "sweep": sweep_snapshot,
         "excitation_path": excitation_path,
     }
+
+
+def _sweep_run_metadata(settings: dict[str, object]) -> dict[str, str]:
+    config = settings["config"]
+    if not isinstance(config, ControlConfig):
+        raise ValueError("A validated hardware config is required for sweep records.")
+    return {"name": config.lockin_sweep.run_name, "note": config.lockin_sweep.note}
 
 
 def _sweep_outcome(
@@ -1231,8 +1292,12 @@ def _save_sweep_result(
     output_directory: Path, result: dict[str, object]
 ) -> None:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    run_metadata = result.get("run_metadata")
+    if not isinstance(run_metadata, dict):
+        raise ValueError("Sweep results must include run_metadata.")
+    run_name = _sweep_filename_label(run_metadata.get("name"))
     destination = output_directory / (
-        f"{timestamp}_{result['scan']}_{result['outcome']}.json"
+        f"{timestamp}_{run_name}_{result['scan']}_{result['outcome']}.json"
     )
     serialized = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
     temporary_path: Path | None = None
@@ -1252,6 +1317,19 @@ def _save_sweep_result(
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
+
+
+def _sweep_filename_label(value: object) -> str:
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("Sweep run_metadata.name must be a non-empty trimmed string.")
+    if len(value) > 80 or any(
+        ord(character) < 32 or character in "\\/:*?\"<>|" for character in value
+    ):
+        raise ValueError(
+            "Sweep run_metadata.name must be a safe filename label without path "
+            "separators or Windows-reserved characters."
+        )
+    return value
 
 
 def _prepare_sweep_record_directory(
@@ -1297,6 +1375,128 @@ def _sweep_baseline_source_voltage(settings: dict[str, object]) -> float:
                 f"{role}.source_voltage_v = {MINIMUM_SINE_OUTPUT_V:g} V RMS."
             )
     return config.lockin_xx.source_voltage_v
+
+
+def _configured_xy_sensitivity_code(settings: dict[str, object]) -> int:
+    config = settings["config"]
+    if not isinstance(config, ControlConfig):
+        raise ValueError("A validated hardware config is required for sweeps.")
+    return sensitivity_code(config.lockin_xy.sensitivity_full_scale_v)
+
+
+def _new_sweep_sensitivity_setup(
+    *,
+    original_xx_sensitivity: int,
+    original_xy_sensitivity: int,
+    target_xx_sensitivity: int,
+    target_xy_sensitivity: int,
+) -> dict[str, object]:
+    return {
+        "ranges": {
+            "lockin_xx": {
+                "original_sensitivity_code": original_xx_sensitivity,
+                "target_sensitivity_code": target_xx_sensitivity,
+                "target_full_scale_v": sensitivity_full_scale_v(
+                    target_xx_sensitivity
+                ),
+                "write_attempted": False,
+                "readback_sensitivity_code": None,
+                "verification_sensitivity_code": None,
+            },
+            "lockin_xy": {
+                "original_sensitivity_code": original_xy_sensitivity,
+                "target_sensitivity_code": target_xy_sensitivity,
+                "target_full_scale_v": sensitivity_full_scale_v(
+                    target_xy_sensitivity
+                ),
+                "write_attempted": False,
+                "readback_sensitivity_code": None,
+                "verification_sensitivity_code": None,
+            },
+        },
+        "transition_status": None,
+    }
+
+
+def _configure_sweep_sensitivities(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    sensitivity_setup: dict[str, object],
+    original_xx_sensitivity: int,
+    original_xy_sensitivity: int,
+    target_xx_sensitivity: int,
+    target_xy_sensitivity: int,
+    settle_s: float,
+) -> None:
+    """Ensure both sweep ranges, retaining every range-write and status transition."""
+
+    ranges = sensitivity_setup.get("ranges")
+    if not isinstance(ranges, dict):
+        raise ValueError("Sweep sensitivity setup must contain per-role range records.")
+    instruments = (
+        ("lockin_xx", lockin_xx, original_xx_sensitivity, target_xx_sensitivity),
+        ("lockin_xy", lockin_xy, original_xy_sensitivity, target_xy_sensitivity),
+    )
+    for role, instrument, original, target in instruments:
+        if original != target:
+            range_record = ranges[role]
+            if not isinstance(range_record, dict):
+                raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+            range_record["write_attempted"] = True
+            instrument.set_sensitivity(target)
+    wrote_any_range = any(
+        isinstance(range_record, dict) and range_record.get("write_attempted") is True
+        for range_record in ranges.values()
+    )
+    if wrote_any_range:
+        time.sleep(settle_s)
+    for role, instrument, _, target in instruments:
+        readback = instrument.read_sensitivity()
+        range_record = ranges[role]
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        range_record["readback_sensitivity_code"] = readback
+        if readback != target:
+            raise Sr830Error(
+                f"{role} sensitivity readback {readback} does not match the "
+                f"configured sweep range {target}."
+            )
+    if wrote_any_range:
+        transition, problems = _consume_sensitivity_transition(
+            lockin_xx,
+            lockin_xy,
+            allow_xx_output_overload=False,
+        )
+        sensitivity_setup["transition_status"] = transition
+        if problems:
+            raise Sr830Error(
+                "Unsafe sweep sensitivity transition: " + "; ".join(problems)
+            )
+        time.sleep(settle_s)
+        for role, instrument, _, target in instruments:
+            readback = instrument.read_sensitivity()
+            range_record = ranges[role]
+            if not isinstance(range_record, dict):
+                raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+            range_record["verification_sensitivity_code"] = readback
+            if readback != target:
+                raise Sr830Error(
+                    f"{role} sensitivity changed after the transition from {target} "
+                    f"to {readback}."
+                )
+
+
+def _range_write_attempted(
+    sensitivity_setup: dict[str, object] | None, role: str
+) -> bool:
+    if sensitivity_setup is None:
+        return False
+    ranges = sensitivity_setup.get("ranges")
+    if not isinstance(ranges, dict):
+        return False
+    range_record = ranges.get(role)
+    return isinstance(range_record, dict) and range_record.get("write_attempted") is True
 
 
 def _resolve_sweep_settings(
@@ -1667,12 +1867,14 @@ def _consume_frequency_transition(
 def _consume_sensitivity_transition(
     lockin_xx: Sr830,
     lockin_xy: Sr830,
+    *,
+    allow_xx_output_overload: bool = True,
 ) -> tuple[dict[str, object], list[str]]:
-    """Record and clear overload latches after restoring the narrow XX range.
+    """Record and clear sensitivity-transition latches before strict verification.
 
-    A range change can leave a transient overload latch even after the 4 mVrms
-    baseline is restored. The latch is discarded, not accepted as final status;
-    a second settling interval precedes the strict cleanup readback.
+    Only the known XX-only output-overload latch (`LIAS=4`) may be discarded
+    during XX-range restoration. XY overloads and every setup-transition latch
+    remain failures.
     """
 
     xx = lockin_xx.read_harmonic_sample(1)
@@ -1680,11 +1882,16 @@ def _consume_sensitivity_transition(
     problems: list[str] = []
     for sample in (xx, xy):
         role = sample.reading.role.value
-        if role == "xy" and sample.lia_status.any_overload:
-            problems.append("lockin_xy overloaded during XX sensitivity restoration")
+        allowed_xx_output_overload = (
+            role == "xx"
+            and allow_xx_output_overload
+            and sample.lia_status.raw == 4
+        )
+        if sample.lia_status.any_overload and not allowed_xx_output_overload:
+            problems.append(f"lockin_{role} overloaded during sensitivity transition")
         if sample.lia_status.reference_unlocked:
             problems.append(
-                f"lockin_{role} reference unlocked during sensitivity restoration"
+                f"lockin_{role} reference unlocked during sensitivity transition"
             )
         if sample.lia_status.frequency_range_changed:
             problems.append(f"lockin_{role} frequency range changed unexpectedly")
@@ -1697,11 +1904,12 @@ def _consume_sensitivity_transition(
     return (
         {
             "captured_unix_s": time.time(),
-            "expected_transient_latches": [
-                "lockin_xx.input_or_reserve_overload",
-                "lockin_xx.filter_overload",
-                "lockin_xx.output_overload",
-            ],
+            "expected_transient_latches": (
+                ["lockin_xx.output_overload"]
+                if allow_xx_output_overload
+                else []
+            ),
+            "allow_xx_output_overload": allow_xx_output_overload,
             "lockin_xx": _audited_harmonic_sample_record(xx),
             "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
@@ -1720,6 +1928,8 @@ def _restore_scan_state(
     restore_frequency: bool,
     settle_s: float,
     writes_started: bool,
+    original_xy_sensitivity: int | None = None,
+    restore_xy_sensitivity: bool = False,
 ) -> dict[str, object]:
     if not writes_started:
         return {"attempted": False, "verified": True, "errors": []}
@@ -1771,15 +1981,38 @@ def _restore_scan_state(
             errors.append(f"frequency-restoration transition readback: {exc}")
         time.sleep(settle_s)
     sensitivity_transition: dict[str, object] | None = None
-    if restore_sensitivity:
-        try:
-            lockin_xx.set_sensitivity(original_xx_sensitivity)
-        except BaseException as exc:
-            errors.append(f"restore lockin_xx sensitivity: {exc}")
+    if restore_sensitivity or restore_xy_sensitivity:
+        sensitivity_actions: list[tuple[str, Callable[[], None]]] = []
+        if restore_sensitivity:
+            sensitivity_actions.append(
+                (
+                    "restore lockin_xx sensitivity",
+                    lambda: lockin_xx.set_sensitivity(original_xx_sensitivity),
+                )
+            )
+        if restore_xy_sensitivity:
+            if original_xy_sensitivity is None:
+                errors.append("original lockin_xy sensitivity is unavailable")
+            else:
+                sensitivity_actions.append(
+                    (
+                        "restore lockin_xy sensitivity",
+                        lambda: lockin_xy.set_sensitivity(original_xy_sensitivity),
+                    )
+                )
+        for label, action in sensitivity_actions:
+            try:
+                action()
+            except BaseException as exc:
+                errors.append(f"{label}: {exc}")
         time.sleep(settle_s)
         try:
             sensitivity_transition, transition_problems = (
-                _consume_sensitivity_transition(lockin_xx, lockin_xy)
+                _consume_sensitivity_transition(
+                    lockin_xx,
+                    lockin_xy,
+                    allow_xx_output_overload=restore_sensitivity,
+                )
             )
             errors.extend(transition_problems)
         except BaseException as exc:
@@ -1813,6 +2046,12 @@ def _restore_scan_state(
             errors.append(str(exc))
         if restore_sensitivity and xx.sensitivity != original_xx_sensitivity:
             errors.append("lockin_xx sensitivity did not restore")
+        if (
+            restore_xy_sensitivity
+            and original_xy_sensitivity is not None
+            and xy.sensitivity != original_xy_sensitivity
+        ):
+            errors.append("lockin_xy sensitivity did not restore")
     except BaseException as exc:
         errors.append(f"final readback: {exc}")
     return {

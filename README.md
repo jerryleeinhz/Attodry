@@ -101,6 +101,8 @@ python -m attodry_control.lockin_test sweep-excitation
 两条命令默认读取 `config\hardware.local.toml`；仅当配置文件位于其他位置时才
 附加 `--config <path>`。日常参数、严格预检、自动 JSON 归档和故障后的人工确认流程见
 [`docs/LOCKIN_DAILY_OPERATION.md`](docs/LOCKIN_DAILY_OPERATION.md)。
+每次运行前，在同一 `[lockin_sweep]` 表填写 `run_name` 和 `note`；名称进入 JSON
+文件名，备注保留在审计记录。
 
 已完成的独立扫频和激励JSON可用
 [`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)

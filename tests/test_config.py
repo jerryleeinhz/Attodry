@@ -69,6 +69,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(
             config.lockin_sweep.temporary_xx_sensitivity_full_scale_v, 0.02
         )
+        self.assertEqual(config.lockin_sweep.run_name, "simulation")
+        self.assertEqual(config.lockin_sweep.note, "Simulation fixture.")
         self.assertEqual(config.lockin_sweep.external_series_resistance_ohm, 100000.0)
         self.assertEqual(config.lockin_sweep.approximate_device_resistance_ohm, 500.0)
         self.assertFalse(config.lockin_sweep.external_50_ohm_termination)
@@ -285,6 +287,17 @@ class ConfigurationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ConfigError, "must be false"):
             self.load_text(text)
+
+    def test_lockin_sweep_rejects_unsafe_run_name_or_blank_note(self) -> None:
+        cases = (
+            ('run_name = "simulation"', 'run_name = "sample/one"', "run_name"),
+            ('run_name = "simulation"', 'run_name = " sample"', "run_name"),
+            ('note = "Simulation fixture."', 'note = ""', "note"),
+        )
+        for old, new, expected in cases:
+            with self.subTest(field=expected, value=new):
+                with self.assertRaisesRegex(ConfigError, expected):
+                    self.load_text(self.simulation_text().replace(old, new, 1))
 
     def test_lockin_sweep_rejects_rooted_output_directory(self) -> None:
         text = self.simulation_text().replace(

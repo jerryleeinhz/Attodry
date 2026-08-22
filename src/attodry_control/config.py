@@ -131,6 +131,8 @@ class LockinSweepConfig:
     harmonics: tuple[int, ...]
     skip_unsupported_harmonics: bool
     temporary_xx_sensitivity_full_scale_v: float
+    run_name: str
+    note: str
     settle_s: float
     samples_per_point: int
     sample_interval_s: float
@@ -733,6 +735,8 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             "harmonics",
             "skip_unsupported_harmonics",
             "temporary_xx_sensitivity_full_scale_v",
+            "run_name",
+            "note",
             "settle_s",
             "samples_per_point",
             "sample_interval_s",
@@ -793,6 +797,8 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             f"{name}.skip_unsupported_harmonics",
         ),
         temporary_xx_sensitivity_full_scale_v=sensitivity_full_scale_v,
+        run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
+        note=_sweep_note(table["note"], f"{name}.note"),
         settle_s=settle_s,
         samples_per_point=_integer(
             table["samples_per_point"], f"{name}.samples_per_point", minimum=1
@@ -920,6 +926,32 @@ def _string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{name} must be a non-empty string.")
     return value
+
+
+def _sweep_run_name(value: Any, name: str) -> str:
+    run_name = _string(value, name)
+    if run_name != run_name.strip():
+        raise ConfigError(f"{name} must not start or end with whitespace.")
+    if len(run_name) > 80:
+        raise ConfigError(f"{name} must be at most 80 characters.")
+    if any(
+        ord(character) < 32 or character in '\\\\/:*?\"<>|'
+        for character in run_name
+    ):
+        raise ConfigError(
+            f"{name} must be a safe filename label without path separators or "
+            "Windows-reserved characters."
+        )
+    return run_name
+
+
+def _sweep_note(value: Any, name: str) -> str:
+    note = _string(value, name)
+    if len(note) > 2000:
+        raise ConfigError(f"{name} must be at most 2000 characters.")
+    if "\x00" in note:
+        raise ConfigError(f"{name} must not contain a NUL character.")
+    return note
 
 
 def _boolean(value: Any, name: str) -> bool:

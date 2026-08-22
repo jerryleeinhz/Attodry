@@ -119,7 +119,14 @@ excitation_points_v_rms = [
 harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
+# XX uses this temporary 20 mV measurement range during both sweeps. XY remains
+# fixed at the 1 mV target declared in [lockin_xy], which the sweep now verifies
+# and applies only when necessary.
 temporary_xx_sensitivity_full_scale_v = 0.020
+# Edit these two audit fields before every run. The run name is also included in
+# the JSON filename; the note is preserved inside the JSON record.
+run_name = "replace_before_run"
+note = "Replace this note before every daily sweep."
 settle_s = 1.5
 samples_per_point = 3
 sample_interval_s = 0.3

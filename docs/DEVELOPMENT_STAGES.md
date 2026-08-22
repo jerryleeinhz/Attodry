@@ -318,6 +318,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   the configured `run_data/commissioning` directory with its outcome and an
   address-free resolved-TOML `measurement_config`; no real instrument connection
   was made for this change.
+- Daily sweeps now actively verify the configured fixed XY 1 mV range before
+  formal samples. They conditionally stage it only when preflight differs,
+  record the dual-range transition, reject any setup overload/unlock, and restore
+  only the XX/XY ranges actually changed. `[lockin_sweep]` now also requires
+  `run_name` (safe JSON filename label) and `note` (JSON audit metadata) for
+  each run. Fake-VISA range/cleanup cases and the full offline suite passed:
+  231 tests, 4 skipped; no real instrument was connected or written (2026-08-22).
 - Main integration keeps the temperature-only configuration loader strict while
   recognizing `[lockin_sweep]` as an unrelated optional table, so the daily
   temperature command can continue to use the same station-local TOML without

@@ -424,6 +424,14 @@ h1/h2/h3、有界高频跳过、XX 临时 20 mV、1.5 s settle、每点三个样
 日常操作顺序和所有 `[lockin_sweep]` 字段说明见
 [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。
 
+2026-08-22：日常 sweep 在进入正式点前会实际读回两台 SR830 的量程。XX 的目标仍为
+临时 20 mV；XY 的目标固定为 `[lockin_xy].sensitivity_full_scale_v = 1 mV`，并且只在
+预检读回不一致时才写 `SENS`，不是逐点自动量程。任何 XY 量程转换的过载或失锁都会拒绝
+该次扫描；cleanup 仅恢复本次实际改变过的 XX/XY 原量程并严格验证。`[lockin_sweep]` 中
+新增必填 `run_name` 与 `note`：名称安全地进入 JSON 文件名，备注与双机量程设置/读回一同
+保留在 JSON 审计记录；两项都应在每次日常运行前填写。此变更仅通过 fake-VISA 离线测试，
+没有连接或写入真实仪器。
+
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。

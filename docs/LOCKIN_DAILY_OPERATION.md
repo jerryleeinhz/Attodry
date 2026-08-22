@@ -16,6 +16,10 @@ python -m attodry_control.lockin_test sweep-excitation
 才使用 `--config <path>`；日常运行不需要填写电阻、量程、采样时间、扫描点、
 阶次或确认旗标。
 
+每次运行前，在同一份 `[lockin_sweep]` 表中修改 `run_name` 和 `note`。前者是
+本次数据的简短名称并进入 JSON 文件名，后者记录样品、接线状态或本次测试目的，
+只保存在 JSON 审计记录中。
+
 ## 开始前
 
 先在断开扫描的状态下核对本机 `hardware.local.toml`，再核对实物接线：
@@ -25,6 +29,8 @@ python -m attodry_control.lockin_test sweep-excitation
   TOML 记录这项站点事实，但不能替代目视/接线检查。
 - 外部串联电阻、器件近似电阻、器件 RMS 电流/电压上限，以及“没有外部 50 Ω
   端接”的事实应与当天线路一致。
+- 每次运行前填写非空的 `run_name` 和 `note`；不要沿用示例中的
+  `replace_before_run`。
 - 两台 SR830 应先回到 h1、17.777 Hz、4 mVrms 基线。扫描的预检会读取并检查
   参考角色、锁定、过载、错误状态、频率、h1 和最小 SINE OUT；失败时不会开始扫描。
 
@@ -36,7 +42,8 @@ commissioning 命令仍保留各自的显式授权门。
 
 ## `[lockin_sweep]` 字段
 
-所有日常扫描设置都在同一张 TOML 表中：
+日常扫描的扫频、扫幅、安全和审计设置都在同一张 TOML 表中；固定的 XY 量程仍在
+`[lockin_xy]`，以保持两台仪器的语义角色配置集中：
 
 | 字段 | 含义与当前站点默认值 |
 | --- | --- |
@@ -44,7 +51,10 @@ commissioning 命令仍保留各自的显式授权门。
 | `excitation_points_v_rms` | 扫幅的 XX SINE OUT RMS 电压。当前为 4 mV 到 400 mV 的 11 点，基频固定为 17.777 Hz。 |
 | `harmonics` | 每个正式点的检测阶次。当前严格为 `[1, 2, 3]`。 |
 | `skip_unsupported_harmonics` | 若 h2/h3 的检测频率超过 SR830 的 102 kHz 范围，保留可测阶次并在 JSON 写入 `skipped_harmonics`；当前为 `true`。 |
-| `temporary_xx_sensitivity_full_scale_v` | 扫描期间 XX 临时量程，当前 20 mV；结束时恢复预检读到的 XX 量程。XY 始终使用其 `lockin_xy` 中固定的 1 mV。 |
+| `temporary_xx_sensitivity_full_scale_v` | 扫描期间 XX 临时量程，当前 20 mV；结束时恢复预检读到的 XX 量程。 |
+| `lockin_xy.sensitivity_full_scale_v` | 这是 `[lockin_xy]`（不在本表）的固定 XY 量程，当前 1 mV。每次扫描都会读回校验；若预检量程不同，才写入该值、记录转换状态，并在结束时恢复原 XY 量程。它**不是**逐点自动量程。 |
+| `run_name` | 本次数据的非空短名称（最多 80 个字符）。它进入 JSON 文件名；不可使用 `\ / : * ? " < > |` 等路径或 Windows 保留字符。可使用中文。 |
+| `note` | 本次运行的非空审计备注（最多 2000 个字符），例如样品、接线改动或测试目的。它写入 JSON，但不进入文件名。 |
 | `settle_s`、`samples_per_point`、`sample_interval_s` | 过渡/谐波切换后的等待时间、每点正式样本数、样本间隔。当前是 1.5 s、3、0.3 s；每次实际 `SLVL` 改变等待两个 `settle_s`。 |
 | `external_series_resistance_ohm`、`approximate_device_resistance_ohm` | 电流换算使用的外串联电阻和近似器件电阻；SR830 固有 50 Ω 输出阻抗会自动加入。当前为 100 kΩ 和 500 Ω。 |
 | `max_device_current_a_rms`、`max_device_voltage_v_rms` | 扫幅的 fail-closed 器件 RMS 上限。当前为 5 mA 和 0.5 V。 |
@@ -54,6 +64,9 @@ commissioning 命令仍保留各自的显式授权门。
 `lockin_xx.source_voltage_v` 与 `lockin_xy.source_voltage_v` 仍属于各自的
 Lock-in 配置。日常扫描要求它们均为 SR830 的 4 mVrms 最小输出；扫频名义电流和
 扫幅横坐标使用 XX SINE OUT 的已解析/读回电压，而不是手工输入的电流值。
+因此，扫频中的**激励幅值**是 `lockin_xx.source_voltage_v = 0.004`（4 mVrms），
+扫描只改变 XX 内部参考频率，不改变 `SLVL`；它与 XX 的临时 20 mV、XY 的固定
+1 mV **测量量程**是不同概念。
 
 ## 记录、状态和分析
 
@@ -61,8 +74,8 @@ Lock-in 配置。日常扫描要求它们均为 SR830 的 4 mVrms 最小输出�
 时间、扫描种类和结果状态原子写入一个 JSON，例如：
 
 ```text
-run_data/commissioning/20260822T123456123456Z_frequency_completed.json
-run_data/commissioning/20260822T123456123456Z_excitation_rejected.json
+run_data/commissioning/20260822T123456123456Z_sample_A_frequency_completed.json
+run_data/commissioning/20260822T123456123456Z_sample_A_excitation_rejected.json
 ```
 
 状态含义如下：
@@ -71,10 +84,11 @@ run_data/commissioning/20260822T123456123456Z_excitation_rejected.json
 - `rejected`：预检、正式样本或 cleanup 出现不安全/不匹配/通信错误。
 - `interrupted`：收到中断后已尝试 cleanup。
 
-每个 JSON 都带有地址无关的 `measurement_config`：其中是本次解析后的 TOML
-请求配置、扫描点、量程、时序和激励路径；实际 SR830 读回位于同文件的
-`preflight`、每点记录和 `cleanup`。因此不要把 `measurement_config` 单独当作
-硬件读回证据。若归档写入失败，命令以失败退出，避免把未保存的数据误报为完成。
+每个 JSON 的根部都有 `run_metadata.name` 和 `run_metadata.note`，并在地址无关的
+`measurement_config` 中保留同一份已解析 TOML：请求配置、扫描点、量程、时序和
+激励路径。实际 SR830 读回位于同文件的 `preflight`、`sensitivity_setup`、每点记录
+和 `cleanup`。因此不要把 `measurement_config` 单独当作硬件读回证据。若归档写入
+失败，命令以失败退出，避免把未保存的数据误报为完成。
 
 打开 [`../notebooks/sr830_commissioning_sweeps.ipynb`](../notebooks/sr830_commissioning_sweeps.ipynb)
 即可在开头使用 Browse 按钮选择文件，并按 `completed`/`rejected` 状态筛选。
@@ -83,7 +97,8 @@ run_data/commissioning/20260822T123456123456Z_excitation_rejected.json
 
 ## 出错后
 
-程序会尝试将 XX 恢复为 4 mVrms、h1、17.777 Hz，并恢复预检时的 XX 灵敏度。
-如果 JSON 为 `rejected` 或命令异常退出，不要仅依赖软件消息；在断开器件或继续
-下一轮之前，手动确认两台前面板的参考状态、h1、XX 输出、频率和量程。通信失败时，
-不得推断仪器已回到安全状态。
+程序会尝试将 XX 恢复为 4 mVrms、h1、17.777 Hz，并仅在扫描曾改变它们时恢复预检
+时的 XX 和 XY 灵敏度。XY 范围转换中出现的过载或失锁也会导致本次记录被拒绝，
+不会被当作正常现象忽略。如果 JSON 为 `rejected` 或命令异常退出，不要仅依赖软件
+消息；在断开器件或继续下一轮之前，手动确认两台前面板的参考状态、h1、XX 输出、
+频率和量程。通信失败时，不得推断仪器已回到安全状态。

@@ -227,12 +227,16 @@ An instrument error, unexpected time-constant change, or XX internal-reference
 unlock during transition fails immediately. Any unlock, overload, or error after
 the second settling interval in the formal sample window also fails the scan.
 
-The frequency scan temporarily sets only `lockin_xx` to sensitivity code 21
-(20 mV) before its baseline sample. This prevents a genuine output overload seen
-when Vxx reached about 1.09 mV at 50 Hz on the 1 mV range. It does not change the
-4 mVrms source or `lockin_xy` sensitivity. Cleanup returns to 17.777 Hz while
-the wider range is still active, waits through transition clearing and settling,
-then restores the original xx sensitivity and verifies its readback.
+Before its baseline sample, the frequency scan targets `lockin_xx` sensitivity
+code 21 (20 mV) and the configured fixed `lockin_xy` sensitivity code 17 (1 mV).
+It writes either `SENS` setting only when the preflight readback differs, then
+reads back both targets and records the range-transition status. This prevents a
+genuine output overload seen when Vxx reached about 1.09 mV at 50 Hz on the 1 mV
+range, while making the XY fixed-range policy an observed setting rather than an
+assumption. The setup transition accepts no overload or unlock latch. It does
+not change the 4 mVrms source. Cleanup returns to 17.777 Hz while the wider XX
+range is still active, then restores each original range only if that role was
+changed and verifies both readbacks.
 
 The frequency sweep uses a separate 100 ppm relative tolerance, with the existing
 1.01 mHz absolute floor, for the locked XY external-frequency readback. Retained
@@ -266,8 +270,14 @@ Both commands require the strict `[lockin_sweep]` table in
   orders and record h2/h3 as skipped when their detection frequency would exceed
   the SR830 102 kHz limit.
 - `temporary_xx_sensitivity_full_scale_v = 0.020`: use sensitivity code 21
-  (20 mV full scale) only for `lockin_xx` during the sweep, then restore the
-  original range. `lockin_xy` remains on its configured fixed 1 mV range.
+  (20 mV full scale) for `lockin_xx` during the sweep, then restore its original
+  range if it changed.
+- `lockin_xy.sensitivity_full_scale_v = 0.001`: the fixed XY target (code 17).
+  The sweep verifies it every time and writes it only when preflight found a
+  different range; it is never changed point-by-point or auto-ranged.
+- `run_name` and `note`: required per-run audit metadata. The nonempty, safe
+  filename label `run_name` is included in the JSON name; the nonempty `note`
+  remains in the JSON record.
 - `settle_s`, `samples_per_point`, and `sample_interval_s`: transition settling,
   number of formal samples per point, and spacing between those samples.
 - `external_series_resistance_ohm`, `approximate_device_resistance_ohm`,
@@ -298,15 +308,18 @@ formal samples. Cleanup restores both instruments to h1. Neither sweep writes
 FMOD, RSLP, ISRC, IGND, ICPL, ILIN, RMOD, OFLT, or OFSL. Both consume
 `LIAS?`/`ERRS?`, stop at the first unsafe or mismatched point, retain the
 rejected sample, and attempt to restore `lockin_xx` to 4 mVrms and 17.777 Hz.
-A communication failure still requires manual front-panel verification.
+If sweep setup changed XX or XY sensitivity, cleanup also restores that role's
+preflight range and verifies it. A communication failure still requires manual
+front-panel verification.
 
 Once the VISA pair has opened, every attempted scan writes an atomic JSON result
 under `output_directory`, including `completed`, `rejected`, and `interrupted`
-outcomes. `measurement_config` is an address-free snapshot of the resolved TOML
-request (scan points, harmonics, sensitivity, timing, and circuit/device limits);
-the actual SR830 readbacks remain in `preflight`, each point, and `cleanup`.
-Failure to write the audit file fails the command rather than reporting an
-unarchived measurement as complete.
+outcomes. `run_metadata` preserves the configured per-run name and note.
+`measurement_config` is an address-free snapshot of the resolved TOML request
+(scan points, harmonics, sensitivity, timing, and circuit/device limits); the
+actual SR830 readbacks remain in `preflight`, `sensitivity_setup`, each point,
+and `cleanup`. Failure to write the audit file fails the command rather than
+reporting an unarchived measurement as complete.
 
 `--settle-s` is a transition-settling interval. The excitation command refuses
 an interval below 1.5 s before opening either VISA resource. At the current
@@ -333,12 +346,13 @@ or output overload, a time-constant change, or an instrument error during this
 transition remains a failure; every formal h1/h2/h3 sample rejects every
 unlock, overload, and error bit without exception.
 
-After restoring the original narrow XX sensitivity, cleanup waits, records and
-clears one XX range-transition overload status, waits again, and then performs
-the strict final diagnostic. Only XX overload latches are expected in that
-transition record; any XY overload, either reference unlock, unexpected frequency
-or time-constant change, or instrument error still fails cleanup. Any status bit
-that reappears in the final diagnostic also fails cleanup.
+After restoring any range changed by sweep setup, cleanup waits, records the
+range-transition status, waits again, and then performs the strict final
+diagnostic. Only an XX `LIAS=4` output-overload latch is accepted, and only when
+the original XX range was restored; a setup transition accepts no such latch.
+Any XY overload, either reference unlock, unexpected frequency or time-constant
+change, or instrument error still fails cleanup. Any status bit that reappears
+in the final diagnostic also fails cleanup.
 
 The first real frequency attempt stopped at 25 Hz on a transition-period XY
 unlock latch and did not proceed to the excitation scan. The restored settings

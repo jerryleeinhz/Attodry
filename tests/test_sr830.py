@@ -1126,10 +1126,22 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(json.loads(record_paths[0].read_text(encoding="utf-8")), result)
         self.assertEqual(result["outcome"], "completed")
         self.assertEqual(result["requested_harmonics"], [1, 2, 3])
+        self.assertEqual(
+            result["run_metadata"],
+            {
+                "name": "replace_before_run",
+                "note": "Replace this note before every daily sweep.",
+            },
+        )
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(
             result["measurement_config"]["source"], "resolved_hardware_toml"
         )
+        self.assertEqual(
+            result["measurement_config"]["sweep"]["run_name"],
+            "replace_before_run",
+        )
+        self.assertIn("_replace_before_run_frequency_completed.json", record_paths[0].name)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -1232,10 +1244,17 @@ class Sr830Tests(unittest.TestCase):
                 "SENS 23",
             ],
         )
-        self.assertEqual(xy_resource.writes, [])
+        self.assertEqual(xy_resource.writes, ["SENS 17", "SENS 23"])
         self.assertTrue(result["cleanup"]["verified"])
         self.assertEqual(result["temporary_xx_sensitivity_code"], 21)
+        self.assertEqual(result["configured_xy_sensitivity_code"], 17)
+        self.assertTrue(
+            result["sensitivity_setup"]["ranges"]["lockin_xy"][
+                "write_attempted"
+            ]
+        )
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 23)
 
     def test_cli_frequency_sweep_all_harmonics_records_each_order_and_restores_first(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -1271,7 +1290,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 1)
+        self.assertEqual(result["measurement_config"]["schema_version"], 2)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -1292,6 +1311,97 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["harmonic"], 1)
         self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["harmonic"], 1)
+
+    def test_cli_frequency_sweep_verifies_already_configured_xy_range_without_write(
+        self,
+    ) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["SENS?"] = "17\n"
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(self._hardware_config()),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(
+            result["sensitivity_setup"]["ranges"]["lockin_xy"][
+                "write_attempted"
+            ]
+        )
+        self.assertEqual(
+            result["sensitivity_setup"]["ranges"]["lockin_xy"][
+                "readback_sensitivity_code"
+            ],
+            17,
+        )
+        self.assertEqual(xy_resource.writes, [])
+
+    def test_cli_frequency_sweep_rejects_xy_range_transition_latch_and_restores(
+        self,
+    ) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = ["0\n", "4\n"] + ["0\n"] * 8
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            Sr830Error, "Unsafe sweep sensitivity transition"
+        ):
+            run(
+                [
+                    "sweep-frequency",
+                    "--config", str(self._hardware_config()),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777",
+                    "--settle-s", "0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertEqual(
+            result["sensitivity_setup"]["transition_status"]["lockin_xy"]
+            ["lia_status"]["raw"],
+            4,
+        )
+        self.assertTrue(result["cleanup"]["verified"])
+        self.assertEqual(xy_resource.writes, ["SENS 17", "SENS 23"])
 
     def test_cli_frequency_sweep_rejects_unsupported_harmonic_before_opening_visa(
         self,
@@ -1386,7 +1496,7 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "1\n"] + ["0\n"] * 8
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "1\n"] + ["0\n"] * 8
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -1424,9 +1534,9 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_records_observed_transition_latches(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "18\n"] + ["0\n"] * 11
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "18\n"] + ["0\n"] * 11
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "0\n", "16\n"] + ["0\n"] * 11
+        xy_responses["LIAS?"] = ["0\n", "0\n", "0\n", "16\n"] + ["0\n"] * 11
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -1468,7 +1578,7 @@ class Sr830Tests(unittest.TestCase):
         )
         xy_responses = responses(reference_mode=0)
         xy_responses["LIAS?"] = [
-            "0\n", "0\n", "26\n", "0\n", "24\n", "0\n", "0\n"
+            "0\n", "0\n", "0\n", "26\n", "0\n", "24\n", "0\n", "0\n"
         ]
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
@@ -1589,8 +1699,9 @@ class Sr830Tests(unittest.TestCase):
                 "SENS 23",
             ],
         )
-        self.assertEqual(xy_resource.writes, [])
+        self.assertEqual(xy_resource.writes, ["SENS 17", "SENS 23"])
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 23)
 
     def test_cli_excitation_sweep_requires_one_settle_interval_and_waits_two_after_source_step(self) -> None:
         manager = FakeResourceManager({})
@@ -1699,7 +1810,7 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_excitation_sweep_clears_range_restoration_overload_before_final_status(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "4\n", "0\n"]
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "4\n", "0\n"]
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -1749,13 +1860,13 @@ class Sr830Tests(unittest.TestCase):
             Sr830(xy_resource, LockinRole.XY),
         )
 
-        self.assertIn("lockin_xy overloaded during XX sensitivity restoration", problems)
+        self.assertIn("lockin_xy overloaded during sensitivity transition", problems)
         self.assertEqual(record["lockin_xy"]["lia_status"]["raw"], 4)
 
     def test_cli_excitation_overload_keeps_rejected_sample_and_cleans_up(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "1\n", "0\n", "0\n"]
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "1\n", "0\n", "0\n"]
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )

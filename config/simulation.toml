@@ -97,6 +97,8 @@ harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
 temporary_xx_sensitivity_full_scale_v = 0.020
+run_name = "simulation"
+note = "Simulation fixture."
 settle_s = 1.5
 samples_per_point = 3
 sample_interval_s = 0.3

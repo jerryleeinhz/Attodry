@@ -322,6 +322,14 @@ Completed in Stage 3:
   result embeds an address-free resolved-TOML `measurement_config`, while actual
   readbacks remain in the preflight/point/cleanup records. This change was
   verified without connecting to real instruments or issuing setting writes.
+- On 2026-08-22, sweep setup was extended to actively verify the configured
+  fixed XY 1 mV range alongside the temporary 20 mV XX range. It writes either
+  range only when preflight differs, rejects setup overload/unlock, records the
+  transition, and restores only the ranges actually changed. Required
+  `[lockin_sweep]` `run_name` and `note` now give every JSON record an auditable
+  operator label and note; the label is safely included in the filename. The
+  fake-VISA coverage and full offline suite passed (231 tests, 4 skipped), with
+  no real instrument connection or write.
 - During main integration, the strict temperature-only configuration loader was
   updated to recognize `[lockin_sweep]` as an unrelated optional table. Daily
   temperature operation therefore continues to use the unified local TOML
