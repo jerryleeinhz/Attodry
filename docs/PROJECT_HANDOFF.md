@@ -566,6 +566,14 @@ Completed offline in Stage 4:
   Lock-in/SMU tables while strictly validating the shared top level and every
   temperature-relevant table. It passed compileall and all 218 tests without
   skips on `LK_setup`; again no DLL or hardware operation ran.
+- Extended that same daily module with configured live reporting and crash-
+  resilient process logging. Complete state is still read at `poll_interval_s`;
+  heater power has a separate lower-frequency interval, concise progress is
+  flushed to stderr, and every sample is immediately appended/flushed to a
+  JSONL file relative to the local TOML. Each line and final summary share a
+  `run_id`; stdout remains one final JSON document. Fake-DLL tests verify normal
+  output/logging and preservation of the overshoot-trigger sample before
+  fail-closed control disable. No vendor DLL or real instrument was opened.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` using
   `LK_setup`'s 64-bit Python 3.12.13 `lyr`: all 35 temperature tests and all 156
   offline tests passed without skips, and compileall passed. No vendor DLL was

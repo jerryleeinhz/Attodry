@@ -87,7 +87,9 @@ python -m attodry_control.lockin_test --help
 日常温控参数统一写在已忽略的 `config/hardware.local.toml` 的
 `[temperature_run]` 表中，通常只修改 `target_k`。运行
 `attodry-temperature-run` 不需要额外授权参数；该命令会先开启温控、再设置目标，
-监测30分钟并记录实际样品温度。详细步骤见
+监测30分钟并记录实际样品温度。运行期间会显示样品/VTI 温度、setpoint、温控状态、
+错误码和 heater power，并将每个样本即时刷新到 `[temperature_run].live_log_path`。
+详细步骤见
 [`docs/TEMPERATURE_RUN_GUIDE.md`](docs/TEMPERATURE_RUN_GUIDE.md)。原
 `temperature_commissioning.local.toml` 和 `attodry-temperature-test` 仅保留给
 严格稳定性诊断。

@@ -70,6 +70,9 @@ class TemperatureRunConfig:
     max_overshoot_k: float
     pre_measure_wait_s: float
     poll_interval_s: float
+    display_interval_s: float
+    heater_power_interval_s: float
+    live_log_path: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,6 +415,9 @@ def _parse_temperature_run(
             "max_overshoot_k",
             "pre_measure_wait_s",
             "poll_interval_s",
+            "display_interval_s",
+            "heater_power_interval_s",
+            "live_log_path",
         },
     )
     target_k = _positive_number(table["target_k"], f"{name}.target_k")
@@ -425,6 +431,15 @@ def _parse_temperature_run(
     poll_interval_s = _positive_number(
         table["poll_interval_s"], f"{name}.poll_interval_s"
     )
+    display_interval_s = _positive_number(
+        table["display_interval_s"], f"{name}.display_interval_s"
+    )
+    heater_power_interval_s = _positive_number(
+        table["heater_power_interval_s"], f"{name}.heater_power_interval_s"
+    )
+    live_log_path = _relative_file(
+        table["live_log_path"], f"{name}.live_log_path"
+    )
     if not cryostat.temperature_min_k <= target_k <= cryostat.temperature_max_k:
         raise ConfigError("temperature_run.target_k is outside cryostat limits.")
     if target_k + max_overshoot_k > cryostat.temperature_max_k:
@@ -435,12 +450,23 @@ def _parse_temperature_run(
         raise ConfigError(
             "temperature_run.pre_measure_wait_s must cover poll_interval_s."
         )
+    if display_interval_s < poll_interval_s:
+        raise ConfigError(
+            "temperature_run.display_interval_s must cover poll_interval_s."
+        )
+    if heater_power_interval_s < poll_interval_s:
+        raise ConfigError(
+            "temperature_run.heater_power_interval_s must cover poll_interval_s."
+        )
     return TemperatureRunConfig(
         target_k=target_k,
         max_delta_k=max_delta_k,
         max_overshoot_k=max_overshoot_k,
         pre_measure_wait_s=pre_measure_wait_s,
         poll_interval_s=poll_interval_s,
+        display_interval_s=display_interval_s,
+        heater_power_interval_s=heater_power_interval_s,
+        live_log_path=live_log_path,
     )
 
 
@@ -983,6 +1009,13 @@ def _relative_directory(value: Any, name: str) -> Path:
         raise ConfigError(
             f"{name} must name a non-rooted relative directory."
         )
+    return path
+
+
+def _relative_file(value: Any, name: str) -> Path:
+    path = Path(_string(value, name))
+    if path.is_absolute() or path.anchor or path.name in {"", ".", ".."}:
+        raise ConfigError(f"{name} must name a non-rooted relative file.")
     return path
 
 

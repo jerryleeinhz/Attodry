@@ -40,6 +40,10 @@ max_delta_k = 250.0
 max_overshoot_k = 0.2
 pre_measure_wait_s = 1800.0
 poll_interval_s = 1.0
+display_interval_s = 5.0
+heater_power_interval_s = 10.0
+# Relative to this TOML; every sample is appended and flushed immediately.
+live_log_path = "../run_data/temperature_live.jsonl"
 
 [cleanup]
 normal_end_field_policy = "hold"

@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import time
 from typing import Callable, Sequence
+import uuid
 
 from .attodry import AttoDryDriver, AttoDryError, load_attodry_dll
 from .config import (
@@ -65,6 +66,10 @@ def run(
     config = load_temperature_operation_config(args.config)
     request = config.temperature_run
     cryostat = config.cryostat
+    live_log_path = (
+        args.config.resolve().parent / request.live_log_path
+    ).resolve()
+    live_log_path.parent.mkdir(parents=True, exist_ok=True)
     if (
         cryostat.com_port is None
         or cryostat.dll_path is None
@@ -87,11 +92,15 @@ def run(
         connection_authorized=True,
         writes_authorized=True,
     )
+    request_record = asdict(request)
+    request_record["live_log_path"] = str(request.live_log_path)
     record: dict[str, object] = {
+        "run_id": uuid.uuid4().hex,
         "completed": False,
         "measurement_ready": False,
         "config_path": str(args.config),
-        "temperature_run": asdict(request),
+        "live_log_path": str(live_log_path),
+        "temperature_run": request_record,
         "command_actions": [],
         "temperature_samples": [],
         "recovery_actions": [],
@@ -140,6 +149,8 @@ def run(
             driver,
             request,
             samples=record["temperature_samples"],
+            run_id=str(record["run_id"]),
+            live_log_path=live_log_path,
             monotonic=monotonic,
             sleeper=sleeper,
             wall_time=wall_time,
@@ -198,6 +209,8 @@ def _monitor_until_measurement(
     request: TemperatureRunConfig,
     *,
     samples: object,
+    run_id: str,
+    live_log_path: Path,
     monotonic: Callable[[], float],
     sleeper: Callable[[float], None],
     wall_time: Callable[[], float],
@@ -206,16 +219,37 @@ def _monitor_until_measurement(
         raise TypeError("Temperature sample container must be a list.")
     started = monotonic()
     overshoot_limit_k = request.target_k + request.max_overshoot_k
+    next_display_elapsed_s = 0.0
+    next_heater_elapsed_s = 0.0
+    last_heater_power: dict[str, object] | None = None
     while True:
         state = driver.read_state()
         elapsed_s = monotonic() - started
-        samples.append(
-            {
-                "captured_unix_s": wall_time(),
-                "elapsed_s": elapsed_s,
-                "state": asdict(state),
-            }
-        )
+        sample: dict[str, object] = {
+            "run_id": run_id,
+            "captured_unix_s": wall_time(),
+            "elapsed_s": elapsed_s,
+            "state": asdict(state),
+        }
+        if elapsed_s >= next_heater_elapsed_s:
+            try:
+                last_heater_power = asdict(driver.read_heater_powers())
+                sample["heater_power"] = last_heater_power
+            except BaseException as read_error:
+                sample["heater_power_read_error"] = str(read_error)
+                samples.append(sample)
+                _append_jsonl(live_log_path, sample)
+                raise
+            next_heater_elapsed_s = elapsed_s + request.heater_power_interval_s
+        samples.append(sample)
+        _append_jsonl(live_log_path, sample)
+        if elapsed_s >= next_display_elapsed_s:
+            _print_live_status(
+                state,
+                elapsed_s=elapsed_s,
+                heater_power=last_heater_power,
+            )
+            next_display_elapsed_s = elapsed_s + request.display_interval_s
         if state.error_code:
             raise AttoDryError(
                 f"attoDRY error code {state.error_code} during temperature run."
@@ -239,6 +273,43 @@ def _monitor_until_measurement(
             return state
         remaining_s = request.pre_measure_wait_s - elapsed_s
         sleeper(min(request.poll_interval_s, remaining_s))
+
+
+def _append_jsonl(path: Path, payload: dict[str, object]) -> None:
+    with path.open("a", encoding="utf-8", newline="\n") as output:
+        output.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        output.flush()
+
+
+def _print_live_status(
+    state: CryostatState,
+    *,
+    elapsed_s: float,
+    heater_power: dict[str, object] | None,
+) -> None:
+    sample_heater = (
+        "n/a"
+        if heater_power is None
+        else f"{float(heater_power['sample_w']):.4f} W"
+    )
+    vti_heater = (
+        "n/a"
+        if heater_power is None
+        else f"{float(heater_power['vti_w']):.4f} W"
+    )
+    print(
+        "temperature "
+        f"elapsed={elapsed_s:.1f} s "
+        f"sample={state.sample_temperature_k:.4f} K "
+        f"target={state.user_temperature_k:.4f} K "
+        f"vti={state.vti_temperature_k:.4f} K "
+        f"sample_heater={sample_heater} "
+        f"vti_heater={vti_heater} "
+        f"control={'on' if state.temperature_control_enabled else 'off'} "
+        f"error={state.error_code}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def _record_failure_diagnostic(

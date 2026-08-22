@@ -572,6 +572,14 @@ writes remain uncommissioned and require separate explicit authorization.
   and SMU table completeness while retaining strict validation of every
   temperature-relevant table and rejecting unknown top-level tables. It passed
   compileall and all 218 tests without skips on the same target environment.
+- Added operator-visible temperature-run monitoring without a second hardware
+  control path. Full state remains sampled at the configured poll interval;
+  sample/VTI heater power is read at its own configured interval, concise status
+  is flushed to stderr, and every sample is appended and flushed immediately to
+  an address-free JSONL path relative to the local TOML. The final stdout remains
+  one JSON document. Strict config and fake-DLL tests cover live output, normal
+  logging, and persistence of an overshoot-trigger sample before fail-closed
+  control disable. No real DLL was loaded for this addition.
 - Completed Temperature T2 target-offline validation for commit `e9a7b8c` on
   `LK_setup` with 64-bit Python 3.12.13 in `lyr`: 35 temperature tests and all
   156 offline tests passed with no skips, and source compilation passed. Only

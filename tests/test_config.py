@@ -356,6 +356,24 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.temperature_run.target_k, 1.8)
         self.assertEqual(config.temperature_run.max_delta_k, 250.0)
         self.assertEqual(config.temperature_run.max_overshoot_k, 0.2)
+        self.assertEqual(config.temperature_run.display_interval_s, 5.0)
+        self.assertEqual(config.temperature_run.heater_power_interval_s, 10.0)
+        self.assertEqual(
+            config.temperature_run.live_log_path,
+            Path("../run_data/temperature_live.jsonl"),
+        )
+
+    def test_temperature_run_rejects_absolute_live_log_path(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            'live_log_path = "../run_data/temperature_live.jsonl"',
+            'live_log_path = "C:/temperature_live.jsonl"',
+        )
+        with self.assertRaisesRegex(ConfigError, "live_log_path"):
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
 
     def test_malformed_toml_is_reported_as_configuration_error(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Invalid TOML"):

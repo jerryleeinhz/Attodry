@@ -37,7 +37,8 @@ notepad config\hardware.local.toml
 ```
 
 `hardware.local.toml` 已被 Git 忽略，其中可以保存本机 DLL、COM 端口和设备地址。
-不要提交该文件。
+不要提交该文件。完整的 `config/hardware.example.toml` 由 Git 跟踪，clone/pull 项目
+时会自动取得，不需要另行下载；每台控制电脑只需首次复制一次并填写本机地址。
 
 日常温控参数全部位于同一个表：
 
@@ -49,6 +50,9 @@ max_delta_k = 250.0
 max_overshoot_k = 0.2
 pre_measure_wait_s = 1800.0
 poll_interval_s = 1.0
+display_interval_s = 5.0
+heater_power_interval_s = 10.0
+live_log_path = "../run_data/temperature_live.jsonl"
 ```
 
 参数含义：
@@ -60,6 +64,9 @@ poll_interval_s = 1.0
 | `max_overshoot_k` | 实际样品温度允许超过目标的最大值；commissioned 值为 0.2 K |
 | `pre_measure_wait_s` | 写入目标后持续监测多久才允许进入测量；当前为 1800 s |
 | `poll_interval_s` | 完整状态读取和实际温度记录间隔；当前为 1 s |
+| `display_interval_s` | 终端实时状态的最短刷新间隔；当前为 5 s |
+| `heater_power_interval_s` | sample/VTI heater power 的读取间隔；当前为 10 s |
+| `live_log_path` | 即时 JSONL 日志；相对本 TOML 所在目录解析，当前写入仓库的 `run_data/temperature_live.jsonl` |
 
 例如 `target_k = 1.8` 时，实际样品温度达到或超过 2.0 K 会触发失败清理。
 
@@ -98,10 +105,13 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe `
 4. 先开启并确认 Full Temperature Control；
 5. 再写入并确认 `target_k`；
 6. 每隔 `poll_interval_s` 记录完整状态；
-7. 连续监测 `pre_measure_wait_s`；
-8. 时间达到后将当时的实际状态写入 `measurement_state`，并标记
+7. 按 `heater_power_interval_s` 读取 sample/VTI heater power；
+8. 每个样本立即追加并刷新到 `live_log_path`，并按
+   `display_interval_s` 在终端显示实时状态；
+9. 连续监测 `pre_measure_wait_s`；
+10. 时间达到后将当时的实际状态写入 `measurement_state`，并标记
    `measurement_ready = true`；
-9. 保持目标温度和温控开启，只断开 Python 对 DLL 的连接。
+11. 保持目标温度和温控开启，只断开 Python 对 DLL 的连接。
 
 进入测量不要求实际温度在30分钟内严格等于 setpoint。测量数据必须保存当时的
 `sample_temperature_k`；现有 acquisition/storage 路径已经同时保存：
@@ -112,7 +122,14 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe `
 
 ## 正常输出
 
-命令结束时输出 JSON。关键字段：
+运行期间，终端每隔 `display_interval_s` 显示类似：
+
+```text
+temperature elapsed=300.0 s sample=1.7642 K target=1.8000 K vti=1.7210 K sample_heater=0.1054 W vti_heater=0.0004 W control=on error=0
+```
+
+这些实时行写入 `stderr`。命令结束时在 `stdout` 输出最终 JSON，因此管道和自动
+解析仍然只会收到一个完整 JSON。关键字段：
 
 ```text
 completed = true
@@ -120,20 +137,27 @@ measurement_ready = true
 measurement_state.sample_temperature_k = 实际样品温度
 measurement_state.user_temperature_k = setpoint
 temperature_samples = 30分钟内的完整温度记录
+live_log_path = 已即时写入的 JSONL 路径
 disconnected = true
 ```
+
+JSONL 中每行都是一个已经刷盘的样本；同一文件可以包含多次运行，使用每行的
+`run_id` 与最终 JSON 的 `run_id` 对应。heater power 按配置间隔出现，其余样本仍
+持续保存完整 attoDRY 状态。程序或电脑意外中断时，已经写入的行不会依赖最终汇总
+JSON 才能保留。
 
 `disconnected = true` 只表示 Python 已正常断开 DLL/COM；正常完成后 Full
 Temperature Control 和目标温度保持开启。
 
-如需单独保留这次温控 JSON，可以使用：
+如需另外保留最终汇总 JSON，可以使用：
 
 ```powershell
 attodry-temperature-run |
   Tee-Object -FilePath run_data\temperature_run.json
 ```
 
-正式测量的实际温度仍由 SQLite acquisition/storage 记录，不能只依赖 setpoint。
+实时 JSONL 是温控过程记录；正式测量的实际温度仍由 SQLite acquisition/storage
+记录，不能只依赖 setpoint。
 
 ## 失败和安全行为
 

@@ -1,6 +1,6 @@
 from collections import deque
 import ctypes
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import math
@@ -1056,16 +1056,22 @@ failure_policy = "hold-current"
             "pre_measure_wait_s = 1800.0",
             f"pre_measure_wait_s = {pre_measure_wait_s}",
         )
+        text = text.replace(
+            'live_log_path = "../run_data/temperature_live.jsonl"',
+            'live_log_path = "temperature_live.jsonl"',
+        )
         path.write_text(text, encoding="utf-8")
+        self.addCleanup(path.with_name("temperature_live.jsonl").unlink, missing_ok=True)
         return path
 
     def test_temperature_run_uses_one_config_and_records_actual_temperature(
         self,
     ) -> None:
         output = io.StringIO()
+        progress = io.StringIO()
         config_path = self.temperature_run_config()
 
-        with redirect_stdout(output):
+        with redirect_stdout(output), redirect_stderr(progress):
             exit_code = run_temperature_operation(
                 ["--config", str(config_path)],
                 dll_loader=lambda _: self.dll,
@@ -1093,6 +1099,17 @@ failure_policy = "hold-current"
             self.dll.events.index("set_temperature"),
         )
         self.assertEqual(self.dll.events[-2:], ["disconnect", "end"])
+        self.assertIn("sample=2.0000 K", progress.getvalue())
+        self.assertIn("sample_heater=0.2500 W", progress.getvalue())
+        log_records = [
+            json.loads(line)
+            for line in config_path.with_name("temperature_live.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        self.assertEqual(len(log_records), len(result["temperature_samples"]))
+        self.assertTrue(all(item["run_id"] == result["run_id"] for item in log_records))
+        self.assertEqual(log_records[0]["heater_power"]["sample_w"], 0.25)
 
     def test_temperature_run_overshoot_disables_control(self) -> None:
         self.dll.sample_temperature_k = 2.31
@@ -1124,6 +1141,44 @@ failure_policy = "hold-current"
         )
         self.assertFalse(result["final_state"]["temperature_control_enabled"])
         self.assertTrue(result["disconnected"])
+        log_records = [
+            json.loads(line)
+            for line in config_path.with_name("temperature_live.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        ]
+        self.assertEqual(len(log_records), 1)
+        self.assertAlmostEqual(
+            log_records[0]["state"]["sample_temperature_k"], 2.31, delta=1e-4
+        )
+
+    def test_temperature_run_heater_read_failure_is_logged_and_fails_closed(
+        self,
+    ) -> None:
+        self.dll.return_codes["get_sample_heater_power"] = 5
+        output = io.StringIO()
+        config_path = self.temperature_run_config(pre_measure_wait_s=2.0)
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            AttoDryDllError, "getSampleHeaterPower.*5"
+        ):
+            run_temperature_operation(
+                ["--config", str(config_path)],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+        log_record = json.loads(
+            config_path.with_name("temperature_live.jsonl").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn("getSampleHeaterPower", log_record["heater_power_read_error"])
 
 
 class StepClock:
