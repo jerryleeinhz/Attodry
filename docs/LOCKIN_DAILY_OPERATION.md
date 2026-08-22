@@ -218,7 +218,8 @@ run_data/commissioning/20260822T123456123456Z_sample_A_excitation_rejected.json
 它们混成同一条电流曲线。
 
 打开 [`../notebooks/sr830_commissioning_sweeps.ipynb`](../notebooks/sr830_commissioning_sweeps.ipynb)
-即可在开头使用 Browse 按钮选择文件，并按 `completed`/`rejected` 状态筛选。
+即可在开头设置一次数据目录、刷新远程记录列表并分别选择扫频/扫幅文件，再按
+`completed`/`rejected` 状态筛选。
 默认图只使用 completed 记录和 clean 正式样本；过渡和 cleanup 记录始终保留，
 但不会混入正式曲线。
 

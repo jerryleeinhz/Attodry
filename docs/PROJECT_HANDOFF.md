@@ -373,6 +373,11 @@ Completed in Stage 3:
   voltage exceeds the RMS device limit. The 2 Vrms / 100 kΩ / 50 Ω / 500 Ω
   fake-VISA case records a 9.95 mVrms bound; no hardware resource was opened or
   written.
+- The read-only commissioning notebook now selects remote files without a
+  desktop dialog: its one editable `DATA_DIRECTORY` is refreshed into separate
+  frequency/excitation record lists, and an explicit load button passes the
+  selected pair to the existing filtered plotting cells. This supports Jupyter
+  kernels reached through VSCode/SSH; no hardware module is imported.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic

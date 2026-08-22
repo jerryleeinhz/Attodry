@@ -365,6 +365,11 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   approximate resistance. The old direct-SINE-OUT comparison was removed; a
   2 Vrms / 100 kΩ / 50 Ω / 500 Ω fake-VISA sweep verifies the resulting
   9.95 mVrms bound. No hardware resource was opened or written.
+- Replaced the commissioning notebook's desktop-only file chooser with a
+  remote-compatible directory selector: set one `DATA_DIRECTORY`, refresh the
+  discovered records, choose frequency and excitation JSON files separately,
+  then load the pair. It retains the completed/rejected and formal-sample
+  filters, imports no hardware path, and requires no manually typed file path.
 
 ## Stage 4 - attoDRY real driver
 

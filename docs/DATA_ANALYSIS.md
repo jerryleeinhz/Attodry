@@ -20,7 +20,7 @@ Open `notebooks/sr830_commissioning_sweeps.ipynb` in the `lyr` environment to
 browse and plot the standalone frequency/excitation JSON records under
 `run_data/commissioning`. The notebook is read-only unless its final
 `SAVE_OUTPUTS` switch is explicitly enabled. Its first controls cell provides
-record/sample filters, the optional native Windows Browse dialog, and the
+record/sample filters, remote-directory frequency/excitation selectors, and the
 complete excitation-path resistance calibration.
 
 The catalog filters record status as `completed`, `rejected`, `diagnostic`,
@@ -30,17 +30,14 @@ opt-in. Formal samples can be filtered as `clean`, `problem`, `unlocked`,
 `overload`, or `instrument_error`; transition and cleanup payloads are excluded
 from the plotted rows.
 
-Click the notebook's `Browse…` button to open the native Windows file chooser
-and load a JSON/JSONL file directly. It displays the selected path and switches
-the catalog to that file's directory, so the matching frequency/excitation record
-can be found without copying raw data into the Git clone. The visible
-`Only completed records` checkbox defaults to selected; formal-sample status is
-a multi-select UI and rejected records still require the separate audit checkbox.
-After changing a filter or selecting a file, rerun the catalog and subsequent
-plot cells to refresh the figures.
-If the kernel lacks Windows desktop access, set `FREQUENCY_PATHS` and
-`EXCITATION_PATHS` directly instead. Directory discovery remains available in
-either case.
+Set `DATA_DIRECTORY` once, click `Refresh records`, choose a frequency and an
+excitation record, then click `Load selected records`. This works when the
+kernel is running remotely through VSCode/SSH because it lists files on the
+kernel computer rather than opening a desktop dialog. The visible `Only
+completed records` checkbox defaults to selected; formal-sample status is a
+multi-select UI and rejected records still require the separate audit checkbox.
+After loading the pair, rerun the catalog and subsequent plot cells to refresh
+the figures.
 Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
 opened automatically.
 
