@@ -12,6 +12,31 @@ python -m attodry_control.lockin_test sweep-frequency
 python -m attodry_control.lockin_test sweep-excitation
 ```
 
+### 本机地址与版本更新
+
+SR830 的 VISA 地址只保存于本机、被 Git 忽略的
+`config/hardware.local.toml`。因此在 LK_setup 一次性填写后，后续 `git pull` 不会
+覆盖它；受版本控制的 `hardware.example.toml` 必须继续保留地址占位符，不能把实验站
+地址提交进仓库。日常命令会拒绝空地址、`CHANGE_ME` 地址或 XX/XY 相同的地址。
+
+如果终端错误地显示旧版 sweep 的必填参数（例如
+`--series-resistance-ohm` 或 `--authorize-writes`），该终端没有导入当前 checkout。先在
+**同一终端**执行以下只读检查；它只改变当前终端的 `PYTHONPATH`，不会连接仪器：
+
+```powershell
+conda deactivate
+conda activate lyr
+Set-Location -LiteralPath "C:\Users\LK_Setup\Yuanrong Li\Attodry_control"
+$env:PYTHONPATH = (Join-Path (Get-Location) "src")
+python -c "import sys, attodry_control.lockin_test as m; print(sys.executable); print(m.__file__)"
+python -B -m attodry_control.lockin_test sweep-excitation --help
+```
+
+第二条输出必须指向当前 checkout 的
+`src\attodry_control\lockin_test.py`；最后一条帮助只应显示 `--config`。验证后，在
+同一个终端运行日常 sweep。新开 terminal 通常只需重新 `conda activate lyr`，无需重填
+本机地址。
+
 命令默认读取 `config/hardware.local.toml`。仅当配置文件确实位于其他位置时，
 才使用 `--config <path>`；日常运行不需要填写电阻、量程、采样时间、扫描点、
 阶次或确认旗标。
@@ -69,24 +94,91 @@ JSON。只要任一角色启用自动模式，每个扫描点会在正式 h1/h2/
 h1 判定读数；状态跨同一条连续扫描保留，正式样本不会把判定或转换期数据混入曲线。
 默认 fixed 模式不因本次功能而自动改为 autorange。
 
+## 严格 Lock-in 配置参考
+
+以下字段位于 `[lockin_xx]` 与 `[lockin_xy]`。这是当前日常 sweep 支持的**完整**
+取值范围，不应按 SR830 前面板的其他可选值自行扩展；严格加载器会在连接 VISA 前拒绝
+未知或不受支持的值。
+
+| 字段 | 可填写值与角色约束 |
+| --- | --- |
+| `model` | 必须为 `"SR830"`。 |
+| `address` | 非空 VISA 字符串；XX 与 XY 必须不同，且不能含 `CHANGE_ME`。只写入被忽略的本机 `hardware.local.toml`。 |
+| `reference_source` | XX 严格为 `"internal"`；XY 严格为 `"external_ttl"`。 |
+| `external_reference_edge` | 仅 XY 必填，且只能是 `"rising"`；XX 不可出现此字段。 |
+| `sine_output_connected` | XX 必须 `true`；XY 必须 `false`，表示 XY SINE OUT 已**物理断开**。 |
+| `source_voltage_v` | 配置层允许 0.004--5.0 Vrms；日常频率/幅值扫描均要求两台基线为 `0.004`（4 mVrms）。 |
+| `frequency_hz` | 正数且不超过 102000 Hz；XX 与 XY 必须相同。日常基线为 17.777 Hz。 |
+| `input_mode` | 只能是 `"a_minus_b"`。 |
+| `shield_grounding` | 只能是 `"float"`。 |
+| `input_coupling` | 只能是 `"ac"`。 |
+| `time_constant_s` | 当前项目只能是 `0.3` s。 |
+| `filter_slope_db_oct` | 当前项目只能是 `24`。 |
+| `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
+| `sensitivity_full_scale_v` | 可填 `0.001`、`0.010` 或 `0.020` V。日常 fixed 默认：XX `0.020`、XY `0.001`。在 `bounded_auto` 中它必须等于最小量程。 |
+| `settle_time_constants` | 有限数且至少 `5.0`。每次设置转换的 `settle_s` 必须不小于两台仪器中最大的 `time_constant_s × settle_time_constants`；当前 `0.3 × 5.0 = 1.5` s。该下限会在打开 VISA 前检查并归档。 |
+
+`fixed` 模式只保留 `sensitivity_mode` 和 `sensitivity_full_scale_v`；所有
+`autorange_*` 字段必须完全不存在（继续注释），并非“被忽略”。例如：
+
+```toml
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.020  # XX daily default; XY daily default is 0.001
+```
+
+`bounded_auto` 模式必须同时提供以下五个字段。XX 唯一允许 10 mV → 20 mV，XY 唯一
+允许 1 mV → 10 mV；占用率、连续样本数和调整步数是已经确认的固定安全策略，不能改为
+其他数值：
+
+```toml
+# XX bounded_auto
+sensitivity_mode = "bounded_auto"
+sensitivity_full_scale_v = 0.010
+autorange_min_full_scale_v = 0.010
+autorange_max_full_scale_v = 0.020
+autorange_target_occupancy = 0.85
+autorange_stable_samples = 2
+autorange_max_steps = 1
+```
+
+```toml
+# XY bounded_auto
+sensitivity_mode = "bounded_auto"
+sensitivity_full_scale_v = 0.001
+autorange_min_full_scale_v = 0.001
+autorange_max_full_scale_v = 0.010
+autorange_target_occupancy = 0.85
+autorange_stable_samples = 2
+autorange_max_steps = 1
+```
+
+`settle_time_constants = 5.0` 的含义是每次改变频率、谐波、SINE OUT 或量程后，至少等待
+五个锁相时间常数再继续；它不是另一个毫秒数。`[lockin_sweep].settle_s` 是实际使用的
+单个等待 interval，必须大于或等于上述下限。幅值扫描中每个实际 SINE OUT 改变等待两个
+interval，因此当前是 `2 × 1.5 = 3.0` s。
+
 ## `[lockin_sweep]` 字段
 
 日常扫描的扫频、扫幅、安全、时序和审计设置在同一张 TOML 表中；两台仪器的量程
 模式和范围策略只在上述各自的 Lock-in 表中设置：
 
-| 字段 | 含义与当前站点默认值 |
+| 字段 | 可填写值与约束 |
 | --- | --- |
-| `frequency_points_hz` | 扫频的基频点。当前为 17.777 Hz 到 100 kHz 的 10 个对数等距点。 |
-| `excitation_points_v_rms` | 扫幅的 XX SINE OUT RMS 电压。当前为 4 mV 到 400 mV 的 11 点，基频固定为 17.777 Hz。 |
-| `harmonics` | 每个正式点的检测阶次。当前严格为 `[1, 2, 3]`。 |
-| `skip_unsupported_harmonics` | 若 h2/h3 的检测频率超过 SR830 的 102 kHz 范围，保留可测阶次并在 JSON 写入 `skipped_harmonics`；当前为 `true`。 |
-| `run_name` | 本次数据的非空短名称（最多 80 个字符）。它进入 JSON 文件名；不可使用 `\ / : * ? " < > |` 等路径或 Windows 保留字符。可使用中文。 |
-| `note` | 本次运行的非空审计备注（最多 2000 个字符），例如样品、接线改动或测试目的。它写入 JSON，但不进入文件名。 |
-| `settle_s`、`samples_per_point`、`sample_interval_s` | 过渡/谐波切换后的等待时间、每点正式样本数、样本间隔。当前是 1.5 s、3、0.3 s；每次实际 `SLVL` 改变等待两个 `settle_s`。 |
-| `external_series_resistance_ohm`、`approximate_device_resistance_ohm` | 日常扫描激励路径的唯一可变电阻来源：外串联电阻和近似器件电阻；SR830 固有 50 Ω 输出阻抗会自动加入。当前为 100 kΩ 和 500 Ω。每次扫描会把两者、50 Ω 和总阻抗写入 JSON 的 `measurement_config.excitation_path`，供之后分析使用。 |
-| `max_device_current_a_rms`、`max_device_voltage_v_rms` | 扫幅的 fail-closed 器件 RMS 上限。当前为 5 mA 和 0.5 V。 |
-| `external_50_ohm_termination` | 当前线路必须为 `false`；严格加载器拒绝 `true`。 |
-| `output_directory` | 记录目录，相对 `hardware.local.toml`。默认 `../run_data/commissioning` 假定 TOML 位于 `config/`，所以落在仓库根的 `run_data/commissioning/`，与两个分析 Notebook 的默认目录一致。 |
+| `frequency_points_hz` | 非空、严格递增的数列；每项必须在 0.001--102000 Hz。版本库示例为 17.777 Hz 到 100 kHz 的 10 个对数点。 |
+| `excitation_points_v_rms` | 非空、严格递增的数列；每项必须在 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 点，基频固定为 17.777 Hz。 |
+| `harmonics` | 严格只能为 `[1, 2, 3]`。 |
+| `skip_unsupported_harmonics` | 布尔值 `true` 或 `false`。为 `true` 时，超过 102 kHz 的 h2/h3 不写入仪器，而是在 JSON 写入 `skipped_harmonics`；日常高频扫描推荐 `true`。 |
+| `run_name` | 非空、最多 80 个字符；不可含控制字符或 `\ / : * ? " < > |`。可使用中文，且进入 JSON 文件名。 |
+| `note` | 非空、最多 2000 个字符且不可含 NUL；记录样品、接线改动或测试目的，写入 JSON 但不进入文件名。 |
+| `settle_s` | 有限正数，至少 1.5 s，且必须不小于上节的 time-constant 下限。它是每个普通转换实际等待的 interval；每次实际 `SLVL` 改变等待两倍。 |
+| `samples_per_point` | 整数，至少 1；版本库示例为 3。 |
+| `sample_interval_s` | 有限数，至少 0 s；版本库示例为 0.3 s。 |
+| `external_series_resistance_ohm` | 正数，单位 Ω；外部串联电阻。SR830 固有 50 Ω 输出阻抗会自动加入。 |
+| `approximate_device_resistance_ohm` | 非负数，单位 Ω；允许为 `0`，但应填写当前可得的器件近似值。 |
+| `max_device_current_a_rms` | 正数，单位 Arms；扫幅的 fail-closed 器件电流上限。 |
+| `max_device_voltage_v_rms` | 正数，单位 Vrms；扫幅的 fail-closed 器件电压上限。 |
+| `external_50_ohm_termination` | 当前接线严格只能是 `false`；加载器拒绝 `true`。 |
+| `output_directory` | 非空相对目录，不能是 `.` 或绝对路径；解析后也必须位于允许的项目目录内。默认 `../run_data/commissioning` 假定 TOML 位于 `config/`，所以落在仓库根的 `run_data/commissioning/`。 |
 
 `lockin_xx.source_voltage_v` 与 `lockin_xy.source_voltage_v` 仍属于各自的
 Lock-in 配置。日常扫描要求它们均为 SR830 的 4 mVrms 最小输出；扫频名义电流和

@@ -94,6 +94,10 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 本地 `hardware.local.toml` 只能由操作者维护且必须忽略提交；模板中的地址占位符
 不能用于连接仪器。
 
+日常运行的完整字段值域、`fixed`/`bounded_auto` 示例、时间常数等待关系和旧终端导入
+排错入口统一见 [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)，不要在
+本页和日常手册维护两份独立的取值表。
+
 | 字段 | 含义与确认值 | 约束 |
 | --- | --- | --- |
 | `reference_source` | XX 为 `internal`，即 XX 提供激励与参考；XY 为 `external_ttl`。 | 角色不可交换；XY 的 SINE OUT 必须物理断开。 |
@@ -103,7 +107,7 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 | `input_coupling` | `ac`，交流耦合。 | 两台都固定。 |
 | `time_constant_s` | 数字滤波时间常数，固定 0.3 s。 | 本模块不自动选择时间常数。 |
 | `filter_slope_db_oct` | 低通滤波斜率，固定 24 dB/oct。 | 与时间常数共同定义带宽，不能在正式采样中变化。 |
-| `settle_time_constants` | 每次连接或设置转换后等待的时间常数个数，固定 5.0。 | 当前最短等待为 `5 × 0.3 s = 1.5 s`；这不是缩短等待的授权。 |
+| `settle_time_constants` | 每次设置转换后等待的时间常数个数，最小 5.0。 | `[lockin_sweep].settle_s` 必须不小于两台的 `time_constant_s × settle_time_constants` 最大值；当前最短为 `5 × 0.3 s = 1.5 s`。 |
 | `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
 | `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
 | `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | 选中角色的自动范围边界。推荐 XX 10--20 mV、XY 1--10 mV。 | 仅 `bounded_auto` 使用；必须是项目已确认的相邻 1--10 mV 或 10--20 mV 档位。 |
@@ -184,8 +188,9 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 
 - 当前 4 mVrms、100 kohm 串联、50 ohm 输出和约 1 kohm 器件对应约
   39.58 nArms；400 mVrms 对应约 3.958 uArms。
-- 每次激励扫描都必须由用户提供完整路径阻抗、器件最大 RMS 电流和最大 RMS
-  电压；任何一项缺失都在打开 VISA 前失败。
+- 每次激励扫描从忽略的 `hardware.local.toml` `[lockin_sweep]` 读取完整路径阻抗、
+  器件最大 RMS 电流和最大 RMS 电压；日常命令不再带这些参数。任何一项缺失、格式错误
+  或超出上限都在打开 VISA 前失败，并把已解析值归档到 JSON。
 - SR830 的软件最小输出不是电气断开。异常 cleanup 后仍需人工确认实际接线和
   前面板读回。
 - 只读扫频/扫幅分析的电流不是新的独立测量值，而是 `SINE OUT Vrms / 完整串联路径

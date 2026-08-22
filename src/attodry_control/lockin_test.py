@@ -1095,6 +1095,7 @@ def _run_frequency_sweep(
             },
             "sensitivity_setup": sensitivity_setup,
             "settle_s": args.settle_s,
+            "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
             "samples_per_point": args.samples_per_point,
             "sample_interval_s": args.sample_interval_s,
             "points": records,
@@ -1264,6 +1265,7 @@ def _run_excitation_sweep(
             },
             "sensitivity_setup": sensitivity_setup,
             "settle_s": args.settle_s,
+            "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
             "source_step_settle_s": source_step_settle_s,
             "samples_per_point": args.samples_per_point,
             "sample_interval_s": args.sample_interval_s,
@@ -1331,6 +1333,7 @@ def _measurement_config_snapshot(
         "run_name": config.lockin_sweep.run_name,
         "note": config.lockin_sweep.note,
         "settle_s": args.settle_s,
+        "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
         "samples_per_point": args.samples_per_point,
         "sample_interval_s": args.sample_interval_s,
         "output_directory": config.lockin_sweep.output_directory.as_posix(),
@@ -1911,7 +1914,16 @@ def _resolve_sweep_settings(
         )
     sweep = config.lockin_sweep
     args.configured_harmonics = sweep.harmonics
-    args.settle_s = sweep.settle_s if args.settle_s is None else args.settle_s
+    requested_settle_s = sweep.settle_s if args.settle_s is None else args.settle_s
+    time_constant_settle_floor_s = _time_constant_settle_floor_s(config)
+    if requested_settle_s < time_constant_settle_floor_s:
+        raise Sr830Error(
+            "Sweep settle_s must be at least "
+            f"{time_constant_settle_floor_s:g} s for the configured SR830 "
+            "time constants and settle_time_constants."
+        )
+    args.settle_s = requested_settle_s
+    args.time_constant_settle_floor_s = time_constant_settle_floor_s
     args.samples_per_point = (
         sweep.samples_per_point
         if args.samples_per_point is None
@@ -1945,6 +1957,16 @@ def _resolve_sweep_settings(
     ):
         if getattr(args, argument_name) is None:
             setattr(args, argument_name, configured_value)
+
+
+def _time_constant_settle_floor_s(config: ControlConfig) -> float:
+    """Return the minimum post-setting wait implied by both SR830 filters."""
+
+    return max(
+        MINIMUM_SWEEP_SETTLE_S,
+        config.lockin_xx.time_constant_s * config.lockin_xx.settle_time_constants,
+        config.lockin_xy.time_constant_s * config.lockin_xy.settle_time_constants,
+    )
 
 
 def _requested_sweep_harmonics(args: argparse.Namespace) -> tuple[int, ...]:

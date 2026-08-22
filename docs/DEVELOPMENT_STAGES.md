@@ -349,6 +349,16 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   recognizing `[lockin_sweep]` as an unrelated optional table, so the daily
   temperature command can continue to use the same station-local TOML without
   parsing or acting on Lock-in fields. The merged full offline suite passed.
+- Completed the daily Lock-in configuration clarification and settling-contract
+  fix (2026-08-22). Station VISA addresses remain only in ignored
+  `hardware.local.toml`, so Git updates do not overwrite them. The daily guide now
+  lists every accepted Lock-in/sweep field, including exact `fixed` and
+  `bounded_auto` contracts and a terminal import-path check for obsolete CLI help.
+  `settle_time_constants` now enforces a pre-VISA lower bound on `settle_s` from
+  both SR830 time constants and is archived with each sweep; a fake-VISA test
+  covers the 0.3 s × 6.0 = 1.8 s floor and the 3.6 s source-step wait. The 67
+  Lock-in SR830 tests and source compilation passed; no hardware resource was
+  opened or written.
 
 ## Stage 4 - attoDRY real driver
 

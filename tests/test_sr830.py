@@ -2312,6 +2312,68 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["source_step_settle_s"], 3.0)
         self.assertEqual(result["points"][1]["source_step_settle_s"], 3.0)
 
+    def test_cli_sweep_enforces_time_constant_settle_floor(self) -> None:
+        config_path = self._hardware_config()
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8").replace(
+                "settle_time_constants = 5.0", "settle_time_constants = 6.0"
+            ),
+            encoding="utf-8",
+        )
+        unopened = FakeResourceManager({})
+        with self.assertRaisesRegex(Sr830Error, "at least 1.8 s"):
+            run(
+                [
+                    "sweep-excitation",
+                    "--config", str(config_path),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--settle-s", "1.5",
+                ],
+                resource_manager_factory=lambda: unopened,
+            )
+        self.assertEqual(unopened.opened, [])
+
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with (
+            patch("attodry_control.lockin_test.time.sleep") as sleeper,
+            redirect_stdout(output),
+        ):
+            run(
+                [
+                    "sweep-excitation",
+                    "--config", str(config_path),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,0.4",
+                    "--settle-s", "1.8",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        waits = [call.args[0] for call in sleeper.call_args_list]
+        self.assertTrue(any(abs(wait - 1.8) < 1e-9 for wait in waits))
+        self.assertTrue(any(abs(wait - 3.6) < 1e-9 for wait in waits))
+        self.assertEqual(result["settle_s"], 1.8)
+        self.assertAlmostEqual(result["time_constant_settle_floor_s"], 1.8)
+        self.assertAlmostEqual(
+            result["measurement_config"]["sweep"]["time_constant_settle_floor_s"],
+            1.8,
+        )
+
     def test_cli_excitation_sweep_all_harmonics_records_each_order_and_restores_first(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(

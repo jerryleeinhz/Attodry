@@ -355,6 +355,16 @@ Completed in Stage 3:
   updated to recognize `[lockin_sweep]` as an unrelated optional table. Daily
   temperature operation therefore continues to use the unified local TOML
   without parsing or acting on Lock-in fields; the merged offline suite passed.
+- On 2026-08-22, the daily Lock-in guide was expanded into the authoritative
+  field-value reference for `[lockin_xx]`, `[lockin_xy]`, and `[lockin_sweep]`,
+  including exact `fixed`/`bounded_auto` contracts and an import-path check for
+  obsolete CLI help. Station GPIB/VISA addresses remain only in ignored
+  `hardware.local.toml`, so Git updates preserve them without committing local
+  hardware data. `settle_time_constants` now has a real fail-closed effect:
+  `settle_s` is rejected before VISA opens unless it is at least the largest role
+  time-constant product, and the resolved floor is archived in each JSON. The
+  67 Lock-in SR830 tests and source compilation passed with fake VISA only; no
+  real instrument resource was opened or written.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic
