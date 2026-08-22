@@ -394,6 +394,11 @@ Completed in Stage 3:
   `harmonics` field applies one list to both scan types; it cannot be mixed with
   the new fields. All selected combinations retain the existing h1 cleanup.
   This is offline-tested only; no instrument resource was opened or written.
+- The remote Notebook's load button now also performs the formal-row load and
+  fills point-exclusion options immediately. The standalone formal-samples cell
+  remains only for explicitly refreshing after a filter change, so a normal
+  load-and-exclude workflow cannot apply a blank selector to zero rows. This is
+  read-only analysis only; no hardware path is imported.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic

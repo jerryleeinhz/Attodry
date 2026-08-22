@@ -384,6 +384,11 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   mixed with the new fields. Fake-VISA cases confirm frequency h1+h3 and
   excitation h2 acquisition, no writes to unselected orders, and h1 cleanup.
   No hardware resource was opened or written.
+- Corrected the remote Notebook selection workflow: clicking `Load selected
+  records` now immediately loads the selected formal rows and fills the
+  point-exclusion lists. The later formal-samples cell is retained only to
+  refresh after a filter change, preventing a blank selector from being applied
+  to zero rows. This is read-only analysis behavior with no hardware imports.
 
 ## Stage 4 - attoDRY real driver
 

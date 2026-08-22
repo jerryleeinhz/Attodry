@@ -36,8 +36,9 @@ when the kernel is running remotely through VSCode/SSH because it lists files
 on the kernel computer rather than opening a desktop dialog. The visible `Only
 completed records` checkbox defaults to selected; formal-sample status is a
 multi-select UI and rejected records still require the separate audit checkbox.
-After loading, run the formal-samples cell to populate the point selectors, then
-run the plot cell. A frequency-only selection produces only frequency figures;
+Loading immediately populates the point selectors; then apply any exclusions and
+run the plot cell. Rerun the formal-samples cell only after changing the
+formal-sample filter. A frequency-only selection produces only frequency figures;
 an excitation-only selection produces only current--voltage figures.
 
 `clean` is the default automatic quality screen. It excludes formal samples

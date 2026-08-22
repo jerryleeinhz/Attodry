@@ -2,8 +2,11 @@ import json
 from dataclasses import replace
 import math
 from pathlib import Path
+import sys
 import tempfile
+import types
 import unittest
+from unittest.mock import patch
 
 from attodry_control.commissioning_analysis import (
     ExcitationPathResistance,
@@ -346,6 +349,8 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("frequency_excluded_points_widget", code)
         self.assertIn("excitation_excluded_points_widget", code)
         self.assertIn("apply_point_exclusions_button", code)
+        self.assertIn("def _load_selected_formal_samples", code)
+        self.assertIn("loaded = _load_selected_formal_samples()", code)
         self.assertIn("selection_manifest.json", code)
         self.assertIn("if frequency_rows", code)
         self.assertIn("if excitation_rows", code)
@@ -355,6 +360,49 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("excitation_path_from_sweep_files", code)
         self.assertIn("EXCITATION_PATH_OVERRIDE", code)
         self.assertNotIn("EXTERNAL_SERIES_RESISTANCE_OHM", code)
+
+    def test_notebook_load_button_populates_selected_point_options(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["scan"] = "excitation"
+        payload["measurement_config"] = self._measurement_config_path()
+        source = self._write_json("excitation.json", payload)
+        notebook = json.loads(
+            (PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb").read_text(
+                encoding="utf-8"
+            )
+        )
+        cells = notebook["cells"]
+        widgets = _fake_notebook_widgets()
+        matplotlib = types.ModuleType("matplotlib")
+        pyplot = types.ModuleType("matplotlib.pyplot")
+        matplotlib.pyplot = pyplot
+        ipython = types.ModuleType("IPython")
+        display_module = types.ModuleType("IPython.display")
+        display_module.display = lambda _: None
+        ipython.display = display_module
+        scope: dict[str, object] = {}
+
+        with patch.dict(
+            sys.modules,
+            {
+                "ipywidgets": widgets,
+                "matplotlib": matplotlib,
+                "matplotlib.pyplot": pyplot,
+                "IPython": ipython,
+                "IPython.display": display_module,
+            },
+        ):
+            exec("".join(cells[1]["source"]), scope)
+            scope["DATA_DIRECTORY"] = source.parent
+            exec("".join(cells[3]["source"]), scope)
+            scope["excitation_record_widget"].value = str(source)
+            scope["_load_selected_records"](None)
+
+        self.assertEqual(len(scope["frequency_excluded_points_widget"].options), 0)
+        self.assertEqual(len(scope["excitation_excluded_points_widget"].options), 1)
+        self.assertEqual(len(scope["frequency_rows"]), 0)
+        self.assertEqual(len(scope["excitation_rows"]), 2)
+
 
     def _write_json(self, _name: str, payload: dict[str, object]) -> Path:
         path = self._temporary_path(".json")
@@ -451,6 +499,28 @@ class CommissioningAnalysisTests(unittest.TestCase):
             },
             "error_status": 0,
         }
+
+
+def _fake_notebook_widgets() -> types.ModuleType:
+    class Widget:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.children = args[0] if args else ()
+            self.options = kwargs.get("options", ())
+            self.value = kwargs.get("value", ())
+
+        def on_click(self, callback: object) -> None:
+            self.callback = callback
+
+    widgets = types.ModuleType("ipywidgets")
+    widgets.Checkbox = Widget
+    widgets.SelectMultiple = Widget
+    widgets.Button = Widget
+    widgets.Dropdown = Widget
+    widgets.HTML = Widget
+    widgets.HBox = Widget
+    widgets.VBox = Widget
+    widgets.Layout = lambda **kwargs: kwargs
+    return widgets
 
 
 if __name__ == "__main__":
