@@ -370,6 +370,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   discovered records, choose frequency and excitation JSON files separately,
   then load the pair. It retains the completed/rejected and formal-sample
   filters, imports no hardware path, and requires no manually typed file path.
+- Extended the remote commissioning notebook so frequency and excitation records
+  load independently: it plots only the available six-figure set when one scan
+  type is absent and both sets when both are selected. `clean` remains the
+  default explicit quality screen; a point-level multi-select lets the operator
+  remove suspect retained points without altering raw JSON. Optional export
+  writes the selected files, filters, and exclusions to `selection_manifest.json`
+  for reproducibility. This analysis-only path has no hardware imports.
 
 ## Stage 4 - attoDRY real driver
 

@@ -378,6 +378,14 @@ Completed in Stage 3:
   frequency/excitation record lists, and an explicit load button passes the
   selected pair to the existing filtered plotting cells. This supports Jupyter
   kernels reached through VSCode/SSH; no hardware module is imported.
+- The commissioning notebook now accepts either scan type independently. A
+  frequency-only selection renders only its six frequency figures; an
+  excitation-only selection renders only its six current--voltage figures.
+  `clean` formal samples remain the visible automatic screen, and a point-level
+  multi-select applies reproducible manual exclusions without changing raw JSON.
+  When optional export is enabled, `selection_manifest.json` records the files,
+  filters, retained rows, and excluded point keys. This is analysis-only and has
+  no hardware imports or instrument operations.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic

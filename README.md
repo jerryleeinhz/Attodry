@@ -122,8 +122,10 @@ python -m attodry_control.lockin_test monitor-live --consume-status-latches
 已完成的独立扫频和激励JSON可用
 [`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)
 浏览和绘图。Notebook默认只选择 `completed` 记录和 `clean` 正式样本；可通过
-Windows Browse 对话框直接打开文件，也可显式切换到 rejected/diagnostic 或
-unlock/overload/error 审计筛选。转换期和cleanup数据不会进入默认曲线。
+远程目录列表分别选择扫频、幅值扫描或两者，也可显式切换到 rejected/diagnostic 或
+unlock/overload/error 审计筛选。只选择一种扫描时，Notebook只画相应的六张图；点级
+排除控件不会修改原始 JSON，并在可选导出中记录筛选清单。转换期和 cleanup 数据不会
+进入默认曲线。
 
 只查看频率扫描和幅值扫描中的 XY 信号时，使用
 [`notebooks/sr830_xy_sweeps.ipynb`](notebooks/sr830_xy_sweeps.ipynb)。

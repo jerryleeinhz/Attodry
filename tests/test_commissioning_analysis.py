@@ -328,7 +328,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
         for index, cell in enumerate(code_cells):
             compile("".join(cell["source"]), f"notebook-cell-{index}", "exec")
 
-    def test_notebook_exposes_remote_record_selector_and_completed_filter(self) -> None:
+    def test_notebook_exposes_independent_record_and_point_selectors(self) -> None:
         path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"
         notebook = json.loads(path.read_text(encoding="utf-8"))
         code = "\n".join(
@@ -343,7 +343,15 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("load_selected_records_button.on_click", code)
         self.assertIn("frequency_record_widget", code)
         self.assertIn("excitation_record_widget", code)
+        self.assertIn("frequency_excluded_points_widget", code)
+        self.assertIn("excitation_excluded_points_widget", code)
+        self.assertIn("apply_point_exclusions_button", code)
+        self.assertIn("selection_manifest.json", code)
+        self.assertIn("if frequency_rows", code)
+        self.assertIn("if excitation_rows", code)
         self.assertNotIn("browse_and_load_commissioning_file", code)
+        self.assertNotIn("A completed frequency record is missing", code)
+        self.assertNotIn("A completed excitation record is missing", code)
         self.assertIn("excitation_path_from_sweep_files", code)
         self.assertIn("EXCITATION_PATH_OVERRIDE", code)
         self.assertNotIn("EXTERNAL_SERIES_RESISTANCE_OHM", code)

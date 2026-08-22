@@ -30,14 +30,25 @@ opt-in. Formal samples can be filtered as `clean`, `problem`, `unlocked`,
 `overload`, or `instrument_error`; transition and cleanup payloads are excluded
 from the plotted rows.
 
-Set `DATA_DIRECTORY` once, click `Refresh records`, choose a frequency and an
-excitation record, then click `Load selected records`. This works when the
-kernel is running remotely through VSCode/SSH because it lists files on the
-kernel computer rather than opening a desktop dialog. The visible `Only
+Set `DATA_DIRECTORY` once, click `Refresh records`, select a frequency record,
+an excitation record, or both, then click `Load selected records`. This works
+when the kernel is running remotely through VSCode/SSH because it lists files
+on the kernel computer rather than opening a desktop dialog. The visible `Only
 completed records` checkbox defaults to selected; formal-sample status is a
 multi-select UI and rejected records still require the separate audit checkbox.
-After loading the pair, rerun the catalog and subsequent plot cells to refresh
-the figures.
+After loading, run the formal-samples cell to populate the point selectors, then
+run the plot cell. A frequency-only selection produces only frequency figures;
+an excitation-only selection produces only current--voltage figures.
+
+`clean` is the default automatic quality screen. It excludes formal samples
+already marked `problem`, `unlocked`, `overload`, or `instrument_error` while
+leaving every raw record untouched. The loaded-point selectors show the retained
+scan points with coordinate, selected-row count, and available role/harmonic
+channels. Select a suspect point, click `Apply point exclusions`, and rerun the
+plot cell; clearing the selections and applying restores all automatically
+retained points. The final optional export writes `selection_manifest.json`
+alongside the CSV/PNG/PDF outputs so the selected files, filters, and manual
+exclusions are reproducible.
 Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
 opened automatically.
 
