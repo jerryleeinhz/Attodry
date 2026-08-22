@@ -191,6 +191,10 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 - 每次激励扫描从忽略的 `hardware.local.toml` `[lockin_sweep]` 读取完整路径阻抗、
   器件最大 RMS 电流和最大 RMS 电压；日常命令不再带这些参数。任何一项缺失、格式错误
   或超出上限都在打开 VISA 前失败，并把已解析值归档到 JSON。
+- 器件电压保护使用已确认的 `maximum_device_resistance_ohm`，而非直接把 SINE OUT
+  电压当作器件端电压：`Vsine × Rdevice,max / (Rseries + 50 Ω + Rdevice,max)`。
+  `approximate_device_resistance_ohm` 只用于名义电流和分析；它不能替代高阻状态的
+  电阻上界。上界不明确时必须保持保守值，不能为了通过预检而填入平均电阻。
 - SR830 的软件最小输出不是电气断开。异常 cleanup 后仍需人工确认实际接线和
   前面板读回。
 - 只读扫频/扫幅分析的电流不是新的独立测量值，而是 `SINE OUT Vrms / 完整串联路径

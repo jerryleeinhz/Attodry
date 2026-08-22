@@ -68,6 +68,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.lockin_sweep.note, "Simulation fixture.")
         self.assertEqual(config.lockin_sweep.external_series_resistance_ohm, 100000.0)
         self.assertEqual(config.lockin_sweep.approximate_device_resistance_ohm, 500.0)
+        self.assertEqual(config.lockin_sweep.maximum_device_resistance_ohm, 500.0)
         self.assertFalse(config.lockin_sweep.external_50_ohm_termination)
         self.assertEqual(
             config.lockin_sweep.output_directory,
@@ -367,6 +368,14 @@ class ConfigurationTests(unittest.TestCase):
             "external_50_ohm_termination = true",
         )
         with self.assertRaisesRegex(ConfigError, "must be false"):
+            self.load_text(text)
+
+    def test_lockin_sweep_rejects_resistance_upper_bound_below_approximation(self) -> None:
+        text = self.simulation_text().replace(
+            "maximum_device_resistance_ohm = 500.0",
+            "maximum_device_resistance_ohm = 499.0",
+        )
+        with self.assertRaisesRegex(ConfigError, "maximum_device_resistance_ohm"):
             self.load_text(text)
 
     def test_lockin_sweep_rejects_unsafe_run_name_or_blank_note(self) -> None:

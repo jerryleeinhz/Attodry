@@ -98,6 +98,7 @@ samples_per_point = 3
 sample_interval_s = 0.3
 external_series_resistance_ohm = 100000.0
 approximate_device_resistance_ohm = 500.0
+maximum_device_resistance_ohm = 500.0
 max_device_current_a_rms = 0.005
 max_device_voltage_v_rms = 0.5
 external_50_ohm_termination = false

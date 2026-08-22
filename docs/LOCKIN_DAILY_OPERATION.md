@@ -175,6 +175,7 @@ interval，因此当前是 `2 × 1.5 = 3.0` s。
 | `sample_interval_s` | 有限数，至少 0 s；版本库示例为 0.3 s。 |
 | `external_series_resistance_ohm` | 正数，单位 Ω；外部串联电阻。SR830 固有 50 Ω 输出阻抗会自动加入。 |
 | `approximate_device_resistance_ohm` | 非负数，单位 Ω；允许为 `0`，但应填写当前可得的器件近似值。 |
+| `maximum_device_resistance_ohm` | 非负数，单位 Ω，且不能小于 `approximate_device_resistance_ohm`；这是操作者确认的器件电阻上界，而不是平均值。扫幅的器件端电压上界按 `Vsine × Rdevice,max / (Rseries + 50 Ω + Rdevice,max)` 计算。高阻、断线或接触异常可能超过这个上界时，必须先更新该值；缺失或不满足约束会在打开 VISA 前失败。 |
 | `max_device_current_a_rms` | 正数，单位 Arms；扫幅的 fail-closed 器件电流上限。 |
 | `max_device_voltage_v_rms` | 正数，单位 Vrms；扫幅的 fail-closed 器件电压上限。 |
 | `external_50_ohm_termination` | 当前接线严格只能是 `false`；加载器拒绝 `true`。 |

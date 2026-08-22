@@ -1298,6 +1298,7 @@ def _resolved_excitation_path(settings: dict[str, object]) -> dict[str, float | 
         "approximate_device_resistance_ohm": (
             sweep.approximate_device_resistance_ohm
         ),
+        "maximum_device_resistance_ohm": sweep.maximum_device_resistance_ohm,
         "nominal_total_resistance_ohm": nominal_total,
         "confirmed_max_device_current_a_rms": sweep.max_device_current_a_rms,
         "confirmed_max_device_voltage_v_rms": sweep.max_device_voltage_v_rms,
@@ -1957,6 +1958,7 @@ def _resolve_sweep_settings(
     ):
         if getattr(args, argument_name) is None:
             setattr(args, argument_name, configured_value)
+    args.maximum_device_resistance_ohm = sweep.maximum_device_resistance_ohm
 
 
 def _time_constant_settle_floor_s(config: ControlConfig) -> float:
@@ -2048,7 +2050,11 @@ def _validate_excitation_safety(
     current_bound_a = maximum_source_v / (
         args.series_resistance_ohm + SR830_OUTPUT_RESISTANCE_OHM
     )
-    voltage_bound_v = maximum_source_v
+    voltage_bound_v = maximum_source_v * args.maximum_device_resistance_ohm / (
+        args.series_resistance_ohm
+        + SR830_OUTPUT_RESISTANCE_OHM
+        + args.maximum_device_resistance_ohm
+    )
     if current_bound_a > args.max_device_current_a:
         raise ValueError(
             "Worst-case current bound exceeds the confirmed device RMS current limit."
@@ -2067,6 +2073,7 @@ def _validate_excitation_safety(
         "series_resistance_ohm": args.series_resistance_ohm,
         "sr830_output_resistance_ohm": SR830_OUTPUT_RESISTANCE_OHM,
         "approximate_device_resistance_ohm": args.device_resistance_ohm,
+        "maximum_device_resistance_ohm": args.maximum_device_resistance_ohm,
         "nominal_total_resistance_ohm": nominal_total,
         "confirmed_max_device_current_a_rms": args.max_device_current_a,
         "confirmed_max_device_voltage_v_rms": args.max_device_voltage_v,

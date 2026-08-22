@@ -2408,6 +2408,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(
             result["safety"]["approximate_device_resistance_ohm"], 500.0
         )
+        self.assertEqual(result["safety"]["maximum_device_resistance_ohm"], 500.0)
         self.assertFalse(
             result["measurement_config"]["excitation_path"][
                 "external_50_ohm_termination"
@@ -2421,6 +2422,71 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["harmonic"], 1)
         self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["harmonic"], 1)
+
+    def test_cli_excitation_sweep_uses_device_voltage_divider_upper_bound(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation",
+                    "--config", str(self._hardware_config()),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,2.0",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertAlmostEqual(
+            result["safety"]["worst_case_device_voltage_bound_v_rms"],
+            2.0 * 500.0 / 100550.0,
+        )
+        self.assertLess(
+            result["safety"]["worst_case_device_voltage_bound_v_rms"], 0.5
+        )
+
+    def test_cli_excitation_sweep_rejects_high_declared_device_resistance_before_visa(
+        self,
+    ) -> None:
+        config_path = self._hardware_config()
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8").replace(
+                "maximum_device_resistance_ohm = 500.0",
+                "maximum_device_resistance_ohm = 40000.0",
+            ),
+            encoding="utf-8",
+        )
+        unopened = FakeResourceManager({})
+
+        with self.assertRaisesRegex(
+            ValueError, "Worst-case device voltage bound exceeds"
+        ):
+            run(
+                [
+                    "sweep-excitation",
+                    "--config", str(config_path),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004,2.0",
+                ],
+                resource_manager_factory=lambda: unopened,
+            )
+
+        self.assertEqual(unopened.opened, [])
 
     def test_cli_excitation_sweep_clears_range_restoration_overload_before_final_status(self) -> None:
         shared_frequency = {"hz": 17.777}

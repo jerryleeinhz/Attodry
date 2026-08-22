@@ -136,6 +136,7 @@ class LockinSweepConfig:
     sample_interval_s: float
     external_series_resistance_ohm: float
     approximate_device_resistance_ohm: float
+    maximum_device_resistance_ohm: float
     max_device_current_a_rms: float
     max_device_voltage_v_rms: float
     external_50_ohm_termination: bool
@@ -745,6 +746,7 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             "sample_interval_s",
             "external_series_resistance_ohm",
             "approximate_device_resistance_ohm",
+            "maximum_device_resistance_ohm",
             "max_device_current_a_rms",
             "max_device_voltage_v_rms",
             "external_50_ohm_termination",
@@ -783,6 +785,19 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         raise ConfigError(
             f"{name}.external_50_ohm_termination must be false for this wiring."
         )
+    approximate_device_resistance_ohm = _nonnegative_number(
+        table["approximate_device_resistance_ohm"],
+        f"{name}.approximate_device_resistance_ohm",
+    )
+    maximum_device_resistance_ohm = _nonnegative_number(
+        table["maximum_device_resistance_ohm"],
+        f"{name}.maximum_device_resistance_ohm",
+    )
+    if maximum_device_resistance_ohm < approximate_device_resistance_ohm:
+        raise ConfigError(
+            f"{name}.maximum_device_resistance_ohm must be at least "
+            "approximate_device_resistance_ohm."
+        )
     return LockinSweepConfig(
         frequency_points_hz=frequency_points_hz,
         excitation_points_v_rms=excitation_points_v_rms,
@@ -804,10 +819,8 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             table["external_series_resistance_ohm"],
             f"{name}.external_series_resistance_ohm",
         ),
-        approximate_device_resistance_ohm=_nonnegative_number(
-            table["approximate_device_resistance_ohm"],
-            f"{name}.approximate_device_resistance_ohm",
-        ),
+        approximate_device_resistance_ohm=approximate_device_resistance_ohm,
+        maximum_device_resistance_ohm=maximum_device_resistance_ohm,
         max_device_current_a_rms=_positive_number(
             table["max_device_current_a_rms"],
             f"{name}.max_device_current_a_rms",

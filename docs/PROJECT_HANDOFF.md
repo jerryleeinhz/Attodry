@@ -365,6 +365,14 @@ Completed in Stage 3:
   time-constant product, and the resolved floor is archived in each JSON. The
   67 Lock-in SR830 tests and source compilation passed with fake VISA only; no
   real instrument resource was opened or written.
+- Excitation-sweep device-voltage preflight now uses the circuit divider and a
+  required, operator-confirmed `maximum_device_resistance_ohm` rather than
+  treating SINE OUT itself as the device voltage. It validates the largest
+  possible declared device resistance, records both approximate and maximum
+  values, and still rejects before VISA opens whenever that calculated terminal
+  voltage exceeds the RMS device limit. The 2 Vrms / 100 kΩ / 50 Ω / 500 Ω
+  fake-VISA case records a 9.95 mVrms bound; no hardware resource was opened or
+  written.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic

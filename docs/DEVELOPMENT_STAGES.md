@@ -359,6 +359,12 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   covers the 0.3 s × 6.0 = 1.8 s floor and the 3.6 s source-step wait. The 67
   Lock-in SR830 tests and source compilation passed; no hardware resource was
   opened or written.
+- Updated excitation-voltage preflight to calculate the device-terminal RMS
+  voltage through the confirmed series divider, using a required
+  `maximum_device_resistance_ohm` that cannot be below the analysis-only
+  approximate resistance. The old direct-SINE-OUT comparison was removed; a
+  2 Vrms / 100 kΩ / 50 Ω / 500 Ω fake-VISA sweep verifies the resulting
+  9.95 mVrms bound. No hardware resource was opened or written.
 
 ## Stage 4 - attoDRY real driver
 
