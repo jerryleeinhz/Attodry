@@ -386,6 +386,14 @@ Completed in Stage 3:
   When optional export is enabled, `selection_manifest.json` records the files,
   filters, retained rows, and excluded point keys. This is analysis-only and has
   no hardware imports or instrument operations.
+- The two daily sweep commands now resolve their requested harmonics separately
+  from `[lockin_sweep].frequency_harmonics` and
+  `[lockin_sweep].excitation_harmonics`. Each list is an ascending non-empty
+  combination of h1/h2/h3, and fake-VISA coverage verifies frequency h1+h3 and
+  excitation h2 without writing unselected orders. The compatibility-only old
+  `harmonics` field applies one list to both scan types; it cannot be mixed with
+  the new fields. All selected combinations retain the existing h1 cleanup.
+  This is offline-tested only; no instrument resource was opened or written.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic

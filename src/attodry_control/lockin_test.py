@@ -382,14 +382,14 @@ def _add_sweep_arguments(
         help=(
             override_help
             or "At every point, acquire harmonics 1, 2, and 3 in order. "
-            "This is the default when lockin_sweep.harmonics is [1, 2, 3]."
+            "Overrides the configured scan-specific harmonic list."
         ),
     )
     harmonic_selection.add_argument(
         "--first-harmonic-only",
         action="store_false",
         dest="all_harmonics",
-        help=override_help or "Override the TOML and acquire only the first harmonic.",
+        help=override_help or "Override the TOML and acquire only harmonic 1.",
     )
 def _run_discover(args: argparse.Namespace, factory: Callable[[], object]) -> int:
     manager = factory()
@@ -936,8 +936,6 @@ def _run_frequency_sweep(
             f"0.001-{MAXIMUM_REFERENCE_FREQUENCY_HZ:g} Hz."
         )
     harmonics = _requested_sweep_harmonics(args)
-    if args.skip_unsupported_harmonics and not args.all_harmonics:
-        raise ValueError("--skip-unsupported-harmonics requires --all-harmonics.")
     if not args.skip_unsupported_harmonics:
         _validate_harmonic_detection_frequencies(points, harmonics)
     baseline_hz = float(settings["frequency_hz"])
@@ -1914,7 +1912,11 @@ def _resolve_sweep_settings(
             "the validated hardware TOML."
         )
     sweep = config.lockin_sweep
-    args.configured_harmonics = sweep.harmonics
+    args.configured_harmonics = (
+        sweep.frequency_harmonics
+        if scan == "frequency"
+        else sweep.excitation_harmonics
+    )
     requested_settle_s = sweep.settle_s if args.settle_s is None else args.settle_s
     time_constant_settle_floor_s = _time_constant_settle_floor_s(config)
     if requested_settle_s < time_constant_settle_floor_s:
@@ -1935,15 +1937,12 @@ def _resolve_sweep_settings(
         if args.sample_interval_s is None
         else args.sample_interval_s
     )
-    args.all_harmonics = True if args.all_harmonics is None else args.all_harmonics
     if scan == "frequency":
         args.points_hz = (
             sweep.frequency_points_hz if args.points_hz is None else args.points_hz
         )
         if args.skip_unsupported_harmonics is None:
-            args.skip_unsupported_harmonics = (
-                sweep.skip_unsupported_harmonics if args.all_harmonics else False
-            )
+            args.skip_unsupported_harmonics = sweep.skip_unsupported_harmonics
         return
     if scan != "excitation":
         raise ValueError(f"Unsupported sweep type: {scan}.")
@@ -1972,7 +1971,11 @@ def _time_constant_settle_floor_s(config: ControlConfig) -> float:
 
 
 def _requested_sweep_harmonics(args: argparse.Namespace) -> tuple[int, ...]:
-    return tuple(args.configured_harmonics) if args.all_harmonics else (1,)
+    if args.all_harmonics is True:
+        return (1, 2, 3)
+    if args.all_harmonics is False:
+        return (1,)
+    return tuple(args.configured_harmonics)
 
 
 def _validate_harmonic_detection_frequencies(

@@ -270,7 +270,10 @@ documents every field:
   to 100 kHz.
 - `excitation_points_v_rms`: 4, 6, 10, 16, 26, 40, 64, 100, 160, 252, and
   400 mVrms at the fixed 17.777 Hz fundamental.
-- `harmonics = [1, 2, 3]`: acquire all three orders at every supported point.
+- `frequency_harmonics = [1, 2, 3]`: harmonic orders for the frequency sweep;
+  use any ascending non-empty subset such as `[1, 3]`.
+- `excitation_harmonics = [1, 2, 3]`: harmonic orders for the excitation sweep;
+  it may differ from the frequency selection, for example `[2]`.
 - `skip_unsupported_harmonics = true`: at high fundamentals, retain supported
   orders and record h2/h3 as skipped when their detection frequency would exceed
   the SR830 102 kHz limit.
@@ -341,13 +344,14 @@ written source point; a 4 mVrms baseline point that did not write `SLVL` records
 zero for its point-specific value. It is an acquisition-settling parameter, not
 a safety limit or an automatic phase correction.
 
-The daily coverage policy comes from `harmonics = [1, 2, 3]` and
-`skip_unsupported_harmonics = true` in `[lockin_sweep]`. It retains only the
-supported orders at each point and writes an audited `skipped_harmonics` entry
-for every omission; no missing order is inferred in analysis. On the confirmed
-ten-point 17.777 Hz--100 kHz grid, this yields h1 at all ten points, h2 through
-38.310 kHz (nine points), and h3 through 14.677 kHz (eight points). Change the
-TOML before a future scan if that policy needs to change.
+The daily frequency coverage policy comes from `frequency_harmonics = [1, 2, 3]`
+and `skip_unsupported_harmonics = true` in `[lockin_sweep]`. It retains only the
+selected and supported orders at each point and writes an audited
+`skipped_harmonics` entry for every frequency-limit omission; no missing order
+is inferred in analysis. On the confirmed ten-point 17.777 Hz--100 kHz grid,
+this yields h1 at all ten points, h2 through 38.310 kHz (nine points), and h3
+through 14.677 kHz (eight points). Change the TOML before a future scan if that
+policy needs to change.
 
 The HARM transition record is deliberately excluded from formal curves. It may
 contain only a filter-overload and/or frequency-range-change latch while the

@@ -135,7 +135,10 @@ excitation_points_v_rms = [
   0.252,
   0.400,
 ]
-harmonics = [1, 2, 3]
+# Each list is an ascending non-empty combination of 1, 2, and 3. They apply
+# independently to frequency and excitation sweeps; for example [1, 3] or [2].
+frequency_harmonics = [1, 2, 3]
+excitation_harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
 # Range mode and target/policy belong to [lockin_xx] and [lockin_xy], not this

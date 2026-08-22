@@ -166,7 +166,9 @@ interval，因此当前是 `2 × 1.5 = 3.0` s。
 | --- | --- |
 | `frequency_points_hz` | 非空、严格递增的数列；每项必须在 0.001--102000 Hz。版本库示例为 17.777 Hz 到 100 kHz 的 10 个对数点。 |
 | `excitation_points_v_rms` | 非空、严格递增的数列；每项必须在 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 点，基频固定为 17.777 Hz。 |
-| `harmonics` | 严格只能为 `[1, 2, 3]`。 |
+| `frequency_harmonics` | 扫频所测谐波；升序、非空，且只能由 1、2、3 组成。可填 `[1]`、`[2]`、`[1, 3]` 或 `[1, 2, 3]`。 |
+| `excitation_harmonics` | 扫幅所测谐波；规则与 `frequency_harmonics` 相同，允许与其不同，例如扫频 `[1, 3]` 而扫幅 `[2]`。 |
+| `harmonics` | 旧版兼容字段；若仅保留它，会把同一组合用于两类扫描。不要与上述两个新字段混用。新建或修改日常配置应使用两个新字段。 |
 | `skip_unsupported_harmonics` | 布尔值 `true` 或 `false`。为 `true` 时，超过 102 kHz 的 h2/h3 不写入仪器，而是在 JSON 写入 `skipped_harmonics`；日常高频扫描推荐 `true`。 |
 | `run_name` | 非空、最多 80 个字符；不可含控制字符或 `\ / : * ? " < > |`。可使用中文，且进入 JSON 文件名。 |
 | `note` | 非空、最多 2000 个字符且不可含 NUL；记录样品、接线改动或测试目的，写入 JSON 但不进入文件名。 |

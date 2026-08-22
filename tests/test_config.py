@@ -60,7 +60,8 @@ class ConfigurationTests(unittest.TestCase):
             config.lockin_xy.external_reference_edge, ExternalReferenceEdge.RISING
         )
         self.assertEqual(config.magnet.limits.experiment_vector_max_t, 3.0)
-        self.assertEqual(config.lockin_sweep.harmonics, (1, 2, 3))
+        self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 2, 3))
+        self.assertEqual(config.lockin_sweep.excitation_harmonics, (1, 2, 3))
         self.assertEqual(len(config.lockin_sweep.frequency_points_hz), 10)
         self.assertEqual(config.lockin_sweep.frequency_points_hz[-1], 100000.0)
         self.assertEqual(config.lockin_sweep.excitation_points_v_rms[-1], 0.4)
@@ -377,6 +378,49 @@ class ConfigurationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ConfigError, "maximum_device_resistance_ohm"):
             self.load_text(text)
+
+    def test_lockin_sweep_accepts_independent_harmonic_combinations(self) -> None:
+        text = self.simulation_text().replace(
+            "frequency_harmonics = [1, 2, 3]",
+            "frequency_harmonics = [1, 3]",
+        ).replace(
+            "excitation_harmonics = [1, 2, 3]",
+            "excitation_harmonics = [2]",
+        )
+
+        config = self.load_text(text)
+
+        self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 3))
+        self.assertEqual(config.lockin_sweep.excitation_harmonics, (2,))
+
+    def test_lockin_sweep_legacy_harmonics_apply_to_both_scan_types(self) -> None:
+        text = self.simulation_text().replace(
+            "frequency_harmonics = [1, 2, 3]\nexcitation_harmonics = [1, 2, 3]",
+            "harmonics = [1, 3]",
+        )
+
+        config = self.load_text(text)
+
+        self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 3))
+        self.assertEqual(config.lockin_sweep.excitation_harmonics, (1, 3))
+
+    def test_lockin_sweep_rejects_invalid_or_mixed_harmonic_lists(self) -> None:
+        invalid_lists = ("[1, 1]", "[2, 1]", "[4]")
+        for invalid in invalid_lists:
+            with self.subTest(invalid=invalid):
+                text = self.simulation_text().replace(
+                    "frequency_harmonics = [1, 2, 3]",
+                    f"frequency_harmonics = {invalid}",
+                )
+                with self.assertRaisesRegex(ConfigError, "combination of 1, 2, and 3"):
+                    self.load_text(text)
+
+        mixed = self.simulation_text().replace(
+            "frequency_harmonics = [1, 2, 3]",
+            "harmonics = [1]\nfrequency_harmonics = [1, 2, 3]",
+        )
+        with self.assertRaisesRegex(ConfigError, "cannot be combined"):
+            self.load_text(mixed)
 
     def test_lockin_sweep_rejects_unsafe_run_name_or_blank_note(self) -> None:
         cases = (

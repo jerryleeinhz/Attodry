@@ -377,6 +377,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   remove suspect retained points without altering raw JSON. Optional export
   writes the selected files, filters, and exclusions to `selection_manifest.json`
   for reproducibility. This analysis-only path has no hardware imports.
+- Added scan-specific harmonic selection in `[lockin_sweep]`:
+  `frequency_harmonics` and `excitation_harmonics` each accept an ascending,
+  non-empty subset of h1/h2/h3 and may differ. The older single `harmonics`
+  field remains a compatibility path for one common combination but cannot be
+  mixed with the new fields. Fake-VISA cases confirm frequency h1+h3 and
+  excitation h2 acquisition, no writes to unselected orders, and h1 cleanup.
+  No hardware resource was opened or written.
 
 ## Stage 4 - attoDRY real driver
 

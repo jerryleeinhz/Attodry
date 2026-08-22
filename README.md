@@ -109,6 +109,10 @@ python -m attodry_control.lockin_test sweep-excitation
 每次运行前，在同一 `[lockin_sweep]` 表填写 `run_name` 和 `note`；名称进入 JSON
 文件名，备注保留在审计记录。
 
+同一张表中的 `frequency_harmonics` 和 `excitation_harmonics` 分别决定扫频和扫幅
+测量的谐波组合。它们可独立填写任意升序非空组合，如 `[1, 3]` 或 `[2]`；完成或失败
+清理仍会恢复两台 SR830 到 h1。
+
 在没有任何 sweep 或其他程序占用同一对 VISA 地址时，可用下面的只读面板实时查看
 XX/XY 的电压、相位、频率、量程和锁定状态：
 

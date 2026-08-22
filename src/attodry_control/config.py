@@ -127,7 +127,8 @@ class LockinConfig:
 class LockinSweepConfig:
     frequency_points_hz: tuple[float, ...]
     excitation_points_v_rms: tuple[float, ...]
-    harmonics: tuple[int, ...]
+    frequency_harmonics: tuple[int, ...]
+    excitation_harmonics: tuple[int, ...]
     skip_unsupported_harmonics: bool
     run_name: str
     note: str
@@ -731,13 +732,12 @@ def _validate_lockin_pair(xx: LockinConfig, xy: LockinConfig) -> None:
 
 def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
     name = "lockin_sweep"
-    _strict_keys(
+    _strict_keys_with_optional(
         table,
         name,
         {
             "frequency_points_hz",
             "excitation_points_v_rms",
-            "harmonics",
             "skip_unsupported_harmonics",
             "run_name",
             "note",
@@ -752,6 +752,7 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             "external_50_ohm_termination",
             "output_directory",
         },
+        {"harmonics", "frequency_harmonics", "excitation_harmonics"},
     )
     frequency_points_hz = _positive_number_tuple(
         table["frequency_points_hz"], f"{name}.frequency_points_hz"
@@ -771,9 +772,31 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         raise ConfigError(
             f"{name}.excitation_points_v_rms must remain within 0.004-5 V RMS."
         )
-    harmonics = _integer_tuple(table["harmonics"], f"{name}.harmonics", minimum=1)
-    if harmonics != (1, 2, 3):
-        raise ConfigError(f"{name}.harmonics must be exactly [1, 2, 3].")
+    legacy_harmonics = "harmonics" in table
+    frequency_harmonics_present = "frequency_harmonics" in table
+    excitation_harmonics_present = "excitation_harmonics" in table
+    if legacy_harmonics and (
+        frequency_harmonics_present or excitation_harmonics_present
+    ):
+        raise ConfigError(
+            f"{name}.harmonics cannot be combined with frequency_harmonics or "
+            "excitation_harmonics."
+        )
+    if legacy_harmonics:
+        harmonics = _selected_sweep_harmonics(table["harmonics"], f"{name}.harmonics")
+        frequency_harmonics = harmonics
+        excitation_harmonics = harmonics
+    elif frequency_harmonics_present and excitation_harmonics_present:
+        frequency_harmonics = _selected_sweep_harmonics(
+            table["frequency_harmonics"], f"{name}.frequency_harmonics"
+        )
+        excitation_harmonics = _selected_sweep_harmonics(
+            table["excitation_harmonics"], f"{name}.excitation_harmonics"
+        )
+    else:
+        raise ConfigError(
+            f"{name} requires both frequency_harmonics and excitation_harmonics."
+        )
     settle_s = _positive_number(table["settle_s"], f"{name}.settle_s")
     if settle_s < 1.5:
         raise ConfigError(f"{name}.settle_s must be at least 1.5 seconds.")
@@ -801,7 +824,8 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
     return LockinSweepConfig(
         frequency_points_hz=frequency_points_hz,
         excitation_points_v_rms=excitation_points_v_rms,
-        harmonics=harmonics,
+        frequency_harmonics=frequency_harmonics,
+        excitation_harmonics=excitation_harmonics,
         skip_unsupported_harmonics=_boolean(
             table["skip_unsupported_harmonics"],
             f"{name}.skip_unsupported_harmonics",
@@ -1012,6 +1036,19 @@ def _integer_tuple(value: Any, name: str, *, minimum: int) -> tuple[int, ...]:
         _integer(item, f"{name}[{index}]", minimum=minimum)
         for index, item in enumerate(value)
     )
+
+
+def _selected_sweep_harmonics(value: Any, name: str) -> tuple[int, ...]:
+    harmonics = _integer_tuple(value, name, minimum=1)
+    if (
+        any(harmonic > 3 for harmonic in harmonics)
+        or len(set(harmonics)) != len(harmonics)
+        or tuple(sorted(harmonics)) != harmonics
+    ):
+        raise ConfigError(
+            f"{name} must be an ascending non-empty combination of 1, 2, and 3."
+        )
+    return harmonics
 
 
 def _require_strictly_increasing(values: tuple[float, ...], name: str) -> None:
