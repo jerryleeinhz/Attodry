@@ -61,13 +61,17 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-sensitivity_mode = "bounded_auto"
-sensitivity_full_scale_v = 0.01
-autorange_min_full_scale_v = 0.01
-autorange_max_full_scale_v = 0.02
-autorange_target_occupancy = 0.85
-autorange_stable_samples = 2
-autorange_max_steps = 1
+# Daily default: keep XX fixed at 20 mV full scale. To opt into bounded_auto,
+# change sensitivity_mode, set sensitivity_full_scale_v to the selected minimum,
+# then uncomment every autorange field below. The documented XX auto pair is
+# 10 mV to 20 mV.
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.020
+# autorange_min_full_scale_v = 0.010
+# autorange_max_full_scale_v = 0.020
+# autorange_target_occupancy = 0.85
+# autorange_stable_samples = 2
+# autorange_max_steps = 1
 settle_time_constants = 5.0
 
 [lockin_xy]
@@ -87,6 +91,15 @@ time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.001
+# To opt into bounded_auto for XY, change sensitivity_mode, set
+# sensitivity_full_scale_v to the selected minimum, and uncomment every field
+# below. The documented XY auto pair is 1 mV to 10 mV. XY SINE OUT remains
+# physically disconnected regardless of range mode.
+# autorange_min_full_scale_v = 0.001
+# autorange_max_full_scale_v = 0.010
+# autorange_target_occupancy = 0.85
+# autorange_stable_samples = 2
+# autorange_max_steps = 1
 settle_time_constants = 5.0
 
 [lockin_sweep]
@@ -119,10 +132,8 @@ excitation_points_v_rms = [
 harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
-# XX uses this temporary 20 mV measurement range during both sweeps. XY remains
-# fixed at the 1 mV target declared in [lockin_xy], which the sweep now verifies
-# and applies only when necessary.
-temporary_xx_sensitivity_full_scale_v = 0.020
+# Range mode and target/policy belong to [lockin_xx] and [lockin_xy], not this
+# sweep table. Both roles default to fixed mode above; bounded_auto is opt-in.
 # Edit these two audit fields before every run. The run name is also included in
 # the JSON filename; the note is preserved inside the JSON record.
 run_name = "replace_before_run"

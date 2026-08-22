@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 import math
 
+from .sr830_settings import sensitivity_code
+
 
 class AutorangeAction(StrEnum):
     KEEP = "keep"
@@ -21,10 +23,25 @@ class AutorangePolicy:
     maximum_adjustment_steps: int
 
     def __post_init__(self) -> None:
-        if (self.minimum_full_scale_v, self.maximum_full_scale_v) != (0.01, 0.02):
-            raise ValueError("XX autorange bounds must be the confirmed 0.01-0.02 V")
-        if not 0.0 < self.target_occupancy < 1.0:
-            raise ValueError("target_occupancy must be between zero and one")
+        try:
+            sensitivity_code(self.minimum_full_scale_v)
+            sensitivity_code(self.maximum_full_scale_v)
+        except ValueError as exc:
+            raise ValueError(
+                "autorange bounds must use project-confirmed SR830 full scales"
+            ) from exc
+        if (self.minimum_full_scale_v, self.maximum_full_scale_v) not in {
+            (0.001, 0.01),
+            (0.01, 0.02),
+        }:
+            raise ValueError(
+                "autorange bounds must be a confirmed adjacent pair: "
+                "0.001-0.01 V or 0.01-0.02 V"
+            )
+        if not math.isclose(
+            self.target_occupancy, 0.85, rel_tol=0.0, abs_tol=1e-12
+        ):
+            raise ValueError("target_occupancy must be the confirmed value 0.85")
         if self.stable_samples_before_narrowing != 2:
             raise ValueError(
                 "stable_samples_before_narrowing must be the confirmed value 2"
@@ -55,7 +72,7 @@ def decide_autorange(
     amplitude_v: float,
     overload: bool,
 ) -> AutorangeDecision:
-    """Return one deterministic XX pre-sampling range decision without I/O."""
+    """Return one deterministic pre-sampling range decision without I/O."""
 
     if state.current_full_scale_v not in (
         policy.minimum_full_scale_v,

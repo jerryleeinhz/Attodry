@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 
 from .commissioning_analysis import (
     CommissioningSample,
+    ExcitationPathResistance,
     aggregate_sweep_samples,
     load_sweep_samples,
 )
@@ -46,13 +47,19 @@ def plot_xy_sweep(
     metric: str = "amplitude_v",
     x_axis: str | None = None,
     log_x: bool | None = None,
+    excitation_path: ExcitationPathResistance | None = None,
     destination: str | Path | None = None,
 ):
     """Plot an XY-only frequency or excitation sweep and label its harmonic."""
 
     xy_rows = tuple(row for row in rows if row.role == "xy")
     harmonic = xy_sweep_harmonic(xy_rows)
-    statistics = aggregate_sweep_samples(xy_rows, metric=metric, x_axis=x_axis)
+    statistics = aggregate_sweep_samples(
+        xy_rows,
+        metric=metric,
+        x_axis=x_axis,
+        excitation_path=excitation_path,
+    )
     scan_type = xy_rows[0].scan_type
     resolved_x_axis = x_axis or (
         "target_frequency_hz" if scan_type == "frequency" else "source_v_rms"
@@ -81,6 +88,7 @@ def plot_xy_sweep(
             "target_frequency_hz": "Frequency (Hz)",
             "source_v_rms": "Source voltage (V RMS)",
             "nominal_current_a_rms": "Nominal current (A RMS)",
+            "sine_output_current_a_rms": "SINE OUT current (A RMS)",
         }[resolved_x_axis]
     )
     axis.set_ylabel(

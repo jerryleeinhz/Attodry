@@ -330,6 +330,27 @@ Completed in Stage 3:
   operator label and note; the label is safely included in the filename. The
   fake-VISA coverage and full offline suite passed (231 tests, 4 skipped), with
   no real instrument connection or write.
+- Completed offline dual-role range and live-status integration (2026-08-22):
+  XX and XY now independently choose `fixed` or opt-in `bounded_auto` in their
+  own TOML tables. The daily defaults are fixed XX 20 mV and fixed XY 1 mV; the
+  obsolete sweep-level temporary-XX field was removed. Auto policy is constrained
+  to XX 10--20 mV or XY 1--10 mV, 0.85 occupancy, two consecutive h1 fit probes
+  before narrowing, and one adjustment per continuous sweep. Probe/transition
+  records, verified range readbacks, and cleanup restoration are retained in
+  JSON without entering formal curves. A new `monitor-live` command displays
+  paired X/Y/R, phase, frequency, harmonic, sensitivity, output, and optional
+  latch status through queries only; it cannot send settings writes. Fake-VISA
+  coverage and the full offline suite passed (248 tests, 5 matplotlib-dependent
+  skips); no real instrument was opened or written.
+- Completed offline analysis-calibration handoff (2026-08-22): frequency and
+  current plots default to the per-sweep archived
+  `measurement_config.excitation_path`, rather than duplicating resistance
+  values in a notebook. The snapshot contains the configured external-series and
+  approximate-device resistance, the fixed 50 ohm SR830 output resistance, and
+  the total. Legacy files require an explicit analysis-only override, and mixed
+  archived paths are rejected. Targeted analysis/notebook tests passed (19 tests,
+  4 matplotlib-dependent skips) plus source compilation; no hardware resource
+  was opened or written.
 - During main integration, the strict temperature-only configuration loader was
   updated to recognize `[lockin_sweep]` as an unrelated optional table. Daily
   temperature operation therefore continues to use the unified local TOML

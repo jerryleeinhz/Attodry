@@ -51,6 +51,9 @@ class CommissioningSample:
     source_v_rms: float
     sine_output_v_rms: float
     nominal_current_a_rms: float | None
+    recorded_external_series_resistance_ohm: float | None
+    recorded_sr830_output_resistance_ohm: float | None
+    recorded_approximate_device_resistance_ohm: float | None
     role: str
     harmonic: int
     x_v: float
@@ -268,6 +271,48 @@ def browse_and_load_commissioning_file(
     return None if path is None else (path, load_commissioning_file(path))
 
 
+def excitation_path_from_sweep_files(
+    paths: Iterable[str | Path],
+    *,
+    excitation_path_override: ExcitationPathResistance | None = None,
+) -> ExcitationPathResistance:
+    """Resolve one analysis path from recorded sweep metadata or an override.
+
+    New sweep JSON files archive the complete path in
+    ``measurement_config.excitation_path``. All selected files must agree so a
+    plotted condition cannot silently combine incompatible current calibrations.
+    An explicit override is reserved for legacy records that lack this metadata.
+    """
+
+    selected_paths = tuple(Path(path) for path in paths)
+    if not selected_paths:
+        raise ValueError("At least one sweep file is required for current calibration.")
+    if excitation_path_override is not None:
+        return excitation_path_override
+    recorded_paths: set[ExcitationPathResistance] = set()
+    for path in selected_paths:
+        payload = load_commissioning_file(path)
+        if not isinstance(payload, dict) or payload.get("scan") not in {
+            "frequency",
+            "excitation",
+        }:
+            raise ValueError(f"{path} is not a frequency or excitation sweep.")
+        recorded = _recorded_excitation_path(payload)
+        if recorded is None:
+            raise ValueError(
+                f"{path.name} has no recorded measurement_config.excitation_path; "
+                "provide an explicit ExcitationPathResistance override only for "
+                "legacy data."
+            )
+        recorded_paths.add(recorded)
+    if len(recorded_paths) != 1:
+        raise ValueError(
+            "Selected sweep files record different excitation paths; analyze them "
+            "separately or provide one explicit override."
+        )
+    return next(iter(recorded_paths))
+
+
 def load_sweep_samples(
     path: str | Path,
     *,
@@ -294,6 +339,7 @@ def load_sweep_samples(
     if unknown_roles:
         raise ValueError(f"Unknown roles: {sorted(unknown_roles)}")
     record_status = "completed" if completed else "rejected"
+    recorded_excitation_path = _recorded_excitation_path(payload)
     rows: list[CommissioningSample] = []
     points = payload.get("points", [])
     if not isinstance(points, list):
@@ -319,6 +365,7 @@ def load_sweep_samples(
                     sample=sample,
                     role=role,
                     problems=problems,
+                    recorded_excitation_path=recorded_excitation_path,
                 )
                 if selected_statuses is None or not selected_statuses.isdisjoint(
                     row.statuses
@@ -376,9 +423,14 @@ def aggregate_sweep_samples(
         )
     if x_axis not in SWEEP_X_AXES:
         raise ValueError(f"Unsupported x axis: {x_axis}")
+    resolved_excitation_path = (
+        _single_excitation_path_for_rows(rows, excitation_path)
+        if x_axis == "sine_output_current_a_rms"
+        else excitation_path
+    )
     grouped: dict[tuple[float, str], list[float]] = {}
     for row in rows:
-        raw_x = _sweep_x_value(row, x_axis, excitation_path)
+        raw_x = _sweep_x_value(row, x_axis, resolved_excitation_path)
         grouped.setdefault((float(raw_x), row.role), []).append(
             float(getattr(row, metric))
         )
@@ -468,7 +520,7 @@ def plot_role_harmonic_sweep(
     *,
     role: str,
     harmonic: int,
-    excitation_path: ExcitationPathResistance,
+    excitation_path: ExcitationPathResistance | None = None,
     phase_minimum_amplitude_v: float = 0.0,
     phase_maximum_standard_deviation_deg: float | None = None,
     destination: str | Path | None = None,
@@ -609,7 +661,7 @@ def plot_role_harmonic_sweep(
 def plot_six_role_harmonic_sweeps(
     rows: Sequence[CommissioningSample],
     *,
-    excitation_path: ExcitationPathResistance,
+    excitation_path: ExcitationPathResistance | None = None,
     phase_minimum_amplitude_v: float = 0.0,
     phase_maximum_standard_deviation_deg: float | None = None,
 ) -> dict[tuple[str, int], object]:
@@ -719,6 +771,40 @@ def _formal_sample_payloads(payload: Mapping[str, object]):
             yield from (sample for sample in samples if isinstance(sample, dict))
 
 
+def _recorded_excitation_path(
+    payload: Mapping[str, object],
+) -> ExcitationPathResistance | None:
+    """Read a complete path snapshot from a current sweep JSON record.
+
+    Older records predate the snapshot and return ``None``. A present but malformed
+    snapshot is an audit error rather than a reason to silently choose a path.
+    """
+
+    measurement_config = payload.get("measurement_config")
+    if not isinstance(measurement_config, Mapping):
+        return None
+    excitation_path = measurement_config.get("excitation_path")
+    if excitation_path is None:
+        return None
+    if not isinstance(excitation_path, Mapping):
+        raise ValueError("measurement_config.excitation_path must be an object.")
+    values = (
+        excitation_path.get("series_resistance_ohm"),
+        excitation_path.get("sr830_output_resistance_ohm"),
+        excitation_path.get("approximate_device_resistance_ohm"),
+    )
+    if any(value is None for value in values):
+        raise ValueError("measurement_config.excitation_path is incomplete.")
+    try:
+        return ExcitationPathResistance(
+            external_series_resistance_ohm=float(values[0]),
+            sr830_output_resistance_ohm=float(values[1]),
+            approximate_device_resistance_ohm=float(values[2]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("measurement_config.excitation_path is invalid.") from exc
+
+
 def _commissioning_sample(
     *,
     path: Path,
@@ -728,6 +814,7 @@ def _commissioning_sample(
     sample: Mapping[str, object],
     role: str,
     problems: tuple[str, ...],
+    recorded_excitation_path: ExcitationPathResistance | None,
 ) -> CommissioningSample:
     instrument = sample.get(f"lockin_{role}")
     if not isinstance(instrument, dict):
@@ -775,6 +862,21 @@ def _commissioning_sample(
         nominal_current_a_rms=(
             None if nominal_current is None else float(nominal_current)
         ),
+        recorded_external_series_resistance_ohm=(
+            None
+            if recorded_excitation_path is None
+            else recorded_excitation_path.external_series_resistance_ohm
+        ),
+        recorded_sr830_output_resistance_ohm=(
+            None
+            if recorded_excitation_path is None
+            else recorded_excitation_path.sr830_output_resistance_ohm
+        ),
+        recorded_approximate_device_resistance_ohm=(
+            None
+            if recorded_excitation_path is None
+            else recorded_excitation_path.approximate_device_resistance_ohm
+        ),
         role=role,
         harmonic=int(reading["harmonic"]),
         x_v=float(reading["x_v"]),
@@ -805,17 +907,59 @@ def _validated_filter(
     return values
 
 
+def _excitation_path_for_row(
+    row: CommissioningSample,
+    override: ExcitationPathResistance | None,
+) -> ExcitationPathResistance:
+    """Use an explicit override, otherwise the path archived with this record."""
+
+    if override is not None:
+        return override
+    values = (
+        row.recorded_external_series_resistance_ohm,
+        row.recorded_sr830_output_resistance_ohm,
+        row.recorded_approximate_device_resistance_ohm,
+    )
+    if all(value is None for value in values):
+        raise ValueError(
+            "SINE OUT current requires the recorded measurement_config.excitation_path; "
+            "provide an explicit ExcitationPathResistance override only for legacy data."
+        )
+    if any(value is None for value in values):
+        raise ValueError("Recorded excitation-path resistance is incomplete.")
+    return ExcitationPathResistance(
+        external_series_resistance_ohm=float(values[0]),
+        sr830_output_resistance_ohm=float(values[1]),
+        approximate_device_resistance_ohm=float(values[2]),
+    )
+
+
+def _single_excitation_path_for_rows(
+    rows: Sequence[CommissioningSample],
+    override: ExcitationPathResistance | None,
+) -> ExcitationPathResistance:
+    """Resolve one path and reject a mixed-calibration curve by default."""
+
+    if override is not None:
+        return override
+    paths = {_excitation_path_for_row(row, None) for row in rows}
+    if len(paths) != 1:
+        raise ValueError(
+            "Selected sweep rows record different excitation paths; plot them "
+            "separately or provide one explicit ExcitationPathResistance override."
+        )
+    return next(iter(paths))
+
+
 def _sweep_x_value(
     row: CommissioningSample,
     x_axis: str,
     excitation_path: ExcitationPathResistance | None,
 ) -> float:
     if x_axis == "sine_output_current_a_rms":
-        if excitation_path is None:
-            raise ValueError(
-                "SINE OUT current requires an explicit ExcitationPathResistance."
-            )
-        return excitation_path.current_from_sine_output(row.sine_output_v_rms)
+        return _excitation_path_for_row(
+            row, excitation_path
+        ).current_from_sine_output(row.sine_output_v_rms)
     raw_x = getattr(row, x_axis)
     if raw_x is None:
         raise ValueError(f"Selected x axis {x_axis} contains missing values.")
@@ -824,12 +968,15 @@ def _sweep_x_value(
 
 def _current_summary(
     rows: Sequence[CommissioningSample],
-    excitation_path: ExcitationPathResistance,
+    excitation_path: ExcitationPathResistance | None,
 ) -> str:
     if not rows:
         return "I_RMS unavailable"
+    resolved_excitation_path = _single_excitation_path_for_rows(
+        rows, excitation_path
+    )
     currents = [
-        excitation_path.current_from_sine_output(row.sine_output_v_rms)
+        resolved_excitation_path.current_from_sine_output(row.sine_output_v_rms)
         for row in rows
     ]
     minimum = min(currents)

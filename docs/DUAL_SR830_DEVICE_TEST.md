@@ -227,16 +227,20 @@ An instrument error, unexpected time-constant change, or XX internal-reference
 unlock during transition fails immediately. Any unlock, overload, or error after
 the second settling interval in the formal sample window also fails the scan.
 
-Before its baseline sample, the frequency scan targets `lockin_xx` sensitivity
-code 21 (20 mV) and the configured fixed `lockin_xy` sensitivity code 17 (1 mV).
-It writes either `SENS` setting only when the preflight readback differs, then
-reads back both targets and records the range-transition status. This prevents a
-genuine output overload seen when Vxx reached about 1.09 mV at 50 Hz on the 1 mV
-range, while making the XY fixed-range policy an observed setting rather than an
-assumption. The setup transition accepts no overload or unlock latch. It does
-not change the 4 mVrms source. Cleanup returns to 17.777 Hz while the wider XX
-range is still active, then restores each original range only if that role was
-changed and verifies both readbacks.
+Before formal sampling, each role follows the range policy declared in its own
+`[lockin_xx]` or `[lockin_xy]` table. The daily defaults are fixed XX code 21
+(20 mV) and fixed XY code 17 (1 mV); a role uses `SENS` only when its preflight
+readback differs. An operator may instead explicitly select `bounded_auto` for
+either role, with that role's complete, restricted `autorange_*` policy. Every
+range decision, write, readback, transition status, and final formal range is
+audited. This prevents the genuine output overload seen when Vxx reached about
+1.09 mV at 50 Hz on the 1 mV range without silently enabling XY auto-ranging.
+When any role is automatic, each sweep point first retains a sequential h1
+preprobe for both instruments, carries its state through the continuous scan,
+and freezes the resulting range before formal h1/h2/h3 samples. No range
+transition changes the 4 mVrms source. Cleanup returns to 17.777 Hz while the
+selected range remains active, then restores each original range only if that
+role was changed and verifies both readbacks.
 
 The frequency sweep uses a separate 100 ppm relative tolerance, with the existing
 1.01 mHz absolute floor, for the locked XY external-frequency readback. Retained
@@ -258,8 +262,9 @@ external resistor, the SR830 50 ohm output resistance, and an approximate
 python -m attodry_control.lockin_test sweep-excitation
 ```
 
-Both commands require the strict `[lockin_sweep]` table in
-`config\hardware.local.toml`. The checked-in example documents every field:
+Both commands require the strict `[lockin_sweep]`, `[lockin_xx]`, and
+`[lockin_xy]` tables in `config\hardware.local.toml`. The checked-in example
+documents every field:
 
 - `frequency_points_hz`: ten logarithmically spaced fundamentals from 17.777 Hz
   to 100 kHz.
@@ -269,12 +274,18 @@ Both commands require the strict `[lockin_sweep]` table in
 - `skip_unsupported_harmonics = true`: at high fundamentals, retain supported
   orders and record h2/h3 as skipped when their detection frequency would exceed
   the SR830 102 kHz limit.
-- `temporary_xx_sensitivity_full_scale_v = 0.020`: use sensitivity code 21
-  (20 mV full scale) for `lockin_xx` during the sweep, then restore its original
-  range if it changed.
-- `lockin_xy.sensitivity_full_scale_v = 0.001`: the fixed XY target (code 17).
-  The sweep verifies it every time and writes it only when preflight found a
-  different range; it is never changed point-by-point or auto-ranged.
+- `lockin_xx.sensitivity_mode` / `lockin_xy.sensitivity_mode`: both defaults
+  to `fixed`, with XX 20 mV (code 21) and XY 1 mV (code 17). Change only the
+  chosen role to `bounded_auto` when automatic judgment is wanted; it is opt-in,
+  never an implicit sweep default.
+- `sensitivity_full_scale_v`: the fixed target, or the minimum range in that
+  role's automatic policy. A fixed range is verified and written only when
+  preflight differs.
+- `autorange_min_full_scale_v`, `autorange_max_full_scale_v`,
+  `autorange_target_occupancy = 0.85`, `autorange_stable_samples = 2`, and
+  `autorange_max_steps = 1`: required only for a role explicitly set to
+  `bounded_auto`. The documented daily pairs are XX 10--20 mV and XY 1--10 mV;
+  all transitions remain fail-closed and recorded.
 - `run_name` and `note`: required per-run audit metadata. The nonempty, safe
   filename label `run_name` is included in the JSON name; the nonempty `note`
   remains in the JSON record.
@@ -295,12 +306,12 @@ See [`LOCKIN_DAILY_OPERATION.md`](LOCKIN_DAILY_OPERATION.md) for the daily
 sequence and a concise explanation of the full table.
 
 The daily sweep commands no longer accept per-run wiring confirmations or an
-arming flag. `[lockin_sweep]` is the single source for their limits and timing,
-while the strict lock-in TOML still records the semantic reference roles and
-the XY SINE OUT disconnection. This does not replace the operator's physical
-inspection: the preflight can validate readbacks, lock, overload and error
-states, but cannot see a cable. A preflight failure stops the scan before any
-sweep setting is written.
+arming flag. `[lockin_sweep]` is the source for sweep limits and timing, while
+the two strict Lock-in tables are the source for range policies, semantic
+reference roles, and the XY SINE OUT disconnection. This does not replace the
+operator's physical inspection: the preflight can validate readbacks, lock,
+overload and error states, but cannot see a cable. A preflight failure stops the
+scan before any sweep setting is written.
 
 Each point records h1, h2, and h3 in order: both instruments receive the paired
 `HARM` setting, wait for the configured settling time, and then collect the
@@ -321,7 +332,7 @@ actual SR830 readbacks remain in `preflight`, `sensitivity_setup`, each point,
 and `cleanup`. Failure to write the audit file fails the command rather than
 reporting an unarchived measurement as complete.
 
-`--settle-s` is a transition-settling interval. The excitation command refuses
+`--settle-s` is a transition-settling interval. Both daily sweep commands refuse
 an interval below 1.5 s before opening either VISA resource. At the current
 300 ms / 24 dB/oct bench setting, every actual `SLVL` (SINE OUT) change waits two
 intervals before the output readback and formal h1 sample: 3.0 s by default.

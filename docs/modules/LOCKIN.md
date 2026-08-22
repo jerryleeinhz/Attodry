@@ -24,7 +24,8 @@ TOML 模板现已声明输入、屏蔽、耦合、时间常数、滤波、灵敏
 1. 把两台 SR830 的期望设置用物理量和语义角色写入严格 TOML 契约。
 2. 在所有采集路径保留 X、Y、R、原始相位、频率、谐波和时间信息。
 3. 查询并记录 SR830 的 `PHAS?` 相移设置，禁止隐式 Auto Phase。
-4. 提供固定量程和显式启用的受限自动量程；任何实际 `SENS` 写入继续需要授权。
+4. 提供固定量程和显式启用的受限自动量程；日常 sweep 仅能按已解析的本地 TOML
+   策略写入/恢复 `SENS`，独立 commissioning 命令仍要求各自的显式授权。
 5. 把转换期状态和正式采样状态分开，保留全部原始记录并严格验收正式窗口。
 6. 保持独立 Lock-in 测试不导入 cryostat、magnet 或 gate 控制路径。
 
@@ -48,13 +49,16 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-sensitivity_mode = "bounded_auto"
-sensitivity_full_scale_v = 0.01
-autorange_min_full_scale_v = 0.01
-autorange_max_full_scale_v = 0.02
-autorange_target_occupancy = 0.85
-autorange_stable_samples = 2
-autorange_max_steps = 1
+# Default daily policy: fixed XX at 20 mV.
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.020
+# To opt in to XX bounded_auto, change the mode and use this complete policy:
+# sensitivity_full_scale_v = 0.010
+# autorange_min_full_scale_v = 0.010
+# autorange_max_full_scale_v = 0.020
+# autorange_target_occupancy = 0.85
+# autorange_stable_samples = 2
+# autorange_max_steps = 1
 settle_time_constants = 5.0
 
 [lockin_xy]
@@ -67,15 +71,23 @@ time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.001
+# To opt in to XY bounded_auto, change the mode and use this complete policy:
+# autorange_min_full_scale_v = 0.001
+# autorange_max_full_scale_v = 0.010
+# autorange_target_occupancy = 0.85
+# autorange_stable_samples = 2
+# autorange_max_steps = 1
 settle_time_constants = 5.0
 ```
 
-2026-08-21 用户确认：XY 固定 1 mV；XX 以 10 mV 为启动和最窄量程，20 mV
-为最宽量程，目标占比 0.85，缩窄前需要两个连续安全样本，每个实验条件的预备
-阶段最多调整一次。10 mV 对已记录最大 Vxx 5.384 mV 的占比约 53.8%，但这不
-保证新的温度、磁场、门压或频率条件不会超过 8.5 mV 阈值。
+2026-08-22 日常默认改为两台都固定：XX 20 mV、XY 1 mV。只有操作者在本机
+`hardware.local.toml` 把某一角色明确切换为 `bounded_auto` 时，才执行该角色的
+自动判断。推荐自动对为 XX 10 mV--20 mV、XY 1 mV--10 mV；两者使用 0.85 目标
+占用率、缩窄前两个连续安全样本、每条连续扫描最多一次调整。10 mV 对已记录最大
+Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压或频率条件不会超过
+8.5 mV 阈值。
 
-## 参数与配置含义（2026-08-21 确认）
+## 参数与配置含义（当前日常策略）
 
 所有电压均为 SR830 full-scale 或 RMS 的 SI 单位（V），不是仪器前面板代码。
 代码映射只保存在驱动层：1 mV、10 mV、20 mV 分别对应 `SENS` 代码 17、20、21。
@@ -92,16 +104,17 @@ settle_time_constants = 5.0
 | `time_constant_s` | 数字滤波时间常数，固定 0.3 s。 | 本模块不自动选择时间常数。 |
 | `filter_slope_db_oct` | 低通滤波斜率，固定 24 dB/oct。 | 与时间常数共同定义带宽，不能在正式采样中变化。 |
 | `settle_time_constants` | 每次连接或设置转换后等待的时间常数个数，固定 5.0。 | 当前最短等待为 `5 × 0.3 s = 1.5 s`；这不是缩短等待的授权。 |
-| `sensitivity_mode` | XX 为 `bounded_auto`；XY 为 `fixed`。 | XY 不自动量程，以免零场噪声底触发追逐；L5 不会执行任何量程写入。 |
-| `sensitivity_full_scale_v` | 固定模式的量程；XX 自动模式的起始且最窄量程。XX 10 mV，XY 1 mV。 | XX 自动模式中必须等于 `autorange_min_full_scale_v`。它是期望策略，实际量程以 `SENS?` 读回为准。 |
-| `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | XX 可用范围为 10 mV / 20 mV。 | 仅 XX 的 `bounded_auto` 使用；不可扩大边界。 |
-| `autorange_target_occupancy` | 0.85，即 XX 10 mV 时的阈值是 8.5 mV。 | 到达或超过阈值、或报告过载时，才允许向 20 mV 放宽；20 mV 仍超阈值则 fail closed。 |
-| `autorange_stable_samples` | 在 20 mV 时，连续 2 个不超过 8.5 mV 的样本才可缩窄到 10 mV。 | 任一不合格样本重置计数；这形成迟滞而不是逐点抖动。 |
-| `autorange_max_steps` | 每个实验条件的预备阶段最多调整 1 次。 | 正式采样前冻结量程；扫描中的大幅变化不会由自动量程追随。 |
+| `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
+| `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
+| `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | 选中角色的自动范围边界。推荐 XX 10--20 mV、XY 1--10 mV。 | 仅 `bounded_auto` 使用；必须是项目已确认的相邻 1--10 mV 或 10--20 mV 档位。 |
+| `autorange_target_occupancy` | 0.85。 | 到达或超过阈值、或报告过载时，才允许向该角色的最大量程放宽；最大量程仍不安全则 fail closed。 |
+| `autorange_stable_samples` | 2 个连续安全样本。 | 在最大量程时达到该数量，才允许缩窄；任一不合格样本重置计数。 |
+| `autorange_max_steps` | 每条连续扫描最多 1 次调整。 | 防止量程来回追逐；每次正式采样前冻结实际量程。 |
 
-`bounded_auto` 是可审计的预备阶段状态机，不是 SR830 的 `AGAN` 命令替代品。
-每次许可的 `SENS` 转换都必须单独获写入授权、读回新代码、保存转换记录、至少等
-待 1.5 s、在已单独授权的前提下消费转换锁存、再次等待，并在正式样本前冻结量程。
+`bounded_auto` 是可审计的预备阶段状态机，不是 SR830 的 `AGAN` 命令替代品。每次
+允许的 `SENS` 转换都必须读回新代码、保存转换记录、至少等待 1.5 s、消费并记录
+转换锁存、再次等待，并在正式样本前冻结量程。固定模式仍会在预检不匹配时采用相同
+的读回和审计要求。
 
 ## Lock-in 实验经验和必须落实的规则
 
@@ -135,8 +148,9 @@ settle_time_constants = 5.0
 - 最后验收时间常数为 300 ms，滤波为 24 dB/oct。设置或连接改变后至少等待
   5 个时间常数，即当前至少 1.5 s。
 - 对每个实际 SINE OUT (`SLVL`) 幅值改变，激励扫幅使用两个上述 interval：当前
-  至少 3.0 s，才读回输出并采集 h1；`--settle-s` 小于 1.5 s 会在打开 VISA 前
-  失败。JSON 的 `source_step_settle_s` 记录该实际等待时间，不修改任何相位设置。
+  至少 3.0 s，才读回输出并采集 h1；任一日常 sweep 的 `settle_s` 小于 1.5 s 都会在
+  打开 VISA 前失败。JSON 的 `source_step_settle_s` 记录该实际等待时间，不修改任何
+  相位设置。
 - 以 0.3 s 间隔采集的样本仍相关，不能把它们当作完全独立样本计算误差。
 - 第一版不要自动选择时间常数；保持固定噪声带宽，避免额外转换锁存和不可比数据。
 
@@ -144,18 +158,21 @@ settle_time_constants = 5.0
 
 - 两台最后基线为 1 mV full-scale。XX 在约 50 Hz、R 约 1.09 mV 时曾产生
   真实 output overload，扫频因此临时使用 20 mV 量程。
-- 自动量程必须是可审计的受限状态机：过载或接近 full-scale 时立即放宽；只有
-  连续稳定低占比样本才缩窄；达到用户配置边界或最大步数即停止。
+- 自动量程必须是可审计的受限状态机：**output overload** 或达到 full-scale 占用率
+  阈值时才立即放宽；input/reserve、filter overload 均保守拒绝。只有连续稳定低占比
+  样本才缩窄；达到用户配置边界或最大步数即停止。
 - 每次改变 `SENS` 后记录转换期状态、等待至少 5 tau、消费明确允许的锁存，
   再次等待后才进入正式采样。
 - 自动量程只在每个实验条件的预备阶段运行，正式样本期间冻结量程。
 - XY 零场信号接近量化/噪声底，不能无下界地自动缩窄量程或追逐噪声。
-- 直接调用 SR830 `AGAN` 不能绕过项目边界、状态记录、等待和写入授权。
+- 直接调用 SR830 `AGAN` 不能绕过项目边界、状态记录、等待和日常 TOML/commissioning
+  写入范围约束。
 
 ### 状态锁存与扫频
 
-- `LIAS?` 和 `ERRS?` 会清除锁存位。读取前必须明确授权，并在清除前保存原始值、
-  时间和所处阶段。
+- `LIAS?` 和 `ERRS?` 会清除锁存位。日常 sweep 只能在已解析 TOML 所声明的预检、
+  转换和正式窗口中读取它们，并在清除前保存原始值、时间和所处阶段；独立
+  commissioning 命令继续要求显式授权。
 - 改频率时曾观察到 XY 的 unlock、frequency-range-change 和 overload 转换锁存。
   转换期记录可以单独消费，但正式采样窗口出现任何 unlock/overload/error 仍失败。
 - XY 外参考读回在保持锁定时观察到最高约 54 ppm 偏差。100 ppm 只适用于已验收
@@ -172,10 +189,13 @@ settle_time_constants = 5.0
 - SR830 的软件最小输出不是电气断开。异常 cleanup 后仍需人工确认实际接线和
   前面板读回。
 - 只读扫频/扫幅分析的电流不是新的独立测量值，而是 `SINE OUT Vrms / 完整串联路径
-  电阻`。在 `notebooks/sr830_commissioning_sweeps.ipynb` 开头的 controls cell 修改
-  `EXTERNAL_SERIES_RESISTANCE_OHM`、`SR830_OUTPUT_RESISTANCE_OHM` 和
-  `APPROXIMATE_DEVICE_RESISTANCE_OHM`；当前为 100000 Ω、50 Ω、500 Ω，总计 100550 Ω。
-  该改动只改变绘图标尺，不写仪器，也不能替代下一次激励扫描所需的安全确认。
+  电阻`。日常扫描路径的可变电阻只在忽略提交的 `hardware.local.toml` 的
+  `[lockin_sweep]` 表中设置：`external_series_resistance_ohm` 和
+  `approximate_device_resistance_ohm`；固定 SR830 输出阻抗为 50 Ω。每次 sweep 把三项
+  和总阻抗归档进 JSON 的 `measurement_config.excitation_path`。Notebook 默认使用该
+  历史快照，不会复制或重读当前本机 TOML；只有没有该快照的旧 JSON 才需显式的
+  `EXCITATION_PATH_OVERRIDE`。该覆盖只改变只读绘图标尺，不写仪器，也不能替代下一次
+  激励扫描所需的安全确认。
 
 ## 阶段和验收条件
 
@@ -197,6 +217,11 @@ settle_time_constants = 5.0
    两次等待至少 5 tau，保留 transition/verification 样本后才冻结正式量程。
 
 该计划不把 TOML 期望值当作当前仪器读回，也不改变已经验收的真实台架状态。
+
+2026-08-22 更新：以上 L0--L3 段落保留为当时的历史验收范围。当前**日常** sweep
+契约已允许 XX 与 XY 分别 opt-in `bounded_auto`，默认仍是两台 fixed；旧的
+`commission-xx-autorange-narrow` commissioning helper 则继续严格只服务 XX，不能
+用它对 XY 进行量程写入。
 
 ### L0 - contract（当前：complete）
 
@@ -412,25 +437,35 @@ XX h1 在 11/11 点达到默认相位质量门槛（R >= 1 µVrms 且三次样�
 
 2026-08-22：将重复的 sweep 参数集中到严格的 `[lockin_sweep]` TOML 表。当前站点
 配置固定保存 17.777 Hz--100 kHz 的十个对数等距频点、4--400 mVrms 的十一个幅值点、
-h1/h2/h3、有界高频跳过、XX 临时 20 mV、1.5 s settle、每点三个样本、0.3 s 间隔，
-以及 100 kΩ 外部串联、50 Ω SR830 输出、约 500 Ω 器件、5 mArms/0.5 Vrms 上限和
-无外部 50 Ω 端接。sweep 现在必须使用严格 hardware TOML；两个逐次接线 confirm 不再
-是运行参数。日常只需 `sweep-frequency` 或 `sweep-excitation`；严格预检失败时不会开始
-扫描，但 TOML 不能替代对 XY SINE OUT 实际断开的物理检查。每次已打开双机的尝试都会原子
-保存到 `output_directory`（默认仓库根 `run_data/commissioning`），带
-`completed`/`rejected`/`interrupted` 状态。JSON 的无 VISA 地址
-`measurement_config` 是已解析 TOML 请求；实际读回保留在 preflight、point 和 cleanup。
-扫频点也记录由配置的 4 mVrms 与完整串联路径算出的名义电流。未连接真实仪器或发出写命令。
-日常操作顺序和所有 `[lockin_sweep]` 字段说明见
+h1/h2/h3、有界高频跳过、1.5 s settle、每点三个样本、0.3 s 间隔，以及 100 kΩ
+外部串联、50 Ω SR830 输出、约 500 Ω 器件、5 mArms/0.5 Vrms 上限和无外部 50 Ω
+端接。范围策略不再由该表覆盖，而是由 `[lockin_xx]` 与 `[lockin_xy]` 各自的
+`sensitivity_mode` 和范围字段唯一决定。sweep 现在必须使用严格 hardware TOML；两个
+逐次接线 confirm 不再是运行参数。日常只需 `sweep-frequency` 或
+`sweep-excitation`；严格预检失败时不会开始扫描，但 TOML 不能替代对 XY SINE OUT 实际
+断开的物理检查。每次已打开双机的尝试都会原子保存到 `output_directory`（默认仓库根
+`run_data/commissioning`），带 `completed`/`rejected`/`interrupted` 状态。JSON 的无
+VISA 地址 `measurement_config` 是已解析 TOML 请求；实际读回保留在 preflight、point 和
+cleanup。扫频点也记录由配置的 4 mVrms 与完整串联路径算出的名义电流。日常操作顺序和
+所有字段说明见
 [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。
 
-2026-08-22：日常 sweep 在进入正式点前会实际读回两台 SR830 的量程。XX 的目标仍为
-临时 20 mV；XY 的目标固定为 `[lockin_xy].sensitivity_full_scale_v = 1 mV`，并且只在
-预检读回不一致时才写 `SENS`，不是逐点自动量程。任何 XY 量程转换的过载或失锁都会拒绝
-该次扫描；cleanup 仅恢复本次实际改变过的 XX/XY 原量程并严格验证。`[lockin_sweep]` 中
-新增必填 `run_name` 与 `note`：名称安全地进入 JSON 文件名，备注与双机量程设置/读回一同
-保留在 JSON 审计记录；两项都应在每次日常运行前填写。此变更仅通过 fake-VISA 离线测试，
-没有连接或写入真实仪器。
+2026-08-22：日常 sweep 的双角色量程契约改为 opt-in：默认 XX 固定 20 mV、XY 固定
+1 mV；操作者可独立把任一角色改为 `bounded_auto`。自动策略的候选范围、占用率阈值、
+稳定样本数和最大调整步数必须完整地写入同一角色表，且不会因扫描命令或另一个角色启用
+auto 而隐式打开。每个固定确认或自动决策的写入、读回、状态转换和 cleanup 恢复都应保留
+在 JSON 审计记录。任何 XY 量程转换的失锁、输入/滤波过载或未许可过载都会拒绝该次扫描；
+只有已记录的 XY 缩窄转换可消费 `LIAS=4`，且后续验证必须完全干净。`[lockin_sweep]` 中
+的必填 `run_name` 与 `note` 仍分别作为安全 JSON 文件名标签和审计备注；两项都应在每次
+日常运行前填写。
+
+2026-08-22：新增 `monitor-live` 作为独立的只读双 SR830 状态面板。它显示 XX/XY 的
+X/Y/R、测量相位、设定与 SNAP 频率、谐波、当前 SENS 代码、SINE OUT 和可选的锁定/过载/
+错误状态；不会发送 `SENS`、`HARM`、`FREQ`、`SLVL` 或 cleanup 写入。真实的
+`LIAS?`/`ERRS?` 状态需要显式 `--consume-status-latches`，因其会消费锁存位；因此不得
+同 sweep 或其他访问相同 VISA 地址的程序并行使用。完整日常命令与字段解释见
+[`../LOCKIN_LIVE_MONITOR.md`](../LOCKIN_LIVE_MONITOR.md) 和
+[`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。
 
 ## 预计文件所有权
 

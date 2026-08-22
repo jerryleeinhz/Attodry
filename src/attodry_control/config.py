@@ -18,7 +18,6 @@ from .sr830_settings import (
     SensitivityMode,
     ShieldGrounding,
     map_sr830_settings,
-    sensitivity_code,
 )
 from .stability import StabilityCriteria
 
@@ -130,7 +129,6 @@ class LockinSweepConfig:
     excitation_points_v_rms: tuple[float, ...]
     harmonics: tuple[int, ...]
     skip_unsupported_harmonics: bool
-    temporary_xx_sensitivity_full_scale_v: float
     run_name: str
     note: str
     settle_s: float
@@ -636,8 +634,6 @@ def _parse_lockin(
     autorange_stable_samples = None
     autorange_max_steps = None
     if sensitivity_mode is SensitivityMode.BOUNDED_AUTO:
-        if role is not LockinRole.XX:
-            raise ConfigError("lockin_xy sensitivity_mode must remain 'fixed'.")
         autorange_min_full_scale_v = _positive_number(
             table["autorange_min_full_scale_v"],
             f"{name}.autorange_min_full_scale_v",
@@ -670,6 +666,14 @@ def _parse_lockin(
             )
         except ValueError as exc:
             raise ConfigError(f"{name}: {exc}") from exc
+        required_bounds = (
+            (0.01, 0.02) if role is LockinRole.XX else (0.001, 0.01)
+        )
+        if (autorange_min_full_scale_v, autorange_max_full_scale_v) != required_bounds:
+            raise ConfigError(
+                f"{name} bounded_auto range must be "
+                f"{required_bounds[0]:g}-{required_bounds[1]:g} V."
+            )
         if sensitivity_full_scale_v != autorange_min_full_scale_v:
             raise ConfigError(
                 f"{name}.sensitivity_full_scale_v must equal the autorange minimum."
@@ -734,7 +738,6 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             "excitation_points_v_rms",
             "harmonics",
             "skip_unsupported_harmonics",
-            "temporary_xx_sensitivity_full_scale_v",
             "run_name",
             "note",
             "settle_s",
@@ -769,14 +772,6 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
     harmonics = _integer_tuple(table["harmonics"], f"{name}.harmonics", minimum=1)
     if harmonics != (1, 2, 3):
         raise ConfigError(f"{name}.harmonics must be exactly [1, 2, 3].")
-    sensitivity_full_scale_v = _positive_number(
-        table["temporary_xx_sensitivity_full_scale_v"],
-        f"{name}.temporary_xx_sensitivity_full_scale_v",
-    )
-    try:
-        sensitivity_code(sensitivity_full_scale_v)
-    except ValueError as exc:
-        raise ConfigError(f"{name}: {exc}") from exc
     settle_s = _positive_number(table["settle_s"], f"{name}.settle_s")
     if settle_s < 1.5:
         raise ConfigError(f"{name}.settle_s must be at least 1.5 seconds.")
@@ -796,7 +791,6 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             table["skip_unsupported_harmonics"],
             f"{name}.skip_unsupported_harmonics",
         ),
-        temporary_xx_sensitivity_full_scale_v=sensitivity_full_scale_v,
         run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
         note=_sweep_note(table["note"], f"{name}.note"),
         settle_s=settle_s,

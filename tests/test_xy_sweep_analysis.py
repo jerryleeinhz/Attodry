@@ -61,6 +61,28 @@ class XYSweepAnalysisTests(unittest.TestCase):
         self.assertEqual(labels, ["XY · h1"])
         self.assertEqual(axis.get_title(), "SR830 XY h1 frequency sweep")
 
+    def test_excitation_current_plot_uses_recorded_path_by_default(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        payload = self._sweep("excitation")
+        payload["measurement_config"] = self._measurement_config_path()
+        payload["points"][0]["source_readback_v_rms"] = 0.0039
+        path = self._write_json(payload)
+        xy_rows = load_xy_sweep_samples(path)
+
+        figure = plot_xy_sweep(
+            xy_rows,
+            x_axis="sine_output_current_a_rms",
+            log_x=False,
+        )
+        self.addCleanup(plt.close, figure)
+
+        axis = figure.axes[0]
+        self.assertEqual(axis.get_xlabel(), "SINE OUT current (A RMS)")
+        self.assertAlmostEqual(axis.lines[0].get_xdata()[0], 0.0039 / 100_550.0)
+
     def test_notebook_keeps_frequency_and_excitation_but_no_xx_series(self) -> None:
         path = PROJECT_ROOT / "notebooks" / "sr830_xy_sweeps.ipynb"
         notebook = json.loads(path.read_text(encoding="utf-8"))
@@ -73,6 +95,9 @@ class XYSweepAnalysisTests(unittest.TestCase):
         self.assertIn("load_xy_sweep_samples", source)
         self.assertIn("frequency_rows", source)
         self.assertIn("excitation_rows", source)
+        self.assertIn("excitation_path_from_sweep_files", source)
+        self.assertIn("EXCITATION_PATH_OVERRIDE", source)
+        self.assertIn("sine_output_current_a_rms", source)
         self.assertNotIn("roles={'xx'", source.lower())
         for index, cell in enumerate(notebook["cells"]):
             if cell["cell_type"] == "code":
@@ -114,6 +139,16 @@ class XYSweepAnalysisTests(unittest.TestCase):
                     ],
                 }
             ],
+        }
+
+    @staticmethod
+    def _measurement_config_path() -> dict[str, object]:
+        return {
+            "excitation_path": {
+                "series_resistance_ohm": 100_000.0,
+                "sr830_output_resistance_ohm": 50.0,
+                "approximate_device_resistance_ohm": 500.0,
+            }
         }
 
     @staticmethod

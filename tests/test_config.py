@@ -45,15 +45,13 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.lockin_xx.input_coupling, InputCoupling.AC)
         self.assertEqual(config.lockin_xx.time_constant_s, 0.3)
         self.assertEqual(config.lockin_xx.filter_slope_db_oct, 24)
-        self.assertEqual(
-            config.lockin_xx.sensitivity_mode, SensitivityMode.BOUNDED_AUTO
-        )
-        self.assertEqual(config.lockin_xx.sensitivity_full_scale_v, 0.01)
-        self.assertEqual(config.lockin_xx.autorange_min_full_scale_v, 0.01)
-        self.assertEqual(config.lockin_xx.autorange_max_full_scale_v, 0.02)
-        self.assertEqual(config.lockin_xx.autorange_target_occupancy, 0.85)
-        self.assertEqual(config.lockin_xx.autorange_stable_samples, 2)
-        self.assertEqual(config.lockin_xx.autorange_max_steps, 1)
+        self.assertEqual(config.lockin_xx.sensitivity_mode, SensitivityMode.FIXED)
+        self.assertEqual(config.lockin_xx.sensitivity_full_scale_v, 0.02)
+        self.assertIsNone(config.lockin_xx.autorange_min_full_scale_v)
+        self.assertIsNone(config.lockin_xx.autorange_max_full_scale_v)
+        self.assertIsNone(config.lockin_xx.autorange_target_occupancy)
+        self.assertIsNone(config.lockin_xx.autorange_stable_samples)
+        self.assertIsNone(config.lockin_xx.autorange_max_steps)
         self.assertEqual(config.lockin_xy.sensitivity_mode, SensitivityMode.FIXED)
         self.assertEqual(config.lockin_xy.sensitivity_full_scale_v, 0.001)
         self.assertEqual(config.lockin_xx.settle_time_constants, 5.0)
@@ -66,9 +64,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(len(config.lockin_sweep.frequency_points_hz), 10)
         self.assertEqual(config.lockin_sweep.frequency_points_hz[-1], 100000.0)
         self.assertEqual(config.lockin_sweep.excitation_points_v_rms[-1], 0.4)
-        self.assertEqual(
-            config.lockin_sweep.temporary_xx_sensitivity_full_scale_v, 0.02
-        )
         self.assertEqual(config.lockin_sweep.run_name, "simulation")
         self.assertEqual(config.lockin_sweep.note, "Simulation fixture.")
         self.assertEqual(config.lockin_sweep.external_series_resistance_ohm, 100000.0)
@@ -167,7 +162,7 @@ class ConfigurationTests(unittest.TestCase):
             ("time_constant_s = 0.3", "time_constant_s = 1.0", "time_constant_s"),
             ("filter_slope_db_oct = 24", "filter_slope_db_oct = 12", "filter_slope"),
             (
-                "sensitivity_full_scale_v = 0.01",
+                "sensitivity_full_scale_v = 0.020",
                 "sensitivity_full_scale_v = 0.005",
                 "sensitivity_full_scale_v",
             ),
@@ -193,14 +188,100 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "at least 5.0"):
             self.load_text(text)
 
-    def test_xy_bounded_autorange_is_rejected(self) -> None:
+    def test_xy_bounded_autorange_is_allowed_with_complete_policy(self) -> None:
         text = self.simulation_text().replace(
-            'sensitivity_mode = "fixed"', 'sensitivity_mode = "bounded_auto"', 1
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.001',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.001",
+                    "autorange_min_full_scale_v = 0.001",
+                    "autorange_max_full_scale_v = 0.01",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 1",
+                )
+            ),
+            1,
         )
-        with self.assertRaisesRegex(ConfigError, "lockin_xy"):
+        config = self.load_text(text)
+        self.assertEqual(
+            config.lockin_xy.sensitivity_mode, SensitivityMode.BOUNDED_AUTO
+        )
+        self.assertEqual(config.lockin_xy.autorange_min_full_scale_v, 0.001)
+        self.assertEqual(config.lockin_xy.autorange_max_full_scale_v, 0.01)
+
+    def test_xy_bounded_autorange_rejects_nonadjacent_pair(self) -> None:
+        text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.001',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.001",
+                    "autorange_min_full_scale_v = 0.001",
+                    "autorange_max_full_scale_v = 0.02",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 1",
+                )
+            ),
+            1,
+        )
+        with self.assertRaisesRegex(ConfigError, "adjacent pair"):
             self.load_text(text)
 
-    def test_xx_autorange_rejects_unconfirmed_policy_values(self) -> None:
+    def test_bounded_autorange_rejects_role_swapped_bounds(self) -> None:
+        xx_text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.020',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.001",
+                    "autorange_min_full_scale_v = 0.001",
+                    "autorange_max_full_scale_v = 0.01",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 1",
+                )
+            ),
+            1,
+        )
+        xy_text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.001',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.01",
+                    "autorange_min_full_scale_v = 0.01",
+                    "autorange_max_full_scale_v = 0.02",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 1",
+                )
+            ),
+            1,
+        )
+        with self.assertRaisesRegex(ConfigError, r"lockin_xx bounded_auto range"):
+            self.load_text(xx_text)
+        with self.assertRaisesRegex(ConfigError, r"lockin_xy bounded_auto range"):
+            self.load_text(xy_text)
+
+    def test_bounded_autorange_rejects_unconfirmed_policy_values(self) -> None:
+        text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.020',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.01",
+                    "autorange_min_full_scale_v = 0.01",
+                    "autorange_max_full_scale_v = 0.02",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 1",
+                )
+            ),
+            1,
+        )
         cases = (
             ("autorange_min_full_scale_v = 0.01", "autorange_min_full_scale_v = 0.005"),
             ("autorange_max_full_scale_v = 0.02", "autorange_max_full_scale_v = 0.05"),
@@ -211,7 +292,7 @@ class ConfigurationTests(unittest.TestCase):
         for old, new in cases:
             with self.subTest(field=old.split()[0]):
                 with self.assertRaises(ConfigError):
-                    self.load_text(self.simulation_text().replace(old, new, 1))
+                    self.load_text(text.replace(old, new, 1))
 
     def test_hardware_only_table_is_rejected_in_simulation(self) -> None:
         text = (

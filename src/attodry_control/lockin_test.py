@@ -19,6 +19,7 @@ from .lockin_autorange import (
     AutorangeState,
     decide_autorange,
 )
+from .lockin_live import LiveLockinPairSnapshot, format_live_lockin_snapshot
 from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
@@ -36,6 +37,7 @@ from .sr830 import (
     verify_pair_readback,
 )
 from .sr830_settings import (
+    SensitivityMode,
     Sr830SettingCodes,
     map_sr830_settings,
     sensitivity_code,
@@ -44,7 +46,7 @@ from .sr830_settings import (
 
 
 SR830_OUTPUT_RESISTANCE_OHM = 50.0
-MINIMUM_EXCITATION_SETTLE_S = 1.5
+MINIMUM_SWEEP_SETTLE_S = 1.5
 EXCITATION_SOURCE_STEP_SETTLE_INTERVALS = 2
 # The external SR830 frequency readback showed 54 ppm jitter at 50 Hz while
 # remaining locked and error-free. This sweep-only tolerance leaves measured
@@ -79,6 +81,38 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     diagnose.set_defaults(handler=_run_diagnose)
+
+    monitor_live = subparsers.add_parser(
+        "monitor-live",
+        help=(
+            "Continuously display paired SR830 voltage, phase, frequency, and "
+            "optional latch status without changing settings."
+        ),
+    )
+    _add_pair_arguments(monitor_live)
+    monitor_live.add_argument(
+        "--samples",
+        type=_nonnegative_integer,
+        default=0,
+        help="Number of refreshes; 0 (the default) refreshes until Ctrl+C.",
+    )
+    monitor_live.add_argument(
+        "--interval-s",
+        type=_nonnegative_float,
+        default=1.0,
+        help="Seconds between refreshes. Default: 1 second.",
+    )
+    monitor_live.add_argument(
+        "--consume-status-latches",
+        action="store_true",
+        help=(
+            "Query LIAS?/ERRS? for live lock/overload/error status. These "
+            "queries clear latched status bits on the SR830."
+        ),
+    )
+    monitor_live.set_defaults(
+        config=Path("config/hardware.local.toml"), handler=_run_monitor_live
+    )
 
     set_xx_sensitivity = subparsers.add_parser(
         "set-xx-sensitivity",
@@ -258,6 +292,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         exit_code = run(argv)
     except KeyboardInterrupt:
+        if _requested_command(argv) == "monitor-live":
+            print(
+                "Live monitor stopped. It does not issue SR830 setting writes.",
+                file=sys.stderr,
+            )
+            raise SystemExit(130) from None
         print(
             "Interrupted. If a sweep had started, its safe-state cleanup "
             "was attempted. Manually verify both HARM readbacks, lockin_xx at 4 mVrms, "
@@ -351,17 +391,6 @@ def _add_sweep_arguments(
         dest="all_harmonics",
         help=override_help or "Override the TOML and acquire only the first harmonic.",
     )
-    parser.add_argument(
-        "--xx-sensitivity-code",
-        type=_sensitivity_code,
-        help=(
-            override_help
-            or "Override the temporary lockin_xx sensitivity selected from "
-            "lockin_sweep.temporary_xx_sensitivity_full_scale_v."
-        ),
-    )
-
-
 def _run_discover(args: argparse.Namespace, factory: Callable[[], object]) -> int:
     manager = factory()
     try:
@@ -411,6 +440,44 @@ def _run_diagnose(args: argparse.Namespace, factory: Callable[[], object]) -> in
                 ),
                 flush=True,
             )
+    return 1 if had_problem else 0
+
+
+def _run_monitor_live(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    """Render a read-only terminal panel; no SR830 setting writes are possible here."""
+
+    if args.samples == 0 and args.interval_s <= 0:
+        raise ValueError("Continuous live monitoring requires --interval-s greater than zero.")
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    had_problem = False
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        index = 0
+        while args.samples == 0 or index < args.samples:
+            if index:
+                time.sleep(args.interval_s)
+            xx = lockin_xx.read_diagnostic(
+                consume_status_latches=args.consume_status_latches
+            )
+            xy = lockin_xy.read_diagnostic(
+                consume_status_latches=args.consume_status_latches
+            )
+            problems = tuple(_diagnostic_problems(xx, xy))
+            had_problem = had_problem or bool(problems)
+            snapshot = LiveLockinPairSnapshot(
+                sample_index=index,
+                captured_at_utc=datetime.now(timezone.utc),
+                status_latches_consumed=args.consume_status_latches,
+                lockin_xx=xx,
+                lockin_xy=xy,
+                problems=problems,
+            )
+            if index:
+                print()
+            print(format_live_lockin_snapshot(snapshot), flush=True)
+            index += 1
     return 1 if had_problem else 0
 
 
@@ -569,16 +636,17 @@ def _run_commission_xx_autorange_narrow(
         )
     if args.settle_s < 1.5:
         raise Sr830Error("Autorange commissioning requires at least 1.5 s settling.")
+    if config.lockin_xx.sensitivity_mode is not SensitivityMode.BOUNDED_AUTO:
+        raise ValueError(
+            "commission-xx-autorange-narrow requires "
+            "lockin_xx.sensitivity_mode = 'bounded_auto'."
+        )
 
     xx_settings = _setting_codes(config.lockin_xx)
     xy_settings = _setting_codes(config.lockin_xy)
-    policy = AutorangePolicy(
-        config.lockin_xx.autorange_min_full_scale_v,
-        config.lockin_xx.autorange_max_full_scale_v,
-        config.lockin_xx.autorange_target_occupancy,
-        config.lockin_xx.autorange_stable_samples,
-        config.lockin_xx.autorange_max_steps,
-    )
+    policy = _autorange_policy_for_lockin(config.lockin_xx)
+    if policy is None:
+        raise AssertionError("XX bounded_auto policy was not constructed.")
     minimum_code = sensitivity_code(policy.minimum_full_scale_v)
     maximum_code = sensitivity_code(policy.maximum_full_scale_v)
     if xx_settings.sensitivity != minimum_code:
@@ -852,6 +920,14 @@ def _run_frequency_sweep(
     settings = _resolve_pair_settings(args)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _resolve_sweep_settings(args, settings, scan="frequency")
+    config = settings["config"]
+    if not isinstance(config, ControlConfig):
+        raise ValueError("A validated hardware config is required for sweeps.")
+    if args.settle_s < MINIMUM_SWEEP_SETTLE_S:
+        raise Sr830Error(
+            "Frequency sweep requires at least 1.5 s per settle interval for "
+            "sensitivity and reference transitions."
+        )
     record_directory = _prepare_sweep_record_directory(args, settings)
     points = _validate_increasing_points(args.points_hz, "frequency")
     if points[0] < 0.001 or points[-1] > MAXIMUM_REFERENCE_FREQUENCY_HZ:
@@ -884,20 +960,21 @@ def _run_frequency_sweep(
             )
             writes_started = True
             sensitivity_setup = _new_sweep_sensitivity_setup(
+                lockin_xx_config=config.lockin_xx,
+                lockin_xy_config=config.lockin_xy,
                 original_xx_sensitivity=preflight_xx.sensitivity,
                 original_xy_sensitivity=preflight_xy.sensitivity,
-                target_xx_sensitivity=args.xx_sensitivity_code,
-                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
             )
             _configure_sweep_sensitivities(
                 lockin_xx,
                 lockin_xy,
                 sensitivity_setup=sensitivity_setup,
-                original_xx_sensitivity=preflight_xx.sensitivity,
-                original_xy_sensitivity=preflight_xy.sensitivity,
-                target_xx_sensitivity=args.xx_sensitivity_code,
-                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
                 settle_s=args.settle_s,
+            )
+            autorange_policies, autorange_states = _new_sweep_autorange_controls(
+                config.lockin_xx,
+                config.lockin_xy,
+                sensitivity_setup=sensitivity_setup,
             )
             for point_index, target_hz in enumerate(points):
                 wrote_setting = not math.isclose(
@@ -947,6 +1024,17 @@ def _run_frequency_sweep(
                     skip_unsupported=args.skip_unsupported_harmonics,
                 )
                 point_record["skipped_harmonics"] = skipped_harmonics
+                _apply_sweep_autorange(
+                    lockin_xx,
+                    lockin_xy,
+                    sensitivity_setup=sensitivity_setup,
+                    policies=autorange_policies,
+                    states=autorange_states,
+                    target_frequency_hz=target_hz,
+                    frequency_rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
+                    settle_s=args.settle_s,
+                    record=point_record,
+                )
                 _capture_sweep_point(
                     lockin_xx,
                     lockin_xy,
@@ -1001,10 +1089,10 @@ def _run_frequency_sweep(
             "requested_points_hz": points,
             "requested_harmonics": harmonics,
             "skip_unsupported_harmonics": args.skip_unsupported_harmonics,
-            "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
-            "configured_xy_sensitivity_code": _configured_xy_sensitivity_code(
-                settings
-            ),
+            "sensitivity_modes": {
+                "lockin_xx": config.lockin_xx.sensitivity_mode.value,
+                "lockin_xy": config.lockin_xy.sensitivity_mode.value,
+            },
             "sensitivity_setup": sensitivity_setup,
             "settle_s": args.settle_s,
             "samples_per_point": args.samples_per_point,
@@ -1028,7 +1116,7 @@ def _run_excitation_sweep(
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _resolve_sweep_settings(args, settings, scan="excitation")
     record_directory = _prepare_sweep_record_directory(args, settings)
-    if args.settle_s < MINIMUM_EXCITATION_SETTLE_S:
+    if args.settle_s < MINIMUM_SWEEP_SETTLE_S:
         raise Sr830Error(
             "Excitation sweep requires at least 1.5 s per settle interval; "
             "each SINE OUT step waits two intervals."
@@ -1039,6 +1127,9 @@ def _run_excitation_sweep(
     baseline_hz = float(settings["frequency_hz"])
     baseline_source_v = _sweep_baseline_source_voltage(settings)
     source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+    config = settings["config"]
+    if not isinstance(config, ControlConfig):
+        raise ValueError("A validated hardware config is required for sweeps.")
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         controller = DualSr830Controller(lockin_xx, lockin_xy)
@@ -1053,20 +1144,21 @@ def _run_excitation_sweep(
             )
             writes_started = True
             sensitivity_setup = _new_sweep_sensitivity_setup(
+                lockin_xx_config=config.lockin_xx,
+                lockin_xy_config=config.lockin_xy,
                 original_xx_sensitivity=preflight_xx.sensitivity,
                 original_xy_sensitivity=preflight_xy.sensitivity,
-                target_xx_sensitivity=args.xx_sensitivity_code,
-                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
             )
             _configure_sweep_sensitivities(
                 lockin_xx,
                 lockin_xy,
                 sensitivity_setup=sensitivity_setup,
-                original_xx_sensitivity=preflight_xx.sensitivity,
-                original_xy_sensitivity=preflight_xy.sensitivity,
-                target_xx_sensitivity=args.xx_sensitivity_code,
-                target_xy_sensitivity=_configured_xy_sensitivity_code(settings),
                 settle_s=args.settle_s,
+            )
+            autorange_policies, autorange_states = _new_sweep_autorange_controls(
+                config.lockin_xx,
+                config.lockin_xy,
+                sensitivity_setup=sensitivity_setup,
             )
             for point_index, source_v in enumerate(points):
                 wrote_setting = not math.isclose(
@@ -1099,6 +1191,17 @@ def _run_excitation_sweep(
                         f"lockin_xx SINE OUT readback {output_readback:g} V does not "
                         f"match requested {source_v:g} V."
                     )
+                _apply_sweep_autorange(
+                    lockin_xx,
+                    lockin_xy,
+                    sensitivity_setup=sensitivity_setup,
+                    policies=autorange_policies,
+                    states=autorange_states,
+                    target_frequency_hz=baseline_hz,
+                    frequency_rel_tolerance=1e-5,
+                    settle_s=args.settle_s,
+                    record=point_record,
+                )
                 _capture_sweep_point(
                     lockin_xx,
                     lockin_xy,
@@ -1155,10 +1258,10 @@ def _run_excitation_sweep(
             },
             "requested_points_v_rms": points,
             "requested_harmonics": harmonics,
-            "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
-            "configured_xy_sensitivity_code": _configured_xy_sensitivity_code(
-                settings
-            ),
+            "sensitivity_modes": {
+                "lockin_xx": config.lockin_xx.sensitivity_mode.value,
+                "lockin_xy": config.lockin_xy.sensitivity_mode.value,
+            },
             "sensitivity_setup": sensitivity_setup,
             "settle_s": args.settle_s,
             "source_step_settle_s": source_step_settle_s,
@@ -1221,14 +1324,10 @@ def _measurement_config_snapshot(
             tuple(args.points_hz) if scan == "frequency" else tuple(args.points_v)
         ),
         "harmonics": _requested_sweep_harmonics(args),
-        "temporary_xx_sensitivity_code": args.xx_sensitivity_code,
-        "temporary_xx_sensitivity_full_scale_v": sensitivity_full_scale_v(
-            args.xx_sensitivity_code
-        ),
-        "configured_xy_sensitivity_code": _configured_xy_sensitivity_code(settings),
-        "configured_xy_sensitivity_full_scale_v": (
-            config.lockin_xy.sensitivity_full_scale_v
-        ),
+        "sensitivity_modes": {
+            "lockin_xx": config.lockin_xx.sensitivity_mode.value,
+            "lockin_xy": config.lockin_xy.sensitivity_mode.value,
+        },
         "run_name": config.lockin_sweep.run_name,
         "note": config.lockin_sweep.note,
         "settle_s": args.settle_s,
@@ -1245,7 +1344,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -1377,45 +1476,94 @@ def _sweep_baseline_source_voltage(settings: dict[str, object]) -> float:
     return config.lockin_xx.source_voltage_v
 
 
-def _configured_xy_sensitivity_code(settings: dict[str, object]) -> int:
-    config = settings["config"]
-    if not isinstance(config, ControlConfig):
-        raise ValueError("A validated hardware config is required for sweeps.")
-    return sensitivity_code(config.lockin_xy.sensitivity_full_scale_v)
-
-
 def _new_sweep_sensitivity_setup(
     *,
+    lockin_xx_config: LockinConfig,
+    lockin_xy_config: LockinConfig,
     original_xx_sensitivity: int,
     original_xy_sensitivity: int,
-    target_xx_sensitivity: int,
-    target_xy_sensitivity: int,
 ) -> dict[str, object]:
     return {
         "ranges": {
-            "lockin_xx": {
-                "original_sensitivity_code": original_xx_sensitivity,
-                "target_sensitivity_code": target_xx_sensitivity,
-                "target_full_scale_v": sensitivity_full_scale_v(
-                    target_xx_sensitivity
-                ),
-                "write_attempted": False,
-                "readback_sensitivity_code": None,
-                "verification_sensitivity_code": None,
-            },
-            "lockin_xy": {
-                "original_sensitivity_code": original_xy_sensitivity,
-                "target_sensitivity_code": target_xy_sensitivity,
-                "target_full_scale_v": sensitivity_full_scale_v(
-                    target_xy_sensitivity
-                ),
-                "write_attempted": False,
-                "readback_sensitivity_code": None,
-                "verification_sensitivity_code": None,
-            },
+            "lockin_xx": _new_sweep_range_record(
+                lockin_xx_config, original_xx_sensitivity
+            ),
+            "lockin_xy": _new_sweep_range_record(
+                lockin_xy_config, original_xy_sensitivity
+            ),
         },
         "transition_status": None,
     }
+
+
+def _new_sweep_range_record(
+    lockin: LockinConfig, original_sensitivity: int
+) -> dict[str, object]:
+    policy = _autorange_policy_for_lockin(lockin)
+    configured_code = sensitivity_code(lockin.sensitivity_full_scale_v)
+    if policy is None:
+        initial_target = configured_code
+    else:
+        try:
+            original_full_scale_v = sensitivity_full_scale_v(original_sensitivity)
+        except ValueError as exc:
+            raise Sr830Error(
+                f"lockin_{lockin.role.value} preflight sensitivity "
+                f"{original_sensitivity} is outside the project-confirmed ranges; "
+                "autorange will not change it."
+            ) from exc
+        if original_full_scale_v > policy.maximum_full_scale_v:
+            raise Sr830Error(
+                f"lockin_{lockin.role.value} preflight sensitivity "
+                f"{original_full_scale_v:g} V exceeds its autorange maximum "
+                f"{policy.maximum_full_scale_v:g} V; autorange will not narrow it "
+                "before a safe probe."
+            )
+        initial_target = (
+            original_sensitivity
+            if original_full_scale_v >= policy.minimum_full_scale_v
+            else sensitivity_code(policy.minimum_full_scale_v)
+        )
+    return {
+        "mode": lockin.sensitivity_mode.value,
+        "configured_fixed_sensitivity_code": configured_code,
+        "configured_fixed_full_scale_v": lockin.sensitivity_full_scale_v,
+        "autorange_policy": None if policy is None else asdict(policy),
+        "original_sensitivity_code": original_sensitivity,
+        "initial_target_sensitivity_code": initial_target,
+        "initial_target_full_scale_v": sensitivity_full_scale_v(initial_target),
+        "current_sensitivity_code": initial_target,
+        "write_attempted": False,
+        "initial_setup_write_attempted": False,
+        "autorange_write_attempted": False,
+        "readback_sensitivity_code": None,
+        "verification_sensitivity_code": None,
+        "autorange_transitions": [],
+    }
+
+
+def _autorange_policy_for_lockin(lockin: LockinConfig) -> AutorangePolicy | None:
+    if lockin.sensitivity_mode is SensitivityMode.FIXED:
+        return None
+    values = (
+        lockin.autorange_min_full_scale_v,
+        lockin.autorange_max_full_scale_v,
+        lockin.autorange_target_occupancy,
+        lockin.autorange_stable_samples,
+        lockin.autorange_max_steps,
+    )
+    if any(value is None for value in values):
+        raise ValueError(
+            f"lockin_{lockin.role.value} bounded_auto configuration is incomplete."
+        )
+    minimum, maximum, occupancy, stable_samples, maximum_steps = values
+    return AutorangePolicy(
+        float(minimum),
+        float(maximum),
+        float(occupancy),
+        int(stable_samples),
+        int(maximum_steps),
+    )
 
 
 def _configure_sweep_sensitivities(
@@ -1423,10 +1571,6 @@ def _configure_sweep_sensitivities(
     lockin_xy: Sr830,
     *,
     sensitivity_setup: dict[str, object],
-    original_xx_sensitivity: int,
-    original_xy_sensitivity: int,
-    target_xx_sensitivity: int,
-    target_xy_sensitivity: int,
     settle_s: float,
 ) -> None:
     """Ensure both sweep ranges, retaining every range-write and status transition."""
@@ -1434,16 +1578,20 @@ def _configure_sweep_sensitivities(
     ranges = sensitivity_setup.get("ranges")
     if not isinstance(ranges, dict):
         raise ValueError("Sweep sensitivity setup must contain per-role range records.")
-    instruments = (
-        ("lockin_xx", lockin_xx, original_xx_sensitivity, target_xx_sensitivity),
-        ("lockin_xy", lockin_xy, original_xy_sensitivity, target_xy_sensitivity),
-    )
-    for role, instrument, original, target in instruments:
+    instruments = (("lockin_xx", lockin_xx), ("lockin_xy", lockin_xy))
+    for role, instrument in instruments:
+        range_record = ranges.get(role)
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        original = _sensitivity_record_int(
+            range_record, "original_sensitivity_code", role
+        )
+        target = _sensitivity_record_int(
+            range_record, "initial_target_sensitivity_code", role
+        )
         if original != target:
-            range_record = ranges[role]
-            if not isinstance(range_record, dict):
-                raise ValueError(f"Sweep sensitivity setup is missing {role}.")
             range_record["write_attempted"] = True
+            range_record["initial_setup_write_attempted"] = True
             instrument.set_sensitivity(target)
     wrote_any_range = any(
         isinstance(range_record, dict) and range_record.get("write_attempted") is True
@@ -1451,17 +1599,21 @@ def _configure_sweep_sensitivities(
     )
     if wrote_any_range:
         time.sleep(settle_s)
-    for role, instrument, _, target in instruments:
-        readback = instrument.read_sensitivity()
-        range_record = ranges[role]
+    for role, instrument in instruments:
+        range_record = ranges.get(role)
         if not isinstance(range_record, dict):
             raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        target = _sensitivity_record_int(
+            range_record, "initial_target_sensitivity_code", role
+        )
+        readback = instrument.read_sensitivity()
         range_record["readback_sensitivity_code"] = readback
         if readback != target:
             raise Sr830Error(
                 f"{role} sensitivity readback {readback} does not match the "
                 f"configured sweep range {target}."
             )
+        range_record["current_sensitivity_code"] = target
     if wrote_any_range:
         transition, problems = _consume_sensitivity_transition(
             lockin_xx,
@@ -1474,17 +1626,266 @@ def _configure_sweep_sensitivities(
                 "Unsafe sweep sensitivity transition: " + "; ".join(problems)
             )
         time.sleep(settle_s)
-        for role, instrument, _, target in instruments:
-            readback = instrument.read_sensitivity()
-            range_record = ranges[role]
+        for role, instrument in instruments:
+            range_record = ranges.get(role)
             if not isinstance(range_record, dict):
                 raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+            target = _sensitivity_record_int(
+                range_record, "initial_target_sensitivity_code", role
+            )
+            readback = instrument.read_sensitivity()
             range_record["verification_sensitivity_code"] = readback
             if readback != target:
                 raise Sr830Error(
                     f"{role} sensitivity changed after the transition from {target} "
                     f"to {readback}."
                 )
+
+
+def _sensitivity_record_int(
+    range_record: dict[str, object], key: str, role: str
+) -> int:
+    value = range_record.get(key)
+    if not isinstance(value, int):
+        raise ValueError(f"Sweep sensitivity setup has no integer {key} for {role}.")
+    return value
+
+
+def _new_sweep_autorange_controls(
+    lockin_xx_config: LockinConfig,
+    lockin_xy_config: LockinConfig,
+    *,
+    sensitivity_setup: dict[str, object],
+) -> tuple[dict[str, AutorangePolicy], dict[str, AutorangeState]]:
+    ranges = sensitivity_setup.get("ranges")
+    if not isinstance(ranges, dict):
+        raise ValueError("Sweep sensitivity setup must contain per-role range records.")
+    policies: dict[str, AutorangePolicy] = {}
+    states: dict[str, AutorangeState] = {}
+    for role, lockin in (
+        ("lockin_xx", lockin_xx_config),
+        ("lockin_xy", lockin_xy_config),
+    ):
+        policy = _autorange_policy_for_lockin(lockin)
+        if policy is None:
+            continue
+        range_record = ranges.get(role)
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        current_code = _sensitivity_record_int(
+            range_record, "current_sensitivity_code", role
+        )
+        current_full_scale_v = sensitivity_full_scale_v(current_code)
+        if current_full_scale_v not in (
+            policy.minimum_full_scale_v,
+            policy.maximum_full_scale_v,
+        ):
+            raise ValueError(
+                f"{role} initial autorange sensitivity is outside its configured bounds."
+            )
+        policies[role] = policy
+        states[role] = AutorangeState(current_full_scale_v)
+    return policies, states
+
+
+def _apply_sweep_autorange(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    sensitivity_setup: dict[str, object],
+    policies: dict[str, AutorangePolicy],
+    states: dict[str, AutorangeState],
+    target_frequency_hz: float,
+    frequency_rel_tolerance: float,
+    settle_s: float,
+    record: dict[str, object],
+) -> None:
+    """Run one h1 preprobe for explicitly enabled roles before formal samples."""
+
+    if not policies:
+        return
+    automatic_roles = frozenset(policies)
+    xx = lockin_xx.read_harmonic_sample(1)
+    xy = lockin_xy.read_harmonic_sample(1)
+    probe_problems = _autorange_probe_problems(
+        xx,
+        xy,
+        target_frequency_hz=target_frequency_hz,
+        frequency_rel_tolerance=frequency_rel_tolerance,
+        allowed_output_overload_roles=automatic_roles,
+    )
+    autorange_record: dict[str, object] = {
+        "enabled_roles": sorted(automatic_roles),
+        "probe": {
+            "captured_unix_s": time.time(),
+            "lockin_xx": _audited_harmonic_sample_record(xx),
+            "lockin_xy": _audited_harmonic_sample_record(xy),
+            "problems": probe_problems,
+            "decisions": {},
+        },
+        "transition_status": None,
+        "verification": None,
+    }
+    record["autorange"] = autorange_record
+    probe = autorange_record["probe"]
+    if not isinstance(probe, dict):
+        raise TypeError("Autorange probe record must be a mapping.")
+    decisions = probe["decisions"]
+    if not isinstance(decisions, dict):
+        raise TypeError("Autorange decisions must be a mapping.")
+    if probe_problems:
+        raise Sr830Error("Autorange probe rejected: " + "; ".join(probe_problems))
+
+    samples_by_role = {"lockin_xx": xx, "lockin_xy": xy}
+    changes: dict[str, AutorangeDecision] = {}
+    failures: list[str] = []
+    for role, policy in policies.items():
+        state = states[role]
+        sample = samples_by_role[role]
+        decision = decide_autorange(
+            policy,
+            state,
+            amplitude_v=sample.reading.amplitude_v,
+            overload=sample.lia_status.output_overload,
+        )
+        states[role] = decision.state
+        decisions[role] = {
+            "prior_state": asdict(state),
+            "action": decision.action.value,
+            "occupancy": decision.occupancy,
+            "reason": decision.reason,
+            "next_state": asdict(decision.state),
+        }
+        if decision.action is AutorangeAction.FAIL:
+            failures.append(f"{role}: {decision.reason}")
+        elif decision.action is not AutorangeAction.KEEP:
+            changes[role] = decision
+    if failures:
+        raise Sr830Error("Autorange cannot remain within bounds: " + "; ".join(failures))
+    if not changes:
+        return
+
+    ranges = sensitivity_setup.get("ranges")
+    if not isinstance(ranges, dict):
+        raise ValueError("Sweep sensitivity setup must contain per-role range records.")
+    instruments = {"lockin_xx": lockin_xx, "lockin_xy": lockin_xy}
+    for role, decision in changes.items():
+        range_record = ranges.get(role)
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        target_code = sensitivity_code(decision.state.current_full_scale_v)
+        range_record["write_attempted"] = True
+        range_record["autorange_write_attempted"] = True
+        instruments[role].set_sensitivity(target_code)
+        transitions = range_record.get("autorange_transitions")
+        if not isinstance(transitions, list):
+            raise ValueError(f"Sweep sensitivity setup has no transition list for {role}.")
+        transitions.append(
+            {
+                "action": decision.action.value,
+                "target_sensitivity_code": target_code,
+                "target_full_scale_v": decision.state.current_full_scale_v,
+                "occupancy": decision.occupancy,
+                "reason": decision.reason,
+            }
+        )
+    time.sleep(settle_s)
+    for role, instrument in instruments.items():
+        range_record = ranges.get(role)
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        expected_code = _sensitivity_record_int(
+            range_record, "current_sensitivity_code", role
+        )
+        if role in changes:
+            expected_code = sensitivity_code(changes[role].state.current_full_scale_v)
+        readback = instrument.read_sensitivity()
+        if readback != expected_code:
+            raise Sr830Error(
+                f"{role} autorange readback {readback} does not match requested "
+                f"range {expected_code}."
+            )
+        range_record["current_sensitivity_code"] = expected_code
+
+    narrowing_roles = frozenset(
+        role.removeprefix("lockin_")
+        for role, decision in changes.items()
+        if decision.action is AutorangeAction.NARROW
+    )
+    transition, transition_problems = _consume_sensitivity_transition(
+        lockin_xx,
+        lockin_xy,
+        allow_xx_output_overload=False,
+        allow_output_overload_roles=narrowing_roles,
+    )
+    transition["autorange_actions"] = {
+        role: decision.action.value for role, decision in changes.items()
+    }
+    autorange_record["transition_status"] = transition
+    if transition_problems:
+        raise Sr830Error(
+            "Unsafe autorange transition: " + "; ".join(transition_problems)
+        )
+    time.sleep(settle_s)
+    verification_xx = lockin_xx.read_harmonic_sample(1)
+    verification_xy = lockin_xy.read_harmonic_sample(1)
+    verification_problems = _autorange_probe_problems(
+        verification_xx,
+        verification_xy,
+        target_frequency_hz=target_frequency_hz,
+        frequency_rel_tolerance=frequency_rel_tolerance,
+        allowed_output_overload_roles=frozenset(),
+    )
+    autorange_record["verification"] = {
+        "captured_unix_s": time.time(),
+        "lockin_xx": _audited_harmonic_sample_record(verification_xx),
+        "lockin_xy": _audited_harmonic_sample_record(verification_xy),
+        "problems": verification_problems,
+    }
+    if verification_problems:
+        raise Sr830Error(
+            "Autorange transition verification rejected: "
+            + "; ".join(verification_problems)
+        )
+
+
+def _autorange_probe_problems(
+    xx: Sr830HarmonicSample,
+    xy: Sr830HarmonicSample,
+    *,
+    target_frequency_hz: float,
+    frequency_rel_tolerance: float,
+    allowed_output_overload_roles: frozenset[str],
+) -> list[str]:
+    problems: list[str] = []
+    for sample in (xx, xy):
+        role = f"lockin_{sample.reading.role.value}"
+        if sample.lia_status.reference_unlocked:
+            problems.append(f"{role} reference is unlocked")
+        if sample.lia_status.input_or_reserve_overload:
+            problems.append(f"{role} input/reserve overload")
+        if sample.lia_status.filter_overload:
+            problems.append(f"{role} filter overload")
+        if sample.lia_status.output_overload and not (
+            role in allowed_output_overload_roles and sample.lia_status.raw == 4
+        ):
+            problems.append(f"{role} output overload")
+        if sample.lia_status.frequency_range_changed:
+            problems.append(f"{role} frequency range changed unexpectedly")
+        if sample.lia_status.time_constant_changed:
+            problems.append(f"{role} time constant changed unexpectedly")
+        if sample.error_status:
+            problems.append(f"{role} instrument error is {sample.error_status}")
+    try:
+        _verify_frequency_readbacks(
+            target_frequency_hz,
+            xx.reading.frequency_hz,
+            xy.reading.frequency_hz,
+            rel_tolerance=frequency_rel_tolerance,
+        )
+    except Sr830Error as exc:
+        problems.append(str(exc))
+    return problems
 
 
 def _range_write_attempted(
@@ -1522,11 +1923,6 @@ def _resolve_sweep_settings(
         else args.sample_interval_s
     )
     args.all_harmonics = True if args.all_harmonics is None else args.all_harmonics
-    args.xx_sensitivity_code = (
-        sensitivity_code(sweep.temporary_xx_sensitivity_full_scale_v)
-        if args.xx_sensitivity_code is None
-        else args.xx_sensitivity_code
-    )
     if scan == "frequency":
         args.points_hz = (
             sweep.frequency_points_hz if args.points_hz is None else args.points_hz
@@ -1869,25 +2265,27 @@ def _consume_sensitivity_transition(
     lockin_xy: Sr830,
     *,
     allow_xx_output_overload: bool = True,
+    allow_output_overload_roles: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, object], list[str]]:
     """Record and clear sensitivity-transition latches before strict verification.
 
-    Only the known XX-only output-overload latch (`LIAS=4`) may be discarded
-    during XX-range restoration. XY overloads and every setup-transition latch
-    remain failures.
+    Only an explicitly listed role's output-overload-only latch (`LIAS=4`) may
+    be discarded. This is used for a deliberate range narrowing; all other
+    overloads and transition latches remain failures.
     """
 
+    allowed_roles = set(allow_output_overload_roles)
+    if allow_xx_output_overload:
+        allowed_roles.add("xx")
     xx = lockin_xx.read_harmonic_sample(1)
     xy = lockin_xy.read_harmonic_sample(1)
     problems: list[str] = []
     for sample in (xx, xy):
         role = sample.reading.role.value
-        allowed_xx_output_overload = (
-            role == "xx"
-            and allow_xx_output_overload
-            and sample.lia_status.raw == 4
+        allowed_output_overload = (
+            role in allowed_roles and sample.lia_status.raw == 4
         )
-        if sample.lia_status.any_overload and not allowed_xx_output_overload:
+        if sample.lia_status.any_overload and not allowed_output_overload:
             problems.append(f"lockin_{role} overloaded during sensitivity transition")
         if sample.lia_status.reference_unlocked:
             problems.append(
@@ -1904,12 +2302,11 @@ def _consume_sensitivity_transition(
     return (
         {
             "captured_unix_s": time.time(),
-            "expected_transient_latches": (
-                ["lockin_xx.output_overload"]
-                if allow_xx_output_overload
-                else []
-            ),
+            "expected_transient_latches": [
+                f"lockin_{role}.output_overload" for role in sorted(allowed_roles)
+            ],
             "allow_xx_output_overload": allow_xx_output_overload,
+            "allow_output_overload_roles": sorted(allowed_roles),
             "lockin_xx": _audited_harmonic_sample_record(xx),
             "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
@@ -2266,6 +2663,13 @@ def _positive_integer(value: str) -> int:
     return converted
 
 
+def _nonnegative_integer(value: str) -> int:
+    converted = int(value)
+    if converted < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return converted
+
+
 def _positive_float(value: str) -> float:
     converted = float(value)
     if not math.isfinite(converted) or converted <= 0:
@@ -2278,6 +2682,11 @@ def _nonnegative_float(value: str) -> float:
     if not math.isfinite(converted) or converted < 0:
         raise argparse.ArgumentTypeError("must be finite and non-negative")
     return converted
+
+
+def _requested_command(argv: Sequence[str] | None) -> str | None:
+    arguments = sys.argv[1:] if argv is None else argv
+    return arguments[0] if arguments else None
 
 
 def _positive_float_list(value: str) -> tuple[float, ...]:
@@ -2293,13 +2702,6 @@ def _positive_float_list(value: str) -> tuple[float, ...]:
         raise argparse.ArgumentTypeError(
             "all comma-separated values must be finite and positive"
         )
-    return converted
-
-
-def _sensitivity_code(value: str) -> int:
-    converted = int(value)
-    if not 0 <= converted <= 26:
-        raise argparse.ArgumentTypeError("must be an SR830 sensitivity code from 0 to 26")
     return converted
 
 

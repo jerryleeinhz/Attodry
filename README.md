@@ -65,14 +65,16 @@ worktree；同一 checkout 不要并行编辑。
 
 在接入 attoDRY、磁体或栅极 SMU 之前，先按
 [`docs/DUAL_SR830_DEVICE_TEST.md`](docs/DUAL_SR830_DEVICE_TEST.md) 完成两台
-SR830 的独立测试。工具的诊断模式只查询；任何设置写入都需要显式授权并
-确认 `lockin_xy` 的 SINE OUT 已物理断开。
+SR830 的独立测试。诊断模式只查询；独立 commissioning 设置写入需要显式授权并
+确认 `lockin_xy` 的 SINE OUT 已物理断开。日常双 SR830 sweep 则仅按已解析的
+`hardware.local.toml` 允许范围写入，并保留完整审计记录。
 
 ```powershell
 python -m pip install -e ".[hardware]"
 python -m attodry_control.lockin_test discover
 Copy-Item config\hardware.example.toml config\hardware.local.toml
 python -m attodry_control.lockin_test diagnose --config config\hardware.local.toml
+python -m attodry_control.lockin_test monitor-live --help
 python -m attodry_control.lockin_test measure-harmonics --help
 python -m attodry_control.lockin_test sweep-frequency --help
 python -m attodry_control.lockin_test sweep-excitation --help
@@ -90,8 +92,11 @@ python -m attodry_control.lockin_test --help
 `temperature_commissioning.local.toml` 和 `attodry-temperature-test` 仅保留给
 严格稳定性诊断。
 
-实际 sweep 参数统一保存在 ignored 的 `config\hardware.local.toml` 的
-`[lockin_sweep]` 中。配置完成后，频率扫描和幅值扫描分别直接运行：
+实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
+`config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别
+保存在 `[lockin_xx]` 与 `[lockin_xy]`：默认固定为 XX 20 mV、XY 1 mV；只有把某一
+角色显式改为 `bounded_auto` 时才启用该角色的自动量程。配置完成后，频率扫描和幅值
+扫描分别直接运行：
 
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency
@@ -103,6 +108,16 @@ python -m attodry_control.lockin_test sweep-excitation
 [`docs/LOCKIN_DAILY_OPERATION.md`](docs/LOCKIN_DAILY_OPERATION.md)。
 每次运行前，在同一 `[lockin_sweep]` 表填写 `run_name` 和 `note`；名称进入 JSON
 文件名，备注保留在审计记录。
+
+在没有任何 sweep 或其他程序占用同一对 VISA 地址时，可用下面的只读面板实时查看
+XX/XY 的电压、相位、频率、量程和锁定状态：
+
+```powershell
+python -m attodry_control.lockin_test monitor-live --consume-status-latches
+```
+
+该选项会读取并清除 `LIAS?`/`ERRS?` 锁存位；完整边界和停止方式见
+[`docs/LOCKIN_LIVE_MONITOR.md`](docs/LOCKIN_LIVE_MONITOR.md)。
 
 已完成的独立扫频和激励JSON可用
 [`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)

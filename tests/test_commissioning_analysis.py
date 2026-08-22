@@ -10,6 +10,7 @@ from attodry_control.commissioning_analysis import (
     aggregate_sweep_samples,
     browse_and_load_commissioning_file,
     discover_commissioning_records,
+    excitation_path_from_sweep_files,
     export_commissioning_csv,
     load_sweep_sample_files,
     load_sweep_samples,
@@ -152,25 +153,88 @@ class CommissioningAnalysisTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-negative"):
             ExcitationPathResistance(-1.0, 50.0, 500.0)
 
+    def test_sine_output_current_defaults_to_recorded_sweep_path(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["measurement_config"] = self._measurement_config_path()
+        payload["points"][0]["source_readback_v_rms"] = 0.0039
+        source = self._write_json("recorded-path.json", payload)
+
+        rows = load_sweep_sample_files([source])
+        statistics = aggregate_sweep_samples(
+            rows,
+            x_axis="sine_output_current_a_rms",
+        )
+
+        self.assertEqual(rows[0].recorded_external_series_resistance_ohm, 100_000.0)
+        self.assertEqual(rows[0].recorded_sr830_output_resistance_ohm, 50.0)
+        self.assertEqual(rows[0].recorded_approximate_device_resistance_ohm, 500.0)
+        self.assertAlmostEqual(statistics[0].x_value, 0.0039 / 100_550.0)
+
+    def test_legacy_current_requires_explicit_path_override(self) -> None:
+        payload = self._sweep(completed=True)
+        source = self._write_json("legacy.json", payload)
+        rows = load_sweep_sample_files([source])
+        override = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+
+        with self.assertRaisesRegex(ValueError, "recorded measurement_config"):
+            aggregate_sweep_samples(rows, x_axis="sine_output_current_a_rms")
+
+        statistics = aggregate_sweep_samples(
+            rows,
+            x_axis="sine_output_current_a_rms",
+            excitation_path=override,
+        )
+        self.assertAlmostEqual(statistics[0].x_value, 0.004 / 100_550.0)
+
+    def test_selected_sweep_paths_require_one_recorded_calibration(self) -> None:
+        first_payload = self._sweep(completed=True)
+        first_payload["measurement_config"] = self._measurement_config_path()
+        first = self._write_json("first.json", first_payload)
+        second_payload = self._sweep(completed=True)
+        second_payload["measurement_config"] = self._measurement_config_path(
+            external_series_resistance_ohm=200_000.0
+        )
+        second = self._write_json("second.json", second_payload)
+        legacy = self._write_json("legacy.json", self._sweep(completed=True))
+        override = ExcitationPathResistance(300_000.0, 50.0, 500.0)
+
+        resolved = excitation_path_from_sweep_files([first])
+
+        self.assertEqual(resolved.total_resistance_ohm, 100_550.0)
+        with self.assertRaisesRegex(ValueError, "different excitation paths"):
+            excitation_path_from_sweep_files([first, second])
+        with self.assertRaisesRegex(ValueError, "different excitation paths"):
+            aggregate_sweep_samples(
+                load_sweep_sample_files([first, second]),
+                x_axis="sine_output_current_a_rms",
+            )
+        with self.assertRaisesRegex(ValueError, "no recorded measurement_config"):
+            excitation_path_from_sweep_files([legacy])
+        self.assertEqual(
+            excitation_path_from_sweep_files(
+                [first, second], excitation_path_override=override
+            ),
+            override,
+        )
+
     def test_role_harmonic_plots_have_voltage_and_phase_axes(self) -> None:
         try:
             import matplotlib.pyplot as plt
         except ImportError:
             self.skipTest("matplotlib is not installed")
-        source = self._write_json("completed.json", self._sweep(completed=True))
+        payload = self._sweep(completed=True)
+        payload["measurement_config"] = self._measurement_config_path()
+        source = self._write_json("completed.json", payload)
         rows = load_sweep_samples(source)
-        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
 
-        figure = plot_role_harmonic_sweep(
-            rows, role="xx", harmonic=1, excitation_path=path
-        )
+        figure = plot_role_harmonic_sweep(rows, role="xx", harmonic=1)
         self.addCleanup(plt.close, figure)
         self.assertEqual(len(figure.axes), 2)
         self.assertIn("I_RMS = 39.78 nA", figure.axes[0].get_title())
         self.assertEqual(figure.axes[0].get_ylabel(), "Vxx R (V RMS)")
         self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (degree)")
 
-        figures = plot_six_role_harmonic_sweeps(rows, excitation_path=path)
+        figures = plot_six_role_harmonic_sweeps(rows)
         self.addCleanup(lambda: [plt.close(item) for item in figures.values()])
         self.assertEqual(set(figures), {
             ("xx", 1), ("xx", 2), ("xx", 3),
@@ -277,6 +341,9 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("completed_only_widget", code)
         self.assertIn("browse_button.on_click", code)
         self.assertIn("browse_and_load_commissioning_file", code)
+        self.assertIn("excitation_path_from_sweep_files", code)
+        self.assertIn("EXCITATION_PATH_OVERRIDE", code)
+        self.assertNotIn("EXTERNAL_SERIES_RESISTANCE_OHM", code)
 
     def _write_json(self, _name: str, payload: dict[str, object]) -> Path:
         path = self._temporary_path(".json")
@@ -316,6 +383,18 @@ class CommissioningAnalysisTests(unittest.TestCase):
                     "samples": [self._sample(xy_lia_raw=xy_lia_raw)],
                 }
             ],
+        }
+
+    @staticmethod
+    def _measurement_config_path(
+        *, external_series_resistance_ohm: float = 100_000.0
+    ) -> dict[str, object]:
+        return {
+            "excitation_path": {
+                "series_resistance_ohm": external_series_resistance_ohm,
+                "sr830_output_resistance_ohm": 50.0,
+                "approximate_device_resistance_ohm": 500.0,
+            }
         }
 
     def _sample(

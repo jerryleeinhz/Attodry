@@ -51,15 +51,23 @@ logarithmic and its title states the calibrated RMS current. Current--voltage
 plots use the same SINE OUT-derived RMS current on the x axis. A missing harmonic
 is labeled as missing rather than interpolated or combined with another order.
 
-Change `EXTERNAL_SERIES_RESISTANCE_OHM`,
-`SR830_OUTPUT_RESISTANCE_OHM`, and `APPROXIMATE_DEVICE_RESISTANCE_OHM` in that
-first controls cell when the physical path changes. Their current defaults are
-100000 Ω, 50 Ω, and 500 Ω, respectively, for a total of 100550 Ω. The analysis
-uses `I_rms = V_sine_out_rms / total_path_resistance_ohm`; it uses a stored
-SINE OUT readback when available and only falls back to the recorded setpoint for
-older frequency records that lack a readback. These constants are analysis-only:
-changing them sends no instrument command and must not be mistaken for a new
-hardware safety authorization.
+The daily source of truth for the variable path values is the ignored
+`config/hardware.local.toml` `[lockin_sweep]` table:
+`external_series_resistance_ohm` and `approximate_device_resistance_ohm`.
+The known SR830 output resistance is a fixed 50 Ω. Each sweep archives all three
+components and their total in `measurement_config.excitation_path`, so analysis
+does **not** reread the computer's current local TOML or require a duplicate
+notebook constant. It uses
+`I_rms = V_sine_out_rms / total_path_resistance_ohm`, taking a recorded SINE OUT
+readback when available and otherwise the archived setpoint.
+
+For normal daily JSON, the notebooks and plotting API use that per-record
+snapshot by default. A selection containing different recorded path snapshots is
+rejected rather than silently mixing current calibrations. Older JSON that lacks
+the snapshot requires the visible `EXCITATION_PATH_OVERRIDE` object; this is an
+explicit legacy-only analysis override and applies to every selected file. It
+does not write an instrument and cannot replace the safety review required before
+the next acquisition.
 
 Phase uses circular rather than arithmetic statistics across the -180/180-degree
 wrap. The commissioning notebook exposes two display-only quality controls:

@@ -325,6 +325,26 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   `run_name` (safe JSON filename label) and `note` (JSON audit metadata) for
   each run. Fake-VISA range/cleanup cases and the full offline suite passed:
   231 tests, 4 skipped; no real instrument was connected or written (2026-08-22).
+- Completed offline dual-role range and live-status integration (2026-08-22):
+  XX and XY now independently select `fixed` or opt-in `bounded_auto` in their
+  own TOML tables; the daily defaults are fixed XX 20 mV and fixed XY 1 mV, and
+  the deprecated sweep-level temporary-XX field is gone. Auto policy is limited
+  to XX 10--20 mV or XY 1--10 mV, 0.85 occupancy, two consecutive samples before
+  narrowing, and one adjustment per continuous sweep. Per-point h1 probes,
+  readbacks, transitions, and cleanup restoration are auditable but excluded
+  from formal curves. `monitor-live` adds a separate read-only panel for paired
+  X/Y/R, phase, frequency, harmonic, sensitivity, output, and explicit latch
+  status; it performs no setting writes. Fake-VISA coverage and the complete
+  offline suite passed (248 tests, 5 matplotlib-dependent skips); no hardware
+  resource was opened or written.
+- Completed offline analysis-calibration handoff (2026-08-22): current plots now
+  default to each sweep JSON's archived `measurement_config.excitation_path`,
+  including the configured external-series and approximate-device resistances,
+  fixed 50 ohm SR830 output resistance, and total. Legacy JSON requires an
+  explicit analysis-only override, and mixed archived paths are rejected rather
+  than silently combined. Targeted analysis/notebook tests passed (19 tests,
+  4 matplotlib-dependent skips) and source compilation passed; no hardware
+  resource was opened or written.
 - Main integration keeps the temperature-only configuration loader strict while
   recognizing `[lockin_sweep]` as an unrelated optional table, so the daily
   temperature command can continue to use the same station-local TOML without

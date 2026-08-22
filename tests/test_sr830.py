@@ -109,10 +109,12 @@ class TrackingVisaResource(FakeVisaResource):
         shared_frequency: dict[str, float],
         name: str,
         frequency_scale: float = 1.0,
+        snapshots: list[str] | None = None,
     ):
         super().__init__(responses, name=name)
         self.shared_frequency = shared_frequency
         self.frequency_scale = frequency_scale
+        self.snapshots = [] if snapshots is None else list(snapshots)
 
     def query(self, command: str) -> str:
         if command == "FREQ?":
@@ -120,6 +122,8 @@ class TrackingVisaResource(FakeVisaResource):
             return f"{self.shared_frequency['hz'] * self.frequency_scale:g}\n"
         if command == "SNAP? 1,2,3,4,9":
             self.queries.append(command)
+            if self.snapshots:
+                return self.snapshots.pop(0)
             frequency_hz = self.shared_frequency["hz"] * self.frequency_scale
             return f"1e-6,2e-7,1.0198e-6,11.31,{frequency_hz:g}\n"
         return super().query(command)
@@ -219,6 +223,55 @@ class Sr830Tests(unittest.TestCase):
         self.addCleanup(path.unlink)
         self.addCleanup(shutil.rmtree, path.parent / output_directory, ignore_errors=True)
         return path
+
+    @staticmethod
+    def _snapshot(*, amplitude_v: float, frequency_hz: float = 17.777) -> str:
+        return f"1e-6,2e-7,{amplitude_v:g},11.31,{frequency_hz:g}\n"
+
+    def _enable_bounded_autorange(
+        self,
+        config_path: Path,
+        *,
+        role: str,
+        minimum_full_scale_v: float,
+        maximum_full_scale_v: float,
+    ) -> Path:
+        table_start = f"[lockin_{role}]\n"
+        configured = config_path.read_text(encoding="utf-8")
+        start = configured.index(table_start)
+        end = configured.find("\n[", start + len(table_start))
+        if end == -1:
+            end = len(configured)
+        section = configured[start:end]
+        section = section.replace(
+            'sensitivity_mode = "fixed"',
+            'sensitivity_mode = "bounded_auto"',
+            1,
+        )
+        sensitivity_marker = "sensitivity_full_scale_v = "
+        sensitivity_start = section.index(sensitivity_marker)
+        sensitivity_end = section.index("\n", sensitivity_start)
+        policy = (
+            f"{sensitivity_marker}{minimum_full_scale_v:.3f}\n"
+            f"autorange_min_full_scale_v = {minimum_full_scale_v:.3f}\n"
+            f"autorange_max_full_scale_v = {maximum_full_scale_v:.3f}\n"
+            "autorange_target_occupancy = 0.85\n"
+            "autorange_stable_samples = 2\n"
+            "autorange_max_steps = 1"
+        )
+        section = section[:sensitivity_start] + policy + section[sensitivity_end:]
+        config_path.write_text(
+            configured[:start] + section + configured[end:], encoding="utf-8"
+        )
+        return config_path
+
+    def _hardware_config_with_xx_autorange(self) -> Path:
+        return self._enable_bounded_autorange(
+            self._hardware_config(),
+            role="xx",
+            minimum_full_scale_v=0.01,
+            maximum_full_scale_v=0.02,
+        )
 
     def test_diagnostic_without_status_only_sends_queries(self) -> None:
         resource = FakeVisaResource(responses(reference_mode=1))
@@ -626,6 +679,89 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xx_resource.timeout, 4321)
         self.assertEqual(xy_resource.timeout, 4321)
 
+    def test_cli_monitor_live_is_read_only_and_does_not_consume_latches_by_default(
+        self,
+    ) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+        manager = FakeResourceManager(
+            {
+                "GPIB0::8::INSTR": xx_resource,
+                "GPIB0::9::INSTR": xy_resource,
+            }
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "monitor-live",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--samples",
+                    "1",
+                    "--interval-s",
+                    "0",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        panel = output.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
+        for resource in (xx_resource, xy_resource):
+            self.assertNotIn("LIAS?", resource.queries)
+            self.assertNotIn("ERRS?", resource.queries)
+            self.assertEqual(resource.queries.count("SNAP? 1,2,3,4,9"), 1)
+        self.assertIn("SR830 live status | sample 0", panel)
+        self.assertIn("status latches: not queried", panel)
+        self.assertIn("phase (deg)", panel)
+        self.assertIn("FREQ? (Hz)", panel)
+        self.assertIn("\nXX  ", panel)
+        self.assertIn("\nXY  ", panel)
+        self.assertIn("code 23*", panel)
+        self.assertIn("monitor did not change it", panel)
+        self.assertTrue(manager.closed)
+
+    def test_cli_monitor_live_consumes_latches_only_when_requested(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1))
+        xy_resource = FakeVisaResource(responses(reference_mode=0))
+        manager = FakeResourceManager(
+            {
+                "GPIB0::8::INSTR": xx_resource,
+                "GPIB0::9::INSTR": xy_resource,
+            }
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "monitor-live",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--samples",
+                    "1",
+                    "--interval-s",
+                    "0",
+                    "--consume-status-latches",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        panel = output.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
+        for resource in (xx_resource, xy_resource):
+            self.assertEqual(resource.queries.count("LIAS?"), 1)
+            self.assertEqual(resource.queries.count("ERRS?"), 1)
+        self.assertIn("status latches: queried", panel)
+        self.assertIn("LOCKED", panel)
+        self.assertIn("clear", panel)
+        self.assertTrue(manager.closed)
+
     def test_cli_set_xx_sensitivity_requires_all_authorizations_before_opening(self) -> None:
         for missing_flag in (
             "--authorize-writes",
@@ -678,8 +814,8 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["completed"])
         self.assertTrue(result["write_performed"])
-        self.assertEqual(result["after"]["lockin_xx"]["sensitivity"], 20)
-        self.assertEqual(xx_resource.writes, ["SENS 20"])
+        self.assertEqual(result["after"]["lockin_xx"]["sensitivity"], 21)
+        self.assertEqual(xx_resource.writes, ["SENS 21"])
         self.assertEqual(xy_resource.writes, [])
         self.assertEqual(sleep.call_args_list[0].args, (1.5,))
         self.assertEqual(sleep.call_args_list[1].args, (1.5,))
@@ -759,7 +895,7 @@ class Sr830Tests(unittest.TestCase):
                 arguments = [
                     "commission-xx-autorange-narrow",
                     "--config",
-                    str(self._hardware_config()),
+                    str(self._hardware_config_with_xx_autorange()),
                     "--authorize-writes",
                     "--authorize-status-latch-consumption",
                     "--confirm-xy-sine-disconnected",
@@ -768,6 +904,24 @@ class Sr830Tests(unittest.TestCase):
                 with self.assertRaises(AuthorizationRequired):
                     run(arguments, resource_manager_factory=lambda: manager)
                 self.assertEqual(manager.opened, [])
+
+    def test_cli_autorange_narrow_requires_xx_bounded_auto_before_opening(self) -> None:
+        manager = FakeResourceManager({})
+
+        with self.assertRaisesRegex(ValueError, "lockin_xx.*bounded_auto"):
+            run(
+                [
+                    "commission-xx-autorange-narrow",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(manager.opened, [])
 
     def test_cli_autorange_narrow_stages_then_returns_to_minimum(self) -> None:
         xx_responses = responses(reference_mode=1)
@@ -788,7 +942,7 @@ class Sr830Tests(unittest.TestCase):
                 [
                     "commission-xx-autorange-narrow",
                     "--config",
-                    str(self._hardware_config()),
+                    str(self._hardware_config_with_xx_autorange()),
                     "--authorize-writes",
                     "--authorize-status-latch-consumption",
                     "--confirm-xy-sine-disconnected",
@@ -831,7 +985,7 @@ class Sr830Tests(unittest.TestCase):
                 [
                     "commission-xx-autorange-narrow",
                     "--config",
-                    str(self._hardware_config()),
+                    str(self._hardware_config_with_xx_autorange()),
                     "--authorize-writes",
                     "--authorize-status-latch-consumption",
                     "--confirm-xy-sine-disconnected",
@@ -867,7 +1021,7 @@ class Sr830Tests(unittest.TestCase):
                 [
                     "commission-xx-autorange-narrow",
                     "--config",
-                    str(self._hardware_config()),
+                    str(self._hardware_config_with_xx_autorange()),
                     "--authorize-writes",
                     "--authorize-status-latch-consumption",
                     "--confirm-xy-sine-disconnected",
@@ -1107,7 +1261,7 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--config", str(config_path),
                     "--points-hz", "17.777",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                 ],
@@ -1155,6 +1309,7 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--config", str(config_path),
                     "--points-hz", "17.777",
+                    "--settle-s", "1.5",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -1197,13 +1352,43 @@ class Sr830Tests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "must resolve within"):
             run(
-                ["sweep-frequency", "--config", str(config_path)],
+                [
+                    "sweep-frequency",
+                    "--config",
+                    str(config_path),
+                    "--settle-s",
+                    "1.5",
+                ],
                 resource_manager_factory=lambda: manager,
             )
 
         self.assertEqual(manager.opened, [])
 
-    def test_cli_frequency_sweep_records_points_and_restores_baseline(self) -> None:
+    def test_frequency_sweep_rejects_short_settle_before_opening_visa(self) -> None:
+        factory_opened = False
+
+        def unopened_factory() -> FakeResourceManager:
+            nonlocal factory_opened
+            factory_opened = True
+            raise AssertionError("VISA must not open for an unsafe settle interval.")
+
+        with self.assertRaisesRegex(Sr830Error, "at least 1.5 s"):
+            run(
+                [
+                    "sweep-frequency",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--points-hz",
+                    "17.777",
+                    "--settle-s",
+                    "1.49",
+                ],
+                resource_manager_factory=unopened_factory,
+            )
+
+        self.assertFalse(factory_opened)
+
+    def test_cli_frequency_sweep_default_fixed_modes_do_not_autorange(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -1214,7 +1399,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-frequency",
@@ -1222,7 +1407,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,1000",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--first-harmonic-only",
@@ -1246,15 +1431,375 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(xy_resource.writes, ["SENS 17", "SENS 23"])
         self.assertTrue(result["cleanup"]["verified"])
-        self.assertEqual(result["temporary_xx_sensitivity_code"], 21)
-        self.assertEqual(result["configured_xy_sensitivity_code"], 17)
+        self.assertEqual(
+            result["sensitivity_modes"],
+            {"lockin_xx": "fixed", "lockin_xy": "fixed"},
+        )
+        self.assertEqual(
+            result["sensitivity_setup"]["ranges"]["lockin_xx"]["mode"],
+            "fixed",
+        )
+        self.assertEqual(
+            result["sensitivity_setup"]["ranges"]["lockin_xy"]["mode"],
+            "fixed",
+        )
         self.assertTrue(
             result["sensitivity_setup"]["ranges"]["lockin_xy"][
                 "write_attempted"
             ]
         )
+        self.assertEqual(
+            result["sensitivity_setup"]["ranges"]["lockin_xx"][
+                "autorange_transitions"
+            ],
+            [],
+        )
+        self.assertEqual(
+            result["sensitivity_setup"]["ranges"]["lockin_xy"][
+                "autorange_transitions"
+            ],
+            [],
+        )
+        self.assertTrue(all("autorange" not in point for point in result["points"]))
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
         self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 23)
+
+    def test_cli_frequency_sweep_xy_bounded_auto_widens_from_h1_probe_and_restores(
+        self,
+    ) -> None:
+        config_path = self._enable_bounded_autorange(
+            self._hardware_config(),
+            role="xy",
+            minimum_full_scale_v=0.001,
+            maximum_full_scale_v=0.01,
+        )
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1),
+            shared_frequency=shared_frequency,
+            name="xx",
+            snapshots=[
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+            ],
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["SENS?"] = "17\n"
+        xy_resource = TrackingVisaResource(
+            xy_responses,
+            shared_frequency=shared_frequency,
+            name="xy",
+            snapshots=[
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=0.0009),
+            ],
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config",
+                    str(config_path),
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-hz",
+                    "17.777",
+                    "--settle-s",
+                    "1.5",
+                    "--samples-per-point",
+                    "1",
+                    "--sample-interval-s",
+                    "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        point = result["points"][0]
+        autorange = point["autorange"]
+        xy_decision = autorange["probe"]["decisions"]["lockin_xy"]
+        xy_range = result["sensitivity_setup"]["ranges"]["lockin_xy"]
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(autorange["enabled_roles"], ["lockin_xy"])
+        self.assertEqual(autorange["probe"]["lockin_xy"]["reading"]["harmonic"], 1)
+        self.assertAlmostEqual(
+            autorange["probe"]["lockin_xy"]["reading"]["amplitude_v"], 0.0009
+        )
+        self.assertEqual(xy_decision["action"], "widen")
+        self.assertAlmostEqual(xy_decision["occupancy"], 0.9)
+        self.assertEqual(
+            autorange["transition_status"]["autorange_actions"],
+            {"lockin_xy": "widen"},
+        )
+        self.assertEqual(
+            [
+                transition["target_sensitivity_code"]
+                for transition in xy_range["autorange_transitions"]
+            ],
+            [20],
+        )
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("SENS ")],
+            ["SENS 21", "SENS 23"],
+        )
+        self.assertEqual(
+            [write for write in xy_resource.writes if write.startswith("SENS ")],
+            ["SENS 20", "SENS 17"],
+        )
+        self.assertEqual(len(point["samples"]), 1)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 17)
+
+    def test_cli_frequency_sweep_xx_bounded_auto_widens_from_h1_probe_and_restores(
+        self,
+    ) -> None:
+        config_path = self._hardware_config_with_xx_autorange()
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["SENS?"] = "20\n"
+        xx_resource = TrackingVisaResource(
+            xx_responses,
+            shared_frequency=shared_frequency,
+            name="xx",
+            snapshots=[
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=0.009),
+            ],
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0),
+            shared_frequency=shared_frequency,
+            name="xy",
+            snapshots=[
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+            ],
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config",
+                    str(config_path),
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-hz",
+                    "17.777",
+                    "--settle-s",
+                    "1.5",
+                    "--samples-per-point",
+                    "1",
+                    "--sample-interval-s",
+                    "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        point = result["points"][0]
+        autorange = point["autorange"]
+        xx_decision = autorange["probe"]["decisions"]["lockin_xx"]
+        xx_range = result["sensitivity_setup"]["ranges"]["lockin_xx"]
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(autorange["enabled_roles"], ["lockin_xx"])
+        self.assertEqual(autorange["probe"]["lockin_xx"]["reading"]["harmonic"], 1)
+        self.assertEqual(xx_decision["action"], "widen")
+        self.assertAlmostEqual(xx_decision["occupancy"], 0.9)
+        self.assertEqual(
+            autorange["transition_status"]["autorange_actions"],
+            {"lockin_xx": "widen"},
+        )
+        self.assertEqual(
+            [
+                transition["target_sensitivity_code"]
+                for transition in xx_range["autorange_transitions"]
+            ],
+            [21],
+        )
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("SENS ")],
+            ["SENS 21", "SENS 20"],
+        )
+        self.assertEqual(
+            [write for write in xy_resource.writes if write.startswith("SENS ")],
+            ["SENS 17", "SENS 23"],
+        )
+        self.assertEqual(len(point["samples"]), 1)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 20)
+
+    def test_cli_frequency_sweep_xy_bounded_auto_narrows_after_two_safe_h1_probes(
+        self,
+    ) -> None:
+        config_path = self._enable_bounded_autorange(
+            self._hardware_config(),
+            role="xy",
+            minimum_full_scale_v=0.001,
+            maximum_full_scale_v=0.01,
+        )
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["SENS?"] = "20\n"
+        xy_responses["LIAS?"] = ["0\n"] * 6 + ["4\n"] + ["0\n"] * 12
+        xy_resource = TrackingVisaResource(
+            xy_responses,
+            shared_frequency=shared_frequency,
+            name="xy",
+            snapshots=[
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=0.0005),
+                self._snapshot(amplitude_v=0.0005),
+                self._snapshot(amplitude_v=0.0005, frequency_hz=25),
+                self._snapshot(amplitude_v=0.0005, frequency_hz=25),
+                self._snapshot(amplitude_v=0.0005, frequency_hz=25),
+                self._snapshot(amplitude_v=0.0005, frequency_hz=25),
+                self._snapshot(amplitude_v=0.0005, frequency_hz=25),
+            ],
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config",
+                    str(config_path),
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-hz",
+                    "17.777,25",
+                    "--settle-s",
+                    "1.5",
+                    "--samples-per-point",
+                    "1",
+                    "--sample-interval-s",
+                    "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        first, second = result["points"]
+        first_decision = first["autorange"]["probe"]["decisions"]["lockin_xy"]
+        second_autorange = second["autorange"]
+        second_decision = second_autorange["probe"]["decisions"]["lockin_xy"]
+        transition = second_autorange["transition_status"]
+        verification = second_autorange["verification"]
+        xy_range = result["sensitivity_setup"]["ranges"]["lockin_xy"]
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(first_decision["action"], "keep")
+        self.assertEqual(first_decision["next_state"]["stable_fit_samples"], 1)
+        self.assertEqual(second_decision["action"], "narrow")
+        self.assertEqual(second_decision["next_state"]["current_full_scale_v"], 0.001)
+        self.assertEqual(transition["autorange_actions"], {"lockin_xy": "narrow"})
+        self.assertFalse(transition["allow_xx_output_overload"])
+        self.assertEqual(transition["allow_output_overload_roles"], ["xy"])
+        self.assertEqual(
+            transition["expected_transient_latches"], ["lockin_xy.output_overload"]
+        )
+        self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 4)
+        self.assertEqual(transition["problems"], [])
+        self.assertEqual(verification["problems"], [])
+        self.assertEqual(verification["lockin_xy"]["lia_status"]["raw"], 0)
+        self.assertEqual(
+            [item["target_sensitivity_code"] for item in xy_range["autorange_transitions"]],
+            [17],
+        )
+        self.assertEqual(
+            [write for write in xy_resource.writes if write.startswith("SENS ")],
+            ["SENS 17", "SENS 20"],
+        )
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 20)
+
+    def test_cli_frequency_sweep_rejects_auto_preflight_range_wider_than_policy_before_sens_write(
+        self,
+    ) -> None:
+        config_path = self._enable_bounded_autorange(
+            self._hardware_config(),
+            role="xy",
+            minimum_full_scale_v=0.001,
+            maximum_full_scale_v=0.01,
+        )
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["SENS?"] = "21\n"
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with (
+            patch("attodry_control.lockin_test.time.sleep"),
+            redirect_stdout(output),
+            self.assertRaisesRegex(Sr830Error, "exceeds its autorange maximum"),
+        ):
+            run(
+                [
+                    "sweep-frequency",
+                    "--config",
+                    str(config_path),
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-hz",
+                    "17.777",
+                    "--settle-s",
+                    "1.5",
+                    "--samples-per-point",
+                    "1",
+                    "--sample-interval-s",
+                    "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertIn("exceeds its autorange maximum", result["error"])
+        self.assertIsNone(result["sensitivity_setup"])
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("SENS ")], []
+        )
+        self.assertEqual(
+            [write for write in xy_resource.writes if write.startswith("SENS ")], []
+        )
+        self.assertTrue(result["cleanup"]["verified"])
 
     def test_cli_frequency_sweep_all_harmonics_records_each_order_and_restores_first(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -1267,7 +1812,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-frequency",
@@ -1275,7 +1820,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,1000",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                 ],
@@ -1290,7 +1835,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 2)
+        self.assertEqual(result["measurement_config"]["schema_version"], 3)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -1326,7 +1871,7 @@ class Sr830Tests(unittest.TestCase):
         )
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-frequency",
@@ -1334,7 +1879,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--first-harmonic-only",
@@ -1373,8 +1918,10 @@ class Sr830Tests(unittest.TestCase):
         )
         output = io.StringIO()
 
-        with redirect_stdout(output), self.assertRaisesRegex(
-            Sr830Error, "Unsafe sweep sensitivity transition"
+        with (
+            patch("attodry_control.lockin_test.time.sleep"),
+            redirect_stdout(output),
+            self.assertRaisesRegex(Sr830Error, "Unsafe sweep sensitivity transition"),
         ):
             run(
                 [
@@ -1383,7 +1930,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--first-harmonic-only",
@@ -1427,6 +1974,8 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-hz",
                     "17.777,38310.4813",
+                    "--settle-s",
+                    "1.5",
                     "--all-harmonics",
                     "--fail-on-unsupported-harmonics",
                 ],
@@ -1448,7 +1997,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-frequency",
@@ -1460,7 +2009,7 @@ class Sr830Tests(unittest.TestCase):
                     "--points-hz",
                     "38310.4813,100000",
                     "--settle-s",
-                    "0",
+                    "1.5",
                     "--samples-per-point",
                     "1",
                     "--sample-interval-s",
@@ -1506,7 +2055,11 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "overload"):
+        with (
+            patch("attodry_control.lockin_test.time.sleep"),
+            redirect_stdout(output),
+            self.assertRaisesRegex(Sr830Error, "overload"),
+        ):
             run(
                 [
                     "sweep-frequency",
@@ -1514,7 +2067,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--all-harmonics",
@@ -1546,7 +2099,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-frequency",
@@ -1554,7 +2107,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--all-harmonics",
@@ -1586,7 +2139,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-frequency",
@@ -1594,7 +2147,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,25",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                     "--first-harmonic-only",
@@ -1628,7 +2181,7 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with redirect_stdout(output):
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-frequency",
@@ -1636,7 +2189,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,50",
-                    "--settle-s", "0",
+                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
                     "--sample-interval-s", "0",
                 ],
