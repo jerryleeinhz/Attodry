@@ -762,3 +762,11 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   one additional settled verification read; a repeated latch or any other unsafe
   bit remains fail-closed. Fake-VISA coverage and the complete offline suite passed;
   no hardware resource was opened or written.
+- Merged the operator-supplied station sweep profile into
+  `config/hardware.example.toml`: fixed XX 1 V, fixed XY 10 mV, 4 mV--400 mV
+  linear plus 0.45--5 V linear excitation segments, excitation XX h1 only with
+  XY h1/h2/h3, `test145degree`/`45degree` audit metadata, and 100/150 ohm
+  approximate/maximum device resistance. The XX 1 V full scale is now explicitly
+  present in the safety allowlist. Local VISA addresses remain placeholders in the
+  tracked example by repository policy and belong only in ignored
+  `hardware.local.toml`. Configuration validation and the full fake-VISA suite pass.

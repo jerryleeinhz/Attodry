@@ -64,12 +64,12 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-# Daily default: keep XX fixed at 20 mV full scale. The project also permits
-# 50 mV (SENS 22) when extra h1 headroom is required. To opt into the approved
-# three-level XX bounded_auto ladder, change sensitivity_mode, set the minimum,
-# then uncomment every autorange field below. It widens only as 10 -> 20 -> 50 mV.
+# Station template requested for the current run: fixed XX at 1 V full scale
+# (SENS 26). To opt into the approved three-level bounded_auto ladder, change
+# sensitivity_mode, set the minimum, then uncomment every autorange field below.
+# It widens only as 10 -> 20 -> 50 mV; a 1 V fixed range is not part of that ladder.
 sensitivity_mode = "fixed"
-sensitivity_full_scale_v = 0.020
+sensitivity_full_scale_v = 1.0
 # Dynamic reserve: "high_reserve", "normal", or "low_noise". The checked-in
 # safety policy currently permits only "normal" for daily sweeps.
 reserve_mode = "normal"
@@ -99,7 +99,7 @@ input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
-sensitivity_full_scale_v = 0.001
+sensitivity_full_scale_v = 0.010
 # Dynamic reserve: "high_reserve", "normal", or "low_noise". The checked-in
 # safety policy currently permits only "normal" for daily sweeps.
 reserve_mode = "normal"
@@ -134,7 +134,8 @@ frequency_source_voltage_v_rms = 0.004
 #   { min = 0.050, max = 0.400, scale = "log", points = 8 },
 # ]
 excitation_ranges = [
-  { min = 0.004, max = 0.400, scale = "log", points = 11 },
+  { min = 0.004, max = 0.400, scale = "linear", points = 11 },
+  { min = 0.45, max = 5.0, scale = "linear", points = 21 },
 ]
 # Select formal curves separately for every scan and voltage role. Each list is
 # ascending and uses 1, 2, and/or 3; [] excludes that role from formal curves
@@ -142,7 +143,7 @@ excitation_ranges = [
 # must be selected for each scan. Example: XX h1/h3 and XY h2 in a frequency scan.
 frequency_xx_harmonics = [1, 2, 3]
 frequency_xy_harmonics = [1, 2, 3]
-excitation_xx_harmonics = [1, 2, 3]
+excitation_xx_harmonics = [1]
 excitation_xy_harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
@@ -150,16 +151,16 @@ skip_unsupported_harmonics = true
 # sweep table. Both roles default to fixed mode above; bounded_auto is opt-in.
 # Edit these two audit fields before every run. The run name is also included in
 # the JSON filename; the note is preserved inside the JSON record.
-run_name = "replace_before_run"
-note = "Replace this note before every daily sweep."
+run_name = "test145degree"
+note = "45degree"
 settle_s = 1.5
 samples_per_point = 3
 sample_interval_s = 0.3
 external_series_resistance_ohm = 100000.0
-approximate_device_resistance_ohm = 500.0
+approximate_device_resistance_ohm = 100.0
 # Confirm this upper bound for every device state. It is used to calculate the
 # fail-closed device-terminal voltage from the SINE OUT divider, not as an average.
-maximum_device_resistance_ohm = 500.0
+maximum_device_resistance_ohm = 150.0
 max_device_current_a_rms = 0.005
 max_device_voltage_v_rms = 0.5
 external_50_ohm_termination = false

@@ -21,7 +21,9 @@
 `bounded_auto` 角色不允许区间覆盖。展开点、区间索引、量程切换和读回都写入每次 sweep
 的审计 JSON；旧的点数组仍作为过渡格式接受。
 
-这些是上次真实读回，不是对当前面板状态的持续保证。受版本控制的硬件和模拟
+这些是上次真实读回，不是对当前面板状态的持续保证。受版本控制的
+`hardware.example.toml` 模板已按操作者最新文件改为 XX 1 V、XY 10 mV、100/150 Ω
+电阻参数和分段扫幅网格；这不改变上面记录的历史真实读回。受版本控制的硬件和模拟
 TOML 模板现已声明输入、屏蔽、耦合、时间常数、滤波、灵敏度和 TTL 边沿；本地
 硬件配置仍需操作者手工同步，模板期望值也不能代替真实读回。
 
@@ -55,10 +57,10 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-# Default daily policy: fixed XX at 20 mV. The project also permits 50 mV
-# (SENS 22) for extra h1 headroom; see LOCKIN_DAILY_OPERATION.md.
+# Current station example: fixed XX at 1 V. The project also permits the
+# narrower 10--50 mV bounded-auto ladder; see LOCKIN_DAILY_OPERATION.md.
 sensitivity_mode = "fixed"
-sensitivity_full_scale_v = 0.020
+sensitivity_full_scale_v = 1.0
 reserve_mode = "normal"
 # To opt in to the three-level XX bounded_auto ladder, change the mode and use:
 # sensitivity_full_scale_v = 0.010
@@ -78,7 +80,7 @@ input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
-sensitivity_full_scale_v = 0.001
+sensitivity_full_scale_v = 0.010
 reserve_mode = "normal"
 # To opt in to XY bounded_auto, change the mode and use this complete policy:
 # autorange_min_full_scale_v = 0.001

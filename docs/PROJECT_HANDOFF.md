@@ -796,6 +796,16 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   feature was verified with configuration and fake-VISA tests only; no hardware was
   opened or written.
 
+## Current profile update - operator-supplied hardware example
+
+- Merged the operator-supplied station profile into the tracked hardware example:
+  fixed XX 1 V, fixed XY 10 mV, excitation segments 4 mV--400 mV and 0.45--5 V,
+  excitation formal roles XX h1 and XY h1/h2/h3, run name/note
+  `test145degree`/`45degree`, and 100/150 ohm approximate/maximum device
+  resistance. XX 1 V is now explicitly allowed by the safety policy. The tracked
+  template deliberately retains address placeholders; station VISA addresses
+  remain only in ignored `hardware.local.toml`.
+
 ## User-confirmed requirements
 
 - Replace PPMS/MultiPyVu/ETO with attoDRY2100XL.

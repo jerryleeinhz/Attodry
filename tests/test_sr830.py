@@ -245,6 +245,52 @@ class Sr830Tests(unittest.TestCase):
         path = Path(temporary.name)
         output_directory = f"run_data/lockin_commissioning_{path.stem}"
         template = Path("config/hardware.example.toml").read_text(encoding="utf-8")
+        # Keep the fake-VISA unit fixtures independent of the station-specific
+        # example defaults. The production template is intentionally allowed to
+        # follow the operator's current 1 V/10 mV, 100/150 ohm setup; these tests
+        # exercise the previously commissioned 20 mV/1 mV, 500 ohm fixture.
+        template = (
+            template.replace(
+                "sensitivity_full_scale_v = 1.0",
+                "sensitivity_full_scale_v = 0.020",
+                1,
+            )
+            .replace(
+                "sensitivity_full_scale_v = 0.010",
+                "sensitivity_full_scale_v = 0.001",
+                1,
+            )
+            .replace(
+                "  { min = 0.004, max = 0.400, scale = \"linear\", points = 11 },\n  { min = 0.45, max = 5.0, scale = \"linear\", points = 21 },",
+                "  { min = 0.004, max = 0.400, scale = \"log\", points = 11 },",
+                1,
+            )
+            .replace(
+                "excitation_xx_harmonics = [1]",
+                "excitation_xx_harmonics = [1, 2, 3]",
+                1,
+            )
+            .replace(
+                'run_name = "test145degree"',
+                'run_name = "replace_before_run"',
+                1,
+            )
+            .replace(
+                'note = "45degree"',
+                'note = "Replace this note before every daily sweep."',
+                1,
+            )
+            .replace(
+                "approximate_device_resistance_ohm = 100.0",
+                "approximate_device_resistance_ohm = 500.0",
+                1,
+            )
+            .replace(
+                "maximum_device_resistance_ohm = 150.0",
+                "maximum_device_resistance_ohm = 500.0",
+                1,
+            )
+        )
         configured = (
             template.replace(
                 "CHANGE_ME_SR830_XX_VISA_ADDRESS", "GPIB0::8::INSTR"

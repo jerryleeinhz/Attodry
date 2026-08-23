@@ -95,8 +95,8 @@ python -m attodry_control.lockin_test --help
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
 `config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别
-保存在 `[lockin_xx]` 与 `[lockin_xy]`：默认固定为 XX 20 mV、XY 1 mV；只有把某一
-角色显式改为 `bounded_auto` 时才启用该角色的自动量程。配置完成后，频率扫描和幅值
+保存在 `[lockin_xx]` 与 `[lockin_xy]`：当前 `hardware.example.toml` 示例固定为
+XX 1 V、XY 10 mV；只有把某一角色显式改为 `bounded_auto` 时才启用该角色的自动量程。配置完成后，频率扫描和幅值
 扫描分别直接运行：
 
 扫频期间的固定 XX SINE OUT 幅值填写在

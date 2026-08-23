@@ -210,6 +210,13 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIsNotNone(config.visa)
         self.assertEqual(config.lockin_xx.address, "CHANGE_ME_SR830_XX_VISA_ADDRESS")
         self.assertEqual(config.lockin_xy.address, "CHANGE_ME_SR830_XY_VISA_ADDRESS")
+        self.assertEqual(config.lockin_xx.sensitivity_full_scale_v, 1.0)
+        self.assertEqual(config.lockin_xy.sensitivity_full_scale_v, 0.010)
+        self.assertEqual(config.lockin_sweep.excitation_xx_harmonics, (1,))
+        self.assertEqual(config.lockin_sweep.excitation_xy_harmonics, (1, 2, 3))
+        self.assertEqual(len(config.lockin_sweep.excitation_points_v_rms), 32)
+        self.assertEqual(config.lockin_sweep.approximate_device_resistance_ohm, 100.0)
+        self.assertEqual(config.lockin_sweep.maximum_device_resistance_ohm, 150.0)
         self.assertIsNone(config.gate_top.max_abs_voltage_v)
         with self.assertRaisesRegex(ConfigError, "Hardware configuration is not ready"):
             config.require_hardware_ready()

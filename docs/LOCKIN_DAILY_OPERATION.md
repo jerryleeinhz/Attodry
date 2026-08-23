@@ -54,7 +54,7 @@ python -m attodry_control.lockin_test validate-config
 它只解析两个 TOML 并输出安全策略摘要，绝不会打开 VISA 或写 SR830。日常操作者通常
 只修改被 Git 忽略的 `hardware.local.toml`；需要扩大项目允许量程或改变占用率/稳定样本
 策略时，维护者才编辑并提交 `config/lockin_safety.toml`，同时更新测试和文档。该文件
-当前允许 fixed 的 1、10、20、50 mV；XX 的 bounded-auto 阶梯为 10→20→50 mV，XY
+当前允许 fixed 的 1、10、20、50 mV 以及 XX 的 1 V；XX 的 bounded-auto 阶梯为 10→20→50 mV，XY
 为 1→10 mV，阈值 0.85、缩窄前 2 个连续稳定样本。SR830 的完整硬件映射（包括 1 V，
 代码 26）存在于驱动层，但不等于日常安全白名单。
 
@@ -134,8 +134,8 @@ commissioning 命令仍保留各自的显式授权门。
 
 ## 量程策略：`[lockin_xx]` 与 `[lockin_xy]`
 
-每台 SR830 都有独立的 `sensitivity_mode`。默认配置是 **fixed**：XX 为 20 mV，
-XY 为 1 mV。固定模式在扫描开始时确认目标量程，只有预检读回不同才写入；若扫描
+每台 SR830 都有独立的 `sensitivity_mode`。当前 `hardware.example.toml` station 模板是 **fixed**：XX 为 1 V，
+XY 为 10 mV。固定模式在扫描开始时确认目标量程，只有预检读回不同才写入；若扫描
 改变过该角色的量程，cleanup 会恢复预检时的原量程。
 
 只有明确把某一台的 `sensitivity_mode` 改为 `"bounded_auto"` 时，才启用该角色的
@@ -172,7 +172,7 @@ SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、�
 | `time_constant_s` | 当前项目只能是 `0.3` s。 |
 | `filter_slope_db_oct` | 当前项目只能是 `24`。 |
 | `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
-| `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020` 或 `0.050` V。日常 fixed 默认：XX `0.020`、XY `0.001`。在 `bounded_auto` 中它必须等于最小量程。 |
+| `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020`、`0.050` 或 XX `1.0` V。当前示例 fixed：XX `1.0`、XY `0.010`；在 `bounded_auto` 中它必须等于最小量程。 |
 | `reserve_mode` | `"high_reserve"`（RMOD 0）、`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。实际可用值还必须出现在 `lockin_safety.toml` 该角色的 `allowed_reserve_modes` 中；当前策略只放行 `"normal"`。 |
 | `settle_time_constants` | 有限数且至少 `5.0`。每次设置转换的 `settle_s` 必须不小于两台仪器中最大的 `time_constant_s × settle_time_constants`；当前 `0.3 × 5.0 = 1.5` s。该下限会在打开 VISA 前检查并归档。 |
 
@@ -181,7 +181,7 @@ SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、�
 
 ```toml
 sensitivity_mode = "fixed"
-sensitivity_full_scale_v = 0.020  # XX daily default; XY daily default is 0.001
+sensitivity_full_scale_v = 1.0    # example station fixed range; XY example is 0.010
 ```
 
 `bounded_auto` 模式必须同时提供以下五个字段。XX 可填 10--20 mV、20--50 mV，或
@@ -207,7 +207,7 @@ autorange_max_steps = 2
 ```toml
 # XY bounded_auto
 sensitivity_mode = "bounded_auto"
-sensitivity_full_scale_v = 0.001
+sensitivity_full_scale_v = 0.010
 autorange_min_full_scale_v = 0.001
 autorange_max_full_scale_v = 0.010
 autorange_target_occupancy = 0.85
@@ -313,8 +313,8 @@ sensitivity_full_scale_v = 0.050
 | --- | --- |
 | `frequency_ranges` | 非空的区间表。线性区间写 `{ min, max, scale = "linear", step = ... }` 或 `{ min, max, scale = "linear", points = ... }`；二者只能选一个，均包含端点，`points >= 2`。对数区间写 `{ min, max, scale = "log", points = ... }`。区间必须严格递增、不能重叠或共享端点，总范围为 0.001--102000 Hz。 |
 | `frequency_source_voltage_v_rms` | 扫频期间 XX SINE OUT 的固定幅值，单位 Vrms；必须在 0.004--5.0 V。扫描开始前只设置一次并读回，所有频点保持不变；同一串联路径和器件电流/电压上限会在打开 VISA 前计算检查。 |
-| `excitation_ranges` | 规则同 `frequency_ranges`，但总范围为 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 个对数点，基频固定为 17.777 Hz。 |
-| `xx_full_scale_v` / `xy_full_scale_v` | 可选的区间级固定量程覆盖；只能填写安全协议白名单中的 SR830 full scale（当前 1、10、20、50 mV）。省略时使用对应 `[lockin_xx]`/`[lockin_xy]` 的设置；`bounded_auto` 角色必须省略。量程只在区间边界切换，并记录读回和状态。 |
+| `excitation_ranges` | 规则同 `frequency_ranges`，但总范围为 0.004--5.0 Vrms。当前示例为 0.004--0.400 V 的 11 个线性点，再加 0.45--5.0 V 的 21 个线性点，基频固定为 17.777 Hz。 |
+| `xx_full_scale_v` / `xy_full_scale_v` | 可选的区间级固定量程覆盖；只能填写安全协议白名单中的 SR830 full scale（当前 1、10、20、50 mV，XX 另有 1 V）。省略时使用对应 `[lockin_xx]`/`[lockin_xy]` 的设置；`bounded_auto` 角色必须省略。量程只在区间边界切换，并记录读回和状态。 |
 | `frequency_xx_harmonics` / `frequency_xy_harmonics` | 分别选择扫频正式曲线中的 XX/XY 谐波。每项为升序组合，只能含 1、2、3；`[]` 表示该角色不进入正式曲线。两项合起来至少选一个。 |
 | `excitation_xx_harmonics` / `excitation_xy_harmonics` | 分别选择扫幅正式曲线中的 XX/XY 谐波；规则同上，且可与扫频不同。例：`excitation_xx_harmonics = []`、`excitation_xy_harmonics = [2]` 只输出 XY h2 曲线。 |
 | `frequency_harmonics` / `excitation_harmonics` | 旧版兼容字段；每个列表会同样应用到 XX 和 XY。二者都必须是非空升序组合，且不可与四个角色专用字段混用。 |
