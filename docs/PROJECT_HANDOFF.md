@@ -764,16 +764,17 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   it is absent or inconsistent. `validate-config` is an optional offline summary
   and does not open VISA. Sweep JSON `measurement_config` records the resolved
   policy and SHA-256.
-- Sweep frequency readback now separates setpoint quantization from XX/XY
-  synchronization. Request→XX allows the wider of 100 ppm and one normal,
-  frequency-dependent SR830 `FREQ?` display bin (0.1 Hz at 316.159 Hz and 1 Hz at
-  5622.802 Hz); XX↔XY remains within the wider of 100 ppm of the XX readback and
-  1.01 mHz. Each point
-  retains the requested grid, XX actual readback, and both raw readbacks, and
-  analysis defaults to that XX actual frequency. Harmonic eligibility uses the
-  higher of requested and actual frequency. Strict unlock, overload, and
-  instrument-error rejection is unchanged. Offline configuration/fake-VISA,
-  record, analysis, and boundary coverage passed; no real instrument was opened.
+- Sweep frequency/excitation records requested, XX actual, and both raw frequency
+  readbacks without rejecting numeric display-bin or XX/XY differences. Analysis
+  defaults to the XX actual frequency, and harmonic eligibility uses the higher of
+  the requested and both actual frequencies. Non-finite/out-of-range values and
+  strict unlock, overload, instrument-error, and unsafe-transition checks remain
+  fail-closed. Offline configuration/fake-VISA, record, analysis, and boundary
+  coverage passed; no real instrument was opened.
+- Both sweeps clear pending VISA responses before their first query and again before
+  cleanup after an abort; the result records `interface_clear` and schema version 9.
+  The explicit `recover-interface` command clears only transport-layer pending I/O
+  and reports `settings_changed=false`; diagnose and monitor-live remain read-only.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

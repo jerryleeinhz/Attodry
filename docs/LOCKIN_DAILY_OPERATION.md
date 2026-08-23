@@ -59,19 +59,17 @@ python -m attodry_control.lockin_test validate-config
 代码 26）存在于驱动层，但不等于日常安全白名单。
 
 每个 sweep JSON 的 `measurement_config` 会保存解析后的 `lockin_safety`、文件路径和
-SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次允许的量程和时序。扫频时
-SR830 的 `FREQ?` 显示精度会随频率改变，因此请求值与 XX 的实际读回值允许
-`max(100 ppm × 请求频率, 一个正常 SR830 显示量化档位)` 的差异：例如
-316.159 Hz 时为 ±0.1 Hz，5622.802 Hz 时为 ±1 Hz。XX 与 XY 的读回仍必须彼此在
-`max(100 ppm × XX 读回频率, 1.01 mHz)` 内一致；`LIAS?` 的 reference-unlocked、overload、error
-仍会拒绝正式样本。
+SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次允许的量程和时序。SR830
+的 `FREQ?` 显示精度会随频率改变，因此 sweep 不再因为请求频率、XX 读回和 XY 读回的
+数值差异而拒绝；它们全部作为观测值记录。仍会拒绝非有限、低于 1 mHz 或高于 102 kHz
+的读回，以及 `LIAS?` 报告的 reference-unlocked、overload、错误和不安全转换状态。
 
 每个扫频点同时归档 `requested_frequency_hz`（数学扫描网格）、
 `actual_frequency_hz`（XX 的 `FREQ?` 读回）和两台仪器的
 `frequency_readback_hz`。分析和绘图默认使用 `actual_frequency_hz`；旧 JSON 缺少
 该字段时才回退到原有 `target_frequency_hz`。这里的“实际”是仪器报告的已施加源频率，
 不是独立计量校准值。谐波上限仍按请求和实际读回中较高的频率检查，不能因显示量化
-放松 102 kHz 的安全边界。
+放松 102 kHz 的安全边界；谐波判定使用请求值和两台实际读回中的较高者。
 
 每次运行前，在同一份 `[lockin_sweep]` 表中修改 `run_name` 和 `note`。前者是
 本次数据的简短名称并进入 JSON 文件名，后者记录样品、接线状态或本次测试目的，
@@ -87,6 +85,24 @@ python -m attodry_control.lockin_test monitor-live --consume-status-latches
 这是独立的只读面板；`--consume-status-latches` 会清除 `LIAS?`/`ERRS?` 锁存位，不能
 与扫描并行运行。字段说明、停止方式和无锁存读取的含义见
 [`LOCKIN_LIVE_MONITOR.md`](LOCKIN_LIVE_MONITOR.md)。
+
+### 中断后的 VISA 接口恢复
+
+两个 sweep 在第一次 `*IDN?` 之前会自动对 XX/XY 各执行一次 VISA 接口清理，并把结果
+写入 JSON 的 `interface_clear.at_start`。如果 sweep 因异常或 Ctrl+C 中止，会在安全
+cleanup 前再次尽力清理，并记录 `interface_clear.before_cleanup`。清理只丢弃 VISA
+传输层的待处理响应，不改变频率、量程、SINE OUT 或谐波设置；不会在每个查询或每个
+数据点前反复执行，因此不会掩盖正常通信错误。`diagnose` 与 `monitor-live` 保持只读
+语义，不会自动清理锁存。
+
+若上一次程序被硬中断、终端关闭，或需要在重新运行前手动恢复，可执行：
+
+```powershell
+python -m attodry_control.lockin_test recover-interface
+```
+
+该命令只打开两台已配置的 SR830、清理 VISA 接口并输出 JSON，`settings_changed` 必须
+为 `false`。通信故障后仍须人工确认前面板和接线；接口清理不能证明仪器处于安全状态。
 
 ## 开始前
 

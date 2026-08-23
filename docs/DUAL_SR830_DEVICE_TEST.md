@@ -242,12 +242,20 @@ transition changes the 4 mVrms source. Cleanup returns to 17.777 Hz while the
 selected range remains active, then restores each original range only if that
 role was changed and verifies both readbacks.
 
-The frequency sweep uses a separate 100 ppm relative tolerance, with the existing
-1.01 mHz absolute floor, for the locked XY external-frequency readback. Retained
-formal samples showed 31 ppm jitter at 70.7 Hz and 54 ppm jitter at 50 Hz while
-remaining locked, overload-free, and error-free. The tolerance does not change
-the stricter integrated harmonic-path comparison and never overrides a status
-failure.
+Sweep frequency requests and SR830 `FREQ?`/`SNAP?` readbacks are all recorded;
+numeric XX/XY differences and display quantization do not reject a sweep. The
+tool still rejects non-finite or out-of-range (0.001--102000 Hz) observations,
+and any unlock, overload, instrument error, or unsafe transition remains a
+fail-closed condition. `actual_frequency_hz` is the XX readback used by analysis;
+harmonic eligibility uses the higher of requested and both actual frequencies.
+
+Both sweep commands clear pending VISA responses before their first query and
+again before cleanup after an abort. After a hard interruption, the transport
+layer can be cleared manually without changing settings:
+
+```powershell
+python -m attodry_control.lockin_test recover-interface
+```
 
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency

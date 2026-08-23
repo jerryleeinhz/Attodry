@@ -43,6 +43,8 @@ class VisaResource(Protocol):
 
     def write(self, command: str) -> object: ...
 
+    def clear(self) -> object: ...
+
     def close(self) -> None: ...
 
 
@@ -234,6 +236,21 @@ class Sr830:
 
     def read_sine_output(self) -> float:
         return self._query_float("SLVL?")
+
+    def clear_interface(self) -> None:
+        """Discard pending VISA I/O without changing SR830 settings.
+
+        PyVISA exposes this as ``Resource.clear``.  A missing method is treated
+        as an error instead of silently claiming that a possibly stale response
+        queue was recovered.
+        """
+
+        clear = getattr(self._resource, "clear", None)
+        if not callable(clear):
+            raise Sr830Error(
+                f"lockin_{self.role.value} VISA resource does not support interface clear."
+            )
+        clear()
 
     def set_internal_reference_frequency(self, frequency_hz: float) -> None:
         if self.role is not LockinRole.XX:
@@ -641,7 +658,11 @@ def execute_autorange_transition(
 
 
 def verify_pair_readback(
-    xx: Sr830Diagnostic, xy: Sr830Diagnostic, expected_frequency_hz: float
+    xx: Sr830Diagnostic,
+    xy: Sr830Diagnostic,
+    expected_frequency_hz: float,
+    *,
+    check_frequency: bool = True,
 ) -> None:
     problems: list[str] = []
     if xx.reference_mode != 1:
@@ -657,7 +678,17 @@ def verify_pair_readback(
     if not math.isclose(xy.sine_output_v, MINIMUM_SINE_OUTPUT_V, abs_tol=0.001):
         problems.append("lockin_xy sine output is not at the 4 mVrms minimum")
     for diagnostic in (xx, xy):
-        if not math.isclose(
+        for label, frequency_hz in (
+            ("frequency", diagnostic.frequency_hz),
+            ("snapshot frequency", diagnostic.snapshot_frequency_hz),
+        ):
+            if not math.isfinite(frequency_hz) or not (
+                0.001 <= frequency_hz <= MAXIMUM_REFERENCE_FREQUENCY_HZ
+            ):
+                problems.append(
+                    f"{diagnostic.role.value} {label} readback is invalid"
+                )
+        if check_frequency and not math.isclose(
             diagnostic.frequency_hz,
             expected_frequency_hz,
             rel_tol=1e-5,
@@ -804,6 +835,7 @@ class DualSr830Controller:
         self,
         *,
         frequency_hz: float,
+        check_frequency: bool = True,
     ) -> tuple[Sr830Diagnostic, Sr830Diagnostic]:
         """Read and validate an existing dual-SR830 configuration without writes."""
 
@@ -811,7 +843,7 @@ class DualSr830Controller:
         xy = self.lockin_xy.read_diagnostic(consume_status_latches=True)
         if xx.identity == xy.identity:
             raise Sr830Error("Both semantic roles returned the same SR830 identity.")
-        verify_pair_readback(xx, xy, frequency_hz)
+        verify_pair_readback(xx, xy, frequency_hz, check_frequency=check_frequency)
         problems: list[str] = []
         for diagnostic in (xx, xy):
             if diagnostic.lia_status is None or diagnostic.error_status is None:

@@ -64,6 +64,7 @@ class FakeVisaResource:
         self.fail_write = fail_write
         self.queries: list[str] = []
         self.writes: list[str] = []
+        self.clear_calls = 0
         self.closed = False
         self.name = name
         self.events = events
@@ -103,6 +104,11 @@ class FakeVisaResource:
 
     def close(self) -> None:
         self.closed = True
+
+    def clear(self) -> None:
+        self.clear_calls += 1
+        if self.events is not None:
+            self.events.append((self.name, "clear", ""))
 
 
 class TrackingVisaResource(FakeVisaResource):
@@ -271,12 +277,11 @@ class Sr830Tests(unittest.TestCase):
             5622.0,
             5622.05,
         )
-        with self.assertRaisesRegex(Sr830Error, "does not match"):
-            _verify_requested_sweep_frequency_readbacks(
-                target_hz,
-                5620.0,
-                5620.05,
-            )
+        _verify_requested_sweep_frequency_readbacks(
+            target_hz,
+            5620.0,
+            5620.05,
+        )
 
     def test_internal_reference_frequency_preserves_requested_precision(self) -> None:
         resource = FakeVisaResource(responses(reference_mode=1))
@@ -1482,7 +1487,7 @@ class Sr830Tests(unittest.TestCase):
             [write for write in xx_resource.writes if write.startswith("SENS ")],
             ["SENS 22", "SENS 21", "SENS 23"],
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 8)
+        self.assertEqual(result["measurement_config"]["schema_version"], 9)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -2334,7 +2339,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 8)
+        self.assertEqual(result["measurement_config"]["schema_version"], 9)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -2755,6 +2760,71 @@ class Sr830Tests(unittest.TestCase):
             49.9973,
             places=4,
         )
+
+    def test_cli_frequency_sweep_records_large_valid_pair_offset(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0),
+            shared_frequency=shared_frequency,
+            name="xy",
+            frequency_scale=0.9,
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(self._hardware_config()),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777,25",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertAlmostEqual(
+            result["points"][1]["frequency_readback_hz"]["lockin_xy"], 22.5
+        )
+        self.assertEqual(xx_resource.clear_calls, 1)
+        self.assertEqual(xy_resource.clear_calls, 1)
+        self.assertTrue(result["interface_clear"]["at_start"]["completed"])
+
+    def test_recover_interface_clears_both_resources_without_writes(self) -> None:
+        xx_resource = FakeVisaResource(responses(reference_mode=1), name="xx")
+        xy_resource = FakeVisaResource(responses(reference_mode=0), name="xy")
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "recover-interface",
+                    "--config", str(self._hardware_config()),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertFalse(result["settings_changed"])
+        self.assertEqual(xx_resource.clear_calls, 1)
+        self.assertEqual(xy_resource.clear_calls, 1)
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
 
     def test_cli_excitation_sweep_checks_limits_and_restores_original_range(self) -> None:
         shared_frequency = {"hz": 17.777}

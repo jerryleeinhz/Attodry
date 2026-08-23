@@ -739,13 +739,16 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
 - Daily `sweep-frequency` and `sweep-excitation` now run directly after TOML loading;
   `validate-config` is an optional offline summary and never a prerequisite or VISA
   connection step. Sweep JSON records include the resolved policy and hash.
-- Sweep frequency verification separately checks the requested source setting and
-  the external-reference follower. Request→XX allows the wider of 100 ppm and one
-  normal frequency-dependent SR830 `FREQ?` display bin (0.1 Hz at 316.159 Hz and
-  1 Hz at 5622.802 Hz); XX↔XY remains within the wider of 100 ppm of the XX
-  readback and 1.01 mHz.
-  Each point records requested, XX actual, and both raw readbacks; analysis defaults
-  to the XX actual frequency. Harmonic eligibility uses the higher of requested and
-  actual frequency. Unlock, overload, and instrument-error checks remain
-  fail-closed. Offline configuration, fake-VISA, record, analysis, and boundary
-  tests cover the behavior.
+- Sweep frequency records requested, XX actual, and both raw readbacks; analysis
+  defaults to the XX actual frequency. Harmonic eligibility uses the higher of
+  requested and both actual frequencies. Numeric display-bin differences are not
+  rejected; non-finite/out-of-range values, unlock, overload, and instrument-error
+  checks remain fail-closed. Offline configuration, fake-VISA, record, analysis,
+  and boundary tests cover the behavior.
+- Updated the sweep policy after observed SR830 display quantization: requested,
+  XX, and XY frequency values are now recorded without numeric mismatch rejection.
+  Only non-finite/out-of-range frequency values and the independent lock, overload,
+  error, and unsafe-transition checks fail closed. Both sweeps clear pending VISA
+  responses before their first query and again before cleanup after an abort; the
+  new read/write-free `recover-interface` command provides manual recovery after a
+  hard interruption. The JSON schema is version 9 and includes the clear audit.

@@ -143,6 +143,18 @@ def build_parser() -> argparse.ArgumentParser:
         config=Path("config/hardware.local.toml"), handler=_run_monitor_live
     )
 
+    recover_interface = subparsers.add_parser(
+        "recover-interface",
+        help=(
+            "Clear pending VISA responses on both SR830 interfaces without "
+            "changing instrument settings."
+        ),
+    )
+    _add_pair_arguments(recover_interface)
+    recover_interface.set_defaults(
+        config=Path("config/hardware.local.toml"), handler=_run_recover_interface
+    )
+
     set_xx_sensitivity = subparsers.add_parser(
         "set-xx-sensitivity",
         help=(
@@ -330,7 +342,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(
             "Interrupted. If a sweep had started, its safe-state cleanup "
             "was attempted. Manually verify both HARM readbacks, lockin_xx at 4 mVrms, "
-            "and lockin_xx at 17.777 Hz before disconnecting the device.",
+            "and lockin_xx at 17.777 Hz before disconnecting the device. If the "
+            "next run reports stale VISA I/O, use recover-interface first.",
             file=sys.stderr,
         )
         raise SystemExit(130) from None
@@ -536,6 +549,31 @@ def _run_monitor_live(
             print(format_live_lockin_snapshot(snapshot), flush=True)
             index += 1
     return 1 if had_problem else 0
+
+
+def _run_recover_interface(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    """Explicitly recover stale VISA I/O after an interrupted hardware run."""
+
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        interface_clear = _clear_pair_interfaces(lockin_xx, lockin_xy)
+    print(
+        json.dumps(
+            {
+                "command": "recover-interface",
+                "completed": True,
+                "interface_clear": interface_clear,
+                "settings_changed": False,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+    return 0
 
 
 def _run_set_xx_sensitivity(
@@ -1013,9 +1051,17 @@ def _run_frequency_sweep(
         sensitivity_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
+        interface_clear: dict[str, object] = {
+            "at_start": None,
+            "before_cleanup": None,
+        }
         try:
+            interface_clear["at_start"] = _clear_pair_interfaces(
+                lockin_xx, lockin_xy
+            )
             preflight_xx, preflight_xy = controller.verify_existing_configuration(
                 frequency_hz=baseline_hz,
+                check_frequency=False,
             )
             writes_started = True
             sensitivity_setup = _new_sweep_sensitivity_setup(
@@ -1106,7 +1152,7 @@ def _run_frequency_sweep(
                 }
                 actual_frequency_hz = xx_readback
                 point_record["actual_frequency_hz"] = actual_frequency_hz
-                _verify_requested_sweep_frequency_readbacks(
+                _validate_frequency_observations(
                     target_hz,
                     xx_readback,
                     xy_readback,
@@ -1115,7 +1161,7 @@ def _run_frequency_sweep(
                 # readback must not make an unsafe requested setting appear safe,
                 # and a rounded-up readback must not be used above the limit.
                 point_harmonics, skipped_harmonics = _harmonics_for_frequency(
-                    max(target_hz, actual_frequency_hz),
+                    max(target_hz, actual_frequency_hz, xy_readback),
                     harmonics,
                     skip_unsupported=args.skip_unsupported_harmonics,
                 )
@@ -1157,6 +1203,9 @@ def _run_frequency_sweep(
                 )
         except BaseException as exc:
             failure = exc
+            interface_clear["before_cleanup"] = _clear_pair_interfaces(
+                lockin_xx, lockin_xy, suppress_errors=True
+            )
         cleanup = (
             _restore_scan_state(
                 lockin_xx,
@@ -1173,6 +1222,7 @@ def _run_frequency_sweep(
                 restore_frequency=True,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
+                verify_frequency_match=False,
             )
             if preflight_xx is not None
             else {"attempted": False, "verified": True, "errors": []}
@@ -1226,6 +1276,7 @@ def _run_frequency_sweep(
             "safety": frequency_safety,
             "points": records,
             "cleanup": cleanup,
+            "interface_clear": interface_clear,
             "error": None if failure is None else str(failure),
         }
         _emit_sweep_result(record_directory, result)
@@ -1266,9 +1317,17 @@ def _run_excitation_sweep(
         sensitivity_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
+        interface_clear: dict[str, object] = {
+            "at_start": None,
+            "before_cleanup": None,
+        }
         try:
+            interface_clear["at_start"] = _clear_pair_interfaces(
+                lockin_xx, lockin_xy
+            )
             preflight_xx, preflight_xy = controller.verify_existing_configuration(
                 frequency_hz=baseline_hz,
+                check_frequency=False,
             )
             writes_started = True
             sensitivity_setup = _new_sweep_sensitivity_setup(
@@ -1302,6 +1361,9 @@ def _run_excitation_sweep(
                 point_record = {
                     "point_index": point_index,
                     "target_frequency_hz": baseline_hz,
+                    "requested_frequency_hz": baseline_hz,
+                    "actual_frequency_hz": None,
+                    "frequency_readback_hz": None,
                     "source_v_rms": source_v,
                     "source_readback_v_rms": None,
                     "source_readback_safety": None,
@@ -1331,6 +1393,26 @@ def _run_excitation_sweep(
                 point_record["nominal_current_a_rms"] = output_readback / float(
                     source_readback_safety["nominal_total_resistance_ohm"]
                 )
+                xx_frequency_readback = lockin_xx.read_reference_frequency()
+                xy_frequency_readback = lockin_xy.read_reference_frequency()
+                _validate_frequency_observations(
+                    baseline_hz, xx_frequency_readback, xy_frequency_readback
+                )
+                point_record["frequency_readback_hz"] = {
+                    "lockin_xx": xx_frequency_readback,
+                    "lockin_xy": xy_frequency_readback,
+                }
+                point_record["actual_frequency_hz"] = xx_frequency_readback
+                point_harmonics, skipped_harmonics = _harmonics_for_frequency(
+                    max(
+                        baseline_hz,
+                        xx_frequency_readback,
+                        xy_frequency_readback,
+                    ),
+                    harmonics,
+                    skip_unsupported=args.skip_unsupported_harmonics,
+                )
+                point_record["skipped_harmonics"] = skipped_harmonics
                 _apply_sweep_segment_ranges(
                     lockin_xx,
                     lockin_xy,
@@ -1347,7 +1429,7 @@ def _run_excitation_sweep(
                     sensitivity_setup=sensitivity_setup,
                     policies=autorange_policies,
                     states=autorange_states,
-                    target_frequency_hz=baseline_hz,
+                    target_frequency_hz=xx_frequency_readback,
                     frequency_rel_tolerance=1e-5,
                     settle_s=args.settle_s,
                     record=point_record,
@@ -1355,10 +1437,10 @@ def _run_excitation_sweep(
                 _capture_sweep_point(
                     lockin_xx,
                     lockin_xy,
-                    target_frequency_hz=baseline_hz,
-                    harmonics=harmonics,
+                    target_frequency_hz=xx_frequency_readback,
+                    harmonics=point_harmonics,
                     selected_roles_by_harmonic=_roles_by_harmonic(
-                        harmonics, harmonics_by_role
+                        point_harmonics, harmonics_by_role
                     ),
                     harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
@@ -1368,6 +1450,9 @@ def _run_excitation_sweep(
                 )
         except BaseException as exc:
             failure = exc
+            interface_clear["before_cleanup"] = _clear_pair_interfaces(
+                lockin_xx, lockin_xy, suppress_errors=True
+            )
         cleanup = (
             _restore_scan_state(
                 lockin_xx,
@@ -1384,6 +1469,7 @@ def _run_excitation_sweep(
                 restore_frequency=False,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
+                verify_frequency_match=False,
             )
             if preflight_xx is not None
             else {"attempted": False, "verified": True, "errors": []}
@@ -1426,6 +1512,7 @@ def _run_excitation_sweep(
             "safety": safety,
             "points": records,
             "cleanup": cleanup,
+            "interface_clear": interface_clear,
             "error": None if failure is None else str(failure),
         }
         _emit_sweep_result(record_directory, result)
@@ -1511,13 +1598,19 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 8,
+        "schema_version": 9,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
         "source_readback_policy": (
             "SINE OUT request/readback differences are recorded, not rejected; "
             "readback determines derived current and post-write safety."
+        ),
+        "frequency_readback_policy": (
+            "Sweep frequency requests and SR830 FREQ?/SNAP? readbacks are both "
+            "recorded; display quantization or XX/XY differences are not rejected. "
+            "Only non-finite, out-of-range, unlock, overload, and instrument-error "
+            "conditions fail closed."
         ),
         "setting_writes_enabled_by_command": True,
         "lockin_safety": asdict(config.lockin_safety),
@@ -2215,6 +2308,7 @@ def _autorange_probe_problems(
             xy.reading.frequency_hz,
             rel_tolerance=frequency_rel_tolerance,
             absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
+            check_match=False,
         )
     except Sr830Error as exc:
         problems.append(str(exc))
@@ -2282,6 +2376,8 @@ def _resolve_sweep_settings(
         else args.sample_interval_s
     )
     args.maximum_source_voltage_v = config.lockin_safety.maximum_source_voltage_v_rms
+    if getattr(args, "skip_unsupported_harmonics", None) is None:
+        args.skip_unsupported_harmonics = sweep.skip_unsupported_harmonics
     if scan == "frequency":
         if args.points_hz is None:
             args.points_hz = sweep.frequency_points_hz
@@ -2292,8 +2388,6 @@ def _resolve_sweep_settings(
                 SweepPointConfig(value, None, None, None) for value in args.points_hz
             )
             args.range_segments = ()
-        if args.skip_unsupported_harmonics is None:
-            args.skip_unsupported_harmonics = sweep.skip_unsupported_harmonics
         return
     if args.points_v is None:
         args.points_v = sweep.excitation_points_v_rms
@@ -2581,25 +2675,22 @@ def _verify_requested_sweep_frequency_readbacks(
     xx_readback_hz: float,
     xy_readback_hz: float,
 ) -> None:
-    """Verify the source setpoint and the external-reference follower separately."""
+    """Validate sweep frequency observations without comparing display bins."""
 
-    requested_tolerance_hz = _sweep_requested_frequency_tolerance_hz(requested_hz)
-    if not math.isclose(
-        xx_readback_hz,
-        requested_hz,
-        rel_tol=0.0,
-        abs_tol=requested_tolerance_hz,
-    ):
-        raise Sr830Error(
-            f"lockin_xx frequency readback {xx_readback_hz:g} Hz does not match "
-            f"requested {requested_hz:g} Hz."
-        )
-    _verify_frequency_pair_readbacks(
-        xx_readback_hz,
-        xy_readback_hz,
-        rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
-        absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
-    )
+    _validate_frequency_observations(requested_hz, xx_readback_hz, xy_readback_hz)
+
+
+def _validate_frequency_observations(*frequencies_hz: float) -> None:
+    """Reject only impossible FREQ?/SNAP? values; recordable quantization is allowed."""
+
+    for frequency_hz in frequencies_hz:
+        if not math.isfinite(frequency_hz) or not (
+            0.001 <= frequency_hz <= MAXIMUM_REFERENCE_FREQUENCY_HZ
+        ):
+            raise Sr830Error(
+                f"frequency readback {frequency_hz!r} Hz is outside the SR830 "
+                "0.001-102000 Hz range."
+            )
 
 
 def _verify_frequency_pair_readbacks(
@@ -2625,7 +2716,11 @@ def _verify_frequency_readbacks(
     *,
     rel_tolerance: float = 1e-5,
     absolute_tolerance_hz: float = PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
+    check_match: bool = True,
 ) -> None:
+    _validate_frequency_observations(target_hz, xx_readback_hz, xy_readback_hz)
+    if not check_match:
+        return
     for role, readback in (("xx", xx_readback_hz), ("xy", xy_readback_hz)):
         if not math.isclose(
             readback,
@@ -2704,6 +2799,7 @@ def _capture_sweep_point(
                     xy.reading.frequency_hz,
                     rel_tolerance=frequency_rel_tolerance,
                     absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
+                    check_match=False,
                 )
             except Sr830Error as exc:
                 problems.append(str(exc))
@@ -2893,6 +2989,7 @@ def _restore_scan_state(
     writes_started: bool,
     original_xy_sensitivity: int | None = None,
     restore_xy_sensitivity: bool = False,
+    verify_frequency_match: bool = True,
 ) -> dict[str, object]:
     if not writes_started:
         return {"attempted": False, "verified": True, "errors": []}
@@ -2985,7 +3082,9 @@ def _restore_scan_state(
         xx = lockin_xx.read_diagnostic(consume_status_latches=True)
         xy = lockin_xy.read_diagnostic(consume_status_latches=True)
         diagnostics = {"lockin_xx": asdict(xx), "lockin_xy": asdict(xy)}
-        errors.extend(_diagnostic_problems(xx, xy))
+        errors.extend(
+            _diagnostic_problems(xx, xy, check_frequency_match=verify_frequency_match)
+        )
         if not math.isclose(xx.sine_output_v, 0.004, rel_tol=0.0, abs_tol=0.001):
             errors.append("lockin_xx did not read back 4 mVrms")
         try:
@@ -2997,6 +3096,7 @@ def _restore_scan_state(
                     SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
                 ),
                 absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
+                check_match=verify_frequency_match,
             )
             _verify_frequency_readbacks(
                 baseline_hz,
@@ -3006,6 +3106,7 @@ def _restore_scan_state(
                     SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
                 ),
                 absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
+                check_match=verify_frequency_match,
             )
         except Sr830Error as exc:
             errors.append(str(exc))
@@ -3051,6 +3152,36 @@ def _open_pair(settings: dict[str, object], factory: Callable[[], object]):
         Sr830(xy_resource, LockinRole.XY),
     )
     return _PairContext(stack, pair)
+
+
+def _clear_pair_interfaces(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    suppress_errors: bool = False,
+) -> dict[str, object]:
+    """Clear both VISA response queues and return an auditable status."""
+
+    status: dict[str, object] = {
+        "attempted": True,
+        "lockin_xx": {"completed": False},
+        "lockin_xy": {"completed": False},
+    }
+    errors: list[str] = []
+    for role, instrument in (("lockin_xx", lockin_xx), ("lockin_xy", lockin_xy)):
+        role_status = status[role]
+        assert isinstance(role_status, dict)
+        try:
+            instrument.clear_interface()
+            role_status["completed"] = True
+        except BaseException as exc:
+            role_status["error"] = str(exc)
+            errors.append(f"{role}: {exc}")
+    status["completed"] = not errors
+    status["errors"] = errors
+    if errors and not suppress_errors:
+        raise Sr830Error("VISA interface clear failed: " + "; ".join(errors))
+    return status
 
 
 def _resolve_pair_settings(args: argparse.Namespace) -> dict[str, object]:
@@ -3129,7 +3260,10 @@ def _open_resource(manager: object, address: str, timeout_ms: int):
 
 
 def _diagnostic_problems(
-    xx: Sr830Diagnostic, xy: Sr830Diagnostic
+    xx: Sr830Diagnostic,
+    xy: Sr830Diagnostic,
+    *,
+    check_frequency_match: bool = True,
 ) -> list[str]:
     problems: list[str] = []
     if xx.identity == xy.identity:
@@ -3144,7 +3278,7 @@ def _diagnostic_problems(
         problems.append("both lock-ins must use first harmonic for this test")
     if xy.sine_output_v > 0.005:
         problems.append("lockin_xy SINE OUT is above its minimum setting")
-    if not math.isclose(
+    if check_frequency_match and not math.isclose(
         xx.snapshot_frequency_hz,
         xy.snapshot_frequency_hz,
         rel_tol=1e-5,

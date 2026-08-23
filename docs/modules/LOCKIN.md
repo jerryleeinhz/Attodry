@@ -195,12 +195,14 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
   commissioning 命令继续要求显式授权。
 - 改频率时曾观察到 XY 的 unlock、frequency-range-change 和 overload 转换锁存。
   转换期记录可以单独消费，但正式采样窗口出现任何 unlock/overload/error 仍失败。
-- XY 外参考读回在保持锁定时观察到最高约 54 ppm 偏差。扫频时，XX 的设定值到
-  `FREQ?` 读回允许 `max(100 ppm × 请求频率, 一个随频率变化的 SR830 显示量化档位)`；例如
-  316.159 Hz 为 0.1 Hz、5622.802 Hz 为 1 Hz。XX/XY 两机之间仍只允许
-  `max(100 ppm × XX 读回频率, 1.01 mHz)`，不得扩展到谐波测量或状态判据。每点以 XX 的
-  `FREQ?` 作为记录和分析用的 `actual_frequency_hz`，但谐波 102 kHz 上限按请求值和
-  实际读回中较高者判定。
+- XY 外参考读回在保持锁定时观察到显示量化偏差。扫频时不再用数值相等或固定 ppm
+  门限拒绝请求值、XX `FREQ?` 和 XY `FREQ?` 的差异；三者全部记录。仍然拒绝非有限、
+  低于 1 mHz 或高于 102 kHz 的读回，并保留 unlock、overload、instrument-error 和
+  不安全转换的 fail-closed 判据。每点以 XX 的 `FREQ?` 作为记录和分析用的
+  `actual_frequency_hz`，但谐波 102 kHz 上限按请求值和两台实际读回中较高者判定。
+- 两个 sweep 在第一次查询前自动清理两台 VISA 接口，异常或 Ctrl+C 时在 cleanup 前
+  再次尽力清理；状态写入 `interface_clear` 审计字段。`recover-interface` 可在硬中断后
+  手动清理，且不改变 SR830 设置。诊断和实时监控仍不自动清理锁存。
 - 恢复 XX 窄量程曾产生预期的 `LIAS=4` 转换锁存。必须记录、等待并在最终读回
   严格确认为零，不能直接宣布 cleanup 成功。
 

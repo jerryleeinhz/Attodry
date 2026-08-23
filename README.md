@@ -75,6 +75,7 @@ python -m attodry_control.lockin_test discover
 Copy-Item config\hardware.example.toml config\hardware.local.toml
 python -m attodry_control.lockin_test diagnose --config config\hardware.local.toml
 python -m attodry_control.lockin_test monitor-live --help
+python -m attodry_control.lockin_test recover-interface --help
 python -m attodry_control.lockin_test measure-harmonics --help
 python -m attodry_control.lockin_test sweep-frequency --help
 python -m attodry_control.lockin_test sweep-excitation --help
