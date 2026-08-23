@@ -58,6 +58,14 @@ python -m attodry_control.lockin_test validate-config
 为 1→10 mV，阈值 0.85、缩窄前 2 个连续稳定样本。SR830 的完整硬件映射（包括 1 V，
 代码 26）存在于驱动层，但不等于日常安全白名单。
 
+每个角色还必须在 TOML 中填写 `reserve_mode`：`"high_reserve"`（RMOD 0）、
+`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。当前提交的安全协议只允许
+`"normal"`，因此日常默认不会改变动态 Reserve；若经过单独硬件确认需要另一模式，
+维护者必须先在 `lockin_safety.toml` 对应角色的 `allowed_reserve_modes` 中放行，
+再修改被忽略的 `hardware.local.toml`。Sweep 会记录原始 RMOD、目标模式、读回、
+转换状态，并在 cleanup 时恢复扫描前的 RMOD。Reserve 写入始终在降低 SINE OUT 后进行，
+读回与状态确认失败会 fail closed。
+
 每个 sweep JSON 的 `measurement_config` 会保存解析后的 `lockin_safety`、文件路径和
 SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次允许的量程和时序。SR830
 的 `FREQ?` 显示精度会随频率改变，因此 sweep 不再因为请求频率、XX 读回和 XY 读回的
@@ -165,6 +173,7 @@ SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、�
 | `filter_slope_db_oct` | 当前项目只能是 `24`。 |
 | `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
 | `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020` 或 `0.050` V。日常 fixed 默认：XX `0.020`、XY `0.001`。在 `bounded_auto` 中它必须等于最小量程。 |
+| `reserve_mode` | `"high_reserve"`（RMOD 0）、`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。实际可用值还必须出现在 `lockin_safety.toml` 该角色的 `allowed_reserve_modes` 中；当前策略只放行 `"normal"`。 |
 | `settle_time_constants` | 有限数且至少 `5.0`。每次设置转换的 `settle_s` 必须不小于两台仪器中最大的 `time_constant_s × settle_time_constants`；当前 `0.3 × 5.0 = 1.5` s。该下限会在打开 VISA 前检查并归档。 |
 
 `fixed` 模式只保留 `sensitivity_mode` 和 `sensitivity_full_scale_v`；所有
@@ -210,6 +219,15 @@ autorange_max_steps = 1
 五个锁相时间常数再继续；它不是另一个毫秒数。`[lockin_sweep].settle_s` 是实际使用的
 单个等待 interval，必须大于或等于上述下限。幅值扫描中每个实际 SINE OUT 改变等待两个
 interval，因此当前是 `2 × 1.5 = 3.0` s。
+
+### 谐波切换时的短暂 bit-0 过载复核
+
+SR830 的 `LIAS?` bit 0 同时表示输入或 Reserve overload，并且是锁存位。每次 HARM
+写入后的第一条状态读数会被单独记录为 discarded transition，不会进入正式曲线。
+如果第一条记录只有 input/reserve overload，程序会再等待一个 `settle_s`，读取一次
+复核；复核清零则继续正式样本，复核仍有 bit 0、unlock、其他 overload 或错误则拒绝该点。
+其它问题不享受复核。复核读数和是否通过都会写入该点的
+`harmonic_transition_status[*].verification`，方便区分“切换瞬态”与正式测量过载。
 
 ## SR830 全部硬件量程与项目安全白名单
 

@@ -70,6 +70,9 @@ filter_slope_db_oct = 24
 # then uncomment every autorange field below. It widens only as 10 -> 20 -> 50 mV.
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.020
+# Dynamic reserve: "high_reserve", "normal", or "low_noise". The checked-in
+# safety policy currently permits only "normal" for daily sweeps.
+reserve_mode = "normal"
 # autorange_min_full_scale_v = 0.010
 # autorange_max_full_scale_v = 0.050
 # autorange_target_occupancy = 0.85
@@ -97,6 +100,9 @@ time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.001
+# Dynamic reserve: "high_reserve", "normal", or "low_noise". The checked-in
+# safety policy currently permits only "normal" for daily sweeps.
+reserve_mode = "normal"
 # To opt into bounded_auto for XY, change sensitivity_mode, set
 # sensitivity_full_scale_v to the selected minimum, and uncomment every field
 # below. The documented XY auto pair is 1 mV to 10 mV. XY SINE OUT remains

@@ -15,6 +15,7 @@ from .sr830_settings import (
     InputCoupling,
     InputMode,
     ReferenceSource,
+    ReserveMode,
     SensitivityMode,
     ShieldGrounding,
     map_sr830_settings,
@@ -125,12 +126,14 @@ class LockinConfig:
     autorange_max_steps: int | None
     autorange_full_scales_v: tuple[float, ...] | None
     settle_time_constants: float
+    reserve_mode: ReserveMode
 
 
 @dataclass(frozen=True, slots=True)
 class LockinSafetyRoleConfig:
     allowed_fixed_full_scales_v: tuple[float, ...]
     autorange_ladders_v: tuple[tuple[float, ...], ...]
+    allowed_reserve_modes: tuple[ReserveMode, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -694,7 +697,15 @@ def _parse_lockin_safety(document: Mapping[str, Any]) -> LockinSafetyConfig:
 def _parse_lockin_safety_role(
     table: Mapping[str, Any], name: str
 ) -> LockinSafetyRoleConfig:
-    _strict_keys(table, name, {"allowed_fixed_full_scales_v", "autorange_ladders_v"})
+    _strict_keys(
+        table,
+        name,
+        {
+            "allowed_fixed_full_scales_v",
+            "autorange_ladders_v",
+            "allowed_reserve_modes",
+        },
+    )
     allowed_fixed = _full_scale_tuple(
         table["allowed_fixed_full_scales_v"], f"{name}.allowed_fixed_full_scales_v"
     )
@@ -712,7 +723,16 @@ def _parse_lockin_safety_role(
         ladders.append(ladder)
     if len(set(ladders)) != len(ladders):
         raise ConfigError(f"{name}.autorange_ladders_v must not contain duplicates.")
-    return LockinSafetyRoleConfig(allowed_fixed, tuple(ladders))
+    raw_reserve_modes = table["allowed_reserve_modes"]
+    if not isinstance(raw_reserve_modes, list) or not raw_reserve_modes:
+        raise ConfigError(f"{name}.allowed_reserve_modes must be a non-empty array.")
+    reserve_modes = tuple(
+        _enum_value(ReserveMode, value, f"{name}.allowed_reserve_modes[{index}]")
+        for index, value in enumerate(raw_reserve_modes)
+    )
+    if len(set(reserve_modes)) != len(reserve_modes):
+        raise ConfigError(f"{name}.allowed_reserve_modes must not contain duplicates.")
+    return LockinSafetyRoleConfig(allowed_fixed, tuple(ladders), reserve_modes)
 
 
 def _full_scale_tuple(
@@ -757,6 +777,7 @@ def _parse_lockin(
         "sensitivity_mode",
         "sensitivity_full_scale_v",
         "settle_time_constants",
+        "reserve_mode",
     }
     if role is LockinRole.XY:
         expected.add("external_reference_edge")
@@ -827,6 +848,15 @@ def _parse_lockin(
     sensitivity_mode = _enum_value(
         SensitivityMode, table["sensitivity_mode"], f"{name}.sensitivity_mode"
     )
+    reserve_mode = _enum_value(
+        ReserveMode, table["reserve_mode"], f"{name}.reserve_mode"
+    )
+    if reserve_mode not in safety_role.allowed_reserve_modes:
+        allowed = ", ".join(mode.value for mode in safety_role.allowed_reserve_modes)
+        raise ConfigError(
+            f"{name}.reserve_mode={reserve_mode.value!r} is not allowed by "
+            f"lockin_safety.toml (allowed: {allowed})."
+        )
     sensitivity_full_scale_v = _positive_number(
         table["sensitivity_full_scale_v"], f"{name}.sensitivity_full_scale_v"
     )
@@ -961,6 +991,7 @@ def _parse_lockin(
         autorange_max_steps=autorange_max_steps,
         autorange_full_scales_v=autorange_full_scales_v,
         settle_time_constants=settle_time_constants,
+        reserve_mode=reserve_mode,
     )
 
 

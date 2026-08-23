@@ -1,4 +1,4 @@
-schema_version = 1
+schema_version = 2
 
 # Project safety policy for SR830 sweeps.  The code also keeps non-editable
 # SR830 hardware limits; this file controls the narrower project allowlist.
@@ -11,6 +11,7 @@ stable_samples_before_narrowing = 2
 
 [lockin_xx]
 allowed_fixed_full_scales_v = [0.001, 0.010, 0.020, 0.050]
+allowed_reserve_modes = ["normal"]
 autorange_ladders_v = [
   [0.010, 0.020],
   [0.020, 0.050],
@@ -19,6 +20,7 @@ autorange_ladders_v = [
 
 [lockin_xy]
 allowed_fixed_full_scales_v = [0.001, 0.010, 0.020, 0.050]
+allowed_reserve_modes = ["normal"]
 autorange_ladders_v = [
   [0.001, 0.010],
 ]

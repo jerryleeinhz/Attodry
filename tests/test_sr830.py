@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import attodry_control.config as config_module
 from attodry_control.lockin_test import (
+    _consume_and_verify_harmonic_transition,
     _consume_sensitivity_transition,
     _sweep_requested_frequency_tolerance_hz,
     _verify_requested_sweep_frequency_readbacks,
@@ -98,6 +99,7 @@ class FakeVisaResource:
             ("OFLT ", "OFLT?"),
             ("OFSL ", "OFSL?"),
             ("SENS ", "SENS?"),
+            ("RMOD ", "RMOD?"),
         ):
             if command.startswith(prefix):
                 self.responses[query] = command.split()[1] + "\n"
@@ -552,6 +554,55 @@ class Sr830Tests(unittest.TestCase):
         self.assertTrue(status.output_overload)
         self.assertTrue(status.reference_unlocked)
         self.assertTrue(status.any_overload)
+
+    def test_harmonic_transition_rechecks_input_reserve_candidate_once(self) -> None:
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["LIAS?"] = ["1\n", "0\n"]
+        xy_responses["LIAS?"] = ["0\n", "0\n"]
+        xx = Sr830(FakeVisaResource(xx_responses), LockinRole.XX)
+        xy = Sr830(FakeVisaResource(xy_responses), LockinRole.XY)
+        xx.set_harmonic(2)
+        xy.set_harmonic(2)
+
+        with patch("attodry_control.lockin_test.time.sleep") as sleep:
+            transition, problems = _consume_and_verify_harmonic_transition(
+                xx,
+                xy,
+                harmonic=2,
+                settle_s=1.5,
+                allow_input_reserve_recheck=True,
+            )
+
+        self.assertEqual(problems, [])
+        self.assertTrue(transition["verification_required"])
+        self.assertTrue(transition["verification_passed"])
+        self.assertEqual(transition["candidate_transient_latches"], [
+            "lockin_xx.input_or_reserve_overload"
+        ])
+        self.assertEqual(sleep.call_count, 1)
+
+    def test_harmonic_transition_rejects_repeated_input_reserve_candidate(self) -> None:
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["LIAS?"] = ["1\n", "1\n"]
+        xy_responses["LIAS?"] = ["0\n", "0\n"]
+        xx = Sr830(FakeVisaResource(xx_responses), LockinRole.XX)
+        xy = Sr830(FakeVisaResource(xy_responses), LockinRole.XY)
+        xx.set_harmonic(2)
+        xy.set_harmonic(2)
+
+        with patch("attodry_control.lockin_test.time.sleep"):
+            _transition, problems = _consume_and_verify_harmonic_transition(
+                xx,
+                xy,
+                harmonic=2,
+                settle_s=1.5,
+                allow_input_reserve_recheck=True,
+            )
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("input/reserve overload", problems[0])
 
     def test_autorange_transition_requires_both_authorizations_before_io(self) -> None:
         resource = FakeVisaResource(responses(reference_mode=1))
@@ -1487,7 +1538,7 @@ class Sr830Tests(unittest.TestCase):
             [write for write in xx_resource.writes if write.startswith("SENS ")],
             ["SENS 22", "SENS 21", "SENS 23"],
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 9)
+        self.assertEqual(result["measurement_config"]["schema_version"], 10)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -2339,7 +2390,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 9)
+        self.assertEqual(result["measurement_config"]["schema_version"], 10)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -2407,6 +2458,49 @@ class Sr830Tests(unittest.TestCase):
             17,
         )
         self.assertEqual(xy_resource.writes, [])
+
+    def test_cli_frequency_sweep_applies_configured_reserve_and_restores_preflight(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["RMOD?"] = "2\n"
+        xx_resource = TrackingVisaResource(
+            xx_responses, shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(self._hardware_config()),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        reserve = result["reserve_setup"]["roles"]["lockin_xx"]
+        self.assertTrue(reserve["write_attempted"])
+        self.assertEqual(reserve["original_code"], 2)
+        self.assertEqual(reserve["readback_code"], 1)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["reserve_mode"], 2)
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("RMOD ")],
+            ["RMOD 1", "RMOD 2"],
+        )
 
     def test_cli_frequency_sweep_rejects_xy_range_transition_latch_and_restores(
         self,

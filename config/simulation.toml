@@ -42,6 +42,7 @@ time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.020
+reserve_mode = "normal"
 settle_time_constants = 5.0
 
 [lockin_xy]
@@ -59,6 +60,7 @@ time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.001
+reserve_mode = "normal"
 settle_time_constants = 5.0
 
 [lockin_sweep]

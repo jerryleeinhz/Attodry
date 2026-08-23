@@ -6,6 +6,7 @@ from unittest.mock import mock_open, patch
 from attodry_control.config import (
     ConfigError,
     RunMode,
+    ReserveMode,
     load_config,
     load_temperature_operation_config,
 )
@@ -72,6 +73,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.lockin_xy.sensitivity_mode, SensitivityMode.FIXED)
         self.assertEqual(config.lockin_xy.sensitivity_full_scale_v, 0.001)
         self.assertEqual(config.lockin_xx.settle_time_constants, 5.0)
+        self.assertEqual(config.lockin_xx.reserve_mode, ReserveMode.NORMAL)
+        self.assertEqual(config.lockin_xy.reserve_mode, ReserveMode.NORMAL)
         self.assertIsNone(config.lockin_xx.external_reference_edge)
         self.assertEqual(
             config.lockin_xy.external_reference_edge, ExternalReferenceEdge.RISING

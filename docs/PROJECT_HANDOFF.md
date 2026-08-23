@@ -772,9 +772,20 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   fail-closed. Offline configuration/fake-VISA, record, analysis, and boundary
   coverage passed; no real instrument was opened.
 - Both sweeps clear pending VISA responses before their first query and again before
-  cleanup after an abort; the result records `interface_clear` and schema version 9.
+  cleanup after an abort; the result records `interface_clear` and the prior schema
+  version 9 clear-audit fields.
   The explicit `recover-interface` command clears only transport-layer pending I/O
   and reports `settings_changed=false`; diagnose and monitor-live remain read-only.
+- Added semantic `reserve_mode` fields to both lock-in TOML tables and
+  `allowed_reserve_modes` to the versioned safety policy. `high_reserve`, `normal`,
+  and `low_noise` map to SR830 RMOD 0/1/2; the checked-in daily policy currently
+  permits only `normal`. Sweep records audit target/original/readback RMOD values,
+  lower SINE OUT before reserve writes, restore any changed mode during cleanup,
+  and fail closed on status/readback errors. After HARM writes, a first
+  input/reserve-overload-only latch is retained as a discarded transition and
+  receives one additional settled verification read; repeated bit 0 or any other
+  unsafe transition status rejects the point. The offline suite passed with no
+  hardware I/O; the sweep measurement schema is now version 10.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

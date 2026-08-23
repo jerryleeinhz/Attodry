@@ -40,6 +40,7 @@ from .sr830 import (
     Sr830Diagnostic,
     Sr830Error,
     Sr830HarmonicSample,
+    RESERVE_MODE_CODES,
     configure_minimum_excitation_pair,
     verify_fixed_settings_readback,
     verify_pair_readback,
@@ -1049,6 +1050,7 @@ def _run_frequency_sweep(
         preflight_xx = None
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
+        reserve_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
         interface_clear: dict[str, object] = {
@@ -1064,6 +1066,18 @@ def _run_frequency_sweep(
                 check_frequency=False,
             )
             writes_started = True
+            reserve_setup = _new_sweep_reserve_setup(
+                config.lockin_xx,
+                config.lockin_xy,
+                original_xx_reserve_mode=preflight_xx.reserve_mode,
+                original_xy_reserve_mode=preflight_xy.reserve_mode,
+            )
+            _configure_sweep_reserve_modes(
+                lockin_xx,
+                lockin_xy,
+                reserve_setup=reserve_setup,
+                settle_s=args.settle_s,
+            )
             sensitivity_setup = _new_sweep_sensitivity_setup(
                 lockin_xx_config=config.lockin_xx,
                 lockin_xy_config=config.lockin_xy,
@@ -1219,6 +1233,14 @@ def _run_frequency_sweep(
                 restore_xy_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xy"
                 ),
+                original_xx_reserve_mode=preflight_xx.reserve_mode,
+                original_xy_reserve_mode=preflight_xy.reserve_mode,
+                restore_xx_reserve=_reserve_write_attempted(
+                    reserve_setup, "lockin_xx"
+                ),
+                restore_xy_reserve=_reserve_write_attempted(
+                    reserve_setup, "lockin_xy"
+                ),
                 restore_frequency=True,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
@@ -1269,6 +1291,7 @@ def _run_frequency_sweep(
                 "lockin_xy": config.lockin_xy.sensitivity_mode.value,
             },
             "sensitivity_setup": sensitivity_setup,
+            "reserve_setup": reserve_setup,
             "settle_s": args.settle_s,
             "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
             "samples_per_point": args.samples_per_point,
@@ -1315,6 +1338,7 @@ def _run_excitation_sweep(
         preflight_xx = None
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
+        reserve_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
         interface_clear: dict[str, object] = {
@@ -1330,6 +1354,18 @@ def _run_excitation_sweep(
                 check_frequency=False,
             )
             writes_started = True
+            reserve_setup = _new_sweep_reserve_setup(
+                config.lockin_xx,
+                config.lockin_xy,
+                original_xx_reserve_mode=preflight_xx.reserve_mode,
+                original_xy_reserve_mode=preflight_xy.reserve_mode,
+            )
+            _configure_sweep_reserve_modes(
+                lockin_xx,
+                lockin_xy,
+                reserve_setup=reserve_setup,
+                settle_s=args.settle_s,
+            )
             sensitivity_setup = _new_sweep_sensitivity_setup(
                 lockin_xx_config=config.lockin_xx,
                 lockin_xy_config=config.lockin_xy,
@@ -1466,6 +1502,14 @@ def _run_excitation_sweep(
                 restore_xy_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xy"
                 ),
+                original_xx_reserve_mode=preflight_xx.reserve_mode,
+                original_xy_reserve_mode=preflight_xy.reserve_mode,
+                restore_xx_reserve=_reserve_write_attempted(
+                    reserve_setup, "lockin_xx"
+                ),
+                restore_xy_reserve=_reserve_write_attempted(
+                    reserve_setup, "lockin_xy"
+                ),
                 restore_frequency=False,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
@@ -1504,6 +1548,7 @@ def _run_excitation_sweep(
                 "lockin_xy": config.lockin_xy.sensitivity_mode.value,
             },
             "sensitivity_setup": sensitivity_setup,
+            "reserve_setup": reserve_setup,
             "settle_s": args.settle_s,
             "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
             "source_step_settle_s": source_step_settle_s,
@@ -1573,6 +1618,10 @@ def _measurement_config_snapshot(
             "lockin_xx": config.lockin_xx.sensitivity_mode.value,
             "lockin_xy": config.lockin_xy.sensitivity_mode.value,
         },
+        "reserve_modes": {
+            "lockin_xx": config.lockin_xx.reserve_mode.value,
+            "lockin_xy": config.lockin_xy.reserve_mode.value,
+        },
         "run_name": config.lockin_sweep.run_name,
         "note": config.lockin_sweep.note,
         "settle_s": args.settle_s,
@@ -1598,7 +1647,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 9,
+        "schema_version": 10,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -1794,6 +1843,156 @@ def _new_sweep_sensitivity_setup(
         },
         "transition_status": None,
     }
+
+
+def _new_sweep_reserve_setup(
+    lockin_xx_config: LockinConfig,
+    lockin_xy_config: LockinConfig,
+    *,
+    original_xx_reserve_mode: int,
+    original_xy_reserve_mode: int,
+) -> dict[str, object]:
+    """Build an auditable, policy-checked RMOD transition plan."""
+
+    def role_record(lockin: LockinConfig, original: int) -> dict[str, object]:
+        try:
+            target = RESERVE_MODE_CODES[lockin.reserve_mode.value]
+        except KeyError as exc:
+            raise Sr830Error(
+                f"lockin_{lockin.role.value} has unsupported reserve mode "
+                f"{lockin.reserve_mode.value!r}."
+            ) from exc
+        if original not in (0, 1, 2):
+            raise Sr830Error(
+                f"lockin_{lockin.role.value} preflight reserve mode {original} "
+                "is outside the SR830 RMOD range 0-2."
+            )
+        return {
+            "configured_mode": lockin.reserve_mode.value,
+            "configured_code": target,
+            "original_code": original,
+            "write_attempted": False,
+            "readback_code": None,
+            "verification_code": None,
+            "transition_status": None,
+        }
+
+    return {
+        "roles": {
+            "lockin_xx": role_record(lockin_xx_config, original_xx_reserve_mode),
+            "lockin_xy": role_record(lockin_xy_config, original_xy_reserve_mode),
+        },
+        "write_performed": False,
+    }
+
+
+def _reserve_record_int(
+    record: Mapping[str, object], field: str, role: str
+) -> int:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{role} reserve setup field {field} is not an integer.")
+    return value
+
+
+def _reserve_write_attempted(
+    reserve_setup: dict[str, object] | None, role: str
+) -> bool:
+    if not isinstance(reserve_setup, dict):
+        return False
+    roles = reserve_setup.get("roles")
+    if not isinstance(roles, dict):
+        return False
+    record = roles.get(role)
+    return isinstance(record, dict) and record.get("write_attempted") is True
+
+
+def _configure_sweep_reserve_modes(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    reserve_setup: dict[str, object],
+    settle_s: float,
+) -> None:
+    """Apply configured RMOD values, verify them, and consume transition latches."""
+
+    roles = reserve_setup.get("roles")
+    if not isinstance(roles, dict):
+        raise ValueError("Sweep reserve setup must contain per-role records.")
+    instruments = (("lockin_xx", lockin_xx), ("lockin_xy", lockin_xy))
+    for role, instrument in instruments:
+        role_record = roles.get(role)
+        if not isinstance(role_record, dict):
+            raise ValueError(f"Sweep reserve setup is missing {role}.")
+        original = _reserve_record_int(role_record, "original_code", role)
+        target = _reserve_record_int(role_record, "configured_code", role)
+        if original != target:
+            instrument.set_reserve_mode(target)
+            role_record["write_attempted"] = True
+            reserve_setup["write_performed"] = True
+    if reserve_setup.get("write_performed"):
+        time.sleep(settle_s)
+    for role, instrument in instruments:
+        role_record = roles.get(role)
+        if not isinstance(role_record, dict):
+            raise ValueError(f"Sweep reserve setup is missing {role}.")
+        target = _reserve_record_int(role_record, "configured_code", role)
+        readback = instrument.read_reserve_mode()
+        role_record["readback_code"] = readback
+        if readback != target:
+            raise Sr830Error(
+                f"{role} reserve-mode readback {readback} does not match "
+                f"configured RMOD {target}."
+            )
+    if reserve_setup.get("write_performed"):
+        transition, problems = _consume_reserve_transition(lockin_xx, lockin_xy)
+        reserve_setup["transition_status"] = transition
+        if problems:
+            raise Sr830Error("Unsafe reserve-mode transition: " + "; ".join(problems))
+        time.sleep(settle_s)
+        for role, instrument in instruments:
+            role_record = roles.get(role)
+            assert isinstance(role_record, dict)
+            verification = instrument.read_reserve_mode()
+            role_record["verification_code"] = verification
+            target = _reserve_record_int(role_record, "configured_code", role)
+            if verification != target:
+                raise Sr830Error(
+                    f"{role} reserve-mode verification {verification} does not match "
+                    f"configured RMOD {target}."
+                )
+
+
+def _consume_reserve_transition(
+    lockin_xx: Sr830, lockin_xy: Sr830
+) -> tuple[dict[str, object], list[str]]:
+    xx = lockin_xx.read_harmonic_sample(1)
+    xy = lockin_xy.read_harmonic_sample(1)
+    problems: list[str] = []
+    for sample in (xx, xy):
+        role = sample.reading.role.value
+        if sample.lia_status.reference_unlocked:
+            problems.append(f"lockin_{role} reference unlocked during reserve transition")
+        if sample.lia_status.any_overload:
+            problems.append(f"lockin_{role} overload during reserve transition")
+        if sample.lia_status.frequency_range_changed:
+            problems.append(f"lockin_{role} frequency range changed during reserve transition")
+        if sample.lia_status.time_constant_changed:
+            problems.append(f"lockin_{role} time constant changed during reserve transition")
+        if sample.error_status:
+            problems.append(
+                f"lockin_{role} instrument error during reserve transition is "
+                f"{sample.error_status}"
+            )
+    return (
+        {
+            "captured_unix_s": time.time(),
+            "lockin_xx": _audited_harmonic_sample_record(xx),
+            "lockin_xy": _audited_harmonic_sample_record(xy),
+            "problems": problems,
+        },
+        problems,
+    )
 
 
 def _new_sweep_range_record(
@@ -2767,8 +2966,12 @@ def _capture_sweep_point(
             lockin_xx.set_harmonic(harmonic)
             lockin_xy.set_harmonic(harmonic)
             time.sleep(harmonic_settle_s)
-            transition, transition_problems = _consume_harmonic_transition(
-                lockin_xx, lockin_xy, harmonic=harmonic
+            transition, transition_problems = _consume_and_verify_harmonic_transition(
+                lockin_xx,
+                lockin_xy,
+                harmonic=harmonic,
+                settle_s=harmonic_settle_s,
+                allow_input_reserve_recheck=True,
             )
             raw_transitions.append(transition)
             if transition_problems:
@@ -2818,8 +3021,12 @@ def _capture_sweep_point(
         lockin_xx.set_harmonic(1)
         lockin_xy.set_harmonic(1)
         time.sleep(harmonic_settle_s)
-        transition, transition_problems = _consume_harmonic_transition(
-            lockin_xx, lockin_xy, harmonic=1
+        transition, transition_problems = _consume_and_verify_harmonic_transition(
+            lockin_xx,
+            lockin_xy,
+            harmonic=1,
+            settle_s=harmonic_settle_s,
+            allow_input_reserve_recheck=True,
         )
         raw_transitions.append(transition)
         if transition_problems:
@@ -2863,6 +3070,11 @@ def _consume_harmonic_transition(
                 f"lockin_{role} instrument error during harmonic transition is "
                 f"{sample.error_status}"
             )
+    candidate_latches = []
+    if xx.lia_status.input_or_reserve_overload:
+        candidate_latches.append("lockin_xx.input_or_reserve_overload")
+    if xy.lia_status.input_or_reserve_overload:
+        candidate_latches.append("lockin_xy.input_or_reserve_overload")
     return (
         {
             "harmonic": harmonic,
@@ -2871,12 +3083,53 @@ def _consume_harmonic_transition(
                 "filter_overload",
                 "frequency_range_changed",
             ],
+            "candidate_transient_latches": candidate_latches,
             "lockin_xx": _audited_harmonic_sample_record(xx),
             "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
         },
         problems,
     )
+
+
+def _consume_and_verify_harmonic_transition(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    harmonic: int,
+    settle_s: float,
+    allow_input_reserve_recheck: bool,
+) -> tuple[dict[str, object], list[str]]:
+    """Consume one HARM-transition sample and recheck a lone input/reserve latch.
+
+    LIAS bit 0 is latched and can briefly assert while the SR830 changes its
+    internal harmonic/filter path.  The first read is retained as audit data;
+    only a first-read bit-0-only problem is eligible for one settled recheck.
+    A second nonzero status remains a fail-closed transition rejection.
+    """
+
+    transition, problems = _consume_harmonic_transition(
+        lockin_xx, lockin_xy, harmonic=harmonic
+    )
+    if not problems:
+        transition["verification_required"] = False
+        return transition, problems
+    input_reserve_only = all("input/reserve overload" in problem for problem in problems)
+    if not allow_input_reserve_recheck or not input_reserve_only:
+        transition["verification_required"] = False
+        return transition, problems
+    transition["verification_required"] = True
+    transition["verification_reason"] = "input/reserve overload candidate"
+    time.sleep(settle_s)
+    verification, verification_problems = _consume_harmonic_transition(
+        lockin_xx, lockin_xy, harmonic=harmonic
+    )
+    transition["verification"] = verification
+    transition["verification_problems"] = verification_problems
+    if verification_problems:
+        return transition, verification_problems
+    transition["verification_passed"] = True
+    return transition, []
 
 
 def _consume_frequency_transition(
@@ -2989,6 +3242,10 @@ def _restore_scan_state(
     writes_started: bool,
     original_xy_sensitivity: int | None = None,
     restore_xy_sensitivity: bool = False,
+    original_xx_reserve_mode: int | None = None,
+    original_xy_reserve_mode: int | None = None,
+    restore_xx_reserve: bool = False,
+    restore_xy_reserve: bool = False,
     verify_frequency_match: bool = True,
 ) -> dict[str, object]:
     if not writes_started:
@@ -3006,6 +3263,27 @@ def _restore_scan_state(
                 lambda: lockin_xx.set_internal_reference_frequency(baseline_hz),
             )
         )
+    reserve_actions: list[tuple[str, Callable[[], None]]] = []
+    if restore_xx_reserve:
+        if original_xx_reserve_mode is None:
+            errors.append("original lockin_xx reserve mode is unavailable")
+        else:
+            reserve_actions.append(
+                (
+                    "restore lockin_xx reserve mode",
+                    lambda: lockin_xx.set_reserve_mode(original_xx_reserve_mode),
+                )
+            )
+    if restore_xy_reserve:
+        if original_xy_reserve_mode is None:
+            errors.append("original lockin_xy reserve mode is unavailable")
+        else:
+            reserve_actions.append(
+                (
+                    "restore lockin_xy reserve mode",
+                    lambda: lockin_xy.set_reserve_mode(original_xy_reserve_mode),
+                )
+            )
     for label, action in actions:
         try:
             action()
@@ -3024,8 +3302,12 @@ def _restore_scan_state(
     time.sleep(settle_s)
     if harmonic_restored:
         try:
-            harmonic_transition, transition_problems = _consume_harmonic_transition(
-                lockin_xx, lockin_xy, harmonic=1
+            harmonic_transition, transition_problems = _consume_and_verify_harmonic_transition(
+                lockin_xx,
+                lockin_xy,
+                harmonic=1,
+                settle_s=settle_s,
+                allow_input_reserve_recheck=True,
             )
             errors.extend(transition_problems)
         except BaseException as exc:
@@ -3041,6 +3323,22 @@ def _restore_scan_state(
             errors.append(f"frequency-restoration transition readback: {exc}")
         time.sleep(settle_s)
     sensitivity_transition: dict[str, object] | None = None
+    reserve_transition: dict[str, object] | None = None
+    if reserve_actions:
+        for label, action in reserve_actions:
+            try:
+                action()
+            except BaseException as exc:
+                errors.append(f"{label}: {exc}")
+        time.sleep(settle_s)
+        try:
+            reserve_transition, transition_problems = _consume_reserve_transition(
+                lockin_xx, lockin_xy
+            )
+            errors.extend(transition_problems)
+        except BaseException as exc:
+            errors.append(f"reserve-restoration transition readback: {exc}")
+        time.sleep(settle_s)
     if restore_sensitivity or restore_xy_sensitivity:
         sensitivity_actions: list[tuple[str, Callable[[], None]]] = []
         if restore_sensitivity:
@@ -3118,6 +3416,12 @@ def _restore_scan_state(
             and xy.sensitivity != original_xy_sensitivity
         ):
             errors.append("lockin_xy sensitivity did not restore")
+        if restore_xx_reserve and original_xx_reserve_mode is not None:
+            if xx.reserve_mode != original_xx_reserve_mode:
+                errors.append("lockin_xx reserve mode did not restore")
+        if restore_xy_reserve and original_xy_reserve_mode is not None:
+            if xy.reserve_mode != original_xy_reserve_mode:
+                errors.append("lockin_xy reserve mode did not restore")
     except BaseException as exc:
         errors.append(f"final readback: {exc}")
     return {
@@ -3127,6 +3431,7 @@ def _restore_scan_state(
         "harmonic_transition_status": harmonic_transition,
         "transition_status": transition,
         "sensitivity_transition_status": sensitivity_transition,
+        "reserve_transition_status": reserve_transition,
         "final": diagnostics,
     }
 

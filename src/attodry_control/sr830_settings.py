@@ -30,6 +30,14 @@ class SensitivityMode(StrEnum):
     BOUNDED_AUTO = "bounded_auto"
 
 
+class ReserveMode(StrEnum):
+    """SR830 dynamic-reserve operating modes exposed by ``RMOD``."""
+
+    HIGH_RESERVE = "high_reserve"
+    NORMAL = "normal"
+    LOW_NOISE = "low_noise"
+
+
 @dataclass(frozen=True, slots=True)
 class Sr830SettingCodes:
     reference_source: int

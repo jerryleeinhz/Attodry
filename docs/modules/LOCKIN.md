@@ -59,6 +59,7 @@ filter_slope_db_oct = 24
 # (SENS 22) for extra h1 headroom; see LOCKIN_DAILY_OPERATION.md.
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.020
+reserve_mode = "normal"
 # To opt in to the three-level XX bounded_auto ladder, change the mode and use:
 # sensitivity_full_scale_v = 0.010
 # autorange_min_full_scale_v = 0.010
@@ -78,6 +79,7 @@ time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.001
+reserve_mode = "normal"
 # To opt in to XY bounded_auto, change the mode and use this complete policy:
 # autorange_min_full_scale_v = 0.001
 # autorange_max_full_scale_v = 0.010
@@ -126,6 +128,7 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 | `settle_time_constants` | 每次设置转换后等待的时间常数个数，最小 5.0。 | `[lockin_sweep].settle_s` 必须不小于两台的 `time_constant_s × settle_time_constants` 最大值；当前最短为 `5 × 0.3 s = 1.5 s`。 |
 | `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
 | `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
+| `reserve_mode` | `high_reserve`/`normal`/`low_noise`，对应 `RMOD` 0/1/2；当前日常策略为 `normal`。 | 还必须出现在该角色 `lockin_safety.toml` 的 `allowed_reserve_modes` 中；改变时先降 SINE OUT，读回确认并在 cleanup 恢复。 |
 | `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | 选中角色的自动范围边界。推荐 XX 10--50 mV 三档阶梯、XY 1--10 mV。 | 仅 `bounded_auto` 使用；XX 10--50 mV 自动按 10→20→50 mV 逐档转换。 |
 | `autorange_target_occupancy` | 0.85。 | 到达或超过阈值、或报告过载时，才允许上移一个档位；最大档仍不安全则 fail closed。 |
 | `autorange_stable_samples` | 2 个连续安全样本。 | 符合更窄的相邻档位两次后，才允许下移一档；任一不合格样本重置计数。 |
@@ -425,9 +428,10 @@ VISA、不读取状态锁存、不写设置。
 （frequency range changed），没有 unlock 或 instrument error。部分样本已保留；
 cleanup 严格验证 h1、XX 4 mVrms / 10 mV / 17.777 Hz、XY 1 mV 和零状态字，幅值
 扫描未启动。修订后每个 HARM 转换会把仅有的 filter-overload / frequency-range
-changed 锁存作为 discarded transition 记录、消费并再次等待；unlock、input/reserve
-或 output overload、time-constant change、error 仍立即失败，之后的正式样本对全部
-状态位保持零容忍。fake-VISA 覆盖成功、二阶正式失败恢复和这组观察到的转换锁存；
+changed 锁存作为 discarded transition 记录、消费并再次等待；若第一条只有
+input/reserve overload，则再等待一个 interval 做一次复核，复核必须清零；unlock、
+重复 input/reserve、output overload、time-constant change、error 仍失败，之后的正式
+样本对全部状态位保持零容忍。fake-VISA 覆盖成功、二阶正式失败恢复和这组观察到的转换锁存；
 修订后的真实三阶扫频仍需新的明确授权。
 
 2026-08-21：随后的真实三阶扫频在 38.3104813 kHz 的 h3 切换被安全拒绝；h3 所需

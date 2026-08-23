@@ -367,12 +367,13 @@ through 14.677 kHz (eight points). Change the TOML before a future scan if that
 policy needs to change.
 
 The HARM transition record is deliberately excluded from formal curves. It may
-contain only a filter-overload and/or frequency-range-change latch while the
-reference moves to the selected detection harmonic. It is consumed, retained,
-and followed by another full settling interval. Reference unlock, input/reserve
-or output overload, a time-constant change, or an instrument error during this
-transition remains a failure; every formal h1/h2/h3 sample rejects every
-unlock, overload, and error bit without exception.
+contain filter/frequency-range latches while the reference moves to the selected
+detection harmonic. A first-read input/reserve-only latch is retained as a
+transient candidate, consumed, and checked once more after a full settling
+interval; only a clean second read permits formal sampling. Reference unlock,
+output overload, a time-constant change, an instrument error, or any repeated
+input/reserve latch remains a failure. Every formal h1/h2/h3 sample rejects
+every unlock, overload, and error bit without exception.
 
 After restoring any range changed by sweep setup, cleanup waits, records the
 range-transition status, waits again, and then performs the strict final

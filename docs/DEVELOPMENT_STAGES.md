@@ -751,4 +751,14 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   error, and unsafe-transition checks fail closed. Both sweeps clear pending VISA
   responses before their first query and again before cleanup after an abort; the
   new read/write-free `recover-interface` command provides manual recovery after a
-  hard interruption. The JSON schema is version 9 and includes the clear audit.
+  hard interruption. The JSON schema was version 9 for the clear-audit release;
+  the current reserve-aware sweep record is version 10.
+- Added semantic SR830 `reserve_mode` configuration and versioned safety-policy
+  allowlists (schema 10). `high_reserve`, `normal`, and `low_noise` map to RMOD
+  0/1/2; the checked-in daily policy permits `normal` until separate hardware
+  confirmation expands it. Sweep records target/readback/original RMOD values and
+  restores any changed mode after lowering SINE OUT. A first HARM-transition
+  input/reserve-overload-only latch is retained as a discarded candidate and gets
+  one additional settled verification read; a repeated latch or any other unsafe
+  bit remains fail-closed. Fake-VISA coverage and the complete offline suite passed;
+  no hardware resource was opened or written.

@@ -17,6 +17,14 @@ MAXIMUM_REFERENCE_FREQUENCY_HZ = 102_000.0
 PAIR_FREQUENCY_ABS_TOLERANCE_HZ = 0.001_01
 MINIMUM_FIXED_SETTINGS_SETTLE_S = 1.5
 
+# Semantic names are parsed in the configuration layer; these are the SR830
+# integer codes used by RMOD/RMOD?.
+RESERVE_MODE_CODES = {
+    "high_reserve": 0,
+    "normal": 1,
+    "low_noise": 2,
+}
+
 
 class Sr830Error(RuntimeError):
     """Raised when an SR830 response or verified state is invalid."""
@@ -186,7 +194,7 @@ class Sr830:
         input_coupling = self._query_int("ICPL?")
         line_filter = self._query_int("ILIN?")
         sensitivity = self.read_sensitivity()
-        reserve_mode = self._query_int("RMOD?")
+        reserve_mode = self.read_reserve_mode()
         time_constant = self.read_time_constant()
         filter_slope = self.read_filter_slope()
         phase_shift_deg = self.read_phase_shift()
@@ -276,6 +284,22 @@ class Sr830:
         if not 0 <= code <= 26:
             raise Sr830Error(
                 f"lockin_{self.role.value} returned invalid sensitivity code {code}."
+            )
+        return code
+
+    def set_reserve_mode(self, code: int) -> None:
+        if code not in (0, 1, 2):
+            raise ValueError(
+                "SR830 reserve mode code must be 0 (high reserve), 1 (normal), "
+                "or 2 (low noise)."
+            )
+        self._resource.write(f"RMOD {code}")
+
+    def read_reserve_mode(self) -> int:
+        code = self._query_int("RMOD?")
+        if code not in (0, 1, 2):
+            raise Sr830Error(
+                f"lockin_{self.role.value} returned invalid reserve mode code {code}."
             )
         return code
 
