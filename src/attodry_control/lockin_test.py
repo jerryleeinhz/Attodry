@@ -4,6 +4,7 @@ import argparse
 from contextlib import ExitStack
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -50,9 +51,11 @@ SR830_OUTPUT_RESISTANCE_OHM = 50.0
 MINIMUM_SWEEP_SETTLE_S = 1.5
 EXCITATION_SOURCE_STEP_SETTLE_INTERVALS = 2
 # The external SR830 frequency readback showed 54 ppm jitter at 50 Hz while
-# remaining locked and error-free. This sweep-only tolerance leaves measured
-# margin for that jitter; unlock and error status remain unconditional failures.
+# remaining locked and error-free. The instrument also quantizes FREQ? to
+# roughly 0.1 Hz in this operating range, so the absolute tolerance must cover
+# half a display step plus that jitter; unlock and error status remain failures.
 SWEEP_FREQUENCY_REL_TOLERANCE = 100e-6
+SWEEP_FREQUENCY_ABS_TOLERANCE_HZ = 0.11
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +70,21 @@ def build_parser() -> argparse.ArgumentParser:
         "discover", help="List VISA resources without opening instruments."
     )
     discover.set_defaults(handler=_run_discover)
+
+    validate = subparsers.add_parser(
+        "validate-config",
+        help=(
+            "Validate hardware.toml and the adjacent lockin_safety.toml "
+            "without opening VISA instruments."
+        ),
+    )
+    validate.add_argument(
+        "--config",
+        type=Path,
+        default=Path("config/hardware.local.toml"),
+        help="Hardware TOML; lockin_safety.toml is loaded from the same directory.",
+    )
+    validate.set_defaults(handler=_run_validate_config)
 
     diagnose = subparsers.add_parser(
         "diagnose", help="Query two SR830 units without changing their settings."
@@ -318,7 +336,9 @@ def run(
     resource_manager_factory: Callable[[], object] | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
-    factory = resource_manager_factory or _load_resource_manager_factory()
+    factory = resource_manager_factory
+    if factory is None and args.command != "validate-config":
+        factory = _load_resource_manager_factory()
     return args.handler(args, factory)
 
 
@@ -399,6 +419,32 @@ def _run_discover(args: argparse.Namespace, factory: Callable[[], object]) -> in
     finally:
         manager.close()
     print(json.dumps({"resources": resources}, indent=2))
+    return 0
+
+
+def _run_validate_config(
+    args: argparse.Namespace, factory: Callable[[], object] | None = None
+) -> int:
+    """Validate configuration only; this command never imports or opens VISA."""
+
+    del factory
+    config = load_config(args.config)
+    readiness_errors = config.hardware_readiness_errors()
+    safety_path = Path(args.config).with_name("lockin_safety.toml")
+    print(
+        json.dumps(
+            {
+                "config": str(Path(args.config)),
+                "lockin_safety": str(safety_path),
+                "hardware_ready": not readiness_errors,
+                "hardware_readiness_errors": list(readiness_errors),
+                "lockin_safety_policy": asdict(config.lockin_safety),
+                "visa_opened": False,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
@@ -1043,6 +1089,7 @@ def _run_frequency_sweep(
                     xx_readback,
                     xy_readback,
                     rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
+                    absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
                 )
                 point_harmonics, skipped_harmonics = _harmonics_for_frequency(
                     target_hz,
@@ -1400,16 +1447,46 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
         "setting_writes_enabled_by_command": True,
+        "lockin_safety": asdict(config.lockin_safety),
+        "lockin_safety_path": str(
+            settings.get("safety_config_path")
+            or Path(args.config).with_name("lockin_safety.toml")
+        ),
+        "lockin_safety_sha256": _lockin_safety_sha256(settings),
         "lockin_xx": lockin_snapshot(config.lockin_xx),
         "lockin_xy": lockin_snapshot(config.lockin_xy),
         "sweep": sweep_snapshot,
         "excitation_path": excitation_path,
     }
+
+
+def _lockin_safety_sha256(settings: dict[str, object]) -> str:
+    path_value = settings.get("safety_config_path")
+    if path_value is None:
+        config_path = settings.get("config_path")
+        if config_path is None:
+            raise ValueError("Lock-in safety policy path is unavailable.")
+        path_value = Path(config_path).with_name("lockin_safety.toml")
+    path = Path(path_value)
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        # Unit-test callers may inject a policy through load_config(...,
+        # safety_path=...). Production daily sweeps always resolve the sibling
+        # file before reaching this point, so a missing file remains a visible
+        # path in the audit record while the resolved policy is still hashed.
+        config = settings.get("config")
+        if not isinstance(config, ControlConfig):
+            raise ValueError(f"Cannot hash lockin safety policy {path}: {exc}") from exc
+        payload = json.dumps(
+            asdict(config.lockin_safety), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _sweep_run_metadata(settings: dict[str, object]) -> dict[str, str]:
@@ -1611,18 +1688,20 @@ def _autorange_policy_for_lockin(lockin: LockinConfig) -> AutorangePolicy | None
         lockin.autorange_target_occupancy,
         lockin.autorange_stable_samples,
         lockin.autorange_max_steps,
+        lockin.autorange_full_scales_v,
     )
     if any(value is None for value in values):
         raise ValueError(
             f"lockin_{lockin.role.value} bounded_auto configuration is incomplete."
         )
-    minimum, maximum, occupancy, stable_samples, maximum_steps = values
+    minimum, maximum, occupancy, stable_samples, maximum_steps, full_scales = values
     return AutorangePolicy(
         float(minimum),
         float(maximum),
         float(occupancy),
         int(stable_samples),
         int(maximum_steps),
+        tuple(float(value) for value in full_scales),
     )
 
 
@@ -1939,6 +2018,7 @@ def _autorange_probe_problems(
             xx.reading.frequency_hz,
             xy.reading.frequency_hz,
             rel_tolerance=frequency_rel_tolerance,
+            absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
         )
     except Sr830Error as exc:
         problems.append(str(exc))
@@ -2005,6 +2085,7 @@ def _resolve_sweep_settings(
         if args.sample_interval_s is None
         else args.sample_interval_s
     )
+    args.maximum_source_voltage_v = config.lockin_safety.maximum_source_voltage_v_rms
     if scan == "frequency":
         args.points_hz = (
             sweep.frequency_points_hz if args.points_hz is None else args.points_hz
@@ -2142,8 +2223,17 @@ def _validate_excitation_safety(
     args: argparse.Namespace, points: tuple[float, ...]
 ) -> dict[str, float]:
     maximum_source_v = max(points)
-    if min(points) < MINIMUM_SINE_OUTPUT_V or maximum_source_v > MAXIMUM_SINE_OUTPUT_V:
-        raise ValueError("Source-voltage points must be within the SR830 0.004-5 V RMS range.")
+    maximum_allowed_v = float(
+        getattr(args, "maximum_source_voltage_v", MAXIMUM_SINE_OUTPUT_V)
+    )
+    if (
+        min(points) < MINIMUM_SINE_OUTPUT_V
+        or maximum_source_v > maximum_allowed_v
+    ):
+        raise ValueError(
+            "Source-voltage points must be within the configured lockin safety "
+            f"range {MINIMUM_SINE_OUTPUT_V:g}-{maximum_allowed_v:g} V RMS."
+        )
     return _calculate_source_voltage_safety(
         maximum_source_v,
         series_resistance_ohm=args.series_resistance_ohm,
@@ -2151,6 +2241,7 @@ def _validate_excitation_safety(
         maximum_device_resistance_ohm=args.maximum_device_resistance_ohm,
         max_device_current_a=args.max_device_current_a,
         max_device_voltage_v=args.max_device_voltage_v,
+        maximum_allowed_source_v=maximum_allowed_v,
     )
 
 
@@ -2165,6 +2256,7 @@ def _validate_frequency_source_safety(
         maximum_device_resistance_ohm=sweep.maximum_device_resistance_ohm,
         max_device_current_a=sweep.max_device_current_a_rms,
         max_device_voltage_v=sweep.max_device_voltage_v_rms,
+        maximum_allowed_source_v=config.lockin_safety.maximum_source_voltage_v_rms,
     )
 
 
@@ -2176,13 +2268,17 @@ def _calculate_source_voltage_safety(
     maximum_device_resistance_ohm: float,
     max_device_current_a: float,
     max_device_voltage_v: float,
+    maximum_allowed_source_v: float = MAXIMUM_SINE_OUTPUT_V,
 ) -> dict[str, float]:
     if (
         not math.isfinite(maximum_source_v)
         or maximum_source_v < MINIMUM_SINE_OUTPUT_V
-        or maximum_source_v > MAXIMUM_SINE_OUTPUT_V
+        or maximum_source_v > maximum_allowed_source_v
     ):
-        raise ValueError("Source voltage must be within the SR830 0.004-5 V RMS range.")
+        raise ValueError(
+            "Source voltage must be within the configured lockin safety range "
+            f"{MINIMUM_SINE_OUTPUT_V:g}-{maximum_allowed_source_v:g} V RMS."
+        )
     current_bound_a = maximum_source_v / (
         series_resistance_ohm + SR830_OUTPUT_RESISTANCE_OHM
     )
@@ -2229,13 +2325,14 @@ def _verify_frequency_readbacks(
     xy_readback_hz: float,
     *,
     rel_tolerance: float = 1e-5,
+    absolute_tolerance_hz: float = PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
 ) -> None:
     for role, readback in (("xx", xx_readback_hz), ("xy", xy_readback_hz)):
         if not math.isclose(
             readback,
             target_hz,
             rel_tol=rel_tolerance,
-            abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
+            abs_tol=absolute_tolerance_hz,
         ):
             raise Sr830Error(
                 f"lockin_{role} frequency readback {readback:g} Hz does not match "
@@ -2245,7 +2342,7 @@ def _verify_frequency_readbacks(
         xx_readback_hz,
         xy_readback_hz,
         rel_tol=rel_tolerance,
-        abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
+        abs_tol=absolute_tolerance_hz,
     ):
         raise Sr830Error("xx/xy frequency readbacks do not match.")
 
@@ -2308,6 +2405,7 @@ def _capture_sweep_point(
                     xx.reading.frequency_hz,
                     xy.reading.frequency_hz,
                     rel_tolerance=frequency_rel_tolerance,
+                    absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
                 )
             except Sr830Error as exc:
                 problems.append(str(exc))
@@ -2600,6 +2698,7 @@ def _restore_scan_state(
                 rel_tolerance=(
                     SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
                 ),
+                absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
             )
             _verify_frequency_readbacks(
                 baseline_hz,
@@ -2608,6 +2707,7 @@ def _restore_scan_state(
                 rel_tolerance=(
                     SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
                 ),
+                absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
             )
         except Sr830Error as exc:
             errors.append(str(exc))
@@ -2684,6 +2784,12 @@ def _resolve_pair_settings(args: argparse.Namespace) -> dict[str, object]:
 
     return {
         "config": config,
+        "config_path": None if args.config is None else Path(args.config),
+        "safety_config_path": (
+            None
+            if args.config is None
+            else Path(args.config).with_name("lockin_safety.toml")
+        ),
         "xx_address": xx_address,
         "xy_address": xy_address,
         "timeout_ms": timeout_ms,

@@ -100,6 +100,14 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 排错入口统一见 [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)，不要在
 本页和日常手册维护两份独立的取值表。
 
+安全边界现在拆成两个职责：被忽略的 `hardware.local.toml` 保存本站地址、接线事实和
+本次扫描网格；同目录受版本控制的 `lockin_safety.toml` 保存项目允许的 full-scale
+白名单、autorange 阶梯、0.85 占用率、2 个稳定样本、最小 5 tau 和 4 mVrms cleanup。
+两条日常 sweep 自动读取后者，操作者不需要先运行 `validate-config`；该命令只是可选
+的无 VISA 离线检查。每条 JSON 的 `measurement_config` 保存解析后的策略和 SHA-256，
+便于按历史记录复现安全边界。驱动层仍映射完整 SR830 电压量程（包含 1 V/SENS 26），
+但只有安全文件列出的档位能用于日常运行。
+
 | 字段 | 含义与确认值 | 约束 |
 | --- | --- | --- |
 | `reference_source` | XX 为 `internal`，即 XX 提供激励与参考；XY 为 `external_ttl`。 | 角色不可交换；XY 的 SINE OUT 必须物理断开。 |

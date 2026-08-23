@@ -7,8 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import attodry_control.config as config_module
 from attodry_control.lockin_test import (
     _consume_sensitivity_transition,
+    _verify_frequency_readbacks,
     build_parser,
     run,
 )
@@ -182,6 +184,17 @@ def responses(reference_mode: int, *, frequency_hz: float = 17.777) -> dict[str,
 
 
 class Sr830Tests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._load_config_patch = patch(
+            "attodry_control.lockin_test.load_config",
+            side_effect=lambda path: config_module.load_config(
+                path,
+                safety_path=Path("config/lockin_safety.toml"),
+            ),
+        )
+        self._load_config_patch.start()
+        self.addCleanup(self._load_config_patch.stop)
+
     @staticmethod
     def _fixed_codes(*, external: bool):
         return map_sr830_settings(
@@ -223,6 +236,39 @@ class Sr830Tests(unittest.TestCase):
         self.addCleanup(path.unlink)
         self.addCleanup(shutil.rmtree, path.parent / output_directory, ignore_errors=True)
         return path
+
+    def test_frequency_readback_accepts_sr830_display_quantization(self) -> None:
+        _verify_frequency_readbacks(
+            316.159,
+            316.1,
+            316.1,
+            rel_tolerance=100e-6,
+            absolute_tolerance_hz=0.11,
+        )
+
+    def test_validate_config_is_offline_and_optional(self) -> None:
+        output = io.StringIO()
+        factory_called = False
+
+        def unopened_factory():
+            nonlocal factory_called
+            factory_called = True
+            raise AssertionError("validate-config must not load VISA")
+
+        with redirect_stdout(output):
+            exit_code = run(
+                [
+                    "validate-config",
+                    "--config",
+                    str(Path("config/hardware.example.toml")),
+                ],
+                resource_manager_factory=unopened_factory,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertFalse(factory_called)
+        self.assertFalse(result["visa_opened"])
 
     @staticmethod
     def _snapshot(*, amplitude_v: float, frequency_hz: float = 17.777) -> str:
@@ -721,8 +767,8 @@ class Sr830Tests(unittest.TestCase):
         self.assertIn("FREQ? (Hz)", panel)
         self.assertIn("\nXX  ", panel)
         self.assertIn("\nXY  ", panel)
-        self.assertIn("code 23*", panel)
-        self.assertIn("monitor did not change it", panel)
+        self.assertIn("0.1 V", panel)
+        self.assertNotIn("monitor did not change it", panel)
         self.assertTrue(manager.closed)
 
     def test_cli_monitor_live_consumes_latches_only_when_requested(self) -> None:
@@ -2093,7 +2139,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 4)
+        self.assertEqual(result["measurement_config"]["schema_version"], 5)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(

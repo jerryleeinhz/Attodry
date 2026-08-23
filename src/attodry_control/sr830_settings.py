@@ -51,12 +51,39 @@ _INPUT_MODE_CODES = {InputMode.A_MINUS_B: 1}
 _SHIELD_GROUNDING_CODES = {ShieldGrounding.FLOAT: 0}
 _INPUT_COUPLING_CODES = {InputCoupling.AC: 0}
 
-# The project permits these SR830 sensitivity full scales for daily sweeps.
-# Adding a hardware-supported value requires an explicit project-policy update,
-# offline mapping/config tests, and documentation; it is not write authorization.
+# This is the complete SR830 voltage-input full-scale mapping. Project policy
+# decides which of these hardware-supported values daily sweeps may use.
 _TIME_CONSTANT_CODES = {0.3: 9}
 _FILTER_SLOPE_CODES = {24: 3}
-_SENSITIVITY_CODES = {0.001: 17, 0.01: 20, 0.02: 21, 0.05: 22}
+_SENSITIVITY_CODES = {
+    2e-9: 0,
+    5e-9: 1,
+    1e-8: 2,
+    2e-8: 3,
+    5e-8: 4,
+    1e-7: 5,
+    2e-7: 6,
+    5e-7: 7,
+    1e-6: 8,
+    2e-6: 9,
+    5e-6: 10,
+    1e-5: 11,
+    2e-5: 12,
+    5e-5: 13,
+    1e-4: 14,
+    2e-4: 15,
+    5e-4: 16,
+    1e-3: 17,
+    2e-3: 18,
+    5e-3: 19,
+    1e-2: 20,
+    2e-2: 21,
+    5e-2: 22,
+    1e-1: 23,
+    2e-1: 24,
+    5e-1: 25,
+    1.0: 26,
+}
 
 
 def sensitivity_code(full_scale_v: float) -> int:
@@ -64,7 +91,7 @@ def sensitivity_code(full_scale_v: float) -> int:
         return _SENSITIVITY_CODES[full_scale_v]
     except KeyError as exc:
         raise ValueError(
-            "sensitivity full scale must be one of 0.001, 0.01, 0.02, or 0.05 V"
+            "sensitivity full scale is not an SR830 voltage-input full scale"
         ) from exc
 
 
@@ -72,7 +99,7 @@ def sensitivity_full_scale_v(code: int) -> float:
     for full_scale_v, mapped_code in _SENSITIVITY_CODES.items():
         if mapped_code == code:
             return full_scale_v
-    raise ValueError("sensitivity code is outside the project-confirmed ranges")
+    raise ValueError("sensitivity code is outside the SR830 voltage-input range")
 
 
 def map_sr830_settings(

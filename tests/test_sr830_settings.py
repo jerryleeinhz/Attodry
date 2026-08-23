@@ -75,6 +75,20 @@ class Sr830SettingMappingTests(unittest.TestCase):
                 )
                 self.assertEqual(codes.sensitivity, expected_code)
 
+    def test_maps_sr830_one_volt_hardware_code_without_project_authorization(self) -> None:
+        codes = map_sr830_settings(
+            reference_source=ReferenceSource.INTERNAL,
+            external_reference_edge=None,
+            input_mode=InputMode.A_MINUS_B,
+            shield_grounding=ShieldGrounding.FLOAT,
+            input_coupling=InputCoupling.AC,
+            time_constant_s=0.3,
+            filter_slope_db_oct=24,
+            sensitivity_full_scale_v=1.0,
+        )
+
+        self.assertEqual(codes.sensitivity, 26)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,8 +27,9 @@ python -m attodry_control.lockin_test monitor-live --samples 10 --interval-s 1 -
 - `harm`、`SENS`、XX/XY 的 `SINE OUT` 读回；
 - `lock`、`overload` 和 `error` 状态，以及配置/频率不匹配等 warnings。
 
-`SENS` 如果显示为 `code N*`，代表设备当前的原始 SR830 量程代码不在本项目已经确认
-的 1 mV、10 mV、20 mV 策略内。面板只如实报告它，绝不会为了显示而改写量程。
+`SENS` 如果显示为 `code N*`，代表设备返回了驱动完整 SR830 电压量程表之外的原始
+代码；面板只如实报告它，绝不会为了显示而改写量程。某个硬件支持但尚未纳入日常
+`lockin_safety.toml` 白名单的档位会显示其物理 full-scale，但 sweep 仍会在 VISA 前拒绝。
 
 ## 锁定与状态锁存位
 

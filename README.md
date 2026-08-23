@@ -102,6 +102,12 @@ python -m attodry_control.lockin_test --help
 `[lockin_sweep].frequency_source_voltage_v_rms`（0.004--5.0 Vrms）；扫频结束后仍
 按安全协议恢复 4 mVrms。扫幅的逐点幅值仍由 `excitation_points_v_rms` 控制。
 
+两条 sweep 会自动读取与 `hardware.local.toml` 同目录的受版本控制
+`lockin_safety.toml`；日常运行不要求先执行验证命令。需要离线检查时可运行
+`python -m attodry_control.lockin_test validate-config`，它不会打开 VISA。安全文件
+控制日常量程白名单和 bounded-auto 阶梯，完整 SR830 硬件量程映射（包括 1 V）不代表
+该档位已经获准用于日常扫描。
+
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency
 python -m attodry_control.lockin_test sweep-excitation

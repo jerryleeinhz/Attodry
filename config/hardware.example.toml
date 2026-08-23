@@ -1,5 +1,7 @@
 # Copy this file to hardware.local.toml and edit it on the control computer.
 # hardware.local.toml is ignored by git.
+# Daily Lock-in sweeps automatically read the versioned lockin_safety.toml file
+# beside this file; validate-config is optional and is not a run prerequisite.
 
 [project]
 mode = "hardware"

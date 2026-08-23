@@ -40,6 +40,30 @@ python -B -m attodry_control.lockin_test sweep-excitation --help
 才使用 `--config <path>`；日常运行不需要填写电阻、量程、采样时间、扫描点、
 阶次或确认旗标。
 
+### 独立安全协议文件（自动读取）
+
+日常 sweep 会在 `hardware.local.toml` **同一目录**自动读取受版本控制的
+`lockin_safety.toml`；不需要先运行任何验证命令。缺少该文件、字段未知、量程不在
+白名单、自动阶梯不连续，或全局安全值不一致时，命令会在打开 VISA 前 fail closed。
+因此正常运行就是上面的两条 `sweep-*` 命令，`validate-config` 只是可选的离线预检：
+
+```powershell
+python -m attodry_control.lockin_test validate-config
+```
+
+它只解析两个 TOML 并输出安全策略摘要，绝不会打开 VISA 或写 SR830。日常操作者通常
+只修改被 Git 忽略的 `hardware.local.toml`；需要扩大项目允许量程或改变占用率/稳定样本
+策略时，维护者才编辑并提交 `config/lockin_safety.toml`，同时更新测试和文档。该文件
+当前允许 fixed 的 1、10、20、50 mV；XX 的 bounded-auto 阶梯为 10→20→50 mV，XY
+为 1→10 mV，阈值 0.85、缩窄前 2 个连续稳定样本。SR830 的完整硬件映射（包括 1 V，
+代码 26）存在于驱动层，但不等于日常安全白名单。
+
+每个 sweep JSON 的 `measurement_config` 会保存解析后的 `lockin_safety`、文件路径和
+SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次允许的量程和时序。扫频时
+SR830 可能把设定频率量化为约 0.1 Hz（例如 316.159→316.1 Hz）；代码对该显示量化
+保留 0.11 Hz 的绝对容差，但 `LIAS?` 的 reference-unlocked、overload、error 仍会
+拒绝正式样本。
+
 每次运行前，在同一份 `[lockin_sweep]` 表中修改 `run_name` 和 `note`。前者是
 本次数据的简短名称并进入 JSON 文件名，后者记录样品、接线状态或本次测试目的，
 只保存在 JSON 审计记录中。
@@ -198,8 +222,9 @@ interval，因此当前是 `2 × 1.5 = 3.0` s。
 | 25 | 500 mV | 否 |
 | 26 | 1 V | 否 |
 
-“否”并不表示 SR830 前面板不能使用该档，而是日常 sweep 的严格 TOML 和驱动目前不会
-写入它。这样可以避免一次本机配置修改无意中扩大已验证的自动范围。
+“否”并不表示 SR830 前面板不能使用该档；驱动层可以映射完整硬件代码，但日常 sweep
+的严格 TOML 会按 `lockin_safety.toml` 白名单拒绝它。这样可以避免一次本机配置修改
+无意中扩大已验证的自动范围。
 
 ### 50 mV 的正确写法
 

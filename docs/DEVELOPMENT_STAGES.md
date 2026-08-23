@@ -712,3 +712,19 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   and handoff deliverable only; it does not commission any new hardware writes.
 - Pending: exact SMU adapters, real-instrument checks, frozen hardware wheelhouse,
   and offline-control-computer installation verification.
+
+## Stage 7 follow-up - Lock-in safety policy and sweep readback robustness
+
+Status: offline implementation complete (2026-08-23); no hardware was opened.
+
+- Added versioned `config/lockin_safety.toml`, automatically loaded beside every
+  hardware TOML. It owns the project full-scale allowlists, bounded-auto ladders,
+  0.85 occupancy target, two stable samples, minimum settle policy, source bounds,
+  and cleanup amplitude; the complete SR830 hardware mapping remains separate.
+- Daily `sweep-frequency` and `sweep-excitation` now run directly after TOML loading;
+  `validate-config` is an optional offline summary and never a prerequisite or VISA
+  connection step. Sweep JSON records include the resolved policy and hash.
+- Sweep frequency verification accepts the SR830's observed 0.1 Hz display
+  quantization (0.11 Hz absolute tolerance) while keeping unlock, overload, and
+  instrument-error checks fail-closed. Offline configuration, fake-VISA, and
+  readback tests cover the new behavior.

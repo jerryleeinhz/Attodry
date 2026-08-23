@@ -1,4 +1,5 @@
 from pathlib import Path
+import tomllib
 import unittest
 from unittest.mock import mock_open, patch
 
@@ -21,16 +22,32 @@ from attodry_control.sr830_settings import (
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SIMULATION_CONFIG = PROJECT_ROOT / "config" / "simulation.toml"
 HARDWARE_EXAMPLE_CONFIG = PROJECT_ROOT / "config" / "hardware.example.toml"
+LOCKIN_SAFETY_CONFIG = PROJECT_ROOT / "config" / "lockin_safety.toml"
 
 
 class ConfigurationTests(unittest.TestCase):
     def simulation_text(self) -> str:
         return SIMULATION_CONFIG.read_text(encoding="utf-8")
 
-    def load_text(self, text: str):
+    def load_text(self, text: str, safety_text: str | None = None):
+        safety_document = tomllib.loads(
+            (
+                LOCKIN_SAFETY_CONFIG.read_text(encoding="utf-8")
+                if safety_text is None
+                else safety_text
+            )
+        )
+        def load_document_side_effect(path):
+            if Path(path).name == "lockin_safety.toml":
+                return safety_document
+            try:
+                return tomllib.loads(text)
+            except tomllib.TOMLDecodeError as exc:
+                raise ConfigError(f"Invalid TOML in {path}: {exc}") from exc
+
         with patch(
-            "attodry_control.config.Path.open",
-            mock_open(read_data=text.encode("utf-8")),
+            "attodry_control.config._load_document",
+            side_effect=load_document_side_effect,
         ):
             return load_config("test.toml")
 
@@ -81,6 +98,32 @@ class ConfigurationTests(unittest.TestCase):
             Path("../run_data/commissioning"),
         )
         self.assertIsNone(config.visa)
+
+    def test_lockin_safety_policy_is_loaded_from_adjacent_file(self) -> None:
+        config = load_config(SIMULATION_CONFIG)
+
+        self.assertEqual(config.lockin_safety.target_occupancy, 0.85)
+        self.assertEqual(config.lockin_safety.stable_samples_before_narrowing, 2)
+        self.assertEqual(
+            config.lockin_safety.lockin_xx.autorange_ladders_v,
+            ((0.010, 0.020), (0.020, 0.050), (0.010, 0.020, 0.050)),
+        )
+
+    def test_explicit_safety_policy_can_enable_mapped_one_volt_fixed_range(self) -> None:
+        hardware_text = self.simulation_text().replace(
+            "sensitivity_full_scale_v = 0.020",
+            "sensitivity_full_scale_v = 1.000",
+            1,
+        )
+        safety_text = LOCKIN_SAFETY_CONFIG.read_text(encoding="utf-8").replace(
+            "allowed_fixed_full_scales_v = [0.001, 0.010, 0.020, 0.050]",
+            "allowed_fixed_full_scales_v = [0.001, 0.010, 0.020, 0.050, 1.000]",
+            1,
+        )
+
+        config = self.load_text(hardware_text, safety_text=safety_text)
+
+        self.assertEqual(config.lockin_xx.sensitivity_full_scale_v, 1.0)
 
     def test_loads_hardware_template_without_opening_hardware(self) -> None:
         config = load_config(HARDWARE_EXAMPLE_CONFIG)

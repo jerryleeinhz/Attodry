@@ -21,33 +21,34 @@ class AutorangePolicy:
     target_occupancy: float
     stable_samples_before_narrowing: int
     maximum_adjustment_steps: int
+    configured_full_scales_v: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
+        full_scales = self.full_scales_v
+        if len(full_scales) < 2 or any(
+            not math.isfinite(value) or value <= 0
+            for value in full_scales
+        ):
+            raise ValueError("autorange ladder must contain at least two finite positive full scales")
+        if tuple(sorted(set(full_scales))) != full_scales:
+            raise ValueError("autorange ladder must be strictly increasing")
         try:
-            sensitivity_code(self.minimum_full_scale_v)
-            sensitivity_code(self.maximum_full_scale_v)
+            for full_scale in full_scales:
+                sensitivity_code(full_scale)
         except ValueError as exc:
             raise ValueError(
-                "autorange bounds must use project-confirmed SR830 full scales"
+                "autorange bounds must use SR830 voltage-input full scales"
             ) from exc
-        if (self.minimum_full_scale_v, self.maximum_full_scale_v) not in {
-            (0.001, 0.01),
-            (0.01, 0.02),
-            (0.02, 0.05),
-            (0.01, 0.05),
-        }:
-            raise ValueError(
-                "autorange bounds must be a confirmed pair or three-level ladder: "
-                "0.001-0.01 V, 0.01-0.02 V, 0.02-0.05 V, or 0.01-0.05 V"
-            )
         if not math.isclose(
-            self.target_occupancy, 0.85, rel_tol=0.0, abs_tol=1e-12
+            self.minimum_full_scale_v, full_scales[0], rel_tol=0.0, abs_tol=1e-15
+        ) or not math.isclose(
+            self.maximum_full_scale_v, full_scales[-1], rel_tol=0.0, abs_tol=1e-15
         ):
-            raise ValueError("target_occupancy must be the confirmed value 0.85")
-        if self.stable_samples_before_narrowing != 2:
-            raise ValueError(
-                "stable_samples_before_narrowing must be the confirmed value 2"
-            )
+            raise ValueError("autorange bounds must match the configured ladder endpoints")
+        if not 0.0 < self.target_occupancy < 1.0:
+            raise ValueError("target_occupancy must be between 0 and 1")
+        if self.stable_samples_before_narrowing < 1:
+            raise ValueError("stable_samples_before_narrowing must be positive")
         if self.maximum_adjustment_steps != len(self.full_scales_v) - 1:
             raise ValueError(
                 "maximum_adjustment_steps must equal the number of confirmed "
@@ -56,6 +57,8 @@ class AutorangePolicy:
 
     @property
     def full_scales_v(self) -> tuple[float, ...]:
+        if self.configured_full_scales_v is not None:
+            return self.configured_full_scales_v
         if (self.minimum_full_scale_v, self.maximum_full_scale_v) == (0.01, 0.05):
             return (0.01, 0.02, 0.05)
         return (self.minimum_full_scale_v, self.maximum_full_scale_v)

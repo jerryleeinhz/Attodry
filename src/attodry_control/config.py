@@ -18,11 +18,14 @@ from .sr830_settings import (
     SensitivityMode,
     ShieldGrounding,
     map_sr830_settings,
+    sensitivity_code,
 )
 from .stability import StabilityCriteria
 
 
 CONFIRMED_EXPERIMENT_VECTOR_MAX_T = 3.0
+MINIMUM_SR830_SINE_OUTPUT_V = 0.004
+MAXIMUM_SR830_SINE_OUTPUT_V = 5.0
 
 
 class ConfigError(ValueError):
@@ -120,7 +123,27 @@ class LockinConfig:
     autorange_target_occupancy: float | None
     autorange_stable_samples: int | None
     autorange_max_steps: int | None
+    autorange_full_scales_v: tuple[float, ...] | None
     settle_time_constants: float
+
+
+@dataclass(frozen=True, slots=True)
+class LockinSafetyRoleConfig:
+    allowed_fixed_full_scales_v: tuple[float, ...]
+    autorange_ladders_v: tuple[tuple[float, ...], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LockinSafetyConfig:
+    schema_version: int
+    minimum_source_voltage_v_rms: float
+    maximum_source_voltage_v_rms: float
+    cleanup_source_voltage_v_rms: float
+    minimum_settle_time_constants: float
+    target_occupancy: float
+    stable_samples_before_narrowing: int
+    lockin_xx: LockinSafetyRoleConfig
+    lockin_xy: LockinSafetyRoleConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +195,7 @@ class ControlConfig:
     cleanup: CleanupConfig
     lockin_xx: LockinConfig
     lockin_xy: LockinConfig
+    lockin_safety: LockinSafetyConfig
     lockin_sweep: LockinSweepConfig
     gate_top: GateConfig
     gate_bottom: GateConfig
@@ -215,10 +239,19 @@ class ControlConfig:
             raise ConfigError("Hardware configuration is not ready: " + "; ".join(errors))
 
 
-def load_config(path: str | Path) -> ControlConfig:
+def load_config(
+    path: str | Path, *, safety_path: str | Path | None = None
+) -> ControlConfig:
     """Load and validate TOML without importing or opening hardware drivers."""
 
-    document = _load_document(path)
+    config_path = Path(path)
+    document = _load_document(config_path)
+    resolved_safety_path = (
+        Path(safety_path)
+        if safety_path is not None
+        else config_path.with_name("lockin_safety.toml")
+    )
+    safety = _parse_lockin_safety(_load_document(resolved_safety_path))
 
     try:
         project = _parse_project(_table(document, "project"))
@@ -252,13 +285,23 @@ def load_config(path: str | Path) -> ControlConfig:
         )
         cleanup = _parse_cleanup(_table(document, "cleanup"))
         lockin_xx = _parse_lockin(
-            _table(document, "lockin_xx"), LockinRole.XX, "lockin_xx"
+            _table(document, "lockin_xx"),
+            LockinRole.XX,
+            "lockin_xx",
+            safety.lockin_xx,
+            safety,
         )
         lockin_xy = _parse_lockin(
-            _table(document, "lockin_xy"), LockinRole.XY, "lockin_xy"
+            _table(document, "lockin_xy"),
+            LockinRole.XY,
+            "lockin_xy",
+            safety.lockin_xy,
+            safety,
         )
         _validate_lockin_pair(lockin_xx, lockin_xy)
-        lockin_sweep = _parse_lockin_sweep(_table(document, "lockin_sweep"))
+        lockin_sweep = _parse_lockin_sweep(
+            _table(document, "lockin_sweep"), safety
+        )
         gate_top = _parse_gate(
             _table(document, "gate_top"), "top", project.mode, "gate_top"
         )
@@ -283,6 +326,7 @@ def load_config(path: str | Path) -> ControlConfig:
         cleanup=cleanup,
         lockin_xx=lockin_xx,
         lockin_xy=lockin_xy,
+        lockin_safety=safety,
         lockin_sweep=lockin_sweep,
         gate_top=gate_top,
         gate_bottom=gate_bottom,
@@ -544,8 +588,136 @@ def _parse_visa(table: Mapping[str, Any]) -> VisaConfig:
     )
 
 
+def _parse_lockin_safety(document: Mapping[str, Any]) -> LockinSafetyConfig:
+    name = "lockin_safety"
+    _strict_keys(
+        document,
+        name,
+        {
+            "schema_version",
+            "minimum_source_voltage_v_rms",
+            "maximum_source_voltage_v_rms",
+            "cleanup_source_voltage_v_rms",
+            "minimum_settle_time_constants",
+            "target_occupancy",
+            "stable_samples_before_narrowing",
+            "lockin_xx",
+            "lockin_xy",
+        },
+    )
+    schema_version = _integer(document["schema_version"], f"{name}.schema_version", minimum=1)
+    minimum_source_v = _number(
+        document["minimum_source_voltage_v_rms"],
+        f"{name}.minimum_source_voltage_v_rms",
+    )
+    maximum_source_v = _number(
+        document["maximum_source_voltage_v_rms"],
+        f"{name}.maximum_source_voltage_v_rms",
+    )
+    cleanup_source_v = _number(
+        document["cleanup_source_voltage_v_rms"],
+        f"{name}.cleanup_source_voltage_v_rms",
+    )
+    if minimum_source_v != MINIMUM_SR830_SINE_OUTPUT_V:
+        raise ConfigError(
+            f"{name}.minimum_source_voltage_v_rms must remain "
+            f"{MINIMUM_SR830_SINE_OUTPUT_V:g} V RMS."
+        )
+    if not minimum_source_v < maximum_source_v <= MAXIMUM_SR830_SINE_OUTPUT_V:
+        raise ConfigError(
+            f"{name}.maximum_source_voltage_v_rms must be within "
+            f"{minimum_source_v:g}-{MAXIMUM_SR830_SINE_OUTPUT_V:g} V RMS."
+        )
+    if cleanup_source_v != MINIMUM_SR830_SINE_OUTPUT_V:
+        raise ConfigError(
+            f"{name}.cleanup_source_voltage_v_rms must remain "
+            f"{MINIMUM_SR830_SINE_OUTPUT_V:g} V RMS."
+        )
+    minimum_settle = _positive_number(
+        document["minimum_settle_time_constants"],
+        f"{name}.minimum_settle_time_constants",
+    )
+    if minimum_settle < 5.0:
+        raise ConfigError(
+            f"{name}.minimum_settle_time_constants must be at least 5.0."
+        )
+    target_occupancy = _number(
+        document["target_occupancy"], f"{name}.target_occupancy"
+    )
+    if not 0.0 < target_occupancy < 1.0:
+        raise ConfigError(f"{name}.target_occupancy must be between 0 and 1.")
+    stable_samples = _integer(
+        document["stable_samples_before_narrowing"],
+        f"{name}.stable_samples_before_narrowing",
+        minimum=1,
+    )
+    return LockinSafetyConfig(
+        schema_version=schema_version,
+        minimum_source_voltage_v_rms=minimum_source_v,
+        maximum_source_voltage_v_rms=maximum_source_v,
+        cleanup_source_voltage_v_rms=cleanup_source_v,
+        minimum_settle_time_constants=minimum_settle,
+        target_occupancy=target_occupancy,
+        stable_samples_before_narrowing=stable_samples,
+        lockin_xx=_parse_lockin_safety_role(
+            _table(document, "lockin_xx"), "lockin_safety.lockin_xx"
+        ),
+        lockin_xy=_parse_lockin_safety_role(
+            _table(document, "lockin_xy"), "lockin_safety.lockin_xy"
+        ),
+    )
+
+
+def _parse_lockin_safety_role(
+    table: Mapping[str, Any], name: str
+) -> LockinSafetyRoleConfig:
+    _strict_keys(table, name, {"allowed_fixed_full_scales_v", "autorange_ladders_v"})
+    allowed_fixed = _full_scale_tuple(
+        table["allowed_fixed_full_scales_v"], f"{name}.allowed_fixed_full_scales_v"
+    )
+    raw_ladders = table["autorange_ladders_v"]
+    if not isinstance(raw_ladders, list) or not raw_ladders:
+        raise ConfigError(f"{name}.autorange_ladders_v must be a non-empty array.")
+    ladders: list[tuple[float, ...]] = []
+    for index, raw_ladder in enumerate(raw_ladders):
+        ladder_name = f"{name}.autorange_ladders_v[{index}]"
+        ladder = _full_scale_tuple(raw_ladder, ladder_name, minimum_length=2)
+        if any(value not in allowed_fixed for value in ladder):
+            raise ConfigError(
+                f"{ladder_name} must use values from allowed_fixed_full_scales_v."
+            )
+        ladders.append(ladder)
+    if len(set(ladders)) != len(ladders):
+        raise ConfigError(f"{name}.autorange_ladders_v must not contain duplicates.")
+    return LockinSafetyRoleConfig(allowed_fixed, tuple(ladders))
+
+
+def _full_scale_tuple(
+    value: Any, name: str, *, minimum_length: int = 1
+) -> tuple[float, ...]:
+    if not isinstance(value, list) or len(value) < minimum_length:
+        raise ConfigError(
+            f"{name} must be an array with at least {minimum_length} full scales."
+        )
+    values = tuple(_positive_number(item, f"{name}[{index}]") for index, item in enumerate(value))
+    if tuple(sorted(set(values))) != values:
+        raise ConfigError(f"{name} must be strictly increasing without duplicates.")
+    for full_scale in values:
+        try:
+            sensitivity_code(full_scale)
+        except ValueError as exc:
+            raise ConfigError(
+                f"{name} contains {full_scale:g} V, which is not an SR830 full scale."
+            ) from exc
+    return values
+
+
 def _parse_lockin(
-    table: Mapping[str, Any], role: LockinRole, name: str
+    table: Mapping[str, Any],
+    role: LockinRole,
+    name: str,
+    safety_role: LockinSafetyRoleConfig,
+    safety: LockinSafetyConfig,
 ) -> LockinConfig:
     expected = {
         "model",
@@ -640,6 +812,11 @@ def _parse_lockin(
     autorange_target_occupancy = None
     autorange_stable_samples = None
     autorange_max_steps = None
+    autorange_full_scales_v = None
+    if sensitivity_full_scale_v not in safety_role.allowed_fixed_full_scales_v:
+        raise ConfigError(
+            f"{name}.sensitivity_full_scale_v is not allowed by lockin_safety.toml."
+        )
     if sensitivity_mode is SensitivityMode.BOUNDED_AUTO:
         autorange_min_full_scale_v = _positive_number(
             table["autorange_min_full_scale_v"],
@@ -664,39 +841,54 @@ def _parse_lockin(
             minimum=1,
         )
         try:
+            matching_ladders = tuple(
+                ladder
+                for ladder in safety_role.autorange_ladders_v
+                if math.isclose(
+                    ladder[0], autorange_min_full_scale_v, rel_tol=0.0, abs_tol=1e-15
+                )
+                and math.isclose(
+                    ladder[-1], autorange_max_full_scale_v,
+                    rel_tol=0.0,
+                    abs_tol=1e-15,
+                )
+            )
+            if len(matching_ladders) != 1:
+                raise ConfigError(
+                    f"{name} bounded_auto range is not an allowed confirmed pair "
+                    "or lockin_safety.toml ladder."
+                )
+            autorange_full_scales_v = matching_ladders[0]
             AutorangePolicy(
                 autorange_min_full_scale_v,
                 autorange_max_full_scale_v,
                 autorange_target_occupancy,
                 autorange_stable_samples,
                 autorange_max_steps,
+                autorange_full_scales_v,
             )
-        except ValueError as exc:
+        except (ConfigError, ValueError) as exc:
             raise ConfigError(f"{name}: {exc}") from exc
-        allowed_bounds = (
-            {(0.01, 0.02), (0.02, 0.05), (0.01, 0.05)}
-            if role is LockinRole.XX
-            else {(0.001, 0.01)}
-        )
-        if (autorange_min_full_scale_v, autorange_max_full_scale_v) not in allowed_bounds:
-            allowed_text = (
-                "0.01-0.02 V, 0.02-0.05 V, or the three-level 0.01-0.05 V ladder"
-                if role is LockinRole.XX
-                else "0.001-0.01 V"
-            )
+        if not math.isclose(
+            autorange_target_occupancy,
+            safety.target_occupancy,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
             raise ConfigError(
-                f"{name} bounded_auto range must be {allowed_text}."
+                f"{name}.autorange_target_occupancy must match lockin_safety.toml."
             )
-        expected_max_steps = (
-            2
-            if (autorange_min_full_scale_v, autorange_max_full_scale_v)
-            == (0.01, 0.05)
-            else 1
-        )
+        if autorange_stable_samples != safety.stable_samples_before_narrowing:
+            raise ConfigError(
+                f"{name}.autorange_stable_samples must match lockin_safety.toml."
+            )
+        if autorange_full_scales_v is None:
+            raise ConfigError(f"{name} has no configured autorange ladder.")
+        expected_max_steps = len(autorange_full_scales_v) - 1
         if autorange_max_steps != expected_max_steps:
             raise ConfigError(
                 f"{name}.autorange_max_steps must be {expected_max_steps} for its "
-                "confirmed autorange ladder."
+                "confirmed/configured range transitions in the lockin_safety.toml ladder."
             )
         if sensitivity_full_scale_v != autorange_min_full_scale_v:
             raise ConfigError(
@@ -705,8 +897,11 @@ def _parse_lockin(
     settle_time_constants = _positive_number(
         table["settle_time_constants"], f"{name}.settle_time_constants"
     )
-    if settle_time_constants < 5.0:
-        raise ConfigError(f"{name}.settle_time_constants must be at least 5.0.")
+    if settle_time_constants < safety.minimum_settle_time_constants:
+        raise ConfigError(
+            f"{name}.settle_time_constants must be at least "
+            f"{safety.minimum_settle_time_constants:.1f}."
+        )
     try:
         map_sr830_settings(
             reference_source=reference_source,
@@ -741,6 +936,7 @@ def _parse_lockin(
         autorange_target_occupancy=autorange_target_occupancy,
         autorange_stable_samples=autorange_stable_samples,
         autorange_max_steps=autorange_max_steps,
+        autorange_full_scales_v=autorange_full_scales_v,
         settle_time_constants=settle_time_constants,
     )
 
@@ -752,7 +948,9 @@ def _validate_lockin_pair(xx: LockinConfig, xy: LockinConfig) -> None:
         raise ConfigError("lockin_xx and lockin_xy frequencies must match.")
 
 
-def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
+def _parse_lockin_sweep(
+    table: Mapping[str, Any], safety: LockinSafetyConfig
+) -> LockinSweepConfig:
     name = "lockin_sweep"
     _strict_keys_with_optional(
         table,
@@ -792,9 +990,15 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         table["frequency_source_voltage_v_rms"],
         f"{name}.frequency_source_voltage_v_rms",
     )
-    if not 0.004 <= frequency_source_voltage_v_rms <= 5.0:
+    if not (
+        safety.minimum_source_voltage_v_rms
+        <= frequency_source_voltage_v_rms
+        <= safety.maximum_source_voltage_v_rms
+    ):
         raise ConfigError(
-            f"{name}.frequency_source_voltage_v_rms must remain within 0.004-5 V RMS."
+            f"{name}.frequency_source_voltage_v_rms must remain within "
+            f"{safety.minimum_source_voltage_v_rms:g}-"
+            f"{safety.maximum_source_voltage_v_rms:g} V RMS."
         )
     excitation_points_v_rms = _positive_number_tuple(
         table["excitation_points_v_rms"], f"{name}.excitation_points_v_rms"
@@ -807,9 +1011,14 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         raise ConfigError(
             f"{name}.frequency_points_hz must remain within 0.001-102000 Hz."
         )
-    if excitation_points_v_rms[0] < 0.004 or excitation_points_v_rms[-1] > 5.0:
+    if (
+        excitation_points_v_rms[0] < safety.minimum_source_voltage_v_rms
+        or excitation_points_v_rms[-1] > safety.maximum_source_voltage_v_rms
+    ):
         raise ConfigError(
-            f"{name}.excitation_points_v_rms must remain within 0.004-5 V RMS."
+            f"{name}.excitation_points_v_rms must remain within "
+            f"{safety.minimum_source_voltage_v_rms:g}-"
+            f"{safety.maximum_source_voltage_v_rms:g} V RMS."
         )
     legacy_harmonics = "harmonics" in table
     frequency_harmonics_present = "frequency_harmonics" in table

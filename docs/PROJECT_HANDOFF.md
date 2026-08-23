@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## Current stage
 
@@ -742,6 +742,24 @@ User-priority SR830 bench-test slice completed in the laboratory:
   4 mVrms minimum on both units after a caught write failure.
 - The standalone first-harmonic device test, physical Vxx sign reversal, and
   integrated 1/2/3-harmonic write path are complete.
+
+Current Lock-in safety-policy follow-up (2026-08-23):
+
+- Added versioned `config/lockin_safety.toml`, automatically loaded beside the
+  selected hardware TOML. It contains the project full-scale allowlists and
+  bounded-auto ladders (XX 10→20→50 mV, XY 1→10 mV), 0.85 occupancy, two stable
+  samples, minimum settle policy, source bounds, and 4 mVrms cleanup. The driver
+  retains the complete SR830 voltage-input map, including 1 V/SENS 26, but the
+  hardware map is not itself daily write authorization.
+- Daily `sweep-frequency` and `sweep-excitation` require no preceding validation
+  command; they parse the policy automatically and fail closed before VISA when
+  it is absent or inconsistent. `validate-config` is an optional offline summary
+  and does not open VISA. Sweep JSON `measurement_config` records the resolved
+  policy and SHA-256.
+- Sweep frequency readback now accepts the observed SR830 0.1 Hz display
+  quantization (0.11 Hz absolute tolerance) while retaining strict unlock,
+  overload, and instrument-error rejection. Offline configuration/fake-VISA
+  coverage passed after this change; no real instrument was opened in this stage.
 
 ## User-confirmed requirements
 
