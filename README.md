@@ -98,6 +98,10 @@ python -m attodry_control.lockin_test --help
 角色显式改为 `bounded_auto` 时才启用该角色的自动量程。配置完成后，频率扫描和幅值
 扫描分别直接运行：
 
+扫频期间的固定 XX SINE OUT 幅值填写在
+`[lockin_sweep].frequency_source_voltage_v_rms`（0.004--5.0 Vrms）；扫频结束后仍
+按安全协议恢复 4 mVrms。扫幅的逐点幅值仍由 `excitation_points_v_rms` 控制。
+
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency
 python -m attodry_control.lockin_test sweep-excitation

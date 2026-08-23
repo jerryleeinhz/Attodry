@@ -244,6 +244,7 @@ sensitivity_full_scale_v = 0.050
 | 字段 | 可填写值与约束 |
 | --- | --- |
 | `frequency_points_hz` | 非空、严格递增的数列；每项必须在 0.001--102000 Hz。版本库示例为 17.777 Hz 到 100 kHz 的 10 个对数点。 |
+| `frequency_source_voltage_v_rms` | 扫频期间 XX SINE OUT 的固定幅值，单位 Vrms；必须在 0.004--5.0 V。扫描开始前只设置一次并读回，所有频点保持不变；同一串联路径和器件电流/电压上限会在打开 VISA 前计算检查。 |
 | `excitation_points_v_rms` | 非空、严格递增的数列；每项必须在 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 点，基频固定为 17.777 Hz。 |
 | `frequency_xx_harmonics` / `frequency_xy_harmonics` | 分别选择扫频正式曲线中的 XX/XY 谐波。每项为升序组合，只能含 1、2、3；`[]` 表示该角色不进入正式曲线。两项合起来至少选一个。 |
 | `excitation_xx_harmonics` / `excitation_xy_harmonics` | 分别选择扫幅正式曲线中的 XX/XY 谐波；规则同上，且可与扫频不同。例：`excitation_xx_harmonics = []`、`excitation_xy_harmonics = [2]` 只输出 XY h2 曲线。 |
@@ -264,22 +265,21 @@ sensitivity_full_scale_v = 0.050
 | `output_directory` | 非空相对目录，不能是 `.` 或绝对路径；解析后也必须位于允许的项目目录内。默认 `../run_data/commissioning` 假定 TOML 位于 `config/`，所以落在仓库根的 `run_data/commissioning/`。 |
 
 `lockin_xx.source_voltage_v` 与 `lockin_xy.source_voltage_v` 仍属于各自的
-Lock-in 配置。日常扫描要求它们均为 SR830 的 4 mVrms 最小输出；扫频名义电流和
-扫幅横坐标使用 XX SINE OUT 的已解析/读回电压，而不是手工输入的电流值。
-因此，扫频中的**激励幅值**是 `lockin_xx.source_voltage_v = 0.004`（4 mVrms），
-扫描只改变 XX 内部参考频率，不改变 `SLVL`；它与两台仪器在各自 Lock-in 表中声明
-的 **测量量程策略** 是不同概念。
+Lock-in 配置，并且日常 sweep 的安全基线仍要求两台都是 SR830 的 4 mVrms 最小输出。
+扫频期间的固定激励幅值改由 `[lockin_sweep].frequency_source_voltage_v_rms` 控制：
+程序在扫频正式点前设置并读回 XX 的 `SLVL`，随后只改变 XX 内部参考频率，不再逐点
+改变 `SLVL`。扫频名义电流和分析横坐标使用每点记录的 SINE OUT 读回值，而不是手工
+输入的电流值；幅值扫描仍使用 `excitation_points_v_rms` 逐点改变 `SLVL`。
 
 ### 扫描结束后的 SINE OUT 恢复值
 
-扫描清理阶段不会恢复到扫描前的任意幅值，也不会根据 `source_voltage_v` 动态
-推断恢复值。只要扫描已经开始写入，清理函数会调用固定的
+扫描清理阶段不会恢复到扫描前的任意幅值，也不会把扫频的
+`frequency_source_voltage_v_rms` 留在输出端。只要扫描已经开始写入，清理函数会调用固定的
 `MINIMUM_SINE_OUTPUT_V = 0.004`，把 `lockin_xx` SINE OUT 降回 **4 mVrms**；
 扫频还会恢复基线频率和 1 阶谐波，扫幅则只恢复幅值和 1 阶谐波。当前 sweep
 预检同时强制 `lockin_xx.source_voltage_v` 与 `lockin_xy.source_voltage_v` 都为
-0.004，因此把 TOML 中的 `source_voltage_v` 改成 20 mVrms 不会让结束后恢复为
-20 mVrms，而会在打开 VISA 前被拒绝。若将来需要使用并恢复其他基线幅值，必须
-先修改 sweep 的基线/清理策略并重新验证安全协议；不能只改一个 TOML 字段。
+0.004；因此把扫频字段改成 20 mVrms 后，结束仍恢复为 4 mVrms。若要改变清理
+基线，必须先修改 sweep 的清理策略并重新验证安全协议，不能只改一个 TOML 字段。
 
 如果预检在任何写入前失败，则不会执行清理写入；如果清理记录中的
 `cleanup.verified` 为 `false`，不要假定仪器已经恢复，必须手动核对 SINE OUT、

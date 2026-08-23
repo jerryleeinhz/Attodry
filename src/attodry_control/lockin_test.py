@@ -24,6 +24,7 @@ from .models import LockinRole
 from .sr830 import (
     AuthorizationRequired,
     DualSr830Controller,
+    MAXIMUM_SINE_OUTPUT_V,
     MAXIMUM_REFERENCE_FREQUENCY_HZ,
     MINIMUM_SINE_OUTPUT_V,
     PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
@@ -940,11 +941,14 @@ def _run_frequency_sweep(
     if not args.skip_unsupported_harmonics:
         _validate_harmonic_detection_frequencies(points, harmonics)
     baseline_hz = float(settings["frequency_hz"])
-    baseline_source_v = _sweep_baseline_source_voltage(settings)
+    _sweep_baseline_source_voltage(settings)
+    frequency_source_v = config.lockin_sweep.frequency_source_voltage_v_rms
+    frequency_safety = _validate_frequency_source_safety(config, frequency_source_v)
     excitation_path = _resolved_excitation_path(settings)
-    nominal_current_a_rms = baseline_source_v / float(
+    nominal_current_a_rms = frequency_source_v / float(
         excitation_path["nominal_total_resistance_ohm"]
     )
+    source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
     records: list[dict[str, object]] = []
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         controller = DualSr830Controller(lockin_xx, lockin_xy)
@@ -970,6 +974,28 @@ def _run_frequency_sweep(
                 sensitivity_setup=sensitivity_setup,
                 settle_s=args.settle_s,
             )
+            source_write_performed = not math.isclose(
+                preflight_xx.sine_output_v,
+                frequency_source_v,
+                rel_tol=1e-6,
+                abs_tol=0.001,
+            )
+            if source_write_performed:
+                lockin_xx.set_sine_output(frequency_source_v)
+                time.sleep(source_step_settle_s)
+            else:
+                time.sleep(args.settle_s)
+            source_readback_v = lockin_xx.read_sine_output()
+            if not math.isclose(
+                source_readback_v,
+                frequency_source_v,
+                rel_tol=1e-6,
+                abs_tol=0.001,
+            ):
+                raise Sr830Error(
+                    f"lockin_xx SINE OUT readback {source_readback_v:g} V does not "
+                    f"match configured frequency sweep amplitude {frequency_source_v:g} V."
+                )
             autorange_policies, autorange_states = _new_sweep_autorange_controls(
                 config.lockin_xx,
                 config.lockin_xy,
@@ -982,7 +1008,8 @@ def _run_frequency_sweep(
                 point_record: dict[str, object] = {
                     "point_index": point_index,
                     "target_frequency_hz": target_hz,
-                    "source_v_rms": baseline_source_v,
+                    "source_v_rms": frequency_source_v,
+                    "source_readback_v_rms": source_readback_v,
                     "nominal_current_a_rms": nominal_current_a_rms,
                     "write_performed": wrote_setting,
                     "transition_status": None,
@@ -1089,6 +1116,15 @@ def _run_frequency_sweep(
                 "lockin_xy": None if preflight_xy is None else asdict(preflight_xy),
             },
             "requested_points_hz": points,
+            "frequency_source_voltage_v_rms": frequency_source_v,
+            "source_readback_v_rms": (
+                source_readback_v if "source_readback_v" in locals() else None
+            ),
+            "source_step_settle_s": (
+                source_step_settle_s
+                if "source_write_performed" in locals() and source_write_performed
+                else 0.0
+            ),
             "requested_harmonics": harmonics,
             "requested_harmonics_by_role": harmonics_by_role,
             "skip_unsupported_harmonics": args.skip_unsupported_harmonics,
@@ -1101,6 +1137,7 @@ def _run_frequency_sweep(
             "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
             "samples_per_point": args.samples_per_point,
             "sample_interval_s": args.sample_interval_s,
+            "safety": frequency_safety,
             "points": records,
             "cleanup": cleanup,
             "error": None if failure is None else str(failure),
@@ -1349,6 +1386,12 @@ def _measurement_config_snapshot(
         "output_directory": config.lockin_sweep.output_directory.as_posix(),
     }
     if scan == "frequency":
+        sweep_snapshot["frequency_source_voltage_v_rms"] = (
+            config.lockin_sweep.frequency_source_voltage_v_rms
+        )
+        sweep_snapshot["source_step_settle_s"] = (
+            EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+        )
         sweep_snapshot["skip_unsupported_harmonics"] = (
             args.skip_unsupported_harmonics
         )
@@ -2099,44 +2142,83 @@ def _validate_excitation_safety(
     args: argparse.Namespace, points: tuple[float, ...]
 ) -> dict[str, float]:
     maximum_source_v = max(points)
-    if min(points) < 0.004 or maximum_source_v > 5.0:
+    if min(points) < MINIMUM_SINE_OUTPUT_V or maximum_source_v > MAXIMUM_SINE_OUTPUT_V:
         raise ValueError("Source-voltage points must be within the SR830 0.004-5 V RMS range.")
+    return _calculate_source_voltage_safety(
+        maximum_source_v,
+        series_resistance_ohm=args.series_resistance_ohm,
+        device_resistance_ohm=args.device_resistance_ohm,
+        maximum_device_resistance_ohm=args.maximum_device_resistance_ohm,
+        max_device_current_a=args.max_device_current_a,
+        max_device_voltage_v=args.max_device_voltage_v,
+    )
+
+
+def _validate_frequency_source_safety(
+    config: ControlConfig, source_voltage_v: float
+) -> dict[str, float]:
+    sweep = config.lockin_sweep
+    return _calculate_source_voltage_safety(
+        source_voltage_v,
+        series_resistance_ohm=sweep.external_series_resistance_ohm,
+        device_resistance_ohm=sweep.approximate_device_resistance_ohm,
+        maximum_device_resistance_ohm=sweep.maximum_device_resistance_ohm,
+        max_device_current_a=sweep.max_device_current_a_rms,
+        max_device_voltage_v=sweep.max_device_voltage_v_rms,
+    )
+
+
+def _calculate_source_voltage_safety(
+    maximum_source_v: float,
+    *,
+    series_resistance_ohm: float,
+    device_resistance_ohm: float,
+    maximum_device_resistance_ohm: float,
+    max_device_current_a: float,
+    max_device_voltage_v: float,
+) -> dict[str, float]:
+    if (
+        not math.isfinite(maximum_source_v)
+        or maximum_source_v < MINIMUM_SINE_OUTPUT_V
+        or maximum_source_v > MAXIMUM_SINE_OUTPUT_V
+    ):
+        raise ValueError("Source voltage must be within the SR830 0.004-5 V RMS range.")
     current_bound_a = maximum_source_v / (
-        args.series_resistance_ohm + SR830_OUTPUT_RESISTANCE_OHM
+        series_resistance_ohm + SR830_OUTPUT_RESISTANCE_OHM
     )
-    voltage_bound_v = maximum_source_v * args.maximum_device_resistance_ohm / (
-        args.series_resistance_ohm
+    voltage_bound_v = maximum_source_v * maximum_device_resistance_ohm / (
+        series_resistance_ohm
         + SR830_OUTPUT_RESISTANCE_OHM
-        + args.maximum_device_resistance_ohm
+        + maximum_device_resistance_ohm
     )
-    if current_bound_a > args.max_device_current_a:
+    if current_bound_a > max_device_current_a:
         raise ValueError(
             "Worst-case current bound exceeds the confirmed device RMS current limit."
         )
-    if voltage_bound_v > args.max_device_voltage_v:
+    if voltage_bound_v > max_device_voltage_v:
         raise ValueError(
             "Worst-case device voltage bound exceeds the confirmed device RMS voltage limit."
         )
     nominal_total = (
-        args.series_resistance_ohm
+        series_resistance_ohm
         + SR830_OUTPUT_RESISTANCE_OHM
-        + args.device_resistance_ohm
+        + device_resistance_ohm
     )
     nominal_current_a = maximum_source_v / nominal_total
     return {
-        "series_resistance_ohm": args.series_resistance_ohm,
+        "series_resistance_ohm": series_resistance_ohm,
         "sr830_output_resistance_ohm": SR830_OUTPUT_RESISTANCE_OHM,
-        "approximate_device_resistance_ohm": args.device_resistance_ohm,
-        "maximum_device_resistance_ohm": args.maximum_device_resistance_ohm,
+        "approximate_device_resistance_ohm": device_resistance_ohm,
+        "maximum_device_resistance_ohm": maximum_device_resistance_ohm,
         "nominal_total_resistance_ohm": nominal_total,
-        "confirmed_max_device_current_a_rms": args.max_device_current_a,
-        "confirmed_max_device_voltage_v_rms": args.max_device_voltage_v,
+        "confirmed_max_device_current_a_rms": max_device_current_a,
+        "confirmed_max_device_voltage_v_rms": max_device_voltage_v,
         "maximum_source_v_rms": maximum_source_v,
         "worst_case_current_bound_a_rms": current_bound_a,
         "worst_case_device_voltage_bound_v_rms": voltage_bound_v,
         "nominal_maximum_current_a_rms": nominal_current_a,
         "nominal_maximum_device_voltage_v_rms": (
-            nominal_current_a * args.device_resistance_ohm
+            nominal_current_a * device_resistance_ohm
         ),
     }
 

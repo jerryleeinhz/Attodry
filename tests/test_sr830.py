@@ -1339,6 +1339,57 @@ class Sr830Tests(unittest.TestCase):
         self.assertIsNone(result["preflight"]["lockin_xx"])
         self.assertEqual(len(record_paths), 1)
 
+    def test_frequency_sweep_uses_configured_fixed_source_voltage_and_restores_minimum(
+        self,
+    ) -> None:
+        config_path = self._hardware_config()
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8").replace(
+                "frequency_source_voltage_v_rms = 0.004",
+                "frequency_source_voltage_v_rms = 0.020",
+            ),
+            encoding="utf-8",
+        )
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(config_path),
+                    "--points-hz", "17.777",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["frequency_source_voltage_v_rms"], 0.020)
+        self.assertAlmostEqual(result["source_readback_v_rms"], 0.020)
+        self.assertAlmostEqual(
+            result["points"][0]["nominal_current_a_rms"], 0.020 / 100550.0
+        )
+        self.assertEqual(xx_resource.writes[0], "SENS 21")
+        self.assertIn("SLVL 0.02", xx_resource.writes)
+        self.assertEqual(
+            xx_resource.writes[-3:], ["SLVL 0.004", "FREQ 17.777", "SENS 23"]
+        )
+        self.assertAlmostEqual(result["cleanup"]["final"]["lockin_xx"]["sine_output_v"], 0.004)
+
     def test_sweep_rejects_output_outside_station_config_before_opening(self) -> None:
         config_path = self._hardware_config()
         configured = config_path.read_text(encoding="utf-8")

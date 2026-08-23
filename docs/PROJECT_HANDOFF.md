@@ -395,6 +395,13 @@ Completed in Stage 3:
   `MINIMUM_SINE_OUTPUT_V`; changing `source_voltage_v` alone cannot make cleanup
   restore 20 mVrms because sweep preflight requires both source fields to remain
   at 4 mVrms.
+- Frequency sweeps now take their fixed XX excitation from strict
+  `[lockin_sweep].frequency_source_voltage_v_rms` (0.004--5.0 Vrms). The value is
+  checked against the archived circuit/device limits before VISA opens, set and
+  read back once before the first formal point, and recorded with the derived
+  nominal current at every point. Cleanup remains fail-closed at 4 mVrms. The
+  templates, configuration parser, fake-VISA tests, and daily documentation were
+  updated without connecting to or writing a real instrument.
 - The two daily sweep commands now resolve formal harmonic selections per scan
   and role from `[lockin_sweep].frequency_xx_harmonics`,
   `frequency_xy_harmonics`, `excitation_xx_harmonics`, and

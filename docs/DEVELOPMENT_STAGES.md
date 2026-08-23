@@ -401,6 +401,14 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   restored to the fixed 4 mVrms minimum (`MINIMUM_SINE_OUTPUT_V`), not to an
   arbitrary pre-scan value or a changed TOML `source_voltage_v`; the current
   preflight therefore continues to require both source fields to be 4 mVrms.
+- Added the strict `[lockin_sweep].frequency_source_voltage_v_rms` setting for a
+  configurable fixed XX SINE OUT amplitude during frequency scans. The value is
+  safety-checked against the confirmed complete series path, device current and
+  device voltage limits before VISA opens; the scan sets/reads it once, records
+  the resulting source voltage and nominal current at every frequency point, and
+  still restores the fixed 4 mVrms cleanup baseline. Configuration, templates,
+  fake-VISA coverage, and operator documentation were updated without opening
+  or writing a real instrument.
 
 - The project-approved daily SR830 sensitivity mapping includes 50 mV
   (`SENS 22`). `bounded_auto` remains role-limited: XX now supports the

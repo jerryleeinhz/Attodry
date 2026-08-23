@@ -126,6 +126,7 @@ class LockinConfig:
 @dataclass(frozen=True, slots=True)
 class LockinSweepConfig:
     frequency_points_hz: tuple[float, ...]
+    frequency_source_voltage_v_rms: float
     excitation_points_v_rms: tuple[float, ...]
     frequency_harmonics: tuple[int, ...]
     excitation_harmonics: tuple[int, ...]
@@ -758,6 +759,7 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         name,
         {
             "frequency_points_hz",
+            "frequency_source_voltage_v_rms",
             "excitation_points_v_rms",
             "skip_unsupported_harmonics",
             "run_name",
@@ -786,6 +788,14 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
     frequency_points_hz = _positive_number_tuple(
         table["frequency_points_hz"], f"{name}.frequency_points_hz"
     )
+    frequency_source_voltage_v_rms = _number(
+        table["frequency_source_voltage_v_rms"],
+        f"{name}.frequency_source_voltage_v_rms",
+    )
+    if not 0.004 <= frequency_source_voltage_v_rms <= 5.0:
+        raise ConfigError(
+            f"{name}.frequency_source_voltage_v_rms must remain within 0.004-5 V RMS."
+        )
     excitation_points_v_rms = _positive_number_tuple(
         table["excitation_points_v_rms"], f"{name}.excitation_points_v_rms"
     )
@@ -912,6 +922,7 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         )
     return LockinSweepConfig(
         frequency_points_hz=frequency_points_hz,
+        frequency_source_voltage_v_rms=frequency_source_voltage_v_rms,
         excitation_points_v_rms=excitation_points_v_rms,
         frequency_harmonics=frequency_harmonics,
         excitation_harmonics=excitation_harmonics,

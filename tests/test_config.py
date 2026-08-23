@@ -62,6 +62,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.magnet.limits.experiment_vector_max_t, 3.0)
         self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 2, 3))
         self.assertEqual(config.lockin_sweep.excitation_harmonics, (1, 2, 3))
+        self.assertEqual(config.lockin_sweep.frequency_source_voltage_v_rms, 0.004)
         self.assertEqual(config.lockin_sweep.frequency_xx_harmonics, (1, 2, 3))
         self.assertEqual(config.lockin_sweep.frequency_xy_harmonics, (1, 2, 3))
         self.assertEqual(config.lockin_sweep.excitation_xx_harmonics, (1, 2, 3))
@@ -457,6 +458,14 @@ class ConfigurationTests(unittest.TestCase):
             "external_50_ohm_termination = true",
         )
         with self.assertRaisesRegex(ConfigError, "must be false"):
+            self.load_text(text)
+
+    def test_lockin_sweep_rejects_frequency_source_outside_sr830_range(self) -> None:
+        text = self.simulation_text().replace(
+            "frequency_source_voltage_v_rms = 0.004",
+            "frequency_source_voltage_v_rms = 5.001",
+        )
+        with self.assertRaisesRegex(ConfigError, "frequency_source_voltage_v_rms"):
             self.load_text(text)
 
     def test_lockin_sweep_rejects_resistance_upper_bound_below_approximation(self) -> None:

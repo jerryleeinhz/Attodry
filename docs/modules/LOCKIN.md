@@ -487,6 +487,14 @@ X/Y/R、测量相位、设定与 SNAP 频率、谐波、当前 SENS 代码、SIN
 保留旧配对记录的兼容性，并只为实际选择的 XX/XY × 阶数生成图。该变更仅经离线
 fake-VISA/加载器测试，未连接或写入真实仪器。
 
+2026-08-23：扫频固定激励幅值从 Lock-in 基线字段中分离，新增严格的
+`[lockin_sweep].frequency_source_voltage_v_rms`（0.004--5.0 Vrms）。扫频开始前
+只设置并读回一次 XX `SLVL`，所有频率点记录同一实际 SINE OUT 和由完整串联路径
+计算的名义电流；该幅值在打开 VISA 前按确认的器件电流/电压上限做 fail-closed 预检。
+扫频清理仍将 XX SINE OUT 恢复到固定 4 mVrms 安全基线。`source_voltage_v` 继续表示
+两台 Lock-in 的最小基线，而不再是扫频运行幅值；配置字段、测量记录和日常说明已同步，
+仅 fake-VISA/离线测试覆盖，未连接真实仪器。
+
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。

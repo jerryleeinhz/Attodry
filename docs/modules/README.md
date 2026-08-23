@@ -28,8 +28,8 @@ Magnetic field ┘
    状态锁存、写设置和运动/控温分别需要明确授权，不能互相替代。
 3. 在 `LK_setup` 上运行任何项目命令时，必须使用 Conda 环境 `lyr`，或直接
    调用 `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`。
-4. 不提交 `hardware.local.toml`、实验原始数据、vendor DLL、仪器本地地址、
-   密钥或个人路径。
+4. 不提交 `hardware.local.toml`、实验原始数据、仪器本地地址、密钥或个人路径。
+   vendor DLL 的更新应通过独立提交纳入版本管理。
 5. 每个代码改动必须同时带相应测试；完成后更新
    `DEVELOPMENT_STAGES.md` 和 `PROJECT_HANDOFF.md`。
 6. 保留 rejected/transition/cleanup 原始数据，但默认分析只能使用
@@ -85,4 +85,3 @@ Integration 需要知道的接口或限制：
 ```
 
 只有提交号、测试结果和硬件权限边界都明确，Integration 才能接收该模块。
-

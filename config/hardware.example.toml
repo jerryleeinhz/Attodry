@@ -122,6 +122,9 @@ frequency_points_hz = [
   38310.4812935,
   100000.0,
 ]
+# Fixed XX SINE OUT RMS amplitude used throughout a frequency sweep. The sweep
+# restores the separate 4 mVrms safety baseline after it finishes.
+frequency_source_voltage_v_rms = 0.004
 excitation_points_v_rms = [
   0.004,
   0.006,
