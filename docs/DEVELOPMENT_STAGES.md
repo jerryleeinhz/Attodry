@@ -392,6 +392,11 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   point-exclusion lists. The later formal-samples cell is retained only to
   refresh after a filter change, preventing a blank selector from being applied
   to zero rows. This is read-only analysis behavior with no hardware imports.
+- Corrected rerunning the notebook's formal-samples cell after changing a
+  checkbox: it now re-synchronizes the displayed record/status filters before
+  loading, so an explicitly allowed rejected audit record is not silently
+  retried with the stale completed-only/rejected-disabled filter. This remains
+  read-only analysis behavior with no hardware imports.
 
 - The project-approved daily SR830 sensitivity mapping includes 50 mV
   (`SENS 22`). `bounded_auto` remains role-limited: XX now supports the

@@ -386,6 +386,10 @@ Completed in Stage 3:
   When optional export is enabled, `selection_manifest.json` records the files,
   filters, retained rows, and excluded point keys. This is analysis-only and has
   no hardware imports or instrument operations.
+- Rerunning the notebook's formal-samples cell now first re-synchronizes the
+  current widget filters. Consequently, an explicitly allowed rejected audit
+  record cannot be silently retried using an earlier rejected-disabled filter;
+  this is a read-only notebook fix with no hardware imports or operations.
 - The two daily sweep commands now resolve formal harmonic selections per scan
   and role from `[lockin_sweep].frequency_xx_harmonics`,
   `frequency_xy_harmonics`, `excitation_xx_harmonics`, and

@@ -360,6 +360,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("excitation_excluded_points_widget", code)
         self.assertIn("apply_point_exclusions_button", code)
         self.assertIn("def _load_selected_formal_samples", code)
+        self.assertIn("def _load_selected_formal_samples():\n    _sync_filters()", code)
         self.assertIn("loaded = _load_selected_formal_samples()", code)
         self.assertIn("selection_manifest.json", code)
         self.assertIn("if frequency_rows", code)
