@@ -33,10 +33,12 @@ class AutorangePolicy:
         if (self.minimum_full_scale_v, self.maximum_full_scale_v) not in {
             (0.001, 0.01),
             (0.01, 0.02),
+            (0.02, 0.05),
+            (0.01, 0.05),
         }:
             raise ValueError(
-                "autorange bounds must be a confirmed adjacent pair: "
-                "0.001-0.01 V or 0.01-0.02 V"
+                "autorange bounds must be a confirmed pair or three-level ladder: "
+                "0.001-0.01 V, 0.01-0.02 V, 0.02-0.05 V, or 0.01-0.05 V"
             )
         if not math.isclose(
             self.target_occupancy, 0.85, rel_tol=0.0, abs_tol=1e-12
@@ -46,8 +48,17 @@ class AutorangePolicy:
             raise ValueError(
                 "stable_samples_before_narrowing must be the confirmed value 2"
             )
-        if self.maximum_adjustment_steps != 1:
-            raise ValueError("maximum_adjustment_steps must be the confirmed value 1")
+        if self.maximum_adjustment_steps != len(self.full_scales_v) - 1:
+            raise ValueError(
+                "maximum_adjustment_steps must equal the number of confirmed "
+                "range transitions in the configured ladder"
+            )
+
+    @property
+    def full_scales_v(self) -> tuple[float, ...]:
+        if (self.minimum_full_scale_v, self.maximum_full_scale_v) == (0.01, 0.05):
+            return (0.01, 0.02, 0.05)
+        return (self.minimum_full_scale_v, self.maximum_full_scale_v)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,10 +85,7 @@ def decide_autorange(
 ) -> AutorangeDecision:
     """Return one deterministic pre-sampling range decision without I/O."""
 
-    if state.current_full_scale_v not in (
-        policy.minimum_full_scale_v,
-        policy.maximum_full_scale_v,
-    ):
+    if state.current_full_scale_v not in policy.full_scales_v:
         raise ValueError("current_full_scale_v is outside the configured bounds")
     if not 0 <= state.adjustment_steps <= policy.maximum_adjustment_steps:
         raise ValueError("adjustment_steps is outside the configured limit")
@@ -87,10 +95,11 @@ def decide_autorange(
         raise ValueError("amplitude_v must be finite and non-negative")
 
     occupancy = amplitude_v / state.current_full_scale_v
+    current_index = policy.full_scales_v.index(state.current_full_scale_v)
     must_widen = overload or occupancy >= policy.target_occupancy
     if must_widen:
         if (
-            state.current_full_scale_v == policy.maximum_full_scale_v
+            current_index == len(policy.full_scales_v) - 1
             or state.adjustment_steps >= policy.maximum_adjustment_steps
         ):
             return AutorangeDecision(
@@ -106,7 +115,7 @@ def decide_autorange(
         return AutorangeDecision(
             AutorangeAction.WIDEN,
             AutorangeState(
-                policy.maximum_full_scale_v,
+                policy.full_scales_v[current_index + 1],
                 state.adjustment_steps + 1,
                 0,
             ),
@@ -114,7 +123,7 @@ def decide_autorange(
             "overload" if overload else "target occupancy reached",
         )
 
-    if state.current_full_scale_v == policy.minimum_full_scale_v:
+    if current_index == 0:
         return AutorangeDecision(
             AutorangeAction.KEEP,
             AutorangeState(
@@ -128,7 +137,7 @@ def decide_autorange(
 
     fits_narrower = (
         amplitude_v
-        <= policy.target_occupancy * policy.minimum_full_scale_v
+        <= policy.target_occupancy * policy.full_scales_v[current_index - 1]
     )
     stable_fit_samples = state.stable_fit_samples + 1 if fits_narrower else 0
     if stable_fit_samples < policy.stable_samples_before_narrowing:
@@ -156,7 +165,7 @@ def decide_autorange(
     return AutorangeDecision(
         AutorangeAction.NARROW,
         AutorangeState(
-            policy.minimum_full_scale_v,
+            policy.full_scales_v[current_index - 1],
             state.adjustment_steps + 1,
             0,
         ),

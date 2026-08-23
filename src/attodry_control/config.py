@@ -129,6 +129,10 @@ class LockinSweepConfig:
     excitation_points_v_rms: tuple[float, ...]
     frequency_harmonics: tuple[int, ...]
     excitation_harmonics: tuple[int, ...]
+    frequency_xx_harmonics: tuple[int, ...]
+    frequency_xy_harmonics: tuple[int, ...]
+    excitation_xx_harmonics: tuple[int, ...]
+    excitation_xy_harmonics: tuple[int, ...]
     skip_unsupported_harmonics: bool
     run_name: str
     note: str
@@ -668,13 +672,30 @@ def _parse_lockin(
             )
         except ValueError as exc:
             raise ConfigError(f"{name}: {exc}") from exc
-        required_bounds = (
-            (0.01, 0.02) if role is LockinRole.XX else (0.001, 0.01)
+        allowed_bounds = (
+            {(0.01, 0.02), (0.02, 0.05), (0.01, 0.05)}
+            if role is LockinRole.XX
+            else {(0.001, 0.01)}
         )
-        if (autorange_min_full_scale_v, autorange_max_full_scale_v) != required_bounds:
+        if (autorange_min_full_scale_v, autorange_max_full_scale_v) not in allowed_bounds:
+            allowed_text = (
+                "0.01-0.02 V, 0.02-0.05 V, or the three-level 0.01-0.05 V ladder"
+                if role is LockinRole.XX
+                else "0.001-0.01 V"
+            )
             raise ConfigError(
-                f"{name} bounded_auto range must be "
-                f"{required_bounds[0]:g}-{required_bounds[1]:g} V."
+                f"{name} bounded_auto range must be {allowed_text}."
+            )
+        expected_max_steps = (
+            2
+            if (autorange_min_full_scale_v, autorange_max_full_scale_v)
+            == (0.01, 0.05)
+            else 1
+        )
+        if autorange_max_steps != expected_max_steps:
+            raise ConfigError(
+                f"{name}.autorange_max_steps must be {expected_max_steps} for its "
+                "confirmed autorange ladder."
             )
         if sensitivity_full_scale_v != autorange_min_full_scale_v:
             raise ConfigError(
@@ -752,7 +773,15 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
             "external_50_ohm_termination",
             "output_directory",
         },
-        {"harmonics", "frequency_harmonics", "excitation_harmonics"},
+        {
+            "harmonics",
+            "frequency_harmonics",
+            "excitation_harmonics",
+            "frequency_xx_harmonics",
+            "frequency_xy_harmonics",
+            "excitation_xx_harmonics",
+            "excitation_xy_harmonics",
+        },
     )
     frequency_points_hz = _positive_number_tuple(
         table["frequency_points_hz"], f"{name}.frequency_points_hz"
@@ -775,17 +804,36 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
     legacy_harmonics = "harmonics" in table
     frequency_harmonics_present = "frequency_harmonics" in table
     excitation_harmonics_present = "excitation_harmonics" in table
-    if legacy_harmonics and (
+    role_harmonic_fields = (
+        "frequency_xx_harmonics",
+        "frequency_xy_harmonics",
+        "excitation_xx_harmonics",
+        "excitation_xy_harmonics",
+    )
+    role_harmonics_present = tuple(
+        field for field in role_harmonic_fields if field in table
+    )
+    shared_harmonics_present = (
         frequency_harmonics_present or excitation_harmonics_present
-    ):
+    )
+    if legacy_harmonics and (shared_harmonics_present or role_harmonics_present):
         raise ConfigError(
-            f"{name}.harmonics cannot be combined with frequency_harmonics or "
-            "excitation_harmonics."
+            f"{name}.harmonics cannot be combined with shared or role-specific "
+            "harmonic fields."
+        )
+    if shared_harmonics_present and role_harmonics_present:
+        raise ConfigError(
+            f"{name} shared harmonic fields cannot be combined with role-specific "
+            "harmonic fields."
         )
     if legacy_harmonics:
         harmonics = _selected_sweep_harmonics(table["harmonics"], f"{name}.harmonics")
         frequency_harmonics = harmonics
         excitation_harmonics = harmonics
+        frequency_xx_harmonics = harmonics
+        frequency_xy_harmonics = harmonics
+        excitation_xx_harmonics = harmonics
+        excitation_xy_harmonics = harmonics
     elif frequency_harmonics_present and excitation_harmonics_present:
         frequency_harmonics = _selected_sweep_harmonics(
             table["frequency_harmonics"], f"{name}.frequency_harmonics"
@@ -793,9 +841,50 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         excitation_harmonics = _selected_sweep_harmonics(
             table["excitation_harmonics"], f"{name}.excitation_harmonics"
         )
+        frequency_xx_harmonics = frequency_harmonics
+        frequency_xy_harmonics = frequency_harmonics
+        excitation_xx_harmonics = excitation_harmonics
+        excitation_xy_harmonics = excitation_harmonics
+    elif role_harmonics_present:
+        missing_role_harmonics = [
+            field for field in role_harmonic_fields if field not in table
+        ]
+        if missing_role_harmonics:
+            raise ConfigError(
+                f"{name} role-specific harmonic selection requires all four fields: "
+                + ", ".join(role_harmonic_fields)
+                + "."
+            )
+        frequency_xx_harmonics = _selected_role_sweep_harmonics(
+            table["frequency_xx_harmonics"], f"{name}.frequency_xx_harmonics"
+        )
+        frequency_xy_harmonics = _selected_role_sweep_harmonics(
+            table["frequency_xy_harmonics"], f"{name}.frequency_xy_harmonics"
+        )
+        excitation_xx_harmonics = _selected_role_sweep_harmonics(
+            table["excitation_xx_harmonics"], f"{name}.excitation_xx_harmonics"
+        )
+        excitation_xy_harmonics = _selected_role_sweep_harmonics(
+            table["excitation_xy_harmonics"], f"{name}.excitation_xy_harmonics"
+        )
+        if not frequency_xx_harmonics and not frequency_xy_harmonics:
+            raise ConfigError(
+                f"{name} must select at least one XX or XY frequency harmonic."
+            )
+        if not excitation_xx_harmonics and not excitation_xy_harmonics:
+            raise ConfigError(
+                f"{name} must select at least one XX or XY excitation harmonic."
+            )
+        frequency_harmonics = tuple(
+            sorted(set(frequency_xx_harmonics) | set(frequency_xy_harmonics))
+        )
+        excitation_harmonics = tuple(
+            sorted(set(excitation_xx_harmonics) | set(excitation_xy_harmonics))
+        )
     else:
         raise ConfigError(
-            f"{name} requires both frequency_harmonics and excitation_harmonics."
+            f"{name} requires shared harmonic fields or all four role-specific "
+            "harmonic fields."
         )
     settle_s = _positive_number(table["settle_s"], f"{name}.settle_s")
     if settle_s < 1.5:
@@ -826,6 +915,10 @@ def _parse_lockin_sweep(table: Mapping[str, Any]) -> LockinSweepConfig:
         excitation_points_v_rms=excitation_points_v_rms,
         frequency_harmonics=frequency_harmonics,
         excitation_harmonics=excitation_harmonics,
+        frequency_xx_harmonics=frequency_xx_harmonics,
+        frequency_xy_harmonics=frequency_xy_harmonics,
+        excitation_xx_harmonics=excitation_xx_harmonics,
+        excitation_xy_harmonics=excitation_xy_harmonics,
         skip_unsupported_harmonics=_boolean(
             table["skip_unsupported_harmonics"],
             f"{name}.skip_unsupported_harmonics",
@@ -1049,6 +1142,14 @@ def _selected_sweep_harmonics(value: Any, name: str) -> tuple[int, ...]:
             f"{name} must be an ascending non-empty combination of 1, 2, and 3."
         )
     return harmonics
+
+
+def _selected_role_sweep_harmonics(value: Any, name: str) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        raise ConfigError(f"{name} must be an array of harmonic integers.")
+    if not value:
+        return ()
+    return _selected_sweep_harmonics(value, name)
 
 
 def _require_strictly_increasing(values: tuple[float, ...], name: str) -> None:

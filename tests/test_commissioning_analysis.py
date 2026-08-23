@@ -104,6 +104,23 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(abs(phase.mean), 180.0)
         self.assertLess(phase.standard_deviation, 2.0)
 
+    def test_formal_loader_respects_selected_roles_and_preserves_legacy_pairs(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["points"][0]["samples"][0]["selected_roles"] = ["xy"]
+        selected_path = self._write_json("xy-only.json", payload)
+
+        self.assertEqual(
+            [row.role for row in load_sweep_samples(selected_path)], ["xy"]
+        )
+        self.assertEqual(
+            [row.role for row in load_sweep_samples(selected_path, roles={"xy"})],
+            ["xy"],
+        )
+        legacy_path = self._write_json("legacy-pair.json", self._sweep(completed=True))
+        self.assertEqual(
+            [row.role for row in load_sweep_samples(legacy_path)], ["xx", "xy"]
+        )
+
     def test_csv_export_and_injected_browse_open_data_directly(self) -> None:
         source = self._write_json("completed.json", self._sweep(completed=True))
         browsed = browse_and_load_commissioning_file(
@@ -239,14 +256,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
 
         figures = plot_six_role_harmonic_sweeps(rows)
         self.addCleanup(lambda: [plt.close(item) for item in figures.values()])
-        self.assertEqual(set(figures), {
-            ("xx", 1), ("xx", 2), ("xx", 3),
-            ("xy", 1), ("xy", 2), ("xy", 3),
-        })
-        self.assertIn(
-            "No selected Vxy h2 samples",
-            figures[("xy", 2)].axes[0].texts[0].get_text(),
-        )
+        self.assertEqual(set(figures), {("xx", 1), ("xy", 1)})
 
     def test_role_harmonic_phase_plot_unwraps_and_omits_unqualified_points(self) -> None:
         try:

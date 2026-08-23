@@ -61,7 +61,7 @@ class Sr830SettingMappingTests(unittest.TestCase):
             )
 
     def test_maps_confirmed_xx_autorange_full_scales(self) -> None:
-        for full_scale_v, expected_code in ((0.01, 20), (0.02, 21)):
+        for full_scale_v, expected_code in ((0.01, 20), (0.02, 21), (0.05, 22)):
             with self.subTest(full_scale_v=full_scale_v):
                 codes = map_sr830_settings(
                     reference_source=ReferenceSource.INTERNAL,

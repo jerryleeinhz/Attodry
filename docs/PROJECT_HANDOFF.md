@@ -358,8 +358,8 @@ Completed in Stage 3:
 - On 2026-08-22, the daily Lock-in guide was expanded into the authoritative
   field-value reference for `[lockin_xx]`, `[lockin_xy]`, and `[lockin_sweep]`,
   including exact `fixed`/`bounded_auto` contracts and an import-path check for
-  obsolete CLI help. Station GPIB/VISA addresses remain only in ignored
-  `hardware.local.toml`, so Git updates preserve them without committing local
+  obsolete CLI help. Station-specific GPIB/VISA overrides remain only in ignored
+  `hardware.local.toml`, so Git updates preserve them without replacing local
   hardware data. `settle_time_constants` now has a real fail-closed effect:
   `settle_s` is rejected before VISA opens unless it is at least the largest role
   time-constant product, and the resolved floor is archived in each JSON. The
@@ -386,19 +386,32 @@ Completed in Stage 3:
   When optional export is enabled, `selection_manifest.json` records the files,
   filters, retained rows, and excluded point keys. This is analysis-only and has
   no hardware imports or instrument operations.
-- The two daily sweep commands now resolve their requested harmonics separately
-  from `[lockin_sweep].frequency_harmonics` and
-  `[lockin_sweep].excitation_harmonics`. Each list is an ascending non-empty
-  combination of h1/h2/h3, and fake-VISA coverage verifies frequency h1+h3 and
-  excitation h2 without writing unselected orders. The compatibility-only old
-  `harmonics` field applies one list to both scan types; it cannot be mixed with
-  the new fields. All selected combinations retain the existing h1 cleanup.
-  This is offline-tested only; no instrument resource was opened or written.
+- The two daily sweep commands now resolve formal harmonic selections per scan
+  and role from `[lockin_sweep].frequency_xx_harmonics`,
+  `frequency_xy_harmonics`, `excitation_xx_harmonics`, and
+  `excitation_xy_harmonics`. Each permits an ascending h1/h2/h3 subset or `[]`;
+  every scan requires at least one selected role. The union is still set and read
+  on both SR830s, so selecting only XX or XY never bypasses companion status,
+  lock, overload, readback, or cleanup checks. Formal JSON samples archive
+  `selected_roles`, and offline analysis only emits the actually selected curves.
+  Shared and legacy harmonic fields remain compatibility-only and cannot mix with
+  the four new fields. Fake-VISA, strict-config, loader, and legacy-record tests
+  passed; no instrument resource was opened or written.
 - The remote Notebook's load button now also performs the formal-row load and
   fills point-exclusion options immediately. The standalone formal-samples cell
   remains only for explicitly refreshing after a filter change, so a normal
   load-and-exclude workflow cannot apply a blank selector to zero rows. This is
   read-only analysis only; no hardware path is imported.
+
+- The project-approved daily SR830 sensitivity mapping includes 50 mV
+  (`SENS 22`). `bounded_auto` remains role-limited: XX now supports the
+  fail-closed three-level 10--20--50 mV ladder with at most two total,
+  one-rung transitions per continuous sweep; XY remains 1--10 mV with one.
+  Defaults (XX 20 mV, XY 1 mV) and all excitation/device protection limits are
+  unchanged. Each range change is read back and audited, and 50 mV remains the
+  largest project-approved input full scale. Pure-policy, strict-config, and
+  fake-VISA two-widening cases passed as part of the 265-test offline suite
+  (5 matplotlib-dependent skips); no instrument resource was opened or written.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. Magnetic

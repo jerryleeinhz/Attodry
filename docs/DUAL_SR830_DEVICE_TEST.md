@@ -270,10 +270,13 @@ documents every field:
   to 100 kHz.
 - `excitation_points_v_rms`: 4, 6, 10, 16, 26, 40, 64, 100, 160, 252, and
   400 mVrms at the fixed 17.777 Hz fundamental.
-- `frequency_harmonics = [1, 2, 3]`: harmonic orders for the frequency sweep;
-  use any ascending non-empty subset such as `[1, 3]`.
-- `excitation_harmonics = [1, 2, 3]`: harmonic orders for the excitation sweep;
-  it may differ from the frequency selection, for example `[2]`.
+- `frequency_xx_harmonics` / `frequency_xy_harmonics`: formal XX/XY harmonic
+  orders for the frequency sweep. Each is an ascending subset of `[1, 2, 3]`; an
+  empty list excludes that role from formal curves.
+- `excitation_xx_harmonics` / `excitation_xy_harmonics`: the corresponding
+  excitation-sweep selection. For example XX `[1, 3]` plus XY `[2]` is valid.
+  Both SR830s are still read at every selected harmonic and either safety failure
+  rejects the run.
 - `skip_unsupported_harmonics = true`: at high fundamentals, retain supported
   orders and record h2/h3 as skipped when their detection frequency would exceed
   the SR830 102 kHz limit.
@@ -286,9 +289,10 @@ documents every field:
   preflight differs.
 - `autorange_min_full_scale_v`, `autorange_max_full_scale_v`,
   `autorange_target_occupancy = 0.85`, `autorange_stable_samples = 2`, and
-  `autorange_max_steps = 1`: required only for a role explicitly set to
-  `bounded_auto`. The documented daily pairs are XX 10--20 mV and XY 1--10 mV;
-  all transitions remain fail-closed and recorded.
+  `autorange_max_steps`: required only for a role explicitly set to
+  `bounded_auto`. The daily XX ladder is 10--20--50 mV with
+  `autorange_max_steps = 2`; XY remains 1--10 mV with `autorange_max_steps = 1`.
+  Each transition is fail-closed and recorded.
 - `run_name` and `note`: required per-run audit metadata. The nonempty, safe
   filename label `run_name` is included in the JSON name; the nonempty `note`
   remains in the JSON record.
@@ -344,8 +348,9 @@ written source point; a 4 mVrms baseline point that did not write `SLVL` records
 zero for its point-specific value. It is an acquisition-settling parameter, not
 a safety limit or an automatic phase correction.
 
-The daily frequency coverage policy comes from `frequency_harmonics = [1, 2, 3]`
-and `skip_unsupported_harmonics = true` in `[lockin_sweep]`. It retains only the
+The daily frequency coverage policy comes from the union of
+`frequency_xx_harmonics` and `frequency_xy_harmonics`, together with
+`skip_unsupported_harmonics = true` in `[lockin_sweep]`. It retains only the
 selected and supported orders at each point and writes an audited
 `skipped_harmonics` entry for every frequency-limit omission; no missing order
 is inferred in analysis. On the confirmed ten-point 17.777 Hz--100 kHz grid,

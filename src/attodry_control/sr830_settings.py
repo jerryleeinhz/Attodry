@@ -51,12 +51,12 @@ _INPUT_MODE_CODES = {InputMode.A_MINUS_B: 1}
 _SHIELD_GROUNDING_CODES = {ShieldGrounding.FLOAT: 0}
 _INPUT_COUPLING_CODES = {InputCoupling.AC: 0}
 
-# L1 intentionally exposes only the fixed settings confirmed for this project.
-# Additional hardware-supported values belong here only after their project use is
-# specified and tested; accepting a physical value is not write authorization.
+# The project permits these SR830 sensitivity full scales for daily sweeps.
+# Adding a hardware-supported value requires an explicit project-policy update,
+# offline mapping/config tests, and documentation; it is not write authorization.
 _TIME_CONSTANT_CODES = {0.3: 9}
 _FILTER_SLOPE_CODES = {24: 3}
-_SENSITIVITY_CODES = {0.001: 17, 0.01: 20, 0.02: 21}
+_SENSITIVITY_CODES = {0.001: 17, 0.01: 20, 0.02: 21, 0.05: 22}
 
 
 def sensitivity_code(full_scale_v: float) -> int:
@@ -64,7 +64,7 @@ def sensitivity_code(full_scale_v: float) -> int:
         return _SENSITIVITY_CODES[full_scale_v]
     except KeyError as exc:
         raise ValueError(
-            "sensitivity full scale must be one of 0.001, 0.01, or 0.02 V"
+            "sensitivity full scale must be one of 0.001, 0.01, 0.02, or 0.05 V"
         ) from exc
 
 

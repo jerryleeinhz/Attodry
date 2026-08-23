@@ -350,7 +350,7 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   temperature command can continue to use the same station-local TOML without
   parsing or acting on Lock-in fields. The merged full offline suite passed.
 - Completed the daily Lock-in configuration clarification and settling-contract
-  fix (2026-08-22). Station VISA addresses remain only in ignored
+  fix (2026-08-22). Station-specific VISA overrides remain only in ignored
   `hardware.local.toml`, so Git updates do not overwrite them. The daily guide now
   lists every accepted Lock-in/sweep field, including exact `fixed` and
   `bounded_auto` contracts and a terminal import-path check for obsolete CLI help.
@@ -377,18 +377,31 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   remove suspect retained points without altering raw JSON. Optional export
   writes the selected files, filters, and exclusions to `selection_manifest.json`
   for reproducibility. This analysis-only path has no hardware imports.
-- Added scan-specific harmonic selection in `[lockin_sweep]`:
-  `frequency_harmonics` and `excitation_harmonics` each accept an ascending,
-  non-empty subset of h1/h2/h3 and may differ. The older single `harmonics`
-  field remains a compatibility path for one common combination but cannot be
-  mixed with the new fields. Fake-VISA cases confirm frequency h1+h3 and
-  excitation h2 acquisition, no writes to unselected orders, and h1 cleanup.
-  No hardware resource was opened or written.
+- Added role-specific harmonic selection in `[lockin_sweep]`:
+  `frequency_xx_harmonics`, `frequency_xy_harmonics`,
+  `excitation_xx_harmonics`, and `excitation_xy_harmonics` independently select
+  formal XX/XY h1/h2/h3 curves; `[]` excludes one role, while every scan still
+  requires at least one selection. Both SR830s are set and read at the union of
+  selected orders, so an unselected companion's unsafe status still rejects the
+  run. Each sample records `selected_roles`; analysis honours it and creates only
+  selected role/order figures. The older shared fields remain strict compatibility
+  paths and cannot mix with role-specific fields. Fake-VISA, loader, template,
+  and legacy-record tests passed without opening or writing a hardware resource.
 - Corrected the remote Notebook selection workflow: clicking `Load selected
   records` now immediately loads the selected formal rows and fills the
   point-exclusion lists. The later formal-samples cell is retained only to
   refresh after a filter change, preventing a blank selector from being applied
   to zero rows. This is read-only analysis behavior with no hardware imports.
+
+- The project-approved daily SR830 sensitivity mapping includes 50 mV
+  (`SENS 22`). `bounded_auto` remains role-limited: XX now supports the
+  fail-closed three-level 10--20--50 mV ladder with at most two total,
+  one-rung transitions per continuous sweep; XY remains 1--10 mV with one.
+  Defaults (XX 20 mV, XY 1 mV) and all excitation/device protection limits are
+  unchanged. Each range change is read back and audited, and 50 mV remains the
+  largest project-approved input full scale. Pure-policy, strict-config, and
+  fake-VISA two-widening cases passed as part of the 265-test offline suite
+  (5 matplotlib-dependent skips); no instrument resource was opened or written.
 
 ## Stage 4 - attoDRY real driver
 

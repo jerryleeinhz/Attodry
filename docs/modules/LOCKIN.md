@@ -49,16 +49,17 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-# Default daily policy: fixed XX at 20 mV.
+# Default daily policy: fixed XX at 20 mV. The project also permits 50 mV
+# (SENS 22) for extra h1 headroom; see LOCKIN_DAILY_OPERATION.md.
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.020
-# To opt in to XX bounded_auto, change the mode and use this complete policy:
+# To opt in to the three-level XX bounded_auto ladder, change the mode and use:
 # sensitivity_full_scale_v = 0.010
 # autorange_min_full_scale_v = 0.010
-# autorange_max_full_scale_v = 0.020
+# autorange_max_full_scale_v = 0.050
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# autorange_max_steps = 1
+# autorange_max_steps = 2
 settle_time_constants = 5.0
 
 [lockin_xy]
@@ -82,17 +83,18 @@ settle_time_constants = 5.0
 
 2026-08-22 日常默认改为两台都固定：XX 20 mV、XY 1 mV。只有操作者在本机
 `hardware.local.toml` 把某一角色明确切换为 `bounded_auto` 时，才执行该角色的
-自动判断。推荐自动对为 XX 10 mV--20 mV、XY 1 mV--10 mV；两者使用 0.85 目标
-占用率、缩窄前两个连续安全样本、每条连续扫描最多一次调整。10 mV 对已记录最大
+自动判断。推荐自动阶梯为 XX 10 mV--20 mV--50 mV、XY 1 mV--10 mV；两者使用 0.85
+目标占用率、缩窄前两个连续安全样本。XX 每条连续扫描最多两次、且每次仅在相邻的项目
+确认档位间转换；XY 最多一次。10 mV 对已记录最大
 Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压或频率条件不会超过
 8.5 mV 阈值。
 
 ## 参数与配置含义（当前日常策略）
 
 所有电压均为 SR830 full-scale 或 RMS 的 SI 单位（V），不是仪器前面板代码。
-代码映射只保存在驱动层：1 mV、10 mV、20 mV 分别对应 `SENS` 代码 17、20、21。
-本地 `hardware.local.toml` 只能由操作者维护且必须忽略提交；模板中的地址占位符
-不能用于连接仪器。
+当前项目白名单为 1 mV、10 mV、20 mV、50 mV，分别对应 `SENS` 代码 17、20、21、22。
+本地 `hardware.local.toml` 只能由操作者维护且必须忽略提交；模板默认的 XX/XY GPIB
+地址仅适用于本站，其他控制机必须在本机覆盖后才可连接。
 
 日常运行的完整字段值域、`fixed`/`bounded_auto` 示例、时间常数等待关系和旧终端导入
 排错入口统一见 [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)，不要在
@@ -110,10 +112,10 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 | `settle_time_constants` | 每次设置转换后等待的时间常数个数，最小 5.0。 | `[lockin_sweep].settle_s` 必须不小于两台的 `time_constant_s × settle_time_constants` 最大值；当前最短为 `5 × 0.3 s = 1.5 s`。 |
 | `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
 | `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
-| `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | 选中角色的自动范围边界。推荐 XX 10--20 mV、XY 1--10 mV。 | 仅 `bounded_auto` 使用；必须是项目已确认的相邻 1--10 mV 或 10--20 mV 档位。 |
-| `autorange_target_occupancy` | 0.85。 | 到达或超过阈值、或报告过载时，才允许向该角色的最大量程放宽；最大量程仍不安全则 fail closed。 |
-| `autorange_stable_samples` | 2 个连续安全样本。 | 在最大量程时达到该数量，才允许缩窄；任一不合格样本重置计数。 |
-| `autorange_max_steps` | 每条连续扫描最多 1 次调整。 | 防止量程来回追逐；每次正式采样前冻结实际量程。 |
+| `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | 选中角色的自动范围边界。推荐 XX 10--50 mV 三档阶梯、XY 1--10 mV。 | 仅 `bounded_auto` 使用；XX 10--50 mV 自动按 10→20→50 mV 逐档转换。 |
+| `autorange_target_occupancy` | 0.85。 | 到达或超过阈值、或报告过载时，才允许上移一个档位；最大档仍不安全则 fail closed。 |
+| `autorange_stable_samples` | 2 个连续安全样本。 | 符合更窄的相邻档位两次后，才允许下移一档；任一不合格样本重置计数。 |
+| `autorange_max_steps` | XX 三档为 2；XY 两档为 1。 | 每条连续扫描中允许的总转换次数，必须等于该项目确认阶梯的相邻转换数。 |
 
 `bounded_auto` 是可审计的预备阶段状态机，不是 SR830 的 `AGAN` 命令替代品。每次
 允许的 `SENS` 转换都必须读回新代码、保存转换记录、至少等待 1.5 s、消费并记录
@@ -475,6 +477,15 @@ X/Y/R、测量相位、设定与 SNAP 频率、谐波、当前 SENS 代码、SIN
 同 sweep 或其他访问相同 VISA 地址的程序并行使用。完整日常命令与字段解释见
 [`../LOCKIN_LIVE_MONITOR.md`](../LOCKIN_LIVE_MONITOR.md) 和
 [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。
+
+2026-08-23：日常 sweep 的正式曲线可以按扫描类型、角色和谐波独立选择：
+`frequency_xx_harmonics`、`frequency_xy_harmonics`、
+`excitation_xx_harmonics`、`excitation_xy_harmonics`。每项只接受有序 h1/h2/h3
+组合或 `[]`；每类扫描至少选择一个角色。选择只决定哪一台的数据进入正式曲线，并不
+减少双机 HARM 设置、读回或安全检查：任一伴随读数的 unlock、overload、error 或频率
+不匹配仍使扫描 fail closed。JSON 样本以 `selected_roles` 记录正式归属；分析加载器
+保留旧配对记录的兼容性，并只为实际选择的 XX/XY × 阶数生成图。该变更仅经离线
+fake-VISA/加载器测试，未连接或写入真实仪器。
 
 ## 预计文件所有权
 

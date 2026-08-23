@@ -62,17 +62,17 @@ shield_grounding = "float"
 input_coupling = "ac"
 time_constant_s = 0.3
 filter_slope_db_oct = 24
-# Daily default: keep XX fixed at 20 mV full scale. To opt into bounded_auto,
-# change sensitivity_mode, set sensitivity_full_scale_v to the selected minimum,
-# then uncomment every autorange field below. The documented XX auto pair is
-# 10 mV to 20 mV.
+# Daily default: keep XX fixed at 20 mV full scale. The project also permits
+# 50 mV (SENS 22) when extra h1 headroom is required. To opt into the approved
+# three-level XX bounded_auto ladder, change sensitivity_mode, set the minimum,
+# then uncomment every autorange field below. It widens only as 10 -> 20 -> 50 mV.
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.020
 # autorange_min_full_scale_v = 0.010
-# autorange_max_full_scale_v = 0.020
+# autorange_max_full_scale_v = 0.050
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# autorange_max_steps = 1
+# autorange_max_steps = 2
 # A sweep's settle_s must be at least this multiplier times time_constant_s.
 # At the confirmed 0.3 s and 5.0 values, that lower bound is 1.5 s.
 settle_time_constants = 5.0
@@ -135,10 +135,14 @@ excitation_points_v_rms = [
   0.252,
   0.400,
 ]
-# Each list is an ascending non-empty combination of 1, 2, and 3. They apply
-# independently to frequency and excitation sweeps; for example [1, 3] or [2].
-frequency_harmonics = [1, 2, 3]
-excitation_harmonics = [1, 2, 3]
+# Select formal curves separately for every scan and voltage role. Each list is
+# ascending and uses 1, 2, and/or 3; [] excludes that role from formal curves
+# while retaining its paired readback and every safety check. At least one role
+# must be selected for each scan. Example: XX h1/h3 and XY h2 in a frequency scan.
+frequency_xx_harmonics = [1, 2, 3]
+frequency_xy_harmonics = [1, 2, 3]
+excitation_xx_harmonics = [1, 2, 3]
+excitation_xy_harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
 # Range mode and target/policy belong to [lockin_xx] and [lockin_xy], not this

@@ -354,7 +354,7 @@ def load_sweep_samples(
             if not isinstance(sample, dict):
                 raise ValueError("Each sweep sample must be an object.")
             problems = tuple(str(problem) for problem in sample.get("problems", []))
-            for role in ("xx", "xy"):
+            for role in _formal_selected_roles(sample):
                 if selected_roles is not None and role not in selected_roles:
                     continue
                 row = _commissioning_sample(
@@ -665,7 +665,7 @@ def plot_six_role_harmonic_sweeps(
     phase_minimum_amplitude_v: float = 0.0,
     phase_maximum_standard_deviation_deg: float | None = None,
 ) -> dict[tuple[str, int], object]:
-    """Return the requested separate XX/XY × h1/h2/h3 sweep figures."""
+    """Return one figure for each selected XX/XY and harmonic combination."""
 
     return {
         (role, harmonic): plot_role_harmonic_sweep(
@@ -680,6 +680,7 @@ def plot_six_role_harmonic_sweeps(
         )
         for role in PLOT_ROLES
         for harmonic in PLOT_HARMONICS
+        if any(row.role == role and row.harmonic == harmonic for row in rows)
     }
 
 
@@ -769,6 +770,20 @@ def _formal_sample_payloads(payload: Mapping[str, object]):
         samples = point.get("samples", [])
         if isinstance(samples, list):
             yield from (sample for sample in samples if isinstance(sample, dict))
+
+
+def _formal_selected_roles(sample: Mapping[str, object]) -> tuple[str, ...]:
+    """Return formal roles, treating records before role selection as paired."""
+
+    selected = sample.get("selected_roles")
+    if selected is None:
+        return PLOT_ROLES
+    if not isinstance(selected, list) or not selected:
+        raise ValueError("Sweep sample selected_roles must be a non-empty role list.")
+    roles = tuple(str(role) for role in selected)
+    if len(set(roles)) != len(roles) or set(roles) - set(PLOT_ROLES):
+        raise ValueError("Sweep sample selected_roles contains an unknown or duplicate role.")
+    return roles
 
 
 def _recorded_excitation_path(

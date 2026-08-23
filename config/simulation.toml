@@ -88,10 +88,13 @@ excitation_points_v_rms = [
   0.252,
   0.400,
 ]
-# Each list is an ascending non-empty combination of 1, 2, and 3. They apply
-# independently to frequency and excitation sweeps; for example [1, 3] or [2].
-frequency_harmonics = [1, 2, 3]
-excitation_harmonics = [1, 2, 3]
+# Select formal curves separately for every scan and voltage role. Each list is
+# ascending and uses 1, 2, and/or 3; [] excludes that role from formal curves
+# while retaining its paired readback and every safety check.
+frequency_xx_harmonics = [1, 2, 3]
+frequency_xy_harmonics = [1, 2, 3]
+excitation_xx_harmonics = [1, 2, 3]
+excitation_xy_harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
 run_name = "simulation"

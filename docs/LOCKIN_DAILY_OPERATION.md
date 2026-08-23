@@ -14,10 +14,9 @@ python -m attodry_control.lockin_test sweep-excitation
 
 ### 本机地址与版本更新
 
-SR830 的 VISA 地址只保存于本机、被 Git 忽略的
-`config/hardware.local.toml`。因此在 LK_setup 一次性填写后，后续 `git pull` 不会
-覆盖它；受版本控制的 `hardware.example.toml` 必须继续保留地址占位符，不能把实验站
-地址提交进仓库。日常命令会拒绝空地址、`CHANGE_ME` 地址或 XX/XY 相同的地址。
+`hardware.example.toml` 刻意只保留 XX/XY 地址占位符。请只在本机、被 Git 忽略的
+`config/hardware.local.toml` 填写实际 VISA 地址；后续 `git pull` 不会覆盖本机值。
+日常命令会拒绝空地址、`CHANGE_ME` 地址或 XX/XY 相同的地址。
 
 如果终端错误地显示旧版 sweep 的必填参数（例如
 `--series-resistance-ohm` 或 `--authorize-writes`），该终端没有导入当前 checkout。先在
@@ -85,13 +84,14 @@ XY 为 1 mV。固定模式在扫描开始时确认目标量程，只有预检读
 只有明确把某一台的 `sensitivity_mode` 改为 `"bounded_auto"` 时，才启用该角色的
 受限自动判断。自动模式必须同时填写五个 `autorange_*` 字段，且
 `sensitivity_full_scale_v` 必须等于 `autorange_min_full_scale_v`。当前确认的控制
-参数固定为占用率阈值 0.85、缩窄前连续 2 个稳定样本、每条连续扫描最多 1 次调整；
-范围只能使用项目已确认的相邻 1 mV→10 mV 或 10 mV→20 mV 档位。
+参数固定为占用率阈值 0.85、缩窄前连续 2 个稳定样本。XX 可使用受控三档阶梯
+10 mV→20 mV→50 mV，故每条连续扫描最多 2 次转换；XY 仍只能使用 1 mV→10 mV，
+最多 1 次转换。
 
-推荐的显式自动策略是 XX `10 mV → 20 mV`、XY `1 mV → 10 mV`。XY 的 SINE OUT
-无论量程模式如何都必须保持物理断开。自动判断、转换、读回和锁存状态会写入审计
-JSON。只要任一角色启用自动模式，每个扫描点会在正式 h1/h2/h3 采样前保留一组顺序
-h1 判定读数；状态跨同一条连续扫描保留，正式样本不会把判定或转换期数据混入曲线。
+推荐的显式自动策略是 XX `10 mV → 20 mV → 50 mV` 或 XY `1 mV → 10 mV`。XY 的
+SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、转换、读回和锁存状态会写入
+审计 JSON。只要任一角色启用自动模式，每个扫描点会在正式 h1/h2/h3 采样前保留一组
+顺序 h1 判定读数；状态跨同一条连续扫描保留，正式样本不会把判定或转换期数据混入曲线。
 默认 fixed 模式不因本次功能而自动改为 autorange。
 
 ## 严格 Lock-in 配置参考
@@ -103,7 +103,7 @@ h1 判定读数；状态跨同一条连续扫描保留，正式样本不会把�
 | 字段 | 可填写值与角色约束 |
 | --- | --- |
 | `model` | 必须为 `"SR830"`。 |
-| `address` | 非空 VISA 字符串；XX 与 XY 必须不同，且不能含 `CHANGE_ME`。只写入被忽略的本机 `hardware.local.toml`。 |
+| `address` | 非空 VISA 字符串；XX 与 XY 必须不同，且不能含 `CHANGE_ME`。示例只给占位符；实际地址只写入忽略的本机 `hardware.local.toml`。 |
 | `reference_source` | XX 严格为 `"internal"`；XY 严格为 `"external_ttl"`。 |
 | `external_reference_edge` | 仅 XY 必填，且只能是 `"rising"`；XX 不可出现此字段。 |
 | `sine_output_connected` | XX 必须 `true`；XY 必须 `false`，表示 XY SINE OUT 已**物理断开**。 |
@@ -115,7 +115,7 @@ h1 判定读数；状态跨同一条连续扫描保留，正式样本不会把�
 | `time_constant_s` | 当前项目只能是 `0.3` s。 |
 | `filter_slope_db_oct` | 当前项目只能是 `24`。 |
 | `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
-| `sensitivity_full_scale_v` | 可填 `0.001`、`0.010` 或 `0.020` V。日常 fixed 默认：XX `0.020`、XY `0.001`。在 `bounded_auto` 中它必须等于最小量程。 |
+| `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020` 或 `0.050` V。日常 fixed 默认：XX `0.020`、XY `0.001`。在 `bounded_auto` 中它必须等于最小量程。 |
 | `settle_time_constants` | 有限数且至少 `5.0`。每次设置转换的 `settle_s` 必须不小于两台仪器中最大的 `time_constant_s × settle_time_constants`；当前 `0.3 × 5.0 = 1.5` s。该下限会在打开 VISA 前检查并归档。 |
 
 `fixed` 模式只保留 `sensitivity_mode` 和 `sensitivity_full_scale_v`；所有
@@ -126,19 +126,24 @@ sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.020  # XX daily default; XY daily default is 0.001
 ```
 
-`bounded_auto` 模式必须同时提供以下五个字段。XX 唯一允许 10 mV → 20 mV，XY 唯一
-允许 1 mV → 10 mV；占用率、连续样本数和调整步数是已经确认的固定安全策略，不能改为
-其他数值：
+`bounded_auto` 模式必须同时提供以下五个字段。XX 可填 10--20 mV、20--50 mV，或
+三档 10--20--50 mV；XY 唯一允许 1--10 mV。占用率和连续样本数是固定安全策略，
+`autorange_max_steps` 则必须恰好等于该阶梯的实际转换数，不能任意修改。
+
+XX 的日常三档策略如下。`WIDEN` 每次只上移一个项目确认档位：第一次 10→20 mV，
+第二次 20→50 mV。两次转换用尽后，即使信号继续增大也不会再换档；50 mV 仍过载时
+扫描失败并执行安全 cleanup。`NARROW` 同样一次只下移一档，并计入同一个两次总额度，
+所以一次扫描不会来回追逐量程。
 
 ```toml
-# XX bounded_auto
+# XX bounded_auto：三档 10 mV -> 20 mV -> 50 mV。
 sensitivity_mode = "bounded_auto"
 sensitivity_full_scale_v = 0.010
 autorange_min_full_scale_v = 0.010
-autorange_max_full_scale_v = 0.020
+autorange_max_full_scale_v = 0.050
 autorange_target_occupancy = 0.85
 autorange_stable_samples = 2
-autorange_max_steps = 1
+autorange_max_steps = 2
 ```
 
 ```toml
@@ -157,6 +162,80 @@ autorange_max_steps = 1
 单个等待 interval，必须大于或等于上述下限。幅值扫描中每个实际 SINE OUT 改变等待两个
 interval，因此当前是 `2 × 1.5 = 3.0` s。
 
+## SR830 全部硬件量程与项目安全白名单
+
+下表是 SR830 在**电压输入**下的全部 `SENS` 档位；本项目的 A-B 电压测量使用这一列。
+它与 SINE OUT 输出幅值、器件允许电流/电压是三个不同概念。厂家规定的编号与量程见
+[SRS SR830 手册的 `SENS` 命令表](https://www.thinksrs.com/downloads/PDFs/Manuals/SR830m.pdf)。
+
+| `SENS` | 电压 full scale | 当前日常 sweep 项目白名单 |
+| ---: | ---: | --- |
+| 0 | 2 nV | 否 |
+| 1 | 5 nV | 否 |
+| 2 | 10 nV | 否 |
+| 3 | 20 nV | 否 |
+| 4 | 50 nV | 否 |
+| 5 | 100 nV | 否 |
+| 6 | 200 nV | 否 |
+| 7 | 500 nV | 否 |
+| 8 | 1 µV | 否 |
+| 9 | 2 µV | 否 |
+| 10 | 5 µV | 否 |
+| 11 | 10 µV | 否 |
+| 12 | 20 µV | 否 |
+| 13 | 50 µV | 否 |
+| 14 | 100 µV | 否 |
+| 15 | 200 µV | 否 |
+| 16 | 500 µV | 否 |
+| 17 | 1 mV | 是：XX/XY fixed；XY auto 下界 |
+| 18 | 2 mV | 否 |
+| 19 | 5 mV | 否 |
+| 20 | 10 mV | 是：XX/XY fixed；XX auto 下界；XY auto 上界 |
+| 21 | 20 mV | 是：XX/XY fixed；XX auto 上/下界 |
+| 22 | 50 mV | 是：XX/XY fixed；XX auto 上界（通常仅建议 XX） |
+| 23 | 100 mV | 否 |
+| 24 | 200 mV | 否 |
+| 25 | 500 mV | 否 |
+| 26 | 1 V | 否 |
+
+“否”并不表示 SR830 前面板不能使用该档，而是日常 sweep 的严格 TOML 和驱动目前不会
+写入它。这样可以避免一次本机配置修改无意中扩大已验证的自动范围。
+
+### 50 mV 的正确写法
+
+50 mV 必须写成 `0.050`，单位是 V full scale，不是 `50`。若只需要固定的额外 h1
+余量，在 `[lockin_xx]` 使用：
+
+```toml
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.050
+```
+
+若希望从较小信号开始并在同一扫描中处理两次量程压力，在 `[lockin_xx]` 使用上一节的
+10 mV→20 mV→50 mV 完整 `bounded_auto` 区块。它不会从 10 mV 直接跳到 50 mV；每个
+`WIDEN` 只移动一个项目确认档位。
+
+50 mV 仅增加**输入测量 full scale**，不会提高 5 V SINE OUT 上限，也不会放宽
+`[lockin_sweep]` 中的器件电流、电压或串联电阻保护。对于当前 2 V 扫幅记录，XX h1
+约为 17 mV；20 mV 已接近 0.85 阈值但未过载。固定使用 50 mV 会留出余量，却会降低
+二、三阶的量程占用率，不能改善弱谐波相位。
+
+### 将新的硬件档位纳入项目安全协议
+
+日常操作者只应修改已列为“是”的 `hardware.local.toml` 值；不能通过新增 TOML 字段
+绕过白名单。若将来确实需要把另一 SR830 硬件档位纳入日常 sweep，维护代码时必须同时：
+
+1. 依据厂家手册，把“电压 full scale → `SENS` 代码”加入
+   `src/attodry_control/sr830_settings.py` 的项目映射；
+2. 若用于 `bounded_auto`，只增加一个角色适用的有序自动量程阶梯，并维持 0.85、2 个
+   稳定样本；`autorange_max_steps` 必须等于该阶梯中允许的相邻转换数；
+3. 更新严格配置验证、硬件/模拟模板、此表和阶段交接记录；
+4. 先运行映射、配置和 fake-VISA 离线测试；实际仪器首次写入新档位前，再单独取得
+   硬件写入授权并检查过载/读回/cleanup。
+
+这四步是“修改项目允许最大量程”的安全协议；它不会由普通运行或一次 TOML 编辑自动
+触发。
+
 ## `[lockin_sweep]` 字段
 
 日常扫描的扫频、扫幅、安全、时序和审计设置在同一张 TOML 表中；两台仪器的量程
@@ -166,9 +245,10 @@ interval，因此当前是 `2 × 1.5 = 3.0` s。
 | --- | --- |
 | `frequency_points_hz` | 非空、严格递增的数列；每项必须在 0.001--102000 Hz。版本库示例为 17.777 Hz 到 100 kHz 的 10 个对数点。 |
 | `excitation_points_v_rms` | 非空、严格递增的数列；每项必须在 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 点，基频固定为 17.777 Hz。 |
-| `frequency_harmonics` | 扫频所测谐波；升序、非空，且只能由 1、2、3 组成。可填 `[1]`、`[2]`、`[1, 3]` 或 `[1, 2, 3]`。 |
-| `excitation_harmonics` | 扫幅所测谐波；规则与 `frequency_harmonics` 相同，允许与其不同，例如扫频 `[1, 3]` 而扫幅 `[2]`。 |
-| `harmonics` | 旧版兼容字段；若仅保留它，会把同一组合用于两类扫描。不要与上述两个新字段混用。新建或修改日常配置应使用两个新字段。 |
+| `frequency_xx_harmonics` / `frequency_xy_harmonics` | 分别选择扫频正式曲线中的 XX/XY 谐波。每项为升序组合，只能含 1、2、3；`[]` 表示该角色不进入正式曲线。两项合起来至少选一个。 |
+| `excitation_xx_harmonics` / `excitation_xy_harmonics` | 分别选择扫幅正式曲线中的 XX/XY 谐波；规则同上，且可与扫频不同。例：`excitation_xx_harmonics = []`、`excitation_xy_harmonics = [2]` 只输出 XY h2 曲线。 |
+| `frequency_harmonics` / `excitation_harmonics` | 旧版兼容字段；每个列表会同样应用到 XX 和 XY。二者都必须是非空升序组合，且不可与四个角色专用字段混用。 |
+| `harmonics` | 更旧的兼容字段；一个非空升序组合同时应用到两类扫描和两台仪器，且不可与任何新字段混用。新建或修改日常配置应使用四个角色专用字段。 |
 | `skip_unsupported_harmonics` | 布尔值 `true` 或 `false`。为 `true` 时，超过 102 kHz 的 h2/h3 不写入仪器，而是在 JSON 写入 `skipped_harmonics`；日常高频扫描推荐 `true`。 |
 | `run_name` | 非空、最多 80 个字符；不可含控制字符或 `\ / : * ? " < > |`。可使用中文，且进入 JSON 文件名。 |
 | `note` | 非空、最多 2000 个字符且不可含 NUL；记录样品、接线改动或测试目的，写入 JSON 但不进入文件名。 |
@@ -208,7 +288,8 @@ run_data/commissioning/20260822T123456123456Z_sample_A_excitation_rejected.json
 
 每个 JSON 的根部都有 `run_metadata.name` 和 `run_metadata.note`，并在地址无关的
 `measurement_config` 中保留同一份已解析 TOML：请求配置、扫描点、量程、时序和
-激励路径。实际 SR830 读回位于同文件的 `preflight`、`sensitivity_setup`、每点记录
+激励路径。每个正式样本的 `selected_roles` 标出该阶数实际纳入曲线的 XX/XY；另一台
+SR830 的同时读回仍完整保留并参与安全判决。实际 SR830 读回位于同文件的 `preflight`、`sensitivity_setup`、每点记录
 和 `cleanup`。因此不要把 `measurement_config` 单独当作硬件读回证据。若归档写入
 失败，命令以失败退出，避免把未保存的数据误报为完成。
 
@@ -221,7 +302,8 @@ run_data/commissioning/20260822T123456123456Z_sample_A_excitation_rejected.json
 
 打开 [`../notebooks/sr830_commissioning_sweeps.ipynb`](../notebooks/sr830_commissioning_sweeps.ipynb)
 即可在开头设置一次数据目录、刷新远程记录列表并选择扫频、扫幅或两者，再按
-`completed`/`rejected` 状态筛选。只选一种时只生成该种扫描的六张图。加载后，扫描点
+`completed`/`rejected` 状态筛选。只选一种时只生成该种扫描的已选择 XX/XY×谐波图；未
+选择的组合不会生成空图。加载后，扫描点
 多选框会列出自动保留的点；选中可疑点并应用排除即可重画，不会改写原始 JSON。
 默认图只使用 completed 记录和 clean 正式样本；过渡和 cleanup 记录始终保留，
 但不会混入正式曲线。若开启可选导出，`selection_manifest.json` 会记录文件、筛选和

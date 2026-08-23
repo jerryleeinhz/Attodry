@@ -9,6 +9,7 @@ from attodry_control.lockin_autorange import (
 
 
 XX_POLICY = AutorangePolicy(0.01, 0.02, 0.85, 2, 1)
+XX_THREE_LEVEL_POLICY = AutorangePolicy(0.01, 0.05, 0.85, 2, 2)
 XY_POLICY = AutorangePolicy(0.001, 0.01, 0.85, 2, 1)
 
 
@@ -32,6 +33,35 @@ class LockinAutorangeTests(unittest.TestCase):
             XX_POLICY, AutorangeState(0.01), amplitude_v=0.001, overload=True
         )
         self.assertEqual(decision.action, AutorangeAction.WIDEN)
+
+    def test_three_level_xx_policy_widens_one_range_at_a_time(self) -> None:
+        first = decide_autorange(
+            XX_THREE_LEVEL_POLICY,
+            AutorangeState(0.01),
+            amplitude_v=0.0085,
+            overload=False,
+        )
+        second = decide_autorange(
+            XX_THREE_LEVEL_POLICY,
+            first.state,
+            amplitude_v=0.017,
+            overload=False,
+        )
+
+        self.assertEqual(first.action, AutorangeAction.WIDEN)
+        self.assertEqual(first.state, AutorangeState(0.02, 1, 0))
+        self.assertEqual(second.action, AutorangeAction.WIDEN)
+        self.assertEqual(second.state, AutorangeState(0.05, 2, 0))
+
+    def test_three_level_xx_policy_fails_closed_after_second_widening(self) -> None:
+        decision = decide_autorange(
+            XX_THREE_LEVEL_POLICY,
+            AutorangeState(0.05, 2),
+            amplitude_v=0.0425,
+            overload=False,
+        )
+
+        self.assertEqual(decision.action, AutorangeAction.FAIL)
 
     def test_fails_closed_when_widest_range_is_insufficient(self) -> None:
         decision = decide_autorange(

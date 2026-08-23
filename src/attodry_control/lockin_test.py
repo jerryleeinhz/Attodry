@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 from .config import ControlConfig, LockinConfig, RunMode, load_config
 from .lockin_autorange import (
@@ -935,6 +935,7 @@ def _run_frequency_sweep(
             "Frequency sweep points must be within "
             f"0.001-{MAXIMUM_REFERENCE_FREQUENCY_HZ:g} Hz."
         )
+    harmonics_by_role = _requested_sweep_harmonics_by_role(args)
     harmonics = _requested_sweep_harmonics(args)
     if not args.skip_unsupported_harmonics:
         _validate_harmonic_detection_frequencies(points, harmonics)
@@ -1038,6 +1039,9 @@ def _run_frequency_sweep(
                     lockin_xy,
                     target_frequency_hz=target_hz,
                     harmonics=point_harmonics,
+                    selected_roles_by_harmonic=_roles_by_harmonic(
+                        point_harmonics, harmonics_by_role
+                    ),
                     harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
@@ -1086,6 +1090,7 @@ def _run_frequency_sweep(
             },
             "requested_points_hz": points,
             "requested_harmonics": harmonics,
+            "requested_harmonics_by_role": harmonics_by_role,
             "skip_unsupported_harmonics": args.skip_unsupported_harmonics,
             "sensitivity_modes": {
                 "lockin_xx": config.lockin_xx.sensitivity_mode.value,
@@ -1122,6 +1127,7 @@ def _run_excitation_sweep(
         )
     points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
+    harmonics_by_role = _requested_sweep_harmonics_by_role(args)
     harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
     baseline_source_v = _sweep_baseline_source_voltage(settings)
@@ -1206,6 +1212,9 @@ def _run_excitation_sweep(
                     lockin_xy,
                     target_frequency_hz=baseline_hz,
                     harmonics=harmonics,
+                    selected_roles_by_harmonic=_roles_by_harmonic(
+                        harmonics, harmonics_by_role
+                    ),
                     harmonic_settle_s=args.settle_s,
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
@@ -1257,6 +1266,7 @@ def _run_excitation_sweep(
             },
             "requested_points_v_rms": points,
             "requested_harmonics": harmonics,
+            "requested_harmonics_by_role": harmonics_by_role,
             "sensitivity_modes": {
                 "lockin_xx": config.lockin_xx.sensitivity_mode.value,
                 "lockin_xy": config.lockin_xy.sensitivity_mode.value,
@@ -1325,6 +1335,7 @@ def _measurement_config_snapshot(
             tuple(args.points_hz) if scan == "frequency" else tuple(args.points_v)
         ),
         "harmonics": _requested_sweep_harmonics(args),
+        "harmonics_by_role": _requested_sweep_harmonics_by_role(args),
         "sensitivity_modes": {
             "lockin_xx": config.lockin_xx.sensitivity_mode.value,
             "lockin_xy": config.lockin_xy.sensitivity_mode.value,
@@ -1346,7 +1357,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -1526,11 +1537,15 @@ def _new_sweep_range_record(
             if original_full_scale_v >= policy.minimum_full_scale_v
             else sensitivity_code(policy.minimum_full_scale_v)
         )
+    policy_record = None
+    if policy is not None:
+        policy_record = asdict(policy)
+        policy_record["full_scales_v"] = policy.full_scales_v
     return {
         "mode": lockin.sensitivity_mode.value,
         "configured_fixed_sensitivity_code": configured_code,
         "configured_fixed_full_scale_v": lockin.sensitivity_full_scale_v,
-        "autorange_policy": None if policy is None else asdict(policy),
+        "autorange_policy": policy_record,
         "original_sensitivity_code": original_sensitivity,
         "initial_target_sensitivity_code": initial_target,
         "initial_target_full_scale_v": sensitivity_full_scale_v(initial_target),
@@ -1678,10 +1693,7 @@ def _new_sweep_autorange_controls(
             range_record, "current_sensitivity_code", role
         )
         current_full_scale_v = sensitivity_full_scale_v(current_code)
-        if current_full_scale_v not in (
-            policy.minimum_full_scale_v,
-            policy.maximum_full_scale_v,
-        ):
+        if current_full_scale_v not in policy.full_scales_v:
             raise ValueError(
                 f"{role} initial autorange sensitivity is outside its configured bounds."
             )
@@ -1912,10 +1924,23 @@ def _resolve_sweep_settings(
             "the validated hardware TOML."
         )
     sweep = config.lockin_sweep
-    args.configured_harmonics = (
-        sweep.frequency_harmonics
-        if scan == "frequency"
-        else sweep.excitation_harmonics
+    if scan == "frequency":
+        args.configured_harmonics_by_role = {
+            "xx": sweep.frequency_xx_harmonics,
+            "xy": sweep.frequency_xy_harmonics,
+        }
+    elif scan == "excitation":
+        args.configured_harmonics_by_role = {
+            "xx": sweep.excitation_xx_harmonics,
+            "xy": sweep.excitation_xy_harmonics,
+        }
+    else:
+        raise ValueError(f"Unsupported sweep type: {scan}.")
+    args.configured_harmonics = tuple(
+        sorted(
+            set(args.configured_harmonics_by_role["xx"])
+            | set(args.configured_harmonics_by_role["xy"])
+        )
     )
     requested_settle_s = sweep.settle_s if args.settle_s is None else args.settle_s
     time_constant_settle_floor_s = _time_constant_settle_floor_s(config)
@@ -1944,8 +1969,6 @@ def _resolve_sweep_settings(
         if args.skip_unsupported_harmonics is None:
             args.skip_unsupported_harmonics = sweep.skip_unsupported_harmonics
         return
-    if scan != "excitation":
-        raise ValueError(f"Unsupported sweep type: {scan}.")
     args.points_v = (
         sweep.excitation_points_v_rms if args.points_v is None else args.points_v
     )
@@ -1971,11 +1994,39 @@ def _time_constant_settle_floor_s(config: ControlConfig) -> float:
 
 
 def _requested_sweep_harmonics(args: argparse.Namespace) -> tuple[int, ...]:
+    selections = _requested_sweep_harmonics_by_role(args)
+    return tuple(sorted(set(selections["xx"]) | set(selections["xy"])))
+
+
+def _requested_sweep_harmonics_by_role(
+    args: argparse.Namespace,
+) -> dict[str, tuple[int, ...]]:
+    configured = args.configured_harmonics_by_role
+    if not isinstance(configured, dict):
+        raise TypeError("Configured sweep harmonics must be keyed by role.")
     if args.all_harmonics is True:
-        return (1, 2, 3)
+        return {
+            role: (1, 2, 3) if configured[role] else ()
+            for role in ("xx", "xy")
+        }
     if args.all_harmonics is False:
-        return (1,)
-    return tuple(args.configured_harmonics)
+        return {
+            role: (1,) if configured[role] else ()
+            for role in ("xx", "xy")
+        }
+    return {role: tuple(configured[role]) for role in ("xx", "xy")}
+
+
+def _roles_by_harmonic(
+    harmonics: Sequence[int],
+    harmonics_by_role: Mapping[str, Sequence[int]],
+) -> dict[int, tuple[str, ...]]:
+    return {
+        harmonic: tuple(
+            role for role in ("xx", "xy") if harmonic in harmonics_by_role[role]
+        )
+        for harmonic in harmonics
+    }
 
 
 def _validate_harmonic_detection_frequencies(
@@ -2123,6 +2174,7 @@ def _capture_sweep_point(
     *,
     target_frequency_hz: float,
     harmonics: tuple[int, ...],
+    selected_roles_by_harmonic: Mapping[int, tuple[str, ...]],
     harmonic_settle_s: float,
     samples: int,
     sample_interval_s: float,
@@ -2136,6 +2188,9 @@ def _capture_sweep_point(
     if not isinstance(raw_transitions, list):
         raise TypeError("Sweep point harmonic transitions must be a list.")
     for harmonic in harmonics:
+        selected_roles = selected_roles_by_harmonic.get(harmonic, ())
+        if not selected_roles:
+            raise ValueError(f"Harmonic {harmonic} has no selected formal role.")
         if harmonic != 1:
             lockin_xx.set_harmonic(harmonic)
             lockin_xy.set_harmonic(harmonic)
@@ -2177,6 +2232,7 @@ def _capture_sweep_point(
             sample_payload = {
                 "sample_index": sample_index,
                 "captured_unix_s": time.time(),
+                "selected_roles": list(selected_roles),
                 "lockin_xx": _audited_harmonic_sample_record(xx),
                 "lockin_xy": _audited_harmonic_sample_record(xy),
                 "problems": problems,

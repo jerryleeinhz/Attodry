@@ -235,6 +235,7 @@ class Sr830Tests(unittest.TestCase):
         role: str,
         minimum_full_scale_v: float,
         maximum_full_scale_v: float,
+        maximum_adjustment_steps: int = 1,
     ) -> Path:
         table_start = f"[lockin_{role}]\n"
         configured = config_path.read_text(encoding="utf-8")
@@ -257,7 +258,7 @@ class Sr830Tests(unittest.TestCase):
             f"autorange_max_full_scale_v = {maximum_full_scale_v:.3f}\n"
             "autorange_target_occupancy = 0.85\n"
             "autorange_stable_samples = 2\n"
-            "autorange_max_steps = 1"
+            f"autorange_max_steps = {maximum_adjustment_steps}"
         )
         section = section[:sensitivity_start] + policy + section[sensitivity_end:]
         config_path.write_text(
@@ -1646,6 +1647,105 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(len(point["samples"]), 1)
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 20)
 
+    def test_cli_excitation_sweep_xx_three_level_autorange_widens_twice(self) -> None:
+        config_path = self._enable_bounded_autorange(
+            self._hardware_config(),
+            role="xx",
+            minimum_full_scale_v=0.01,
+            maximum_full_scale_v=0.05,
+            maximum_adjustment_steps=2,
+        )
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["SENS?"] = "20\n"
+        xx_resource = TrackingVisaResource(
+            xx_responses,
+            shared_frequency=shared_frequency,
+            name="xx",
+            snapshots=[
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=0.009),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=0.017),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+                self._snapshot(amplitude_v=1e-6),
+            ],
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0),
+            shared_frequency=shared_frequency,
+            name="xy",
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation",
+                    "--config",
+                    str(config_path),
+                    "--xx-address",
+                    "XX",
+                    "--xy-address",
+                    "XY",
+                    "--points-v",
+                    "0.004,0.006",
+                    "--settle-s",
+                    "1.5",
+                    "--samples-per-point",
+                    "1",
+                    "--sample-interval-s",
+                    "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        first, second = result["points"]
+        xx_range = result["sensitivity_setup"]["ranges"]["lockin_xx"]
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(
+            first["autorange"]["probe"]["decisions"]["lockin_xx"]["action"],
+            "widen",
+        )
+        self.assertEqual(
+            first["autorange"]["probe"]["decisions"]["lockin_xx"][
+                "next_state"
+            ]["current_full_scale_v"],
+            0.02,
+        )
+        self.assertEqual(
+            second["autorange"]["probe"]["decisions"]["lockin_xx"]["action"],
+            "widen",
+        )
+        self.assertEqual(
+            second["autorange"]["probe"]["decisions"]["lockin_xx"][
+                "next_state"
+            ]["current_full_scale_v"],
+            0.05,
+        )
+        self.assertEqual(
+            [item["target_sensitivity_code"] for item in xx_range["autorange_transitions"]],
+            [21, 22],
+        )
+        self.assertEqual(
+            xx_range["autorange_policy"]["full_scales_v"], [0.01, 0.02, 0.05]
+        )
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("SENS ")],
+            ["SENS 21", "SENS 22", "SENS 20"],
+        )
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 20)
+
     def test_cli_frequency_sweep_xy_bounded_auto_narrows_after_two_safe_h1_probes(
         self,
     ) -> None:
@@ -1801,12 +1901,15 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertTrue(result["cleanup"]["verified"])
 
-    def test_cli_frequency_sweep_uses_configured_harmonic_combination(self) -> None:
+    def test_cli_frequency_sweep_uses_configured_role_harmonic_combination(self) -> None:
         config_path = self._hardware_config()
         config_path.write_text(
             config_path.read_text(encoding="utf-8").replace(
-                "frequency_harmonics = [1, 2, 3]",
-                "frequency_harmonics = [1, 3]",
+                "frequency_xx_harmonics = [1, 2, 3]",
+                "frequency_xx_harmonics = [1, 3]",
+            ).replace(
+                "frequency_xy_harmonics = [1, 2, 3]",
+                "frequency_xy_harmonics = [2]",
             ),
             encoding="utf-8",
         )
@@ -1838,16 +1941,72 @@ class Sr830Tests(unittest.TestCase):
 
         result = json.loads(output.getvalue())
         self.assertEqual(exit_code, 0)
-        self.assertEqual(result["requested_harmonics"], [1, 3])
+        self.assertEqual(result["requested_harmonics"], [1, 2, 3])
+        self.assertEqual(
+            result["requested_harmonics_by_role"], {"xx": [1, 3], "xy": [2]}
+        )
         self.assertEqual(
             [sample["lockin_xx"]["reading"]["harmonic"] for sample in result["points"][0]["samples"]],
-            [1, 3],
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            [sample["selected_roles"] for sample in result["points"][0]["samples"]],
+            [["xx"], ["xy"], ["xx"]],
         )
         self.assertEqual(
             [write for write in xx_resource.writes if write.startswith("HARM ")],
-            ["HARM 3", "HARM 1"],
+            ["HARM 2", "HARM 3", "HARM 1"],
         )
-        self.assertNotIn("HARM 2", xx_resource.writes)
+
+    def test_cli_frequency_sweep_rejects_unselected_companion_status(self) -> None:
+        config_path = self._hardware_config()
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8").replace(
+                "frequency_xx_harmonics = [1, 2, 3]",
+                "frequency_xx_harmonics = [1]",
+            ).replace(
+                "frequency_xy_harmonics = [1, 2, 3]",
+                "frequency_xy_harmonics = []",
+            ),
+            encoding="utf-8",
+        )
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = ["0\n", "0\n", "8\n"] + ["0\n"] * 8
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with (
+            patch("attodry_control.lockin_test.time.sleep"),
+            redirect_stdout(output),
+            self.assertRaisesRegex(Sr830Error, "unlocked"),
+        ):
+            run(
+                [
+                    "sweep-frequency",
+                    "--config", str(config_path),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["points"][0]["samples"][0]["selected_roles"], ["xx"])
+        self.assertIn("lockin_xy reference is unlocked", result["error"])
+        self.assertTrue(result["cleanup"]["verified"])
 
     def test_cli_frequency_sweep_all_harmonics_records_each_order_and_restores_first(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -1883,7 +2042,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 3)
+        self.assertEqual(result["measurement_config"]["schema_version"], 4)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -2422,12 +2581,15 @@ class Sr830Tests(unittest.TestCase):
             1.8,
         )
 
-    def test_cli_excitation_sweep_uses_configured_harmonic_combination(self) -> None:
+    def test_cli_excitation_sweep_uses_configured_role_harmonic_combination(self) -> None:
         config_path = self._hardware_config()
         config_path.write_text(
             config_path.read_text(encoding="utf-8").replace(
-                "excitation_harmonics = [1, 2, 3]",
-                "excitation_harmonics = [2]",
+                "excitation_xx_harmonics = [1, 2, 3]",
+                "excitation_xx_harmonics = []",
+            ).replace(
+                "excitation_xy_harmonics = [1, 2, 3]",
+                "excitation_xy_harmonics = [2]",
             ),
             encoding="utf-8",
         )
@@ -2461,9 +2623,13 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(result["requested_harmonics"], [2])
         self.assertEqual(
+            result["requested_harmonics_by_role"], {"xx": [], "xy": [2]}
+        )
+        self.assertEqual(
             [sample["lockin_xy"]["reading"]["harmonic"] for sample in result["points"][0]["samples"]],
             [2],
         )
+        self.assertEqual(result["points"][0]["samples"][0]["selected_roles"], ["xy"])
         self.assertEqual(
             [write for write in xy_resource.writes if write.startswith("HARM ")],
             ["HARM 2", "HARM 1"],

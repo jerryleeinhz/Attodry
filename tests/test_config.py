@@ -62,6 +62,10 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.magnet.limits.experiment_vector_max_t, 3.0)
         self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 2, 3))
         self.assertEqual(config.lockin_sweep.excitation_harmonics, (1, 2, 3))
+        self.assertEqual(config.lockin_sweep.frequency_xx_harmonics, (1, 2, 3))
+        self.assertEqual(config.lockin_sweep.frequency_xy_harmonics, (1, 2, 3))
+        self.assertEqual(config.lockin_sweep.excitation_xx_harmonics, (1, 2, 3))
+        self.assertEqual(config.lockin_sweep.excitation_xy_harmonics, (1, 2, 3))
         self.assertEqual(len(config.lockin_sweep.frequency_points_hz), 10)
         self.assertEqual(config.lockin_sweep.frequency_points_hz[-1], 100000.0)
         self.assertEqual(config.lockin_sweep.excitation_points_v_rms[-1], 0.4)
@@ -83,6 +87,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.project.mode, RunMode.HARDWARE)
         self.assertEqual(config.cryostat.backend, "legacy_dll")
         self.assertIsNotNone(config.visa)
+        self.assertEqual(config.lockin_xx.address, "CHANGE_ME_SR830_XX_VISA_ADDRESS")
+        self.assertEqual(config.lockin_xy.address, "CHANGE_ME_SR830_XY_VISA_ADDRESS")
         self.assertIsNone(config.gate_top.max_abs_voltage_v)
         with self.assertRaisesRegex(ConfigError, "Hardware configuration is not ready"):
             config.require_hardware_ready()
@@ -175,6 +181,17 @@ class ConfigurationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ConfigError, expected):
                     self.load_text(text)
 
+    def test_xx_fixed_setting_accepts_project_confirmed_50_millivolts(self) -> None:
+        text = self.simulation_text().replace(
+            "sensitivity_full_scale_v = 0.020",
+            "sensitivity_full_scale_v = 0.050",
+            1,
+        )
+
+        config = self.load_text(text)
+
+        self.assertEqual(config.lockin_xx.sensitivity_full_scale_v, 0.05)
+
     def test_lockin_xy_requires_confirmed_ttl_rising_edge(self) -> None:
         text = self.simulation_text().replace(
             'external_reference_edge = "rising"',
@@ -229,7 +246,78 @@ class ConfigurationTests(unittest.TestCase):
             ),
             1,
         )
-        with self.assertRaisesRegex(ConfigError, "adjacent pair"):
+        with self.assertRaisesRegex(ConfigError, "confirmed pair"):
+            self.load_text(text)
+
+    def test_xx_bounded_autorange_accepts_20_to_50_millivolt_policy(self) -> None:
+        text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.020',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.020",
+                    "autorange_min_full_scale_v = 0.020",
+                    "autorange_max_full_scale_v = 0.050",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 1",
+                )
+            ),
+            1,
+        )
+
+        config = self.load_text(text)
+
+        self.assertEqual(
+            config.lockin_xx.sensitivity_mode, SensitivityMode.BOUNDED_AUTO
+        )
+        self.assertEqual(config.lockin_xx.autorange_min_full_scale_v, 0.02)
+        self.assertEqual(config.lockin_xx.autorange_max_full_scale_v, 0.05)
+
+    def test_xx_bounded_autorange_accepts_three_level_ladder(self) -> None:
+        text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.020',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.010",
+                    "autorange_min_full_scale_v = 0.010",
+                    "autorange_max_full_scale_v = 0.050",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 2",
+                )
+            ),
+            1,
+        )
+
+        config = self.load_text(text)
+
+        self.assertEqual(
+            config.lockin_xx.sensitivity_mode, SensitivityMode.BOUNDED_AUTO
+        )
+        self.assertEqual(config.lockin_xx.autorange_min_full_scale_v, 0.01)
+        self.assertEqual(config.lockin_xx.autorange_max_full_scale_v, 0.05)
+        self.assertEqual(config.lockin_xx.autorange_max_steps, 2)
+
+    def test_xx_three_level_ladder_requires_two_adjustments(self) -> None:
+        text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.020',
+            "\n".join(
+                (
+                    'sensitivity_mode = "bounded_auto"',
+                    "sensitivity_full_scale_v = 0.010",
+                    "autorange_min_full_scale_v = 0.010",
+                    "autorange_max_full_scale_v = 0.050",
+                    "autorange_target_occupancy = 0.85",
+                    "autorange_stable_samples = 2",
+                    "autorange_max_steps = 1",
+                )
+            ),
+            1,
+        )
+
+        with self.assertRaisesRegex(ConfigError, "number of confirmed range transitions"):
             self.load_text(text)
 
     def test_bounded_autorange_rejects_role_swapped_bounds(self) -> None:
@@ -379,23 +467,34 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "maximum_device_resistance_ohm"):
             self.load_text(text)
 
-    def test_lockin_sweep_accepts_independent_harmonic_combinations(self) -> None:
+    def test_lockin_sweep_accepts_role_specific_harmonic_combinations(self) -> None:
         text = self.simulation_text().replace(
-            "frequency_harmonics = [1, 2, 3]",
-            "frequency_harmonics = [1, 3]",
+            "frequency_xx_harmonics = [1, 2, 3]",
+            "frequency_xx_harmonics = [1, 3]",
         ).replace(
-            "excitation_harmonics = [1, 2, 3]",
-            "excitation_harmonics = [2]",
+            "frequency_xy_harmonics = [1, 2, 3]",
+            "frequency_xy_harmonics = [2]",
+        ).replace(
+            "excitation_xx_harmonics = [1, 2, 3]",
+            "excitation_xx_harmonics = []",
+        ).replace(
+            "excitation_xy_harmonics = [1, 2, 3]",
+            "excitation_xy_harmonics = [2]",
         )
 
         config = self.load_text(text)
 
-        self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 3))
+        self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 2, 3))
         self.assertEqual(config.lockin_sweep.excitation_harmonics, (2,))
+        self.assertEqual(config.lockin_sweep.frequency_xx_harmonics, (1, 3))
+        self.assertEqual(config.lockin_sweep.frequency_xy_harmonics, (2,))
+        self.assertEqual(config.lockin_sweep.excitation_xx_harmonics, ())
+        self.assertEqual(config.lockin_sweep.excitation_xy_harmonics, (2,))
 
     def test_lockin_sweep_legacy_harmonics_apply_to_both_scan_types(self) -> None:
         text = self.simulation_text().replace(
-            "frequency_harmonics = [1, 2, 3]\nexcitation_harmonics = [1, 2, 3]",
+            "frequency_xx_harmonics = [1, 2, 3]\nfrequency_xy_harmonics = [1, 2, 3]\n"
+            "excitation_xx_harmonics = [1, 2, 3]\nexcitation_xy_harmonics = [1, 2, 3]",
             "harmonics = [1, 3]",
         )
 
@@ -403,24 +502,42 @@ class ConfigurationTests(unittest.TestCase):
 
         self.assertEqual(config.lockin_sweep.frequency_harmonics, (1, 3))
         self.assertEqual(config.lockin_sweep.excitation_harmonics, (1, 3))
+        self.assertEqual(config.lockin_sweep.frequency_xx_harmonics, (1, 3))
+        self.assertEqual(config.lockin_sweep.excitation_xy_harmonics, (1, 3))
 
     def test_lockin_sweep_rejects_invalid_or_mixed_harmonic_lists(self) -> None:
         invalid_lists = ("[1, 1]", "[2, 1]", "[4]")
         for invalid in invalid_lists:
             with self.subTest(invalid=invalid):
                 text = self.simulation_text().replace(
-                    "frequency_harmonics = [1, 2, 3]",
-                    f"frequency_harmonics = {invalid}",
+                    "frequency_xx_harmonics = [1, 2, 3]",
+                    f"frequency_xx_harmonics = {invalid}",
                 )
                 with self.assertRaisesRegex(ConfigError, "combination of 1, 2, and 3"):
                     self.load_text(text)
 
         mixed = self.simulation_text().replace(
-            "frequency_harmonics = [1, 2, 3]",
+            "frequency_xx_harmonics = [1, 2, 3]",
             "harmonics = [1]\nfrequency_harmonics = [1, 2, 3]",
         )
         with self.assertRaisesRegex(ConfigError, "cannot be combined"):
             self.load_text(mixed)
+
+    def test_lockin_sweep_rejects_incomplete_or_empty_role_selection(self) -> None:
+        incomplete = self.simulation_text().replace(
+            "frequency_xy_harmonics = [1, 2, 3]\n", ""
+        )
+        with self.assertRaisesRegex(ConfigError, "all four fields"):
+            self.load_text(incomplete)
+        empty_frequency = self.simulation_text().replace(
+            "frequency_xx_harmonics = [1, 2, 3]",
+            "frequency_xx_harmonics = []",
+        ).replace(
+            "frequency_xy_harmonics = [1, 2, 3]",
+            "frequency_xy_harmonics = []",
+        )
+        with self.assertRaisesRegex(ConfigError, "at least one XX or XY frequency"):
+            self.load_text(empty_frequency)
 
     def test_lockin_sweep_rejects_unsafe_run_name_or_blank_note(self) -> None:
         cases = (
