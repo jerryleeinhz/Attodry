@@ -120,7 +120,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(len(sweep.excitation_point_specs), 11)
         self.assertIsNone(sweep.excitation_point_specs[0].xx_full_scale_v)
 
-    def test_linear_range_requires_exact_step_and_expands_inclusive_maximum(self) -> None:
+    def test_linear_range_expands_step_or_point_count_inclusively(self) -> None:
         text = self.simulation_text()
         text = text.replace(
             "{ min = 17.777, max = 100000.0, scale = \"log\", points = 10 }",
@@ -138,6 +138,18 @@ class ConfigurationTests(unittest.TestCase):
             config.lockin_sweep.excitation_point_specs[0].xx_full_scale_v, 0.05
         )
 
+        text = self.simulation_text().replace(
+            '{ min = 17.777, max = 100000.0, scale = "log", points = 10 }',
+            '{ min = 1.0, max = 3.0, scale = "linear", points = 5 }',
+        )
+        config = self.load_text(text)
+        self.assertEqual(
+            config.lockin_sweep.frequency_points_hz,
+            (1.0, 1.5, 2.0, 2.5, 3.0),
+        )
+        self.assertIsNone(config.lockin_sweep.frequency_ranges[0].step)
+        self.assertEqual(config.lockin_sweep.frequency_ranges[0].points, 5)
+
     def test_range_segments_cannot_overlap_or_mix_step_and_points(self) -> None:
         text = self.simulation_text().replace(
             "{ min = 17.777, max = 100000.0, scale = \"log\", points = 10 }",
@@ -151,7 +163,7 @@ class ConfigurationTests(unittest.TestCase):
             "{ min = 17.777, max = 100000.0, scale = \"log\", points = 10 }",
             "{ min = 1.0, max = 3.0, scale = \"linear\", step = 1.0, points = 3 }",
         )
-        with self.assertRaisesRegex(ConfigError, "requires step and forbids points"):
+        with self.assertRaisesRegex(ConfigError, "requires exactly one of step or points"):
             self.load_text(text)
 
     def test_bounded_auto_rejects_segment_full_scale_override(self) -> None:

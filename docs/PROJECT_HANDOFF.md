@@ -767,8 +767,9 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   instrument-error rejection is unchanged. Offline configuration/fake-VISA,
   record, analysis, and boundary coverage passed; no real instrument was opened.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
-  segments. Linear segments use inclusive `min`/`max`/`step`; logarithmic segments
-  use `min`/`max`/`points`. Optional `xx_full_scale_v` and `xy_full_scale_v` overrides
+  segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
+  `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`
+  and `xy_full_scale_v` overrides
   apply only to fixed roles at segment boundaries; bounded-auto roles continue with
   their policy and reject such overrides. Expanded plans and all range transitions are
   archived in measurement schema 7, while legacy point arrays remain accepted. This

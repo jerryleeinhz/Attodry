@@ -1470,24 +1470,40 @@ def _parse_sweep_ranges(
         step: float | None = None
         points: int | None = None
         if scale == "linear":
-            if "step" not in raw_segment or "points" in raw_segment:
+            has_step = "step" in raw_segment
+            has_points = "points" in raw_segment
+            if has_step == has_points:
                 raise ConfigError(
-                    f"{segment_name} with linear scale requires step and forbids points."
+                    f"{segment_name} with linear scale requires exactly one of "
+                    "step or points."
                 )
-            step = _positive_number(raw_segment["step"], f"{segment_name}.step")
-            ratio = (segment_maximum - segment_minimum) / step
-            interval_count = round(ratio)
-            if interval_count < 1 or not math.isclose(
-                ratio, interval_count, rel_tol=0.0, abs_tol=1e-9
-            ):
-                raise ConfigError(
-                    f"{segment_name}.step must divide max-min exactly so max is included."
+            if has_step:
+                step = _positive_number(raw_segment["step"], f"{segment_name}.step")
+                ratio = (segment_maximum - segment_minimum) / step
+                interval_count = round(ratio)
+                if interval_count < 1 or not math.isclose(
+                    ratio, interval_count, rel_tol=0.0, abs_tol=1e-9
+                ):
+                    raise ConfigError(
+                        f"{segment_name}.step must divide max-min exactly so max is included."
+                    )
+                values = tuple(
+                    segment_minimum + step * interval_index
+                    for interval_index in range(interval_count + 1)
                 )
-            values = tuple(
-                segment_minimum + step * interval_index
-                for interval_index in range(interval_count + 1)
-            )
-            values = (*values[:-1], segment_maximum)
+                values = (*values[:-1], segment_maximum)
+            else:
+                points = _integer(
+                    raw_segment["points"], f"{segment_name}.points", minimum=2
+                )
+                values = tuple(
+                    segment_minimum
+                    + (segment_maximum - segment_minimum)
+                    * point_index
+                    / (points - 1)
+                    for point_index in range(points)
+                )
+                values = (segment_minimum, *values[1:-1], segment_maximum)
         else:
             if "points" not in raw_segment or "step" in raw_segment:
                 raise ConfigError(

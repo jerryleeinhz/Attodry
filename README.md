@@ -100,7 +100,9 @@ python -m attodry_control.lockin_test --help
 
 扫频期间的固定 XX SINE OUT 幅值填写在
 `[lockin_sweep].frequency_source_voltage_v_rms`（0.004--5.0 Vrms）；扫频结束后仍
-按安全协议恢复 4 mVrms。扫幅的逐点幅值仍由 `excitation_points_v_rms` 控制。
+按安全协议恢复 4 mVrms。扫幅的逐点幅值由 `excitation_ranges` 控制：线性区间使用
+`min`/`max` 加 `step` 或 `points`（二选一），对数区间使用 `min`/`max`/`points`；
+旧 `excitation_points_v_rms` 数组仅保留兼容。
 
 两条 sweep 会自动读取与 `hardware.local.toml` 同目录的受版本控制
 `lockin_safety.toml`；日常运行不要求先执行验证命令。需要离线检查时可运行

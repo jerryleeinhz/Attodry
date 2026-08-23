@@ -112,7 +112,8 @@ settle_time_constants = 5.0
 
 [lockin_sweep]
 # Range tables expand to inclusive, strictly increasing points before VISA opens.
-# Linear ranges require min/max/step. Log ranges require min/max/points.
+# Linear ranges require min/max plus exactly one of step or points. Log ranges
+# require min/max/points.
 frequency_ranges = [
   { min = 17.777, max = 100000.0, scale = "log", points = 10 },
 ]

@@ -388,7 +388,8 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   paths and cannot mix with role-specific fields. Fake-VISA, loader, template,
   and legacy-record tests passed without opening or writing a hardware resource.
 - Added offline named-range sweep plans (2026-08-23): frequency and excitation grids
-  accept strict linear `min`/`max`/`step` or logarithmic `min`/`max`/`points` segments,
+  accept linear `min`/`max` plus exactly one of `step`/`points`, or logarithmic
+  `min`/`max`/`points` segments,
   with optional independent fixed XX/XY full-scale overrides at segment boundaries.
   Expanded points, segment metadata, range transitions, readbacks, and cleanup restoration
   are archived in schema-version 7 JSON. Legacy point arrays remain compatible; bounded-auto

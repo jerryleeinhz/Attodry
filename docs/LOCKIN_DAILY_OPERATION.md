@@ -277,7 +277,7 @@ sensitivity_full_scale_v = 0.050
 
 | 字段 | 可填写值与约束 |
 | --- | --- |
-| `frequency_ranges` | 非空的区间表；每项写 `{ min, max, scale = "linear", step = ... }` 或 `{ min, max, scale = "log", points = ... }`。线性区间包含端点且 `step` 必须整除；对数区间 `points >= 2`。区间必须严格递增、不能重叠或共享端点，总范围为 0.001--102000 Hz。 |
+| `frequency_ranges` | 非空的区间表。线性区间写 `{ min, max, scale = "linear", step = ... }` 或 `{ min, max, scale = "linear", points = ... }`；二者只能选一个，均包含端点，`points >= 2`。对数区间写 `{ min, max, scale = "log", points = ... }`。区间必须严格递增、不能重叠或共享端点，总范围为 0.001--102000 Hz。 |
 | `frequency_source_voltage_v_rms` | 扫频期间 XX SINE OUT 的固定幅值，单位 Vrms；必须在 0.004--5.0 V。扫描开始前只设置一次并读回，所有频点保持不变；同一串联路径和器件电流/电压上限会在打开 VISA 前计算检查。 |
 | `excitation_ranges` | 规则同 `frequency_ranges`，但总范围为 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 个对数点，基频固定为 17.777 Hz。 |
 | `xx_full_scale_v` / `xy_full_scale_v` | 可选的区间级固定量程覆盖；只能填写安全协议白名单中的 SR830 full scale（当前 1、10、20、50 mV）。省略时使用对应 `[lockin_xx]`/`[lockin_xy]` 的设置；`bounded_auto` 角色必须省略。量程只在区间边界切换，并记录读回和状态。 |
@@ -311,6 +311,9 @@ Lock-in 配置，并且日常 sweep 的安全基线仍要求两台都是 SR830 �
 覆盖仍可用于一次性离线测试，此时不带区间级量程覆盖。每个 JSON 的
 `measurement_config.sweep.range_segments`、`point_range_plan` 以及每点的
 `range_segment_index`/`range_transition` 保存展开后的实际计划和量程切换证据。
+
+线性模式也可按点数配置，例如 `{ min = 0.16, max = 5.0, scale = "linear", points = 16 }`
+生成 16 个从 0.16 到 5.0 Vrms、端点包含的线性等距点；此时不要再写 `step`。
 
 例如，下面的两段扫幅会在第二段开始前把固定 XX 从 10 mV 切回角色设置；XY 始终沿用
 自己的 `[lockin_xy].sensitivity_full_scale_v`：
