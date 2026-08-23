@@ -270,6 +270,21 @@ Lock-in 配置。日常扫描要求它们均为 SR830 的 4 mVrms 最小输出�
 扫描只改变 XX 内部参考频率，不改变 `SLVL`；它与两台仪器在各自 Lock-in 表中声明
 的 **测量量程策略** 是不同概念。
 
+### 扫描结束后的 SINE OUT 恢复值
+
+扫描清理阶段不会恢复到扫描前的任意幅值，也不会根据 `source_voltage_v` 动态
+推断恢复值。只要扫描已经开始写入，清理函数会调用固定的
+`MINIMUM_SINE_OUTPUT_V = 0.004`，把 `lockin_xx` SINE OUT 降回 **4 mVrms**；
+扫频还会恢复基线频率和 1 阶谐波，扫幅则只恢复幅值和 1 阶谐波。当前 sweep
+预检同时强制 `lockin_xx.source_voltage_v` 与 `lockin_xy.source_voltage_v` 都为
+0.004，因此把 TOML 中的 `source_voltage_v` 改成 20 mVrms 不会让结束后恢复为
+20 mVrms，而会在打开 VISA 前被拒绝。若将来需要使用并恢复其他基线幅值，必须
+先修改 sweep 的基线/清理策略并重新验证安全协议；不能只改一个 TOML 字段。
+
+如果预检在任何写入前失败，则不会执行清理写入；如果清理记录中的
+`cleanup.verified` 为 `false`，不要假定仪器已经恢复，必须手动核对 SINE OUT、
+频率、谐波和状态锁存。
+
 ## 记录、状态和分析
 
 在打开 VISA 资源前，程序会先创建并检查记录目录。每次已开始的扫描都会以 UTC

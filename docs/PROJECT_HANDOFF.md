@@ -390,6 +390,11 @@ Completed in Stage 3:
   current widget filters. Consequently, an explicitly allowed rejected audit
   record cannot be silently retried using an earlier rejected-disabled filter;
   this is a read-only notebook fix with no hardware imports or operations.
+- The daily sweep guide now explicitly records the cleanup amplitude contract:
+  a started sweep restores XX SINE OUT to the fixed 4 mVrms
+  `MINIMUM_SINE_OUTPUT_V`; changing `source_voltage_v` alone cannot make cleanup
+  restore 20 mVrms because sweep preflight requires both source fields to remain
+  at 4 mVrms.
 - The two daily sweep commands now resolve formal harmonic selections per scan
   and role from `[lockin_sweep].frequency_xx_harmonics`,
   `frequency_xy_harmonics`, `excitation_xx_harmonics`, and

@@ -397,6 +397,10 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   loading, so an explicitly allowed rejected audit record is not silently
   retried with the stale completed-only/rejected-disabled filter. This remains
   read-only analysis behavior with no hardware imports.
+- Documented the sweep cleanup contract: after any started sweep, XX SINE OUT is
+  restored to the fixed 4 mVrms minimum (`MINIMUM_SINE_OUTPUT_V`), not to an
+  arbitrary pre-scan value or a changed TOML `source_voltage_v`; the current
+  preflight therefore continues to require both source fields to be 4 mVrms.
 
 - The project-approved daily SR830 sensitivity mapping includes 50 mV
   (`SENS 22`). `bounded_auto` remains role-limited: XX now supports the
