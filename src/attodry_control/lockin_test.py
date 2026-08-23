@@ -13,7 +13,13 @@ import tempfile
 import time
 from typing import Callable, Mapping, Sequence
 
-from .config import ControlConfig, LockinConfig, RunMode, load_config
+from .config import (
+    ControlConfig,
+    LockinConfig,
+    RunMode,
+    SweepPointConfig,
+    load_config,
+)
 from .lockin_autorange import (
     AutorangeAction,
     AutorangePolicy,
@@ -51,11 +57,15 @@ SR830_OUTPUT_RESISTANCE_OHM = 50.0
 MINIMUM_SWEEP_SETTLE_S = 1.5
 EXCITATION_SOURCE_STEP_SETTLE_INTERVALS = 2
 # The external SR830 frequency readback showed 54 ppm jitter at 50 Hz while
-# remaining locked and error-free. The instrument also quantizes FREQ? to
-# roughly 0.1 Hz in this operating range, so the absolute tolerance must cover
-# half a display step plus that jitter; unlock and error status remain failures.
+# remaining locked and error-free.  The internal reference readback also has a
+# finite display resolution: the observed bins are 0.1 Hz near 316 Hz and 1 Hz
+# near 5.6 kHz.  Sweep records retain the requested and actual XX frequencies
+# separately, so one normal readback bin may be accepted without treating the
+# requested decimal as the physical excitation frequency.
 SWEEP_FREQUENCY_REL_TOLERANCE = 100e-6
-SWEEP_FREQUENCY_ABS_TOLERANCE_HZ = 0.11
+SWEEP_FREQUENCY_ABS_TOLERANCE_HZ = PAIR_FREQUENCY_ABS_TOLERANCE_HZ
+SR830_FREQUENCY_READBACK_SIGNIFICANT_DIGITS = 4
+SR830_FREQUENCY_READBACK_MINIMUM_QUANTUM_HZ = 0.0001
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1013,6 +1023,9 @@ def _run_frequency_sweep(
                 lockin_xy_config=config.lockin_xy,
                 original_xx_sensitivity=preflight_xx.sensitivity,
                 original_xy_sensitivity=preflight_xy.sensitivity,
+                initial_full_scale_overrides=_initial_sweep_range_overrides(
+                    args.point_specs
+                ),
             )
             _configure_sweep_sensitivities(
                 lockin_xx,
@@ -1048,15 +1061,23 @@ def _run_frequency_sweep(
                 sensitivity_setup=sensitivity_setup,
             )
             for point_index, target_hz in enumerate(points):
+                point_spec = args.point_specs[point_index]
                 wrote_setting = not math.isclose(
                     target_hz, baseline_hz, rel_tol=0.0, abs_tol=1e-12
                 )
                 point_record: dict[str, object] = {
                     "point_index": point_index,
                     "target_frequency_hz": target_hz,
+                    "requested_frequency_hz": target_hz,
+                    "actual_frequency_hz": None,
+                    "requested_frequency_tolerance_hz": (
+                        _sweep_requested_frequency_tolerance_hz(target_hz)
+                    ),
                     "source_v_rms": frequency_source_v,
                     "source_readback_v_rms": source_readback_v,
                     "nominal_current_a_rms": nominal_current_a_rms,
+                    "range_segment_index": point_spec.segment_index,
+                    "requested_full_scale_v": _point_range_full_scales(point_spec),
                     "write_performed": wrote_setting,
                     "transition_status": None,
                     "frequency_readback_hz": None,
@@ -1084,26 +1105,39 @@ def _run_frequency_sweep(
                     "lockin_xx": xx_readback,
                     "lockin_xy": xy_readback,
                 }
-                _verify_frequency_readbacks(
+                actual_frequency_hz = xx_readback
+                point_record["actual_frequency_hz"] = actual_frequency_hz
+                _verify_requested_sweep_frequency_readbacks(
                     target_hz,
                     xx_readback,
                     xy_readback,
-                    rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
-                    absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
                 )
+                # Keep the SR830 harmonic limit fail-closed: a rounded-down
+                # readback must not make an unsafe requested setting appear safe,
+                # and a rounded-up readback must not be used above the limit.
                 point_harmonics, skipped_harmonics = _harmonics_for_frequency(
-                    target_hz,
+                    max(target_hz, actual_frequency_hz),
                     harmonics,
                     skip_unsupported=args.skip_unsupported_harmonics,
                 )
                 point_record["skipped_harmonics"] = skipped_harmonics
+                _apply_sweep_segment_ranges(
+                    lockin_xx,
+                    lockin_xy,
+                    sensitivity_setup=sensitivity_setup,
+                    point_spec=point_spec,
+                    lockin_xx_config=config.lockin_xx,
+                    lockin_xy_config=config.lockin_xy,
+                    settle_s=args.settle_s,
+                    record=point_record,
+                )
                 _apply_sweep_autorange(
                     lockin_xx,
                     lockin_xy,
                     sensitivity_setup=sensitivity_setup,
                     policies=autorange_policies,
                     states=autorange_states,
-                    target_frequency_hz=target_hz,
+                    target_frequency_hz=actual_frequency_hz,
                     frequency_rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
                     settle_s=args.settle_s,
                     record=point_record,
@@ -1111,7 +1145,7 @@ def _run_frequency_sweep(
                 _capture_sweep_point(
                     lockin_xx,
                     lockin_xy,
-                    target_frequency_hz=target_hz,
+                    target_frequency_hz=actual_frequency_hz,
                     harmonics=point_harmonics,
                     selected_roles_by_harmonic=_roles_by_harmonic(
                         point_harmonics, harmonics_by_role
@@ -1163,6 +1197,7 @@ def _run_frequency_sweep(
                 "lockin_xy": None if preflight_xy is None else asdict(preflight_xy),
             },
             "requested_points_hz": points,
+            "range_segments": _sweep_range_segments(args, scan="frequency"),
             "frequency_source_voltage_v_rms": frequency_source_v,
             "source_readback_v_rms": (
                 source_readback_v if "source_readback_v" in locals() else None
@@ -1237,6 +1272,9 @@ def _run_excitation_sweep(
                 lockin_xy_config=config.lockin_xy,
                 original_xx_sensitivity=preflight_xx.sensitivity,
                 original_xy_sensitivity=preflight_xy.sensitivity,
+                initial_full_scale_overrides=_initial_sweep_range_overrides(
+                    args.point_specs
+                ),
             )
             _configure_sweep_sensitivities(
                 lockin_xx,
@@ -1250,6 +1288,7 @@ def _run_excitation_sweep(
                 sensitivity_setup=sensitivity_setup,
             )
             for point_index, source_v in enumerate(points):
+                point_spec = args.point_specs[point_index]
                 wrote_setting = not math.isclose(
                     source_v, baseline_source_v, rel_tol=0.0, abs_tol=1e-12
                 )
@@ -1263,6 +1302,8 @@ def _run_excitation_sweep(
                         source_step_settle_s if wrote_setting else 0.0
                     ),
                     "nominal_current_a_rms": nominal_current_a,
+                    "range_segment_index": point_spec.segment_index,
+                    "requested_full_scale_v": _point_range_full_scales(point_spec),
                     "write_performed": wrote_setting,
                     "harmonic_transition_status": [],
                     "samples": [],
@@ -1280,6 +1321,16 @@ def _run_excitation_sweep(
                         f"lockin_xx SINE OUT readback {output_readback:g} V does not "
                         f"match requested {source_v:g} V."
                     )
+                _apply_sweep_segment_ranges(
+                    lockin_xx,
+                    lockin_xy,
+                    sensitivity_setup=sensitivity_setup,
+                    point_spec=point_spec,
+                    lockin_xx_config=config.lockin_xx,
+                    lockin_xy_config=config.lockin_xy,
+                    settle_s=args.settle_s,
+                    record=point_record,
+                )
                 _apply_sweep_autorange(
                     lockin_xx,
                     lockin_xy,
@@ -1349,6 +1400,7 @@ def _run_excitation_sweep(
                 "lockin_xy": None if preflight_xy is None else asdict(preflight_xy),
             },
             "requested_points_v_rms": points,
+            "range_segments": _sweep_range_segments(args, scan="excitation"),
             "requested_harmonics": harmonics,
             "requested_harmonics_by_role": harmonics_by_role,
             "sensitivity_modes": {
@@ -1431,6 +1483,8 @@ def _measurement_config_snapshot(
         "samples_per_point": args.samples_per_point,
         "sample_interval_s": args.sample_interval_s,
         "output_directory": config.lockin_sweep.output_directory.as_posix(),
+        "range_segments": _sweep_range_segments(args, scan=scan),
+        "point_range_plan": [asdict(spec) for spec in args.point_specs],
     }
     if scan == "frequency":
         sweep_snapshot["frequency_source_voltage_v_rms"] = (
@@ -1447,7 +1501,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 5,
+        "schema_version": 7,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -1615,14 +1669,20 @@ def _new_sweep_sensitivity_setup(
     lockin_xy_config: LockinConfig,
     original_xx_sensitivity: int,
     original_xy_sensitivity: int,
+    initial_full_scale_overrides: Mapping[str, float | None] | None = None,
 ) -> dict[str, object]:
+    overrides = initial_full_scale_overrides or {}
     return {
         "ranges": {
             "lockin_xx": _new_sweep_range_record(
-                lockin_xx_config, original_xx_sensitivity
+                lockin_xx_config,
+                original_xx_sensitivity,
+                initial_full_scale_v=overrides.get("lockin_xx"),
             ),
             "lockin_xy": _new_sweep_range_record(
-                lockin_xy_config, original_xy_sensitivity
+                lockin_xy_config,
+                original_xy_sensitivity,
+                initial_full_scale_v=overrides.get("lockin_xy"),
             ),
         },
         "transition_status": None,
@@ -1630,11 +1690,20 @@ def _new_sweep_sensitivity_setup(
 
 
 def _new_sweep_range_record(
-    lockin: LockinConfig, original_sensitivity: int
+    lockin: LockinConfig,
+    original_sensitivity: int,
+    *,
+    initial_full_scale_v: float | None = None,
 ) -> dict[str, object]:
     policy = _autorange_policy_for_lockin(lockin)
     configured_code = sensitivity_code(lockin.sensitivity_full_scale_v)
-    if policy is None:
+    if initial_full_scale_v is not None:
+        if policy is not None:
+            raise ValueError(
+                f"lockin_{lockin.role.value} range overrides require fixed sensitivity mode."
+            )
+        initial_target = sensitivity_code(initial_full_scale_v)
+    elif policy is None:
         initial_target = configured_code
     else:
         try:
@@ -1669,6 +1738,7 @@ def _new_sweep_range_record(
         "original_sensitivity_code": original_sensitivity,
         "initial_target_sensitivity_code": initial_target,
         "initial_target_full_scale_v": sensitivity_full_scale_v(initial_target),
+        "initial_range_override_full_scale_v": initial_full_scale_v,
         "current_sensitivity_code": initial_target,
         "write_attempted": False,
         "initial_setup_write_attempted": False,
@@ -1779,6 +1849,118 @@ def _configure_sweep_sensitivities(
                     f"{role} sensitivity changed after the transition from {target} "
                     f"to {readback}."
                 )
+
+
+def _apply_sweep_segment_ranges(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    sensitivity_setup: dict[str, object],
+    point_spec: SweepPointConfig,
+    lockin_xx_config: LockinConfig,
+    lockin_xy_config: LockinConfig,
+    settle_s: float,
+    record: dict[str, object],
+) -> None:
+    """Apply an optional fixed-range override at a named range segment.
+
+    Segment overrides are validated during TOML loading and are therefore only
+    available for fixed roles. A missing override means that role's configured
+    fixed range, so leaving one segment returns the instrument to its global
+    setting. Bounded-auto roles are intentionally left to the autorange state
+    machine.
+    """
+
+    ranges = sensitivity_setup.get("ranges")
+    if not isinstance(ranges, dict):
+        raise ValueError("Sweep sensitivity setup must contain per-role range records.")
+    role_configs = {
+        "lockin_xx": lockin_xx_config,
+        "lockin_xy": lockin_xy_config,
+    }
+    instruments = {"lockin_xx": lockin_xx, "lockin_xy": lockin_xy}
+    requested = _point_range_full_scales(point_spec)
+    changes: dict[str, int] = {}
+    for role, lockin_config in role_configs.items():
+        if _autorange_policy_for_lockin(lockin_config) is not None:
+            continue
+        target_full_scale = requested[role]
+        if target_full_scale is None:
+            target_full_scale = lockin_config.sensitivity_full_scale_v
+        target_code = sensitivity_code(target_full_scale)
+        range_record = ranges.get(role)
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        current_code = _sensitivity_record_int(range_record, "current_sensitivity_code", role)
+        if current_code != target_code:
+            changes[role] = target_code
+
+    transition_record: dict[str, object] = {
+        "segment_index": point_spec.segment_index,
+        "requested_full_scale_v": requested,
+        "changed": {},
+        "status": None,
+        "verification": {},
+    }
+    record["range_transition"] = transition_record
+    if not changes:
+        return
+    changed_record = transition_record["changed"]
+    if not isinstance(changed_record, dict):
+        raise TypeError("Range transition changed record must be a mapping.")
+    for role, target_code in changes.items():
+        range_record = ranges[role]
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        range_record["write_attempted"] = True
+        changed_record[role] = {
+            "target_sensitivity_code": target_code,
+            "target_full_scale_v": sensitivity_full_scale_v(target_code),
+        }
+        instruments[role].set_sensitivity(target_code)
+    time.sleep(settle_s)
+    for role, instrument in instruments.items():
+        range_record = ranges[role]
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        expected_code = changes.get(
+            role, _sensitivity_record_int(range_record, "current_sensitivity_code", role)
+        )
+        readback = instrument.read_sensitivity()
+        if readback != expected_code:
+            raise Sr830Error(
+                f"{role} segment range readback {readback} does not match requested "
+                f"range {expected_code}."
+            )
+        range_record["current_sensitivity_code"] = expected_code
+        verification = transition_record["verification"]
+        if not isinstance(verification, dict):
+            raise TypeError("Range transition verification must be a mapping.")
+        verification[role] = {
+            "readback_sensitivity_code": readback,
+            "readback_full_scale_v": sensitivity_full_scale_v(readback),
+        }
+    transition, problems = _consume_sensitivity_transition(
+        lockin_xx,
+        lockin_xy,
+        allow_xx_output_overload=False,
+    )
+    transition_record["status"] = transition
+    sensitivity_setup["transition_status"] = transition
+    if problems:
+        raise Sr830Error("Unsafe sweep segment sensitivity transition: " + "; ".join(problems))
+    time.sleep(settle_s)
+    for role, instrument in instruments.items():
+        range_record = ranges[role]
+        if not isinstance(range_record, dict):
+            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+        expected_code = _sensitivity_record_int(range_record, "current_sensitivity_code", role)
+        readback = instrument.read_sensitivity()
+        if readback != expected_code:
+            raise Sr830Error(
+                f"{role} segment range changed after transition from {expected_code} "
+                f"to {readback}."
+            )
 
 
 def _sensitivity_record_int(
@@ -2087,15 +2269,27 @@ def _resolve_sweep_settings(
     )
     args.maximum_source_voltage_v = config.lockin_safety.maximum_source_voltage_v_rms
     if scan == "frequency":
-        args.points_hz = (
-            sweep.frequency_points_hz if args.points_hz is None else args.points_hz
-        )
+        if args.points_hz is None:
+            args.points_hz = sweep.frequency_points_hz
+            args.point_specs = sweep.frequency_point_specs
+            args.range_segments = sweep.frequency_ranges
+        else:
+            args.point_specs = tuple(
+                SweepPointConfig(value, None, None, None) for value in args.points_hz
+            )
+            args.range_segments = ()
         if args.skip_unsupported_harmonics is None:
             args.skip_unsupported_harmonics = sweep.skip_unsupported_harmonics
         return
-    args.points_v = (
-        sweep.excitation_points_v_rms if args.points_v is None else args.points_v
-    )
+    if args.points_v is None:
+        args.points_v = sweep.excitation_points_v_rms
+        args.point_specs = sweep.excitation_point_specs
+        args.range_segments = sweep.excitation_ranges
+    else:
+        args.point_specs = tuple(
+            SweepPointConfig(value, None, None, None) for value in args.points_v
+        )
+        args.range_segments = ()
     for argument_name, configured_value in (
         ("series_resistance_ohm", sweep.external_series_resistance_ohm),
         ("device_resistance_ohm", sweep.approximate_device_resistance_ohm),
@@ -2105,6 +2299,32 @@ def _resolve_sweep_settings(
         if getattr(args, argument_name) is None:
             setattr(args, argument_name, configured_value)
     args.maximum_device_resistance_ohm = sweep.maximum_device_resistance_ohm
+
+
+def _initial_sweep_range_overrides(
+    point_specs: Sequence[SweepPointConfig],
+) -> dict[str, float | None]:
+    if not point_specs:
+        raise ValueError("A sweep must contain at least one point specification.")
+    first = point_specs[0]
+    return {
+        "lockin_xx": first.xx_full_scale_v,
+        "lockin_xy": first.xy_full_scale_v,
+    }
+
+
+def _point_range_full_scales(point_spec: SweepPointConfig) -> dict[str, float | None]:
+    return {
+        "lockin_xx": point_spec.xx_full_scale_v,
+        "lockin_xy": point_spec.xy_full_scale_v,
+    }
+
+
+def _sweep_range_segments(
+    args: argparse.Namespace, *, scan: str
+) -> list[dict[str, object]]:
+    segments = getattr(args, "range_segments", ())
+    return [asdict(segment) for segment in segments]
 
 
 def _time_constant_settle_floor_s(config: ControlConfig) -> float:
@@ -2319,6 +2539,71 @@ def _calculate_source_voltage_safety(
     }
 
 
+def _sr830_frequency_readback_quantum_hz(frequency_hz: float) -> float:
+    """Return one conservative SR830 FREQ? display bin at this frequency."""
+
+    if not math.isfinite(frequency_hz) or frequency_hz <= 0.0:
+        raise ValueError(
+            "Frequency readback quantum requires a positive finite frequency."
+        )
+    magnitude = 10.0 ** math.floor(math.log10(frequency_hz))
+    return max(
+        SR830_FREQUENCY_READBACK_MINIMUM_QUANTUM_HZ,
+        magnitude / (10.0 ** (SR830_FREQUENCY_READBACK_SIGNIFICANT_DIGITS - 1)),
+    )
+
+
+def _sweep_requested_frequency_tolerance_hz(requested_frequency_hz: float) -> float:
+    """Bound a requested-vs-readback comparison to one normal SR830 bin."""
+
+    return max(
+        SWEEP_FREQUENCY_REL_TOLERANCE * requested_frequency_hz,
+        _sr830_frequency_readback_quantum_hz(requested_frequency_hz),
+    )
+
+
+def _verify_requested_sweep_frequency_readbacks(
+    requested_hz: float,
+    xx_readback_hz: float,
+    xy_readback_hz: float,
+) -> None:
+    """Verify the source setpoint and the external-reference follower separately."""
+
+    requested_tolerance_hz = _sweep_requested_frequency_tolerance_hz(requested_hz)
+    if not math.isclose(
+        xx_readback_hz,
+        requested_hz,
+        rel_tol=0.0,
+        abs_tol=requested_tolerance_hz,
+    ):
+        raise Sr830Error(
+            f"lockin_xx frequency readback {xx_readback_hz:g} Hz does not match "
+            f"requested {requested_hz:g} Hz."
+        )
+    _verify_frequency_pair_readbacks(
+        xx_readback_hz,
+        xy_readback_hz,
+        rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
+        absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
+    )
+
+
+def _verify_frequency_pair_readbacks(
+    xx_readback_hz: float,
+    xy_readback_hz: float,
+    *,
+    rel_tolerance: float,
+    absolute_tolerance_hz: float,
+) -> None:
+    if not math.isclose(
+        xx_readback_hz,
+        xy_readback_hz,
+        rel_tol=rel_tolerance,
+        abs_tol=absolute_tolerance_hz,
+    ):
+        raise Sr830Error("xx/xy frequency readbacks do not match.")
+
+
 def _verify_frequency_readbacks(
     target_hz: float,
     xx_readback_hz: float,
@@ -2338,13 +2623,12 @@ def _verify_frequency_readbacks(
                 f"lockin_{role} frequency readback {readback:g} Hz does not match "
                 f"requested {target_hz:g} Hz."
             )
-    if not math.isclose(
+    _verify_frequency_pair_readbacks(
         xx_readback_hz,
         xy_readback_hz,
-        rel_tol=rel_tolerance,
-        abs_tol=absolute_tolerance_hz,
-    ):
-        raise Sr830Error("xx/xy frequency readbacks do not match.")
+        rel_tolerance=rel_tolerance,
+        absolute_tolerance_hz=absolute_tolerance_hz,
+    )
 
 
 def _capture_sweep_point(

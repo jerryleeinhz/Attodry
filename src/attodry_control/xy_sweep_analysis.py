@@ -62,7 +62,7 @@ def plot_xy_sweep(
     )
     scan_type = xy_rows[0].scan_type
     resolved_x_axis = x_axis or (
-        "target_frequency_hz" if scan_type == "frequency" else "source_v_rms"
+        "actual_frequency_hz" if scan_type == "frequency" else "source_v_rms"
     )
     try:
         import matplotlib.pyplot as plt
@@ -86,6 +86,7 @@ def plot_xy_sweep(
     axis.set_xlabel(
         {
             "target_frequency_hz": "Frequency (Hz)",
+            "actual_frequency_hz": "Frequency (Hz)",
             "source_v_rms": "Source voltage (V RMS)",
             "nominal_current_a_rms": "Nominal current (A RMS)",
             "sine_output_current_a_rms": "SINE OUT current (A RMS)",

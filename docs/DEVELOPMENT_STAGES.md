@@ -387,6 +387,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   selected role/order figures. The older shared fields remain strict compatibility
   paths and cannot mix with role-specific fields. Fake-VISA, loader, template,
   and legacy-record tests passed without opening or writing a hardware resource.
+- Added offline named-range sweep plans (2026-08-23): frequency and excitation grids
+  accept strict linear `min`/`max`/`step` or logarithmic `min`/`max`/`points` segments,
+  with optional independent fixed XX/XY full-scale overrides at segment boundaries.
+  Expanded points, segment metadata, range transitions, readbacks, and cleanup restoration
+  are archived in schema-version 7 JSON. Legacy point arrays remain compatible; bounded-auto
+  roles reject segment overrides. Configuration and fake-VISA coverage passed without
+  opening or writing a real instrument.
 - Corrected the remote Notebook selection workflow: clicking `Load selected
   records` now immediately loads the selected formal rows and fills the
   point-exclusion lists. The later formal-samples cell is retained only to
@@ -724,7 +731,13 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
 - Daily `sweep-frequency` and `sweep-excitation` now run directly after TOML loading;
   `validate-config` is an optional offline summary and never a prerequisite or VISA
   connection step. Sweep JSON records include the resolved policy and hash.
-- Sweep frequency verification accepts the SR830's observed 0.1 Hz display
-  quantization (0.11 Hz absolute tolerance) while keeping unlock, overload, and
-  instrument-error checks fail-closed. Offline configuration, fake-VISA, and
-  readback tests cover the new behavior.
+- Sweep frequency verification separately checks the requested source setting and
+  the external-reference follower. Request→XX allows the wider of 100 ppm and one
+  normal frequency-dependent SR830 `FREQ?` display bin (0.1 Hz at 316.159 Hz and
+  1 Hz at 5622.802 Hz); XX↔XY remains within the wider of 100 ppm of the XX
+  readback and 1.01 mHz.
+  Each point records requested, XX actual, and both raw readbacks; analysis defaults
+  to the XX actual frequency. Harmonic eligibility uses the higher of requested and
+  actual frequency. Unlock, overload, and instrument-error checks remain
+  fail-closed. Offline configuration, fake-VISA, record, analysis, and boundary
+  tests cover the behavior.

@@ -109,6 +109,68 @@ class ConfigurationTests(unittest.TestCase):
             ((0.010, 0.020), (0.020, 0.050), (0.010, 0.020, 0.050)),
         )
 
+    def test_range_tables_expand_log_points_and_keep_segment_metadata(self) -> None:
+        config = load_config(SIMULATION_CONFIG)
+
+        sweep = config.lockin_sweep
+        self.assertEqual(len(sweep.frequency_ranges), 1)
+        self.assertEqual(sweep.frequency_ranges[0].scale, "log")
+        self.assertEqual(sweep.frequency_point_specs[0].segment_index, 0)
+        self.assertEqual(sweep.frequency_point_specs[-1].value, 100000.0)
+        self.assertEqual(len(sweep.excitation_point_specs), 11)
+        self.assertIsNone(sweep.excitation_point_specs[0].xx_full_scale_v)
+
+    def test_linear_range_requires_exact_step_and_expands_inclusive_maximum(self) -> None:
+        text = self.simulation_text()
+        text = text.replace(
+            "{ min = 17.777, max = 100000.0, scale = \"log\", points = 10 }",
+            "{ min = 1.0, max = 3.0, scale = \"linear\", step = 1.0 }",
+        )
+        text = text.replace(
+            "{ min = 0.004, max = 0.400, scale = \"log\", points = 11 }",
+            "{ min = 0.004, max = 0.012, scale = \"linear\", step = 0.004, xx_full_scale_v = 0.050 }",
+        )
+        config = self.load_text(text)
+
+        self.assertEqual(config.lockin_sweep.frequency_points_hz, (1.0, 2.0, 3.0))
+        self.assertEqual(config.lockin_sweep.excitation_points_v_rms, (0.004, 0.008, 0.012))
+        self.assertEqual(
+            config.lockin_sweep.excitation_point_specs[0].xx_full_scale_v, 0.05
+        )
+
+    def test_range_segments_cannot_overlap_or_mix_step_and_points(self) -> None:
+        text = self.simulation_text().replace(
+            "{ min = 17.777, max = 100000.0, scale = \"log\", points = 10 }",
+            "{ min = 1.0, max = 3.0, scale = \"linear\", step = 1.0 },\n"
+            "  { min = 3.0, max = 4.0, scale = \"linear\", step = 1.0 }",
+        )
+        with self.assertRaisesRegex(ConfigError, "may not overlap or share"):
+            self.load_text(text)
+
+        text = self.simulation_text().replace(
+            "{ min = 17.777, max = 100000.0, scale = \"log\", points = 10 }",
+            "{ min = 1.0, max = 3.0, scale = \"linear\", step = 1.0, points = 3 }",
+        )
+        with self.assertRaisesRegex(ConfigError, "requires step and forbids points"):
+            self.load_text(text)
+
+    def test_bounded_auto_rejects_segment_full_scale_override(self) -> None:
+        text = self.simulation_text().replace(
+            'sensitivity_mode = "fixed"\nsensitivity_full_scale_v = 0.020',
+            'sensitivity_mode = "bounded_auto"\nsensitivity_full_scale_v = 0.010\n'
+            'autorange_min_full_scale_v = 0.010\n'
+            'autorange_max_full_scale_v = 0.020\n'
+            'autorange_target_occupancy = 0.85\n'
+            'autorange_stable_samples = 2\n'
+            'autorange_max_steps = 1',
+            1,
+        ).replace(
+            '{ min = 17.777, max = 100000.0, scale = "log", points = 10 }',
+            '{ min = 17.777, max = 100000.0, scale = "log", points = 10, xx_full_scale_v = 0.020 }',
+        )
+        with self.assertRaisesRegex(ConfigError, "cannot be set while lockin_xx"):
+            self.load_text(text)
+
     def test_explicit_safety_policy_can_enable_mapped_one_volt_fixed_range(self) -> None:
         hardware_text = self.simulation_text().replace(
             "sensitivity_full_scale_v = 0.020",

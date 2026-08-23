@@ -4,13 +4,15 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+from typing import Callable
 import unittest
 from unittest.mock import patch
 
 import attodry_control.config as config_module
 from attodry_control.lockin_test import (
     _consume_sensitivity_transition,
-    _verify_frequency_readbacks,
+    _sweep_requested_frequency_tolerance_hz,
+    _verify_requested_sweep_frequency_readbacks,
     build_parser,
     run,
 )
@@ -111,11 +113,13 @@ class TrackingVisaResource(FakeVisaResource):
         shared_frequency: dict[str, float],
         name: str,
         frequency_scale: float = 1.0,
+        frequency_transform: Callable[[float], float] | None = None,
         snapshots: list[str] | None = None,
     ):
         super().__init__(responses, name=name)
         self.shared_frequency = shared_frequency
         self.frequency_scale = frequency_scale
+        self.frequency_transform = frequency_transform
         self.snapshots = [] if snapshots is None else list(snapshots)
 
     def query(self, command: str) -> str:
@@ -133,7 +137,12 @@ class TrackingVisaResource(FakeVisaResource):
     def write(self, command: str) -> None:
         super().write(command)
         if command.startswith("FREQ "):
-            self.shared_frequency["hz"] = float(command.split()[1])
+            requested_frequency = float(command.split()[1])
+            self.shared_frequency["hz"] = (
+                requested_frequency
+                if self.frequency_transform is None
+                else self.frequency_transform(requested_frequency)
+            )
         elif command.startswith("SLVL "):
             self.responses["SLVL?"] = command.split()[1] + "\n"
         elif command.startswith("SENS "):
@@ -238,13 +247,37 @@ class Sr830Tests(unittest.TestCase):
         return path
 
     def test_frequency_readback_accepts_sr830_display_quantization(self) -> None:
-        _verify_frequency_readbacks(
+        _verify_requested_sweep_frequency_readbacks(
             316.159,
             316.1,
             316.1,
-            rel_tolerance=100e-6,
-            absolute_tolerance_hz=0.11,
         )
+
+    def test_frequency_readback_accepts_one_high_frequency_sr830_bin(self) -> None:
+        target_hz = 5622.80243375
+        tolerance_hz = _sweep_requested_frequency_tolerance_hz(target_hz)
+
+        self.assertEqual(tolerance_hz, 1.0)
+        _verify_requested_sweep_frequency_readbacks(
+            target_hz,
+            5622.0,
+            5622.05,
+        )
+        with self.assertRaisesRegex(Sr830Error, "does not match"):
+            _verify_requested_sweep_frequency_readbacks(
+                target_hz,
+                5620.0,
+                5620.05,
+            )
+
+    def test_internal_reference_frequency_preserves_requested_precision(self) -> None:
+        resource = FakeVisaResource(responses(reference_mode=1))
+
+        Sr830(resource, LockinRole.XX).set_internal_reference_frequency(
+            5622.80243375
+        )
+
+        self.assertEqual(resource.writes, ["FREQ 5622.80243375"])
 
     def test_validate_config_is_offline_and_optional(self) -> None:
         output = io.StringIO()
@@ -1344,6 +1377,105 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertIn("_replace_before_run_frequency_completed.json", record_paths[0].name)
 
+    def test_frequency_sweep_records_actual_quantized_frequency(self) -> None:
+        config_path = self._hardware_config()
+        shared_frequency = {"hz": 17.777}
+        quantize_high_frequency = lambda frequency_hz: (
+            5622.0 if frequency_hz > 5000.0 else frequency_hz
+        )
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1),
+            shared_frequency=shared_frequency,
+            name="xx",
+            frequency_transform=quantize_high_frequency,
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0),
+            shared_frequency=shared_frequency,
+            name="xy",
+            frequency_scale=5622.05 / 5622.0,
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(config_path),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "17.777,5622.80243375",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        point = result["points"][1]
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertAlmostEqual(point["requested_frequency_hz"], 5622.80243375)
+        self.assertAlmostEqual(point["target_frequency_hz"], 5622.80243375)
+        self.assertEqual(point["actual_frequency_hz"], 5622.0)
+        self.assertEqual(point["requested_frequency_tolerance_hz"], 1.0)
+        self.assertEqual(
+            point["frequency_readback_hz"],
+            {"lockin_xx": 5622.0, "lockin_xy": 5622.05},
+        )
+        self.assertEqual(point["samples"][0]["lockin_xx"]["reading"]["frequency_hz"], 5622.0)
+
+    def test_frequency_range_segments_apply_fixed_role_overrides_at_boundaries(self) -> None:
+        config_path = self._hardware_config()
+        configured = config_path.read_text(encoding="utf-8").replace(
+            '{ min = 17.777, max = 100000.0, scale = "log", points = 10 },',
+            '{ min = 17.777, max = 1000.0, scale = "linear", step = 982.223, xx_full_scale_v = 0.050 },\n'
+            '  { min = 1001.0, max = 2000.0, scale = "linear", step = 999.0 },',
+        )
+        config_path.write_text(configured, encoding="utf-8")
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(config_path),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["points"][0]["range_segment_index"], 0)
+        self.assertEqual(result["points"][2]["range_segment_index"], 1)
+        self.assertEqual(result["points"][0]["requested_full_scale_v"]["lockin_xx"], 0.05)
+        self.assertEqual(result["points"][2]["requested_full_scale_v"]["lockin_xx"], None)
+        self.assertEqual(
+            [write for write in xx_resource.writes if write.startswith("SENS ")],
+            ["SENS 22", "SENS 21", "SENS 23"],
+        )
+        self.assertEqual(result["measurement_config"]["schema_version"], 7)
+
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
         xx_responses = responses(reference_mode=1)
@@ -2139,7 +2271,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 5)
+        self.assertEqual(result["measurement_config"]["schema_version"], 7)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -2342,6 +2474,58 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(
             [item["harmonic"] for item in second["skipped_harmonics"]], [2, 3]
+        )
+        self.assertNotIn("HARM 3", xx_resource.writes)
+        self.assertNotIn("HARM 3", xy_resource.writes)
+
+    def test_frequency_sweep_uses_actual_frequency_for_harmonic_limit(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        rounded_up = lambda frequency_hz: (
+            34000.1 if frequency_hz > 30000.0 else frequency_hz
+        )
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1),
+            shared_frequency=shared_frequency,
+            name="xx",
+            frequency_transform=rounded_up,
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0),
+            shared_frequency=shared_frequency,
+            name="xy",
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-frequency",
+                    "--config", str(self._hardware_config()),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-hz", "34000",
+                    "--settle-s", "1.5",
+                    "--samples-per-point", "1",
+                    "--sample-interval-s", "0",
+                    "--all-harmonics",
+                    "--skip-unsupported-harmonics",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        point = result["points"][0]
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(point["actual_frequency_hz"], 34000.1)
+        self.assertEqual(
+            [sample["lockin_xx"]["reading"]["harmonic"] for sample in point["samples"]],
+            [1, 2],
+        )
+        self.assertEqual(
+            [item["harmonic"] for item in point["skipped_harmonics"]], [3]
         )
         self.assertNotIn("HARM 3", xx_resource.writes)
         self.assertNotIn("HARM 3", xy_resource.writes)

@@ -19,6 +19,7 @@ SWEEP_METRICS = frozenset({"x_v", "y_v", "amplitude_v", "phase_deg"})
 SWEEP_X_AXES = frozenset(
     {
         "target_frequency_hz",
+        "actual_frequency_hz",
         "source_v_rms",
         "nominal_current_a_rms",
         "sine_output_current_a_rms",
@@ -48,6 +49,7 @@ class CommissioningSample:
     point_index: int
     sample_index: int
     target_frequency_hz: float
+    actual_frequency_hz: float
     source_v_rms: float
     sine_output_v_rms: float
     nominal_current_a_rms: float | None
@@ -417,7 +419,7 @@ def aggregate_sweep_samples(
         raise ValueError("Aggregate one sweep type at a time.")
     if x_axis is None:
         x_axis = (
-            "target_frequency_hz"
+            "actual_frequency_hz"
             if next(iter(scan_types)) == "frequency"
             else "source_v_rms"
         )
@@ -466,7 +468,7 @@ def plot_commissioning_sweep(
     )
     scan_type = rows[0].scan_type
     resolved_x_axis = x_axis or (
-        "target_frequency_hz" if scan_type == "frequency" else "source_v_rms"
+        "actual_frequency_hz" if scan_type == "frequency" else "source_v_rms"
     )
     try:
         import matplotlib.pyplot as plt
@@ -494,6 +496,7 @@ def plot_commissioning_sweep(
     axis.set_xlabel(
         {
             "target_frequency_hz": "Frequency (Hz)",
+            "actual_frequency_hz": "Frequency (Hz)",
             "source_v_rms": "Source voltage (V RMS)",
             "nominal_current_a_rms": "Nominal current (A RMS)",
             "sine_output_current_a_rms": "SINE OUT current (A RMS)",
@@ -557,7 +560,7 @@ def plot_role_harmonic_sweep(
         row for row in rows if row.role == role and row.harmonic == harmonic
     )
     x_axis = (
-        "target_frequency_hz"
+        "actual_frequency_hz"
         if scan_type == "frequency"
         else "sine_output_current_a_rms"
     )
@@ -865,6 +868,9 @@ def _commissioning_sample(
     sine_output = point.get("source_readback_v_rms")
     if sine_output is None:
         sine_output = point["source_v_rms"]
+    actual_frequency = point.get("actual_frequency_hz")
+    if actual_frequency is None:
+        actual_frequency = point["target_frequency_hz"]
     return CommissioningSample(
         source_path=str(path),
         record_status=record_status,
@@ -872,6 +878,7 @@ def _commissioning_sample(
         point_index=int(point.get("point_index", 0)),
         sample_index=int(sample.get("sample_index", 0)),
         target_frequency_hz=float(point["target_frequency_hz"]),
+        actual_frequency_hz=float(actual_frequency),
         source_v_rms=float(point["source_v_rms"]),
         sine_output_v_rms=float(sine_output),
         nominal_current_a_rms=(

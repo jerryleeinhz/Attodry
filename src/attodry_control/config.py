@@ -147,10 +147,33 @@ class LockinSafetyConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SweepRangeConfig:
+    minimum: float
+    maximum: float
+    scale: str
+    step: float | None
+    points: int | None
+    xx_full_scale_v: float | None
+    xy_full_scale_v: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class SweepPointConfig:
+    value: float
+    segment_index: int | None
+    xx_full_scale_v: float | None
+    xy_full_scale_v: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class LockinSweepConfig:
     frequency_points_hz: tuple[float, ...]
+    frequency_ranges: tuple[SweepRangeConfig, ...]
+    frequency_point_specs: tuple[SweepPointConfig, ...]
     frequency_source_voltage_v_rms: float
     excitation_points_v_rms: tuple[float, ...]
+    excitation_ranges: tuple[SweepRangeConfig, ...]
+    excitation_point_specs: tuple[SweepPointConfig, ...]
     frequency_harmonics: tuple[int, ...]
     excitation_harmonics: tuple[int, ...]
     frequency_xx_harmonics: tuple[int, ...]
@@ -300,7 +323,7 @@ def load_config(
         )
         _validate_lockin_pair(lockin_xx, lockin_xy)
         lockin_sweep = _parse_lockin_sweep(
-            _table(document, "lockin_sweep"), safety
+            _table(document, "lockin_sweep"), safety, lockin_xx, lockin_xy
         )
         gate_top = _parse_gate(
             _table(document, "gate_top"), "top", project.mode, "gate_top"
@@ -949,16 +972,17 @@ def _validate_lockin_pair(xx: LockinConfig, xy: LockinConfig) -> None:
 
 
 def _parse_lockin_sweep(
-    table: Mapping[str, Any], safety: LockinSafetyConfig
+    table: Mapping[str, Any],
+    safety: LockinSafetyConfig,
+    lockin_xx: LockinConfig,
+    lockin_xy: LockinConfig,
 ) -> LockinSweepConfig:
     name = "lockin_sweep"
     _strict_keys_with_optional(
         table,
         name,
         {
-            "frequency_points_hz",
             "frequency_source_voltage_v_rms",
-            "excitation_points_v_rms",
             "skip_unsupported_harmonics",
             "run_name",
             "note",
@@ -974,6 +998,10 @@ def _parse_lockin_sweep(
             "output_directory",
         },
         {
+            "frequency_points_hz",
+            "frequency_ranges",
+            "excitation_points_v_rms",
+            "excitation_ranges",
             "harmonics",
             "frequency_harmonics",
             "excitation_harmonics",
@@ -983,9 +1011,38 @@ def _parse_lockin_sweep(
             "excitation_xy_harmonics",
         },
     )
-    frequency_points_hz = _positive_number_tuple(
-        table["frequency_points_hz"], f"{name}.frequency_points_hz"
-    )
+    frequency_points_present = "frequency_points_hz" in table
+    frequency_ranges_present = "frequency_ranges" in table
+    if frequency_points_present == frequency_ranges_present:
+        raise ConfigError(
+            f"{name} must define exactly one of frequency_points_hz or frequency_ranges."
+        )
+    excitation_points_present = "excitation_points_v_rms" in table
+    excitation_ranges_present = "excitation_ranges" in table
+    if excitation_points_present == excitation_ranges_present:
+        raise ConfigError(
+            f"{name} must define exactly one of excitation_points_v_rms or "
+            "excitation_ranges."
+        )
+    if frequency_points_present:
+        frequency_points_hz = _positive_number_tuple(
+            table["frequency_points_hz"], f"{name}.frequency_points_hz"
+        )
+        frequency_ranges: tuple[SweepRangeConfig, ...] = ()
+        frequency_point_specs = tuple(
+            SweepPointConfig(value, None, None, None) for value in frequency_points_hz
+        )
+    else:
+        frequency_ranges, frequency_point_specs = _parse_sweep_ranges(
+            table["frequency_ranges"],
+            f"{name}.frequency_ranges",
+            minimum=0.001,
+            maximum=102_000.0,
+            safety=safety,
+            lockin_xx=lockin_xx,
+            lockin_xy=lockin_xy,
+        )
+        frequency_points_hz = tuple(spec.value for spec in frequency_point_specs)
     frequency_source_voltage_v_rms = _number(
         table["frequency_source_voltage_v_rms"],
         f"{name}.frequency_source_voltage_v_rms",
@@ -1000,9 +1057,28 @@ def _parse_lockin_sweep(
             f"{safety.minimum_source_voltage_v_rms:g}-"
             f"{safety.maximum_source_voltage_v_rms:g} V RMS."
         )
-    excitation_points_v_rms = _positive_number_tuple(
-        table["excitation_points_v_rms"], f"{name}.excitation_points_v_rms"
-    )
+    if excitation_points_present:
+        excitation_points_v_rms = _positive_number_tuple(
+            table["excitation_points_v_rms"], f"{name}.excitation_points_v_rms"
+        )
+        excitation_ranges: tuple[SweepRangeConfig, ...] = ()
+        excitation_point_specs = tuple(
+            SweepPointConfig(value, None, None, None)
+            for value in excitation_points_v_rms
+        )
+    else:
+        excitation_ranges, excitation_point_specs = _parse_sweep_ranges(
+            table["excitation_ranges"],
+            f"{name}.excitation_ranges",
+            minimum=safety.minimum_source_voltage_v_rms,
+            maximum=safety.maximum_source_voltage_v_rms,
+            safety=safety,
+            lockin_xx=lockin_xx,
+            lockin_xy=lockin_xy,
+        )
+        excitation_points_v_rms = tuple(
+            spec.value for spec in excitation_point_specs
+        )
     _require_strictly_increasing(frequency_points_hz, f"{name}.frequency_points_hz")
     _require_strictly_increasing(
         excitation_points_v_rms, f"{name}.excitation_points_v_rms"
@@ -1131,8 +1207,12 @@ def _parse_lockin_sweep(
         )
     return LockinSweepConfig(
         frequency_points_hz=frequency_points_hz,
+        frequency_ranges=frequency_ranges,
+        frequency_point_specs=frequency_point_specs,
         frequency_source_voltage_v_rms=frequency_source_voltage_v_rms,
         excitation_points_v_rms=excitation_points_v_rms,
+        excitation_ranges=excitation_ranges,
+        excitation_point_specs=excitation_point_specs,
         frequency_harmonics=frequency_harmonics,
         excitation_harmonics=excitation_harmonics,
         frequency_xx_harmonics=frequency_xx_harmonics,
@@ -1340,6 +1420,156 @@ def _positive_number_tuple(value: Any, name: str) -> tuple[float, ...]:
     if not isinstance(value, list) or not value:
         raise ConfigError(f"{name} must be a non-empty array of numbers.")
     return tuple(_positive_number(item, f"{name}[{index}]") for index, item in enumerate(value))
+
+
+def _parse_sweep_ranges(
+    value: Any,
+    name: str,
+    *,
+    minimum: float,
+    maximum: float,
+    safety: LockinSafetyConfig,
+    lockin_xx: LockinConfig,
+    lockin_xy: LockinConfig,
+) -> tuple[tuple[SweepRangeConfig, ...], tuple[SweepPointConfig, ...]]:
+    if not isinstance(value, list) or not value:
+        raise ConfigError(f"{name} must be a non-empty array of range tables.")
+    ranges: list[SweepRangeConfig] = []
+    point_specs: list[SweepPointConfig] = []
+    previous_maximum: float | None = None
+    for index, raw_segment in enumerate(value):
+        segment_name = f"{name}[{index}]"
+        if not isinstance(raw_segment, dict):
+            raise ConfigError(f"{segment_name} must be a TOML table.")
+        _strict_keys_with_optional(
+            raw_segment,
+            segment_name,
+            {"min", "max", "scale"},
+            {"step", "points", "xx_full_scale_v", "xy_full_scale_v"},
+        )
+        segment_minimum = _positive_number(
+            raw_segment["min"], f"{segment_name}.min"
+        )
+        segment_maximum = _positive_number(
+            raw_segment["max"], f"{segment_name}.max"
+        )
+        if segment_minimum < minimum or segment_maximum > maximum:
+            raise ConfigError(
+                f"{segment_name} must remain within {minimum:g}-{maximum:g}."
+            )
+        if segment_maximum <= segment_minimum:
+            raise ConfigError(f"{segment_name}.max must be greater than min.")
+        if previous_maximum is not None and segment_minimum <= previous_maximum:
+            raise ConfigError(
+                f"{segment_name}.min must be greater than the previous segment max; "
+                "segments may not overlap or share a boundary point."
+            )
+        scale = _string(raw_segment["scale"], f"{segment_name}.scale")
+        if scale not in {"linear", "log"}:
+            raise ConfigError(f"{segment_name}.scale must be 'linear' or 'log'.")
+        step: float | None = None
+        points: int | None = None
+        if scale == "linear":
+            if "step" not in raw_segment or "points" in raw_segment:
+                raise ConfigError(
+                    f"{segment_name} with linear scale requires step and forbids points."
+                )
+            step = _positive_number(raw_segment["step"], f"{segment_name}.step")
+            ratio = (segment_maximum - segment_minimum) / step
+            interval_count = round(ratio)
+            if interval_count < 1 or not math.isclose(
+                ratio, interval_count, rel_tol=0.0, abs_tol=1e-9
+            ):
+                raise ConfigError(
+                    f"{segment_name}.step must divide max-min exactly so max is included."
+                )
+            values = tuple(
+                segment_minimum + step * interval_index
+                for interval_index in range(interval_count + 1)
+            )
+            values = (*values[:-1], segment_maximum)
+        else:
+            if "points" not in raw_segment or "step" in raw_segment:
+                raise ConfigError(
+                    f"{segment_name} with log scale requires points and forbids step."
+                )
+            points = _integer(raw_segment["points"], f"{segment_name}.points", minimum=2)
+            values = tuple(
+                math.exp(
+                    math.log(segment_minimum)
+                    + (math.log(segment_maximum) - math.log(segment_minimum))
+                    * point_index
+                    / (points - 1)
+                )
+                for point_index in range(points)
+            )
+            values = (segment_minimum, *values[1:-1], segment_maximum)
+        xx_full_scale_v = _parse_sweep_range_full_scale(
+            raw_segment,
+            "xx_full_scale_v",
+            segment_name,
+            safety.lockin_xx,
+            lockin_xx,
+        )
+        xy_full_scale_v = _parse_sweep_range_full_scale(
+            raw_segment,
+            "xy_full_scale_v",
+            segment_name,
+            safety.lockin_xy,
+            lockin_xy,
+        )
+        ranges.append(
+            SweepRangeConfig(
+                minimum=segment_minimum,
+                maximum=segment_maximum,
+                scale=scale,
+                step=step,
+                points=points,
+                xx_full_scale_v=xx_full_scale_v,
+                xy_full_scale_v=xy_full_scale_v,
+            )
+        )
+        point_specs.extend(
+            SweepPointConfig(
+                value=point,
+                segment_index=index,
+                xx_full_scale_v=xx_full_scale_v,
+                xy_full_scale_v=xy_full_scale_v,
+            )
+            for point in values
+        )
+        previous_maximum = segment_maximum
+    points = tuple(spec.value for spec in point_specs)
+    _require_strictly_increasing(points, name)
+    return tuple(ranges), tuple(point_specs)
+
+
+def _parse_sweep_range_full_scale(
+    segment: Mapping[str, Any],
+    field: str,
+    segment_name: str,
+    safety_role: LockinSafetyRoleConfig,
+    lockin: LockinConfig,
+) -> float | None:
+    if field not in segment:
+        return None
+    value = _positive_number(segment[field], f"{segment_name}.{field}")
+    if value not in safety_role.allowed_fixed_full_scales_v:
+        raise ConfigError(
+            f"{segment_name}.{field} must use a project-confirmed SR830 full scale."
+        )
+    try:
+        sensitivity_code(value)
+    except ValueError as exc:
+        raise ConfigError(
+            f"{segment_name}.{field} is not an SR830 full scale."
+        ) from exc
+    if lockin.sensitivity_mode is SensitivityMode.BOUNDED_AUTO:
+        raise ConfigError(
+            f"{segment_name}.{field} cannot be set while lockin_{lockin.role.value} "
+            "uses bounded_auto; omit it to use that policy."
+        )
+    return value
 
 
 def _integer_tuple(value: Any, name: str, *, minimum: int) -> tuple[int, ...]:

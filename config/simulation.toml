@@ -62,32 +62,12 @@ sensitivity_full_scale_v = 0.001
 settle_time_constants = 5.0
 
 [lockin_sweep]
-# Ten logarithmically spaced frequency points from 17.777 Hz to 100 kHz.
-frequency_points_hz = [
-  17.777,
-  46.4024449701,
-  121.122062171,
-  316.15907209,
-  825.254764272,
-  2154.12267455,
-  5622.80243375,
-  14676.9297694,
-  38310.4812935,
-  100000.0,
+frequency_ranges = [
+  { min = 17.777, max = 100000.0, scale = "log", points = 10 },
 ]
 frequency_source_voltage_v_rms = 0.004
-excitation_points_v_rms = [
-  0.004,
-  0.006,
-  0.010,
-  0.016,
-  0.026,
-  0.040,
-  0.064,
-  0.100,
-  0.160,
-  0.252,
-  0.400,
+excitation_ranges = [
+  { min = 0.004, max = 0.400, scale = "log", points = 11 },
 ]
 # Select formal curves separately for every scan and voltage role. Each list is
 # ascending and uses 1, 2, and/or 3; [] excludes that role from formal curves

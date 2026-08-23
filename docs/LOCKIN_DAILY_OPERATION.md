@@ -60,9 +60,18 @@ python -m attodry_control.lockin_test validate-config
 
 每个 sweep JSON 的 `measurement_config` 会保存解析后的 `lockin_safety`、文件路径和
 SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次允许的量程和时序。扫频时
-SR830 可能把设定频率量化为约 0.1 Hz（例如 316.159→316.1 Hz）；代码对该显示量化
-保留 0.11 Hz 的绝对容差，但 `LIAS?` 的 reference-unlocked、overload、error 仍会
-拒绝正式样本。
+SR830 的 `FREQ?` 显示精度会随频率改变，因此请求值与 XX 的实际读回值允许
+`max(100 ppm × 请求频率, 一个正常 SR830 显示量化档位)` 的差异：例如
+316.159 Hz 时为 ±0.1 Hz，5622.802 Hz 时为 ±1 Hz。XX 与 XY 的读回仍必须彼此在
+`max(100 ppm × XX 读回频率, 1.01 mHz)` 内一致；`LIAS?` 的 reference-unlocked、overload、error
+仍会拒绝正式样本。
+
+每个扫频点同时归档 `requested_frequency_hz`（数学扫描网格）、
+`actual_frequency_hz`（XX 的 `FREQ?` 读回）和两台仪器的
+`frequency_readback_hz`。分析和绘图默认使用 `actual_frequency_hz`；旧 JSON 缺少
+该字段时才回退到原有 `target_frequency_hz`。这里的“实际”是仪器报告的已施加源频率，
+不是独立计量校准值。谐波上限仍按请求和实际读回中较高的频率检查，不能因显示量化
+放松 102 kHz 的安全边界。
 
 每次运行前，在同一份 `[lockin_sweep]` 表中修改 `run_name` 和 `note`。前者是
 本次数据的简短名称并进入 JSON 文件名，后者记录样品、接线状态或本次测试目的，
@@ -268,9 +277,10 @@ sensitivity_full_scale_v = 0.050
 
 | 字段 | 可填写值与约束 |
 | --- | --- |
-| `frequency_points_hz` | 非空、严格递增的数列；每项必须在 0.001--102000 Hz。版本库示例为 17.777 Hz 到 100 kHz 的 10 个对数点。 |
+| `frequency_ranges` | 非空的区间表；每项写 `{ min, max, scale = "linear", step = ... }` 或 `{ min, max, scale = "log", points = ... }`。线性区间包含端点且 `step` 必须整除；对数区间 `points >= 2`。区间必须严格递增、不能重叠或共享端点，总范围为 0.001--102000 Hz。 |
 | `frequency_source_voltage_v_rms` | 扫频期间 XX SINE OUT 的固定幅值，单位 Vrms；必须在 0.004--5.0 V。扫描开始前只设置一次并读回，所有频点保持不变；同一串联路径和器件电流/电压上限会在打开 VISA 前计算检查。 |
-| `excitation_points_v_rms` | 非空、严格递增的数列；每项必须在 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 点，基频固定为 17.777 Hz。 |
+| `excitation_ranges` | 规则同 `frequency_ranges`，但总范围为 0.004--5.0 Vrms。版本库示例为 4--400 mVrms 的 11 个对数点，基频固定为 17.777 Hz。 |
+| `xx_full_scale_v` / `xy_full_scale_v` | 可选的区间级固定量程覆盖；只能填写安全协议白名单中的 SR830 full scale（当前 1、10、20、50 mV）。省略时使用对应 `[lockin_xx]`/`[lockin_xy]` 的设置；`bounded_auto` 角色必须省略。量程只在区间边界切换，并记录读回和状态。 |
 | `frequency_xx_harmonics` / `frequency_xy_harmonics` | 分别选择扫频正式曲线中的 XX/XY 谐波。每项为升序组合，只能含 1、2、3；`[]` 表示该角色不进入正式曲线。两项合起来至少选一个。 |
 | `excitation_xx_harmonics` / `excitation_xy_harmonics` | 分别选择扫幅正式曲线中的 XX/XY 谐波；规则同上，且可与扫频不同。例：`excitation_xx_harmonics = []`、`excitation_xy_harmonics = [2]` 只输出 XY h2 曲线。 |
 | `frequency_harmonics` / `excitation_harmonics` | 旧版兼容字段；每个列表会同样应用到 XX 和 XY。二者都必须是非空升序组合，且不可与四个角色专用字段混用。 |
@@ -294,7 +304,24 @@ Lock-in 配置，并且日常 sweep 的安全基线仍要求两台都是 SR830 �
 扫频期间的固定激励幅值改由 `[lockin_sweep].frequency_source_voltage_v_rms` 控制：
 程序在扫频正式点前设置并读回 XX 的 `SLVL`，随后只改变 XX 内部参考频率，不再逐点
 改变 `SLVL`。扫频名义电流和分析横坐标使用每点记录的 SINE OUT 读回值，而不是手工
-输入的电流值；幅值扫描仍使用 `excitation_points_v_rms` 逐点改变 `SLVL`。
+输入的电流值；幅值扫描仍使用展开后的 `excitation_ranges` 逐点改变 `SLVL`。
+
+新的区间表与旧版 `frequency_points_hz`、`excitation_points_v_rms` 互斥；旧数组仍被解析，便于已有
+`hardware.local.toml` 过渡。不要同时填写数组和区间。命令行隐藏的 `--points-hz`/`--points-v`
+覆盖仍可用于一次性离线测试，此时不带区间级量程覆盖。每个 JSON 的
+`measurement_config.sweep.range_segments`、`point_range_plan` 以及每点的
+`range_segment_index`/`range_transition` 保存展开后的实际计划和量程切换证据。
+
+例如，下面的两段扫幅会在第二段开始前把固定 XX 从 10 mV 切回角色设置；XY 始终沿用
+自己的 `[lockin_xy].sensitivity_full_scale_v`：
+
+```toml
+excitation_ranges = [
+  { min = 0.004, max = 0.040, scale = "linear", step = 0.004,
+    xx_full_scale_v = 0.010 },
+  { min = 0.050, max = 0.400, scale = "log", points = 8 },
+]
+```
 
 ### 扫描结束后的 SINE OUT 恢复值
 
@@ -330,7 +357,8 @@ run_data/commissioning/20260822T123456123456Z_sample_A_excitation_rejected.json
 `measurement_config` 中保留同一份已解析 TOML：请求配置、扫描点、量程、时序和
 激励路径。每个正式样本的 `selected_roles` 标出该阶数实际纳入曲线的 XX/XY；另一台
 SR830 的同时读回仍完整保留并参与安全判决。实际 SR830 读回位于同文件的 `preflight`、`sensitivity_setup`、每点记录
-和 `cleanup`。因此不要把 `measurement_config` 单独当作硬件读回证据。若归档写入
+和 `cleanup`；扫频点的 XX `FREQ?` 读回同时写为 `actual_frequency_hz`。因此不要把
+`measurement_config` 单独当作硬件读回证据。若归档写入
 失败，命令以失败退出，避免把未保存的数据误报为完成。
 
 分析电流时，Notebook 和 Python API 默认只使用该 JSON 中归档的

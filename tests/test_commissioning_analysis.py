@@ -74,6 +74,20 @@ class CommissioningAnalysisTests(unittest.TestCase):
         )
         self.assertEqual([row.role for row in unlocked], ["xy"])
 
+    def test_frequency_analysis_defaults_to_recorded_actual_frequency(self) -> None:
+        payload = self._sweep(completed=True)
+        point = payload["points"][0]
+        point["target_frequency_hz"] = 5622.80243375
+        point["actual_frequency_hz"] = 5622.0
+        path = self._write_json("actual_frequency.json", payload)
+
+        rows = load_sweep_samples(path)
+        statistics = aggregate_sweep_samples(rows)
+
+        self.assertEqual({row.target_frequency_hz for row in rows}, {5622.80243375})
+        self.assertEqual({row.actual_frequency_hz for row in rows}, {5622.0})
+        self.assertEqual({item.x_value for item in statistics}, {5622.0})
+
     def test_formal_loader_excludes_transition_and_aggregates_samples(self) -> None:
         payload = self._sweep(completed=True)
         payload["points"][0]["transition_status"] = {
@@ -269,6 +283,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
             replace(
                 base,
                 target_frequency_hz=10.0,
+                actual_frequency_hz=10.0,
                 sample_index=0,
                 amplitude_v=0.5e-6,
                 phase_deg=0.0,
@@ -276,6 +291,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
             replace(
                 base,
                 target_frequency_hz=10.0,
+                actual_frequency_hz=10.0,
                 sample_index=1,
                 amplitude_v=0.5e-6,
                 phase_deg=90.0,
@@ -283,6 +299,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
             replace(
                 base,
                 target_frequency_hz=100.0,
+                actual_frequency_hz=100.0,
                 sample_index=0,
                 amplitude_v=5e-6,
                 phase_deg=179.0,
@@ -290,6 +307,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
             replace(
                 base,
                 target_frequency_hz=100.0,
+                actual_frequency_hz=100.0,
                 sample_index=1,
                 amplitude_v=5e-6,
                 phase_deg=-179.0,
@@ -297,6 +315,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
             replace(
                 base,
                 target_frequency_hz=1000.0,
+                actual_frequency_hz=1000.0,
                 sample_index=0,
                 amplitude_v=5e-6,
                 phase_deg=-178.0,
@@ -304,6 +323,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
             replace(
                 base,
                 target_frequency_hz=1000.0,
+                actual_frequency_hz=1000.0,
                 sample_index=1,
                 amplitude_v=5e-6,
                 phase_deg=-178.0,

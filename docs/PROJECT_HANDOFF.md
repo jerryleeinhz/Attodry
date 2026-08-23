@@ -756,10 +756,24 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   it is absent or inconsistent. `validate-config` is an optional offline summary
   and does not open VISA. Sweep JSON `measurement_config` records the resolved
   policy and SHA-256.
-- Sweep frequency readback now accepts the observed SR830 0.1 Hz display
-  quantization (0.11 Hz absolute tolerance) while retaining strict unlock,
-  overload, and instrument-error rejection. Offline configuration/fake-VISA
-  coverage passed after this change; no real instrument was opened in this stage.
+- Sweep frequency readback now separates setpoint quantization from XX/XY
+  synchronization. Request→XX allows the wider of 100 ppm and one normal,
+  frequency-dependent SR830 `FREQ?` display bin (0.1 Hz at 316.159 Hz and 1 Hz at
+  5622.802 Hz); XX↔XY remains within the wider of 100 ppm of the XX readback and
+  1.01 mHz. Each point
+  retains the requested grid, XX actual readback, and both raw readbacks, and
+  analysis defaults to that XX actual frequency. Harmonic eligibility uses the
+  higher of requested and actual frequency. Strict unlock, overload, and
+  instrument-error rejection is unchanged. Offline configuration/fake-VISA,
+  record, analysis, and boundary coverage passed; no real instrument was opened.
+- Sweep grids now also accept named, non-overlapping linear or logarithmic range
+  segments. Linear segments use inclusive `min`/`max`/`step`; logarithmic segments
+  use `min`/`max`/`points`. Optional `xx_full_scale_v` and `xy_full_scale_v` overrides
+  apply only to fixed roles at segment boundaries; bounded-auto roles continue with
+  their policy and reject such overrides. Expanded plans and all range transitions are
+  archived in measurement schema 7, while legacy point arrays remain accepted. This
+  feature was verified with configuration and fake-VISA tests only; no hardware was
+  opened or written.
 
 ## User-confirmed requirements
 

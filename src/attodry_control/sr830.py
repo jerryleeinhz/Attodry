@@ -244,7 +244,7 @@ class Sr830:
             or frequency_hz > MAXIMUM_REFERENCE_FREQUENCY_HZ
         ):
             raise ValueError("Reference frequency must be within 0.001-102000 Hz.")
-        self._resource.write(f"FREQ {frequency_hz:g}")
+        self._resource.write(f"FREQ {frequency_hz:.12g}")
 
     def read_reference_frequency(self) -> float:
         return self._query_float("FREQ?")
