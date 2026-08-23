@@ -418,6 +418,14 @@ Completed in Stage 3:
   remains only for explicitly refreshing after a filter change, so a normal
   load-and-exclude workflow cannot apply a blank selector to zero rows. This is
   read-only analysis only; no hardware path is imported.
+- SINE OUT request/readback differences are now audit-only for both daily sweep
+  commands: a quantized `SLVL?` value no longer rejects a safe scan. Records keep
+  the requested amplitude and requested nominal current separately from the
+  readback amplitude and readback-derived nominal current. The readback still
+  undergoes the existing SR830 source-range and complete-path device-current/
+  device-voltage safety calculation before sampling. Offline fake-VISA tests
+  cover the observed 83.2 mVrms request to 82 mVrms readback case; no real VISA
+  resource was opened.
 
 - The project-approved daily SR830 sensitivity mapping includes 50 mV
   (`SENS 22`). `bounded_auto` remains role-limited: XX now supports the

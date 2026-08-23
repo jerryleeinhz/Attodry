@@ -306,6 +306,13 @@ Lock-in 配置，并且日常 sweep 的安全基线仍要求两台都是 SR830 �
 改变 `SLVL`。扫频名义电流和分析横坐标使用每点记录的 SINE OUT 读回值，而不是手工
 输入的电流值；幅值扫描仍使用展开后的 `excitation_ranges` 逐点改变 `SLVL`。
 
+`source_v_rms` 是程序向 SR830 请求的幅值；`source_readback_v_rms` 是随后由
+`SLVL?` 返回并实际用于名义电流、绘图和数据分析的仪器读回值。二者不再要求数值匹配：
+SR830 的幅值量化或显示精度造成的任意差异都会写入审计记录，而不会单独拒绝扫描。读回值
+仍必须是有限、处于 SR830/项目允许范围内的数值，并会按完整串联路径重新检查器件电流和
+器件电压上限；这两项独立安全边界不因取消匹配检查而放宽。每个点同时保存
+`requested_nominal_current_a_rms` 与按读回值计算的 `nominal_current_a_rms`。
+
 新的区间表与旧版 `frequency_points_hz`、`excitation_points_v_rms` 互斥；旧数组仍被解析，便于已有
 `hardware.local.toml` 过渡。不要同时填写数组和区间。命令行隐藏的 `--points-hz`/`--points-v`
 覆盖仍可用于一次性离线测试，此时不带区间级量程覆盖。每个 JSON 的

@@ -1001,7 +1001,7 @@ def _run_frequency_sweep(
     frequency_source_v = config.lockin_sweep.frequency_source_voltage_v_rms
     frequency_safety = _validate_frequency_source_safety(config, frequency_source_v)
     excitation_path = _resolved_excitation_path(settings)
-    nominal_current_a_rms = frequency_source_v / float(
+    requested_nominal_current_a_rms = frequency_source_v / float(
         excitation_path["nominal_total_resistance_ohm"]
     )
     source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
@@ -1045,16 +1045,12 @@ def _run_frequency_sweep(
             else:
                 time.sleep(args.settle_s)
             source_readback_v = lockin_xx.read_sine_output()
-            if not math.isclose(
-                source_readback_v,
-                frequency_source_v,
-                rel_tol=1e-6,
-                abs_tol=0.001,
-            ):
-                raise Sr830Error(
-                    f"lockin_xx SINE OUT readback {source_readback_v:g} V does not "
-                    f"match configured frequency sweep amplitude {frequency_source_v:g} V."
-                )
+            source_readback_safety = _validate_frequency_source_safety(
+                config, source_readback_v
+            )
+            nominal_current_a_rms = source_readback_v / float(
+                excitation_path["nominal_total_resistance_ohm"]
+            )
             autorange_policies, autorange_states = _new_sweep_autorange_controls(
                 config.lockin_xx,
                 config.lockin_xy,
@@ -1075,6 +1071,9 @@ def _run_frequency_sweep(
                     ),
                     "source_v_rms": frequency_source_v,
                     "source_readback_v_rms": source_readback_v,
+                    "requested_nominal_current_a_rms": (
+                        requested_nominal_current_a_rms
+                    ),
                     "nominal_current_a_rms": nominal_current_a_rms,
                     "range_segment_index": point_spec.segment_index,
                     "requested_full_scale_v": _point_range_full_scales(point_spec),
@@ -1202,6 +1201,11 @@ def _run_frequency_sweep(
             "source_readback_v_rms": (
                 source_readback_v if "source_readback_v" in locals() else None
             ),
+            "source_readback_safety": (
+                source_readback_safety
+                if "source_readback_safety" in locals()
+                else None
+            ),
             "source_step_settle_s": (
                 source_step_settle_s
                 if "source_write_performed" in locals() and source_write_performed
@@ -1292,16 +1296,20 @@ def _run_excitation_sweep(
                 wrote_setting = not math.isclose(
                     source_v, baseline_source_v, rel_tol=0.0, abs_tol=1e-12
                 )
-                nominal_current_a = source_v / safety["nominal_total_resistance_ohm"]
+                requested_nominal_current_a = (
+                    source_v / safety["nominal_total_resistance_ohm"]
+                )
                 point_record = {
                     "point_index": point_index,
                     "target_frequency_hz": baseline_hz,
                     "source_v_rms": source_v,
                     "source_readback_v_rms": None,
+                    "source_readback_safety": None,
                     "source_step_settle_s": (
                         source_step_settle_s if wrote_setting else 0.0
                     ),
-                    "nominal_current_a_rms": nominal_current_a,
+                    "requested_nominal_current_a_rms": requested_nominal_current_a,
+                    "nominal_current_a_rms": None,
                     "range_segment_index": point_spec.segment_index,
                     "requested_full_scale_v": _point_range_full_scales(point_spec),
                     "write_performed": wrote_setting,
@@ -1316,11 +1324,13 @@ def _run_excitation_sweep(
                     time.sleep(args.settle_s)
                 output_readback = lockin_xx.read_sine_output()
                 point_record["source_readback_v_rms"] = output_readback
-                if not math.isclose(output_readback, source_v, rel_tol=1e-6, abs_tol=0.001):
-                    raise Sr830Error(
-                        f"lockin_xx SINE OUT readback {output_readback:g} V does not "
-                        f"match requested {source_v:g} V."
-                    )
+                source_readback_safety = _validate_excitation_safety(
+                    args, (output_readback,)
+                )
+                point_record["source_readback_safety"] = source_readback_safety
+                point_record["nominal_current_a_rms"] = output_readback / float(
+                    source_readback_safety["nominal_total_resistance_ohm"]
+                )
                 _apply_sweep_segment_ranges(
                     lockin_xx,
                     lockin_xy,
@@ -1501,10 +1511,14 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 7,
+        "schema_version": 8,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
+        "source_readback_policy": (
+            "SINE OUT request/readback differences are recorded, not rejected; "
+            "readback determines derived current and post-write safety."
+        ),
         "setting_writes_enabled_by_command": True,
         "lockin_safety": asdict(config.lockin_safety),
         "lockin_safety_path": str(

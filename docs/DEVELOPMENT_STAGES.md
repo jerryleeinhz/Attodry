@@ -417,6 +417,13 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   still restores the fixed 4 mVrms cleanup baseline. Configuration, templates,
   fake-VISA coverage, and operator documentation were updated without opening
   or writing a real instrument.
+- Changed daily frequency and excitation sweeps so a requested SINE OUT value
+  and its `SLVL?` readback are independently recorded rather than match-gated.
+  Readback values now determine recorded nominal current and downstream analysis;
+  requested values remain preserved for audit. Invalid or unsafe readbacks still
+  fail closed using the configured SR830 source range and full device-path
+  current/voltage checks. Fake-VISA tests cover a safe 83.2 mVrms request with an
+  82 mVrms readback; no real hardware was opened.
 
 - The project-approved daily SR830 sensitivity mapping includes 50 mV
   (`SENS 22`). `bounded_auto` remains role-limited: XX now supports the

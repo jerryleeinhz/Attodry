@@ -513,6 +513,12 @@ fake-VISA/加载器测试，未连接或写入真实仪器。
 两台 Lock-in 的最小基线，而不再是扫频运行幅值；配置字段、测量记录和日常说明已同步，
 仅 fake-VISA/离线测试覆盖，未连接真实仪器。
 
+2026-08-23：SINE OUT 请求值与 `SLVL?` 读回值现分开归档。扫频和扫幅均不再因两者
+不匹配而拒绝，例如请求 83.2 mVrms、读回 82 mVrms 会继续扫描。`source_v_rms` 保留
+请求，`source_readback_v_rms` 是电流和分析的依据；每点同时保留请求与读回计算的名义
+电流。读回值仍须通过 SR830 输出范围及完整串联路径的器件电流/电压安全复核，故这不是
+取消安全上限。该改动仅通过 fake-VISA 离线验证，未连接或写入真实仪器。
+
 ## 预计文件所有权
 
 - 配置：`config.py`、`config/hardware.example.toml`、`config/simulation.toml`。
