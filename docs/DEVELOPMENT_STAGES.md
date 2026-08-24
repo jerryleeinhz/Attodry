@@ -798,3 +798,8 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   samples are documented as stability readings, not statistically independent
   replicas. Configuration, fake-VISA, and full offline test coverage passed; no
   hardware resource was opened or written.
+- Simplified Reserve configuration (2026-08-24): removed
+  `allowed_reserve_modes` from the safety policy and its duplicate validation.
+  A role selects its valid SR830 Reserve mode directly in `hardware.local.toml`;
+  every actual RMOD change still lowers SINE OUT first, verifies readback/status,
+  is audited, and is restored during cleanup.

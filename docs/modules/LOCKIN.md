@@ -117,6 +117,8 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 白名单、autorange 阶梯、0.85 占用率、2 个稳定样本和 4 mVrms cleanup。
 日常 sweep 的等待时间只由 `[lockin_sweep]` 的时间常数倍数推导，不属于
 `lockin_safety.toml`。
+该安全文件同样不保存或审核 Reserve 模式；Reserve 只在角色 TOML 以 SR830 已知枚举值
+设置，实际写入仍有独立的读回、状态和 cleanup 检查。
 两条日常 sweep 自动读取后者，操作者不需要先运行 `validate-config`；该命令只是可选
 的无 VISA 离线检查。每条 JSON 的 `measurement_config` 保存解析后的策略和 SHA-256，
 便于按历史记录复现安全边界。驱动层仍映射完整 SR830 电压量程（包含 1 V/SENS 26），
@@ -133,7 +135,7 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 | `filter_slope_db_oct` | SR830 低通滤波斜率；硬件可选 `6`、`12`、`18`、`24` dB/oct。当前项目确认值为 `24` dB/oct。 | 与时间常数共同定义带宽；正式采样中不能变化。当前代码和安全策略只放行 `24`，改用其他档位前必须同步更新安全策略、驱动映射、测试并重新确认 settling。 |
 | `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
 | `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
-| `reserve_mode` | `high_reserve`/`normal`/`low_noise`，对应 `RMOD` 0/1/2；当前日常策略为 `normal`。 | 还必须出现在该角色 `lockin_safety.toml` 的 `allowed_reserve_modes` 中；改变时先降 SINE OUT，读回确认并在 cleanup 恢复。 |
+| `reserve_mode` | `high_reserve`/`normal`/`low_noise`，对应 `RMOD` 0/1/2；默认 `normal`。 | 只在相应角色的 `hardware.local.toml` 设置；改变时先降 SINE OUT，读回确认并在 cleanup 恢复。 |
 | `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | 选中角色的自动范围边界。推荐 XX 10--50 mV 三档阶梯、XY 1--10 mV。 | 仅 `bounded_auto` 使用；XX 10--50 mV 自动按 10→20→50 mV 逐档转换。 |
 | `autorange_target_occupancy` | 0.85。 | 到达或超过阈值才允许上移一个档位；最大档仍不安全则 fail closed。 |
 | `autorange_stable_samples` | 2 个连续安全样本。 | 符合更窄的相邻档位两次后，才允许下移一档；任一不合格样本重置计数。 |
@@ -185,8 +187,8 @@ Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可
 `high_reserve`；干净输入和弱信号才考虑 `low_noise`。Reserve 不决定锁相输出的最低
 可测 SNR，后者主要由输入噪声密度、低通 ENBW/时间常数和平均决定。`FILTER OVLD`
 也不能用提高 Reserve 解决。完整常用档位表、计算例子和日常选择流程统一见
-[`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。当前版本化安全策略仍只
-允许 `normal`，其他模式说明不是硬件写入授权。
+[`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。模式只由角色 TOML
+选择，但每次实际写入仍必须通过降输出、读回、状态检查和 cleanup 恢复。
 
 `bounded_auto` 是可审计的预备阶段状态机，不是 SR830 的 `AGAN` 命令替代品。每次
 允许的 `SENS` 转换都必须读回新代码、保存转换记录、等待自动推导的 settle interval、消费并记录

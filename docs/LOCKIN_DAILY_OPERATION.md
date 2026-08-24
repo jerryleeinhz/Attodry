@@ -18,6 +18,17 @@ python -m attodry_control.lockin_test sweep-excitation
 `config/hardware.local.toml` 填写实际 VISA 地址；后续 `git pull` 不会覆盖本机值。
 日常命令会拒绝空地址、`CHANGE_ME` 地址或 XX/XY 相同的地址。
 
+若出现 `VI_ERROR_RSRC_NFOUND`，先在同一环境运行以下只读发现命令：
+
+```powershell
+python -m attodry_control.lockin_test discover
+```
+
+它只列出 Windows/NI-VISA 可见的资源，不打开 SR830、也不写设置。输出中的资源字符串
+必须与本机 TOML 的 `lockin_xx.address`、`lockin_xy.address` 完全一致；例如发现的是
+`GPIB0::8::INSTR` 而不是 `GPIB1::8::INSTR` 时，应只修改本机 TOML。若两个资源均未
+出现，应在 NI MAX 检查 GPIB 控制器、驱动、仪器电源、地址与电缆，而不是修改 sweep 参数。
+
 如果终端错误地显示旧版 sweep 的必填参数（例如
 `--series-resistance-ohm` 或 `--authorize-writes`），该终端没有导入当前 checkout。先在
 **同一终端**执行以下只读检查；它只改变当前终端的 `PYTHONPATH`，不会连接仪器：
@@ -45,6 +56,8 @@ python -B -m attodry_control.lockin_test sweep-excitation --help
 日常 sweep 会在 `hardware.local.toml` **同一目录**自动读取受版本控制的
 `lockin_safety.toml`；不需要先运行任何验证命令。缺少该文件、字段未知、量程不在
 白名单、自动阶梯不连续，或全局安全值不一致时，命令会在打开 VISA 前 fail closed。
+安全文件不包含、也不审核 `reserve_mode`；它只审核量程、autorange 阶梯、源输出边界与
+cleanup。`reserve_mode` 仅由对应角色 TOML 的枚举值校验。
 因此正常运行就是上面的两条 `sweep-*` 命令，`validate-config` 只是可选的离线预检：
 
 ```powershell
@@ -59,12 +72,11 @@ python -m attodry_control.lockin_test validate-config
 代码 26）存在于驱动层，但不等于日常安全白名单。
 
 每个角色还必须在 TOML 中填写 `reserve_mode`：`"high_reserve"`（RMOD 0）、
-`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。当前提交的安全协议只允许
-`"normal"`，因此日常默认不会改变动态 Reserve；若经过单独硬件确认需要另一模式，
-维护者必须先在 `lockin_safety.toml` 对应角色的 `allowed_reserve_modes` 中放行，
-再修改被忽略的 `hardware.local.toml`。Sweep 会记录原始 RMOD、目标模式、读回、
-转换状态，并在 cleanup 时恢复扫描前的 RMOD。Reserve 写入始终在降低 SINE OUT 后进行，
-读回与状态确认失败会 fail closed。
+`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。它只由该角色的
+`hardware.local.toml` 选择，不再在 `lockin_safety.toml` 重复维护白名单；日常默认仍是
+`"normal"`。Sweep 会记录原始 RMOD、目标模式、读回和转换状态，并在 cleanup 时恢复
+扫描前的 RMOD。Reserve 写入始终在降低 SINE OUT 后进行，读回与状态确认失败会 fail
+closed。
 
 ### Reserve dB、内部增益分配和选择方法
 
@@ -236,7 +248,7 @@ SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、�
 | `filter_slope_db_oct` | SR830 硬件可选 `6`、`12`、`18`、`24` dB/oct，对应 `OFSL` 代码 `0`、`1`、`2`、`3`；当前项目只能是 `24`。 |
 | `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
 | `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020`、`0.050` 或 XX `1.0` V。当前示例 fixed：XX `1.0`、XY `0.010`；在 `bounded_auto` 中它必须等于最小量程。 |
-| `reserve_mode` | `"high_reserve"`（RMOD 0）、`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。实际可用值还必须出现在 `lockin_safety.toml` 该角色的 `allowed_reserve_modes` 中；当前策略只放行 `"normal"`。 |
+| `reserve_mode` | `"high_reserve"`（RMOD 0）、`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。只在该角色的 `hardware.local.toml` 设置；默认 `"normal"`。 |
 
 `fixed` 模式只保留 `sensitivity_mode` 和 `sensitivity_full_scale_v`；所有
 `autorange_*` 字段必须完全不存在（继续注释），并非“被忽略”。例如：

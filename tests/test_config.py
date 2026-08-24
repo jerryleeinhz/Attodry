@@ -102,6 +102,15 @@ class ConfigurationTests(unittest.TestCase):
         )
         self.assertIsNone(config.visa)
 
+    def test_lockin_reserve_mode_is_selected_only_in_hardware_toml(self) -> None:
+        config = self.load_text(
+            self.simulation_text().replace(
+                'reserve_mode = "normal"', 'reserve_mode = "high_reserve"', 1
+            )
+        )
+
+        self.assertEqual(config.lockin_xx.reserve_mode, ReserveMode.HIGH_RESERVE)
+
     def test_lockin_safety_policy_is_loaded_from_adjacent_file(self) -> None:
         config = load_config(SIMULATION_CONFIG)
 

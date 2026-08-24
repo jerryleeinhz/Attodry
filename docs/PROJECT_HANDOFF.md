@@ -817,6 +817,12 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   `sample_interval_s`, and treats repeat samples as stability readings rather than
   independent replicas. Measurement schema version is 12. Configuration,
   fake-VISA, and full offline tests passed; no hardware resource was opened.
+- Simplified Reserve configuration (2026-08-24): removed
+  `allowed_reserve_modes` from `lockin_safety.toml`. Each role's
+  `hardware.local.toml` now selects one confirmed SR830 mode
+  (`high_reserve`/`normal`/`low_noise`) directly. The existing safe write order,
+  RMOD readback/status verification, audit record, and cleanup restoration remain
+  unchanged.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`
