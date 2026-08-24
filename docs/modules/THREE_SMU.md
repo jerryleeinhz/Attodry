@@ -6,6 +6,10 @@
 测试、CLI、两个 Notebook 与审计/分析路径已经完成；尚未在目标电脑 `lyr`
 环境验收，也未连接真实 SMU 或发送任何真实写命令。
 
+日常配置、参数、离线 `describe`、未来真实运行门槛、数据分析和异常处置统一见
+[`THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)。在 S1/S2 获得
+明确授权前，只执行其中标为离线的步骤。
+
 S0 交付结果：
 
 - 严格 hardware/scan TOML、语义角色 QCoDeS Keithley 2400 adapter、共享
@@ -180,7 +184,7 @@ Chat 决定如何接入主 acquisition。
 
 ### CLI
 
-预期接口如下，实际命令以实现后的 `--help` 为准：
+已实现接口如下，命令选项以当前 `--help` 为准：
 
 ```powershell
 python -m attodry_control.three_smu_cli describe `
@@ -205,14 +209,15 @@ Notebook 只使用公共会话 API，不能直接调用 QCoDeS：
 AUTHORIZE_WRITES = False
 
 with ThreeSmuSession.open(
-    hardware,
+    hardware, plan,
     authorize_writes=AUTHORIZE_WRITES,
 ) as session:
-    for sample in session.run(plan):
+    for sample in session.run(output_dir=OUTPUT_DIR):
         live_plot.update(sample)
 ```
 
-Notebook 默认 `AUTHORIZE_WRITES = False`，运行单元格前由操作者手工改为 `True`。
+Notebook 默认 `AUTHORIZE_WRITES = False`；只有本次真实连接和写入已获明确授权，
+并复核两个本地 TOML 后，操作者才可手工改为 `True`。
 离开 `with`、点击中断或正常结束时都必须走同一个 cleanup。实时图只是消费者，
 不能拥有第二套 setpoint 或 safety 逻辑。
 

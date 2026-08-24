@@ -57,7 +57,8 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
 - [`Temperature`](docs/modules/TEMPERATURE.md)：attoDRY 温度读回、控制和稳定；
 - [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：X/Z 矢量场、3 T 限制和归零；
 - [`Three-SMU`](docs/modules/THREE_SMU.md)：三台 Keithley、双栅极与 bias 的
-  QCoDeS CLI/Notebook 双路线；
+  QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
+  [`THREE_SMU_DAILY_OPERATION.md`](docs/THREE_SMU_DAILY_OPERATION.md)；
 - [`Integration`](docs/modules/INTEGRATION.md)：各设备模块分别验收后的组合流程。
 
 每个工作包都包含当前真实验收边界、目标、非目标、分阶段验收条件、预计文件

@@ -216,6 +216,10 @@ follow-up:
   generator, retained scan modes, strict operator-filled safety configuration,
   auditable data, accepted-only analysis, and fail-closed cleanup. No real SMU
   connection or setting write was performed.
+- `THREE_SMU_DAILY_OPERATION.md` now provides the operator-facing independent
+  daily workflow and full parameter reference. It clearly separates the currently
+  permitted offline `describe`/analysis path from future, separately authorized
+  connection and write steps; adding the guide did not perform hardware actions.
 - `INTEGRATION.md` requires commit IDs, tests, hardware-action reports, and known
   limitations from the four device modules before combination.
 - `docs/modules/README.md` defines shared permissions, `lyr` use, branch/worktree
@@ -243,6 +247,9 @@ Completed offline in Stage 5:
   voltage-source gate SMUs. Its S0 implementation now
   provides one shared CLI/Jupyter session and deliberately excludes Lock-in
   recording.
+- Added `THREE_SMU_DAILY_OPERATION.md` as the Stage 5 operator guide for local
+  templates, strict parameter review, scan modes, CLI/Notebook use, accepted-only
+  analysis, cleanup interpretation, and manual-verification failures.
 - Added strict independent Three-SMU hardware/scan TOML, a narrow exception-
   transparent QCoDeS Keithley 2400 adapter, offline `describe`, write-gated
   `run`, and a shared safety/session generator. Supported plans cover time,

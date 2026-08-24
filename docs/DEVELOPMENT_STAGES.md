@@ -216,6 +216,10 @@ remain pending explicit authorization and operator-filled limits.
   and all six per-gate safety values before any hardware driver can be built.
 - Added `docs/modules/THREE_SMU.md` (2026-08-21) as the independent QCoDeS
   implementation package; it now records S0 as offline complete.
+- Added `docs/THREE_SMU_DAILY_OPERATION.md` (2026-08-24) with the independent
+  offline daily workflow, complete hardware/scan parameter reference, scan-mode
+  combinations, future write-authorization boundary, data review, and fail-closed
+  recovery instructions. It does not commission a real connection or write.
 - Added independent `smu_bias`, `gate_top`, and `gate_bottom` Keithley 2400
   configuration and QCoDeS adapter modules. All placeholders, duplicate
   addresses/identities, non-voltage gate modes, invalid source ranges, and
