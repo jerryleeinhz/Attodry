@@ -131,7 +131,7 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 | `input_mode` | `a_minus_b`，差分 A-B 测量。 | 两台都固定，避免把共模信号当作输运信号。 |
 | `shield_grounding` | `float`，输入屏蔽浮地。 | 两台都固定。 |
 | `input_coupling` | `ac`，交流耦合。 | 两台都固定。 |
-| `time_constant_s` | 数字滤波时间常数；当前确认可选 0.3 s 或 1.0 s。 | 每台可独立设置；日常 sweep 使用较慢的一台自动推导所有秒数等待。 |
+| `time_constant_s` | SR830 的完整离散 `OFLT` 时间常数，10 µs--30 ks。 | 每台可独立设置；日常 sweep 使用较慢的一台自动推导所有秒数等待。完整秒值与代码见日常手册。 |
 | `filter_slope_db_oct` | SR830 低通滤波斜率；硬件可选 `6`、`12`、`18`、`24` dB/oct。当前项目确认值为 `24` dB/oct。 | 与时间常数共同定义带宽；正式采样中不能变化。当前代码和安全策略只放行 `24`，改用其他档位前必须同步更新安全策略、驱动映射、测试并重新确认 settling。 |
 | `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
 | `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
@@ -224,8 +224,14 @@ Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可
 
 ### 时间常数和采样
 
-- 每台 SR830 的 `time_constant_s` 当前确认可设为 0.3 s 或 1.0 s。sweep 取两台中较慢的
-  值 `τslow`，不再接受手动秒数 `settle_s`。
+- 每台 SR830 的 `time_constant_s` 可使用官方 `OFLT` 0--19 的完整离散档位，即
+  10 µs--30 ks；完整 TOML 秒值与代码表见
+  [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。任意中间值（例如 5 s）
+  仍会在打开 VISA 前被拒绝。sweep 取两台中较慢的值 `τslow`，不再接受手动秒数
+  `settle_s`。
+- 时间常数大于 30 s 时，SR830 要求 `谐波阶数 × 参考频率 <= 200 Hz`。项目继续通过
+  `OFLT?` 精确读回和 time-constant-change 锁存 fail closed，不能把仪器自动换档当作
+  已接受配置。
 - `[lockin_sweep].settle_time_constants`（至少 5.0）给出一次 transition 的倍数：
   `settle_interval_s = τslow × settle_time_constants`。设定、频率、谐波或量程实际改变后，
   程序使用两个 interval 与中间状态检查；0.3 s/5.0 时为 3.0 s，1.0 s/5.0 时为 10.0 s。

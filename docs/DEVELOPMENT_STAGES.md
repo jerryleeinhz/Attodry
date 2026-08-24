@@ -790,7 +790,8 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   updates plus fresh hardware confirmation.
 - Simplified daily sweep timing (2026-08-24): removed user-facing `settle_s`,
   per-role settling multipliers, and all `lockin_safety.toml` timing settings.
-  Each role retains only `time_constant_s` (confirmed 0.3 s or 1.0 s). The single
+  Each role retains only its discrete SR830 `time_constant_s`; the complete
+  allowed hardware range is recorded below. The single
   `[lockin_sweep].settle_time_constants` value (minimum 5.0) and
   `sample_interval_time_constants` derive seconds from the slower role. Every
   record now archives the slowest time constant, transition interval, two-interval
@@ -803,3 +804,11 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   A role selects its valid SR830 Reserve mode directly in `hardware.local.toml`;
   every actual RMOD change still lowers SINE OUT first, verifies readback/status,
   is audited, and is restored during cleanup.
+- Added all SR830 `OFLT` time constants (2026-08-24): configuration now maps the
+  complete discrete 10 µs--30 ks hardware range, while rejecting non-hardware
+  values such as 5 s. Documentation lists all 20 TOML values and codes, explains
+  derived sweep waits, and records the >30 s / >200 Hz harmonic-detection
+  restriction. The 140 directly relevant configuration/mapping/fake-VISA tests
+  pass. In the full local run, 295 tests pass and 4 skip; the sole unrelated
+  publication-plot test is blocked by the workstation's NumPy/Matplotlib binary
+  mismatch. No VISA resource was opened.

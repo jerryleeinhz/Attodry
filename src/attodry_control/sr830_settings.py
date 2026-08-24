@@ -59,12 +59,34 @@ _INPUT_MODE_CODES = {InputMode.A_MINUS_B: 1}
 _SHIELD_GROUNDING_CODES = {ShieldGrounding.FLOAT: 0}
 _INPUT_COUPLING_CODES = {InputCoupling.AC: 0}
 
-# This is the complete SR830 voltage-input full-scale mapping. Project policy
-# decides which of these hardware-supported values daily sweeps may use.
-# Daily sweeps currently permit the two confirmed station settings below.  The
-# SR830 OFLT codes are discrete; callers must never substitute an arbitrary float.
-_TIME_CONSTANT_CODES = {0.3: 9, 1.0: 10}
+# Complete SR830 OFLT mapping.  These are discrete hardware settings; callers
+# must never substitute an arbitrary time constant between adjacent values.
+_TIME_CONSTANT_CODES = {
+    10e-6: 0,
+    30e-6: 1,
+    100e-6: 2,
+    300e-6: 3,
+    1e-3: 4,
+    3e-3: 5,
+    10e-3: 6,
+    30e-3: 7,
+    100e-3: 8,
+    300e-3: 9,
+    1.0: 10,
+    3.0: 11,
+    10.0: 12,
+    30.0: 13,
+    100.0: 14,
+    300.0: 15,
+    1_000.0: 16,
+    3_000.0: 17,
+    10_000.0: 18,
+    30_000.0: 19,
+}
 _FILTER_SLOPE_CODES = {24: 3}
+
+# Complete SR830 voltage-input full-scale mapping. Project policy decides which
+# hardware-supported values a particular sweep may use.
 _SENSITIVITY_CODES = {
     2e-9: 0,
     5e-9: 1,
@@ -136,7 +158,8 @@ def map_sr830_settings(
         time_constant_code = _TIME_CONSTANT_CODES[time_constant_s]
     except KeyError as exc:
         raise ValueError(
-            "time_constant_s must be one of the confirmed values: 0.3, 1.0 s"
+            "time_constant_s must be a discrete SR830 OFLT value from "
+            "0.00001 to 30000 s"
         ) from exc
     try:
         filter_slope_code = _FILTER_SLOPE_CODES[filter_slope_db_oct]
