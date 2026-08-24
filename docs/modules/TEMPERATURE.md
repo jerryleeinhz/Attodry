@@ -47,6 +47,19 @@ DLL、连接设备或发送硬件命令。
 有关的表，不要求补写或修改 Lock-in/SMU 参数；未知顶层表仍被拒绝。该提交在
 `LK_setup` 通过 compileall 和全部218项测试（0 skipped），同样没有加载 DLL。
 
+本轮新增了日常温控的中断策略。`interrupt_policy` 缺省为 `abort`，保持原有
+fail-closed 行为；`continue` 在完整状态仍安全时自动恢复一次，随后要求
+`resume_recheck_s`（默认 30 s）的新读回；`wait-confirmation` 保持已确认的目标和
+温控状态并询问操作者。第二次自动中断转为等待确认。过冲、非零错误、通信失败、
+控制或 setpoint 无法确认等硬故障不受这些策略放宽，始终执行安全清理。SQLite
+acquisition 的中断事件现在明确记录 `repeat-interrupted-condition`；恢复会从首个
+未 accepted 的 condition 重测，并保留中断 attempt 的原始 rejected 数据。
+每个 run/target 的 error-free、温控开启资格也会持久化；同一目标的后续模拟 condition
+只执行短读回复查，不重复完整温度等待。真实 Integration 使用该资格前必须重新读取
+attoDRY 并确认目标、控制和错误状态。
+该策略和恢复语义已用 fake-DLL、模拟站和 SQLite 离线测试覆盖，尚未在真实硬件上
+人为触发中断恢复。
+
 ## 模块目标
 
 1. 独立验证温度状态读取、设定、控制启停和稳定判据。
@@ -69,8 +82,9 @@ DLL、连接设备或发送硬件命令。
 - 稳定必须同时满足：控制已开、错误码为零、全部窗口样本在容差内、窗口
   peak-to-peak 小于配置阈值、未超时。
 - 通信失败后保留 `last_confirmed_state`；不能报告目标已到达。
-- `Ctrl+C` 或异常的温度策略应在 Integration 中明确，不能由本模块擅自关闭
-  cryostat 控制。
+- 日常入口的 `Ctrl+C` 策略已由 `[temperature_run].interrupt_policy` 明确：默认
+  `abort`，也可选择 `continue` 或 `wait-confirmation`；硬故障仍由本模块
+  fail-closed，Integration 组合时必须保留这一覆盖规则。
 - DLL、COM5 和本地路径只能存在于 ignored 的 `hardware.local.toml`。
 
 ## 阶段和验收条件
@@ -88,7 +102,8 @@ DLL、连接设备或发送硬件命令。
   驱动负责控制标志、错误码、poll interval 和总 timeout。
 - `CryostatController` 通用协议尚未声明稳定等待，而仿真接口当前按
   `max_polls` 驱动。Integration 组合前需统一这一调用契约，不能让调用方猜测。
-- 未增加 PID、升降温速率、异常时擅自关闭温控等未确认功能。
+- 未增加 PID、升降温速率或自动修改控制参数；中断恢复只在完整状态已确认安全时
+  保留目标并重新读回。
 
 ### T1 - offline behavior tests（offline complete：2026-08-21）
 

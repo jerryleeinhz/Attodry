@@ -43,6 +43,14 @@ class FieldEndPolicy(StrEnum):
     ZERO = "zero"
 
 
+class TemperatureInterruptPolicy(StrEnum):
+    """How a recoverable operator interruption is handled."""
+
+    CONTINUE = "continue"
+    ABORT = "abort"
+    WAIT_CONFIRMATION = "wait-confirmation"
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectConfig:
     mode: RunMode
@@ -74,6 +82,8 @@ class TemperatureRunConfig:
     max_overshoot_k: float
     pre_measure_wait_s: float
     poll_interval_s: float
+    interrupt_policy: TemperatureInterruptPolicy = TemperatureInterruptPolicy.ABORT
+    resume_recheck_s: float = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -477,7 +487,7 @@ def _parse_temperature_run(
     table: Mapping[str, Any], cryostat: CryostatConfig
 ) -> TemperatureRunConfig:
     name = "temperature_run"
-    _strict_keys(
+    _strict_keys_with_optional(
         table,
         name,
         {
@@ -487,6 +497,7 @@ def _parse_temperature_run(
             "pre_measure_wait_s",
             "poll_interval_s",
         },
+        {"interrupt_policy", "resume_recheck_s"},
     )
     target_k = _positive_number(table["target_k"], f"{name}.target_k")
     max_delta_k = _positive_number(table["max_delta_k"], f"{name}.max_delta_k")
@@ -498,6 +509,21 @@ def _parse_temperature_run(
     )
     poll_interval_s = _positive_number(
         table["poll_interval_s"], f"{name}.poll_interval_s"
+    )
+    raw_policy = table.get(
+        "interrupt_policy", TemperatureInterruptPolicy.ABORT.value
+    )
+    try:
+        interrupt_policy = TemperatureInterruptPolicy(
+            _string(raw_policy, f"{name}.interrupt_policy")
+        )
+    except ValueError as exc:
+        allowed = ", ".join(policy.value for policy in TemperatureInterruptPolicy)
+        raise ConfigError(
+            f"{name}.interrupt_policy must be one of: {allowed}."
+        ) from exc
+    resume_recheck_s = _positive_number(
+        table.get("resume_recheck_s", 30.0), f"{name}.resume_recheck_s"
     )
     if not cryostat.temperature_min_k <= target_k <= cryostat.temperature_max_k:
         raise ConfigError("temperature_run.target_k is outside cryostat limits.")
@@ -515,6 +541,8 @@ def _parse_temperature_run(
         max_overshoot_k=max_overshoot_k,
         pre_measure_wait_s=pre_measure_wait_s,
         poll_interval_s=poll_interval_s,
+        interrupt_policy=interrupt_policy,
+        resume_recheck_s=resume_recheck_s,
     )
 
 

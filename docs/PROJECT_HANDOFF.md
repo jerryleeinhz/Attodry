@@ -654,6 +654,20 @@ temperature operation uses the unified hardware TOML and dedicated command witho
 additional authorization flags. SMUs and real end-to-end acquisition still require
 staged authorization.
 
+Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
+`interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
+`resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state
+recheck and then requires confirmation on another interruption; `wait-confirmation`
+asks before retrying. Overshoot, nonzero device errors, communication failures, and
+unconfirmed control/setpoint states remain hard fail-closed faults. The SQLite
+acquisition audit now records that a resumed run repeats the interrupted condition;
+partial attempts remain rejected and retained. A confirmed error-free temperature
+state is persisted per run/target so a later same-target simulated condition uses a
+short recheck instead of repeating the full wait; a real integration must revalidate
+that state against the device before using it. Fake-DLL, simulated-station, and
+SQLite tests cover the new paths. No real hardware interruption/recovery was
+performed, and the full real attoDRY measurement engine is still pending.
+
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
 

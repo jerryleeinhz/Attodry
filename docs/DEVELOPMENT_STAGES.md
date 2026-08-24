@@ -798,3 +798,26 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   samples are documented as stability readings, not statistically independent
   replicas. Configuration, fake-VISA, and full offline test coverage passed; no
   hardware resource was opened or written.
+
+## Stage 7 follow-up - temperature interruption and point recovery
+
+Status: offline implementation complete (2026-08-24); real interruption/recovery
+remains pending explicit hardware authorization.
+
+- Added `[temperature_run].interrupt_policy` with `continue`, `abort` (default), and
+  `wait-confirmation`; omitted policy values remain backward-compatible with the
+  existing abort behavior.
+- Added `[temperature_run].resume_recheck_s`, default 30 s. A continue or confirmed
+  resume requires a fresh full-state recheck before the temperature run can become
+  measurement-ready. A second automatic continue request changes to confirmation.
+- Overshoot, nonzero attoDRY errors, communication failures, and unconfirmed
+  control/setpoint states remain hard fail-closed paths regardless of policy.
+- Extended SQLite acquisition interruption/resume audit payloads to identify the
+  interrupted condition; resume repeats that condition with a new attempt index and
+  keeps partial raw data rejected for audit.
+- Persisted an error-free, enabled temperature qualification per run/target. A later
+  pending condition at the same target uses a short simulated readback recheck rather
+  than repeating the full temperature wait; the real integration must perform the
+  corresponding hardware recheck before relying on the token.
+- Added fake-DLL, simulated-station, configuration, and SQLite tests. No vendor DLL
+  was loaded and no real instrument was connected for this feature.

@@ -42,6 +42,12 @@ max_delta_k = 250.0
 max_overshoot_k = 0.2
 pre_measure_wait_s = 1800.0
 poll_interval_s = 1.0
+# What to do after a recoverable operator interruption. The default is the
+# existing fail-closed behavior: disable temperature control and exit.
+interrupt_policy = "abort"
+# After continue/resume, require this much fresh full-state monitoring before
+# accepting the already-observed temperature preparation.
+resume_recheck_s = 30.0
 
 [cleanup]
 normal_end_field_policy = "hold"

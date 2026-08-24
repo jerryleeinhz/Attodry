@@ -12,6 +12,7 @@ from typing import Callable, Sequence
 from .attodry import AttoDryDriver, AttoDryError, load_attodry_dll
 from .config import (
     TemperatureRunConfig,
+    TemperatureInterruptPolicy,
     load_temperature_operation_config,
 )
 from .models import CryostatState
@@ -60,6 +61,7 @@ def run(
     monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
     wall_time: Callable[[], float] = time.time,
+    confirmation: Callable[[str], str] | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
     config = load_temperature_operation_config(args.config)
@@ -94,6 +96,7 @@ def run(
         "temperature_run": asdict(request),
         "command_actions": [],
         "temperature_samples": [],
+        "interruptions": [],
         "recovery_actions": [],
     }
     connected = False
@@ -140,9 +143,11 @@ def run(
             driver,
             request,
             samples=record["temperature_samples"],
+            interruptions=record["interruptions"],
             monotonic=monotonic,
             sleeper=sleeper,
             wall_time=wall_time,
+            confirmation=confirmation,
         )
         record["measurement_state"] = asdict(measurement_state)
         record["measurement_ready"] = True
@@ -198,16 +203,37 @@ def _monitor_until_measurement(
     request: TemperatureRunConfig,
     *,
     samples: object,
+    interruptions: object,
     monotonic: Callable[[], float],
     sleeper: Callable[[float], None],
     wall_time: Callable[[], float],
+    confirmation: Callable[[str], str] | None,
 ) -> CryostatState:
     if not isinstance(samples, list):
         raise TypeError("Temperature sample container must be a list.")
+    if not isinstance(interruptions, list):
+        raise TypeError("Temperature interruption container must be a list.")
     started = monotonic()
     overshoot_limit_k = request.target_k + request.max_overshoot_k
+    recheck_started: float | None = None
+    automatic_recoveries = 0
     while True:
-        state = driver.read_state()
+        try:
+            state = driver.read_state()
+        except KeyboardInterrupt:
+            pause_started = monotonic()
+            recheck_started = _handle_operator_interrupt(
+                driver,
+                request,
+                interruptions=interruptions,
+                monotonic=monotonic,
+                wall_time=wall_time,
+                confirmation=confirmation,
+                automatic_recoveries=automatic_recoveries,
+            )
+            automatic_recoveries += 1
+            started += monotonic() - pause_started
+            continue
         elapsed_s = monotonic() - started
         samples.append(
             {
@@ -235,10 +261,133 @@ def _monitor_until_measurement(
                 "Sample temperature reached the configured overshoot limit: "
                 f"{state.sample_temperature_k:g} K >= {overshoot_limit_k:g} K."
             )
+        if recheck_started is not None:
+            recheck_elapsed_s = monotonic() - recheck_started
+        else:
+            recheck_elapsed_s = request.resume_recheck_s
+        if recheck_elapsed_s < request.resume_recheck_s:
+            try:
+                sleeper(
+                    min(
+                        request.poll_interval_s,
+                        request.resume_recheck_s - recheck_elapsed_s,
+                    )
+                )
+            except KeyboardInterrupt:
+                pause_started = monotonic()
+                recheck_started = _handle_operator_interrupt(
+                    driver,
+                    request,
+                    interruptions=interruptions,
+                    monotonic=monotonic,
+                    wall_time=wall_time,
+                    confirmation=confirmation,
+                    automatic_recoveries=automatic_recoveries,
+                )
+                automatic_recoveries += 1
+                started += monotonic() - pause_started
+            continue
         if elapsed_s >= request.pre_measure_wait_s:
             return state
         remaining_s = request.pre_measure_wait_s - elapsed_s
-        sleeper(min(request.poll_interval_s, remaining_s))
+        try:
+            sleeper(min(request.poll_interval_s, remaining_s))
+        except KeyboardInterrupt:
+            pause_started = monotonic()
+            recheck_started = _handle_operator_interrupt(
+                driver,
+                request,
+                interruptions=interruptions,
+                monotonic=monotonic,
+                wall_time=wall_time,
+                confirmation=confirmation,
+                automatic_recoveries=automatic_recoveries,
+            )
+            automatic_recoveries += 1
+            started += monotonic() - pause_started
+
+
+def _handle_operator_interrupt(
+    driver: AttoDryDriver,
+    request: TemperatureRunConfig,
+    *,
+    interruptions: list[object],
+    monotonic: Callable[[], float],
+    wall_time: Callable[[], float],
+    confirmation: Callable[[str], str] | None,
+    automatic_recoveries: int,
+) -> float:
+    """Validate a soft interruption and return the fresh recheck start time."""
+    policy = request.interrupt_policy
+    if policy is TemperatureInterruptPolicy.ABORT:
+        interruptions.append(
+            {
+                "captured_unix_s": wall_time(),
+                "policy": policy.value,
+                "action": "abort",
+                "reason": "operator interrupt",
+            }
+        )
+        raise KeyboardInterrupt
+    if (
+        policy is TemperatureInterruptPolicy.CONTINUE
+        and automatic_recoveries >= 1
+    ):
+        policy = TemperatureInterruptPolicy.WAIT_CONFIRMATION
+
+    state = driver.read_state()
+    if state.error_code:
+        raise AttoDryError(
+            "Cannot recover temperature interruption while attoDRY reports "
+            f"error code {state.error_code}."
+        )
+    if not state.temperature_control_enabled:
+        raise AttoDryError(
+            "Cannot recover temperature interruption while temperature control "
+            "is not confirmed enabled."
+        )
+    if not math.isclose(state.user_temperature_k, request.target_k, abs_tol=1e-4):
+        raise AttoDryError(
+            "Cannot recover temperature interruption after the temperature "
+            "setpoint changed."
+        )
+    overshoot_limit_k = request.target_k + request.max_overshoot_k
+    if state.sample_temperature_k >= overshoot_limit_k:
+        raise AttoDryError(
+            "Cannot recover temperature interruption after the sample reached "
+            f"the overshoot limit: {state.sample_temperature_k:g} K >= "
+            f"{overshoot_limit_k:g} K."
+        )
+
+    action = "continue"
+    if policy is TemperatureInterruptPolicy.WAIT_CONFIRMATION:
+        answerer = confirmation or input
+        answer = answerer(
+            "Temperature control is confirmed safe. Continue this run? [y/N] "
+        )
+        if answer.strip().lower() not in {"y", "yes", "continue"}:
+            interruptions.append(
+                {
+                    "captured_unix_s": wall_time(),
+                    "policy": request.interrupt_policy.value,
+                    "action": "abort",
+                    "reason": "operator confirmation declined",
+                    "state": asdict(state),
+                }
+            )
+            raise KeyboardInterrupt
+        action = "continue-after-confirmation"
+    interruptions.append(
+        {
+            "captured_unix_s": wall_time(),
+            "policy": request.interrupt_policy.value,
+            "effective_policy": policy.value,
+            "action": action,
+            "reason": "operator interrupt",
+            "state": asdict(state),
+        }
+    )
+    return monotonic()
 
 
 def _record_failure_diagnostic(

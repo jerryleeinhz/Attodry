@@ -20,6 +20,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=Path("config/simulation.toml"))
     parser.add_argument("--database", required=True, type=Path)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume the existing run and repeat its first incomplete condition.",
+    )
     parser.add_argument("--temperature-k", type=float, default=2.0)
     parser.add_argument("--bx-t", type=float, default=0.0)
     parser.add_argument("--bz-t", type=float, default=0.0)
@@ -59,20 +64,24 @@ def run(argv: Sequence[str] | None = None) -> int:
     )
     args.database.parent.mkdir(parents=True, exist_ok=True)
     with RunStore(args.database) as store:
-        summary = SimulationRunEngine(
+        engine = SimulationRunEngine(
             store=store,
             run_id=args.run_id,
             station_factory=station_factory,
             max_attempts_per_condition=2,
             normal_end_field_policy=config.cleanup.normal_end_field_policy,
-        ).start_new(
-            (condition,),
-            config_snapshot={
-                "mode": config.project.mode.value,
-                "source": str(args.config),
-                "created_at_utc": datetime.now(UTC).isoformat(),
-            },
         )
+        if args.resume:
+            summary = engine.resume((condition,))
+        else:
+            summary = engine.start_new(
+                (condition,),
+                config_snapshot={
+                    "mode": config.project.mode.value,
+                    "source": str(args.config),
+                    "created_at_utc": datetime.now(UTC).isoformat(),
+                },
+            )
     print(
         f"run_id={summary.run_id} accepted_conditions="
         f"{summary.accepted_conditions} rejected_attempts="

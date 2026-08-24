@@ -7,7 +7,13 @@ from .cleanup import (
     cleanup_after_normal_completion,
 )
 from .attodry import AttoDryDriver
-from .config import ConfigError, ControlConfig, RunMode, load_config
+from .config import (
+    ConfigError,
+    ControlConfig,
+    RunMode,
+    TemperatureInterruptPolicy,
+    load_config,
+)
 from .gates import GateSafetyLimits, SafeGateController
 from .models import CryostatState, GateState, LockinReading, LockinRole, VectorField
 from .records import (
@@ -53,6 +59,7 @@ __all__ = [
     "SimulationStation",
     "SimulationRunEngine",
     "StabilityCriteria",
+    "TemperatureInterruptPolicy",
     "TimedValue",
     "VectorField",
     "cleanup_after_failure",

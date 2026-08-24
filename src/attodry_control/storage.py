@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 import json
+import math
 from pathlib import Path
 import sqlite3
 from typing import Any, Mapping
 
-from .models import LockinRole
+from .models import CryostatState, LockinRole
 from .records import (
     AttemptRecord,
     AttemptStatus,
@@ -165,6 +166,14 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     updated_at_utc TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS temperature_qualifications (
+    run_id TEXT NOT NULL REFERENCES runs(run_id),
+    target_k REAL NOT NULL CHECK (target_k > 0),
+    qualified_at_utc TEXT NOT NULL,
+    state_json TEXT NOT NULL,
+    PRIMARY KEY (run_id, target_k)
+);
+
 CREATE TRIGGER IF NOT EXISTS transport_accept_requires_accepted_attempt_insert
 BEFORE INSERT ON transport_readings
 WHEN NEW.accepted = 1 AND NOT EXISTS (
@@ -291,7 +300,7 @@ class RunStore:
                     "ALTER TABLE transport_readings ADD COLUMN "
                     "phase_shift_deg REAL NOT NULL DEFAULT 0.0"
                 )
-            self.connection.execute("PRAGMA user_version = 3")
+            self.connection.execute("PRAGMA user_version = 4")
 
     def create_run(
         self,
@@ -704,6 +713,54 @@ class RunStore:
             (run_id,),
         ).fetchone()
         return None if row is None else int(row["next_sequence_index"])
+
+    def save_temperature_qualification(
+        self,
+        run_id: str,
+        *,
+        target_k: float,
+        state: CryostatState,
+        qualified_at_utc: datetime,
+    ) -> None:
+        if target_k <= 0:
+            raise ValueError("target_k must be positive.")
+        if state.error_code or not state.temperature_control_enabled:
+            raise ValueError(
+                "Only a confirmed, enabled, error-free temperature state can "
+                "be saved as qualified."
+            )
+        if not math.isclose(state.user_temperature_k, target_k, abs_tol=1e-4):
+            raise ValueError(
+                "Temperature qualification target does not match the confirmed "
+                "device setpoint."
+            )
+        with self.connection:
+            self.connection.execute(
+                """
+                INSERT INTO temperature_qualifications(
+                    run_id, target_k, qualified_at_utc, state_json
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(run_id, target_k) DO UPDATE SET
+                    qualified_at_utc = excluded.qualified_at_utc,
+                    state_json = excluded.state_json
+                """,
+                (
+                    run_id,
+                    float(target_k),
+                    _timestamp_text(qualified_at_utc),
+                    _json(asdict(state)),
+                ),
+            )
+
+    def has_temperature_qualification(self, run_id: str, target_k: float) -> bool:
+        row = self.connection.execute(
+            """
+            SELECT 1 FROM temperature_qualifications
+            WHERE run_id = ? AND target_k = ?
+            """,
+            (run_id, float(target_k)),
+        ).fetchone()
+        return row is not None
 
 
 class RunMonitor:

@@ -1125,6 +1125,118 @@ failure_policy = "hold-current"
         self.assertFalse(result["final_state"]["temperature_control_enabled"])
         self.assertTrue(result["disconnected"])
 
+    def test_temperature_run_continue_rechecks_and_finishes_after_interrupt(
+        self,
+    ) -> None:
+        output = io.StringIO()
+        config_path = self.temperature_run_config(pre_measure_wait_s=2.0)
+        text = config_path.read_text(encoding="utf-8").replace(
+            'interrupt_policy = "abort"',
+            'interrupt_policy = "continue"',
+        ).replace(
+            "resume_recheck_s = 30.0",
+            "resume_recheck_s = 1.0",
+        )
+        config_path.write_text(text, encoding="utf-8")
+
+        class InterruptOnce:
+            def __init__(self) -> None:
+                self.interrupted = False
+
+            def __call__(self, _: float) -> None:
+                if not self.interrupted:
+                    self.interrupted = True
+                    raise KeyboardInterrupt
+
+        with redirect_stdout(output):
+            exit_code = run_temperature_operation(
+                ["--config", str(config_path)],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=InterruptOnce(),
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["interruptions"][0]["action"], "continue")
+        self.assertTrue(result["final_state"]["temperature_control_enabled"])
+
+    def test_temperature_run_wait_confirmation_decline_uses_abort_cleanup(
+        self,
+    ) -> None:
+        output = io.StringIO()
+        config_path = self.temperature_run_config(pre_measure_wait_s=2.0)
+        text = config_path.read_text(encoding="utf-8").replace(
+            'interrupt_policy = "abort"',
+            'interrupt_policy = "wait-confirmation"',
+        )
+        config_path.write_text(text, encoding="utf-8")
+
+        class InterruptOnce:
+            def __init__(self) -> None:
+                self.interrupted = False
+
+            def __call__(self, _: float) -> None:
+                if not self.interrupted:
+                    self.interrupted = True
+                    raise KeyboardInterrupt
+
+        with redirect_stdout(output), self.assertRaises(KeyboardInterrupt):
+            run_temperature_operation(
+                ["--config", str(config_path)],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=InterruptOnce(),
+                wall_time=lambda: 123.0,
+                confirmation=lambda _: "n",
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["interruptions"][0]["action"], "abort")
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+
+    def test_temperature_run_continue_changes_to_confirmation_after_second_interrupt(
+        self,
+    ) -> None:
+        output = io.StringIO()
+        config_path = self.temperature_run_config(pre_measure_wait_s=2.0)
+        text = config_path.read_text(encoding="utf-8").replace(
+            'interrupt_policy = "abort"',
+            'interrupt_policy = "continue"',
+        ).replace(
+            "resume_recheck_s = 30.0",
+            "resume_recheck_s = 1.0",
+        )
+        config_path.write_text(text, encoding="utf-8")
+
+        class InterruptTwice:
+            def __init__(self) -> None:
+                self.interruptions = 0
+
+            def __call__(self, _: float) -> None:
+                if self.interruptions < 2:
+                    self.interruptions += 1
+                    raise KeyboardInterrupt
+
+        with redirect_stdout(output):
+            exit_code = run_temperature_operation(
+                ["--config", str(config_path)],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(step_s=0.1),
+                sleeper=InterruptTwice(),
+                wall_time=lambda: 123.0,
+                confirmation=lambda _: "yes",
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            [item["action"] for item in result["interruptions"]],
+            ["continue", "continue-after-confirmation"],
+        )
+
 
 class StepClock:
     def __init__(self, step_s: float = 1.0) -> None:
