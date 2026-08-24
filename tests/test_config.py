@@ -343,14 +343,36 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "at least 5.0"):
             self.load_text(text)
 
-    def test_lockin_accepts_confirmed_one_second_time_constant(self) -> None:
-        text = self.simulation_text().replace(
-            "time_constant_s = 0.3", "time_constant_s = 1.0", 1
+    def test_lockin_accepts_all_sr830_time_constant_values(self) -> None:
+        values = (
+            0.00001,
+            0.00003,
+            0.0001,
+            0.0003,
+            0.001,
+            0.003,
+            0.01,
+            0.03,
+            0.1,
+            0.3,
+            1.0,
+            3.0,
+            10.0,
+            30.0,
+            100.0,
+            300.0,
+            1000.0,
+            3000.0,
+            10000.0,
+            30000.0,
         )
-
-        config = self.load_text(text)
-
-        self.assertEqual(config.lockin_xx.time_constant_s, 1.0)
+        for value in values:
+            with self.subTest(time_constant_s=value):
+                text = self.simulation_text().replace(
+                    "time_constant_s = 0.3", f"time_constant_s = {value}", 1
+                )
+                config = self.load_text(text)
+                self.assertEqual(config.lockin_xx.time_constant_s, value)
 
     def test_lockin_sweep_rejects_legacy_second_based_timing_fields(self) -> None:
         text = self.simulation_text().replace(

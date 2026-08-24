@@ -62,6 +62,7 @@ frequency_hz = 17.777
 input_mode = "a_minus_b"
 shield_grounding = "float"
 input_coupling = "ac"
+# Must be one discrete SR830 OFLT value; see docs/LOCKIN_DAILY_OPERATION.md.
 time_constant_s = 0.3
 filter_slope_db_oct = 24
 # Station template requested for the current run: fixed XX at 1 V full scale
@@ -91,6 +92,7 @@ frequency_hz = 17.777
 input_mode = "a_minus_b"
 shield_grounding = "float"
 input_coupling = "ac"
+# Must be one discrete SR830 OFLT value; see docs/LOCKIN_DAILY_OPERATION.md.
 time_constant_s = 0.3
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"

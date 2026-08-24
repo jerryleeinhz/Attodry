@@ -809,8 +809,9 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   confirmation changes.
 - Simplified daily sweep timing (2026-08-24): `settle_s`, per-role
   `settle_time_constants`, and `lockin_safety.toml` timing settings are removed.
-  Each role now has only its SR830 `time_constant_s` (confirmed values 0.3 s or
-  1.0 s); `[lockin_sweep].settle_time_constants` (at least 5.0) and
+  Each role now has only its discrete SR830 `time_constant_s`; the complete
+  allowed hardware range is recorded below. `[lockin_sweep].settle_time_constants`
+  (at least 5.0) and
   `sample_interval_time_constants` are the two user-controlled timing
   multipliers. The sweep derives every second value from the slower role, archives
   `slowest_time_constant_s`, `settle_interval_s`, `post_setting_settle_s`, and
@@ -823,6 +824,14 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   (`high_reserve`/`normal`/`low_noise`) directly. The existing safe write order,
   RMOD readback/status verification, audit record, and cleanup restoration remain
   unchanged.
+- Added the complete SR830 `OFLT` 0--19 mapping (2026-08-24), allowing every
+  discrete hardware time constant from 10 µs through 30 ks in each role's
+  `time_constant_s`. Arbitrary values such as 5 s remain invalid. The daily guide
+  records every TOML value/code and the SR830 restriction on time constants above
+  30 s when harmonic detection exceeds 200 Hz; sweep readback/status checks remain
+  fail closed. All 140 directly relevant offline tests pass; the full local run
+  reports 295 passed, 4 skipped, and one unrelated publication-plot failure from
+  this workstation's NumPy/Matplotlib binary mismatch.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

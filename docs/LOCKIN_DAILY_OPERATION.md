@@ -244,11 +244,43 @@ SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、�
 | `input_mode` | 只能是 `"a_minus_b"`。 |
 | `shield_grounding` | 只能是 `"float"`。 |
 | `input_coupling` | 只能是 `"ac"`。 |
-| `time_constant_s` | 当前项目确认可填 `0.3` 或 `1.0` s；必须是 SR830 的离散 `OFLT` 档位。两台可不同，sweep 自动使用较慢的一台计算等待和重复样本间隔。 |
+| `time_constant_s` | 必须是下表中的 SR830 离散 `OFLT` 档位。两台可不同，sweep 自动使用较慢的一台计算等待和重复样本间隔。 |
 | `filter_slope_db_oct` | SR830 硬件可选 `6`、`12`、`18`、`24` dB/oct，对应 `OFSL` 代码 `0`、`1`、`2`、`3`；当前项目只能是 `24`。 |
 | `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
 | `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020`、`0.050` 或 XX `1.0` V。当前示例 fixed：XX `1.0`、XY `0.010`；在 `bounded_auto` 中它必须等于最小量程。 |
 | `reserve_mode` | `"high_reserve"`（RMOD 0）、`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。只在该角色的 `hardware.local.toml` 设置；默认 `"normal"`。 |
+
+SR830 全部允许的时间常数如下；在 TOML 中统一填写秒数：
+
+| `time_constant_s` | `OFLT` | 前面板时间 |
+| ---: | ---: | ---: |
+| `0.00001` | 0 | 10 µs |
+| `0.00003` | 1 | 30 µs |
+| `0.0001` | 2 | 100 µs |
+| `0.0003` | 3 | 300 µs |
+| `0.001` | 4 | 1 ms |
+| `0.003` | 5 | 3 ms |
+| `0.01` | 6 | 10 ms |
+| `0.03` | 7 | 30 ms |
+| `0.1` | 8 | 100 ms |
+| `0.3` | 9 | 300 ms |
+| `1.0` | 10 | 1 s |
+| `3.0` | 11 | 3 s |
+| `10.0` | 12 | 10 s |
+| `30.0` | 13 | 30 s |
+| `100.0` | 14 | 100 s |
+| `300.0` | 15 | 300 s |
+| `1000.0` | 16 | 1 ks |
+| `3000.0` | 17 | 3 ks |
+| `10000.0` | 18 | 10 ks |
+| `30000.0` | 19 | 30 ks |
+
+`5.0` 不在表中，因此不是有效档位。SR830 还规定：当
+`谐波阶数 × 参考频率 > 200 Hz` 时，不能使用大于 30 s 的时间常数。若高频 sweep 中
+仪器因此改变时间常数，项目的 `OFLT?` 读回和 `time_constant_changed` 状态检查会拒绝
+该次测量。设置长时间常数前也要估算总耗时；例如 `30.0 s` 配合
+`settle_time_constants = 5.0` 时，一个 interval 为 150 s，设置改变后的两个 interval
+合计 300 s。
 
 `fixed` 模式只保留 `sensitivity_mode` 和 `sensitivity_full_scale_v`；所有
 `autorange_*` 字段必须完全不存在（继续注释），并非“被忽略”。例如：
@@ -302,8 +334,9 @@ sample_interval_time_constants = 1.0
 
 程序取 XX/XY 中较慢的 `time_constant_s` 为 `τslow`，自动计算
 `settle_interval_s = τslow × settle_time_constants`。频率、谐波、SINE OUT 或量程发生
-实际改变后，正式样本前保留两次 interval 和中间状态检查；因此 0.3 s 时为 3.0 s，1.0 s
-时为 10.0 s。`settle_s` 已删除，日常配置和 CLI 都不能再手动填写秒数。
+实际改变后，正式样本前保留两次 interval 和中间状态检查；例如 0.3 s 时为 3.0 s，
+1.0 s 时为 10.0 s，30 s 时为 300 s。`settle_s` 已删除，日常配置和 CLI 都不能再
+手动填写秒数。
 
 `sample_interval_time_constants` 决定同一点重复样本之间的间隔：实际秒数为
 `τslow × sample_interval_time_constants`。示例的 `1.0` 在 0.3 s/1.0 s 时间常数下分别是

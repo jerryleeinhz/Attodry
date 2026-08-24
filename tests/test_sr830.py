@@ -291,6 +291,7 @@ class Sr830Tests(unittest.TestCase):
                 1,
             )
         )
+
         configured = (
             template.replace(
                 "CHANGE_ME_SR830_XX_VISA_ADDRESS", "GPIB0::8::INSTR"
@@ -307,6 +308,44 @@ class Sr830Tests(unittest.TestCase):
         self.addCleanup(path.unlink)
         self.addCleanup(shutil.rmtree, path.parent / output_directory, ignore_errors=True)
         return path
+
+    def test_maps_all_sr830_time_constant_codes(self) -> None:
+        expected = (
+            (10e-6, 0),
+            (30e-6, 1),
+            (100e-6, 2),
+            (300e-6, 3),
+            (1e-3, 4),
+            (3e-3, 5),
+            (10e-3, 6),
+            (30e-3, 7),
+            (100e-3, 8),
+            (300e-3, 9),
+            (1.0, 10),
+            (3.0, 11),
+            (10.0, 12),
+            (30.0, 13),
+            (100.0, 14),
+            (300.0, 15),
+            (1_000.0, 16),
+            (3_000.0, 17),
+            (10_000.0, 18),
+            (30_000.0, 19),
+        )
+
+        for time_constant_s, code in expected:
+            with self.subTest(time_constant_s=time_constant_s):
+                settings = map_sr830_settings(
+                    reference_source=ReferenceSource.INTERNAL,
+                    external_reference_edge=None,
+                    input_mode=InputMode.A_MINUS_B,
+                    shield_grounding=ShieldGrounding.FLOAT,
+                    input_coupling=InputCoupling.AC,
+                    time_constant_s=time_constant_s,
+                    filter_slope_db_oct=24,
+                    sensitivity_full_scale_v=0.001,
+                )
+                self.assertEqual(settings.time_constant, code)
 
     def test_frequency_readback_accepts_sr830_display_quantization(self) -> None:
         _verify_requested_sweep_frequency_readbacks(
