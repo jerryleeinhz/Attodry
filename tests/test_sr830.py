@@ -375,7 +375,6 @@ class Sr830Tests(unittest.TestCase):
         role: str,
         minimum_full_scale_v: float,
         maximum_full_scale_v: float,
-        maximum_adjustment_steps: int = 1,
     ) -> Path:
         table_start = f"[lockin_{role}]\n"
         configured = config_path.read_text(encoding="utf-8")
@@ -397,8 +396,7 @@ class Sr830Tests(unittest.TestCase):
             f"autorange_min_full_scale_v = {minimum_full_scale_v:.3f}\n"
             f"autorange_max_full_scale_v = {maximum_full_scale_v:.3f}\n"
             "autorange_target_occupancy = 0.85\n"
-            "autorange_stable_samples = 2\n"
-            f"autorange_max_steps = {maximum_adjustment_steps}"
+            "autorange_stable_samples = 2"
         )
         section = section[:sensitivity_start] + policy + section[sensitivity_end:]
         config_path.write_text(
@@ -650,11 +648,37 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("input/reserve overload", problems[0])
 
+    def test_harmonic_transition_rechecks_filter_candidate_once(self) -> None:
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["LIAS?"] = ["2\n", "0\n"]
+        xy_responses["LIAS?"] = ["0\n", "0\n"]
+        xx = Sr830(FakeVisaResource(xx_responses), LockinRole.XX)
+        xy = Sr830(FakeVisaResource(xy_responses), LockinRole.XY)
+        xx.set_harmonic(2)
+        xy.set_harmonic(2)
+
+        with patch("attodry_control.lockin_test.time.sleep") as sleep:
+            transition, problems = _consume_and_verify_harmonic_transition(
+                xx,
+                xy,
+                harmonic=2,
+                settle_s=1.5,
+                allow_input_reserve_recheck=True,
+            )
+
+        self.assertEqual(problems, [])
+        self.assertTrue(transition["verification_passed"])
+        self.assertEqual(
+            transition["candidate_transient_latches"], ["lockin_xx.filter_overload"]
+        )
+        self.assertEqual(sleep.call_count, 1)
+
     def test_autorange_transition_requires_both_authorizations_before_io(self) -> None:
         resource = FakeVisaResource(responses(reference_mode=1))
         decision = AutorangeDecision(
             AutorangeAction.WIDEN,
-            AutorangeState(0.02, 1, 0),
+            AutorangeState(0.02, 0),
             0.85,
             "target occupancy reached",
         )
@@ -679,7 +703,7 @@ class Sr830Tests(unittest.TestCase):
         delays: list[float] = []
         decision = AutorangeDecision(
             AutorangeAction.WIDEN,
-            AutorangeState(0.02, 1, 0),
+            AutorangeState(0.02, 0),
             0.85,
             "target occupancy reached",
         )
@@ -707,7 +731,7 @@ class Sr830Tests(unittest.TestCase):
         resource = FakeVisaResource(response_map)
         decision = AutorangeDecision(
             AutorangeAction.WIDEN,
-            AutorangeState(0.02, 1, 0),
+            AutorangeState(0.02, 0),
             0.85,
             "target occupancy reached",
         )
@@ -1584,7 +1608,7 @@ class Sr830Tests(unittest.TestCase):
             [write for write in xx_resource.writes if write.startswith("SENS ")],
             ["SENS 22", "SENS 21", "SENS 23"],
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 10)
+        self.assertEqual(result["measurement_config"]["schema_version"], 11)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -2047,7 +2071,6 @@ class Sr830Tests(unittest.TestCase):
             role="xx",
             minimum_full_scale_v=0.01,
             maximum_full_scale_v=0.05,
-            maximum_adjustment_steps=2,
         )
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
@@ -2216,9 +2239,10 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(second_decision["next_state"]["current_full_scale_v"], 0.001)
         self.assertEqual(transition["autorange_actions"], {"lockin_xy": "narrow"})
         self.assertFalse(transition["allow_xx_output_overload"])
-        self.assertEqual(transition["allow_output_overload_roles"], ["xy"])
+        self.assertEqual(transition["allow_output_overload_roles"], [])
         self.assertEqual(
-            transition["expected_transient_latches"], ["lockin_xy.output_overload"]
+            transition["ignored_record_only_latches"],
+            ["lockin_xx.output_overload", "lockin_xy.output_overload"],
         )
         self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 4)
         self.assertEqual(transition["problems"], [])
@@ -2436,7 +2460,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 10)
+        self.assertEqual(result["measurement_config"]["schema_version"], 11)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -2562,12 +2586,8 @@ class Sr830Tests(unittest.TestCase):
         )
         output = io.StringIO()
 
-        with (
-            patch("attodry_control.lockin_test.time.sleep"),
-            redirect_stdout(output),
-            self.assertRaisesRegex(Sr830Error, "Unsafe sweep sensitivity transition"),
-        ):
-            run(
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
                 [
                     "sweep-frequency",
                     "--config", str(self._hardware_config()),
@@ -2583,9 +2603,13 @@ class Sr830Tests(unittest.TestCase):
                     {"XX": xx_resource, "XY": xy_resource}
                 ),
             )
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["points"][0]["samples"][0]["problems"], [])
 
         result = json.loads(output.getvalue())
-        self.assertFalse(result["completed"])
+        self.assertTrue(result["completed"])
         self.assertEqual(
             result["sensitivity_setup"]["transition_status"]["lockin_xy"]
             ["lia_status"]["raw"],
@@ -2741,7 +2765,7 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "1\n"] + ["0\n"] * 8
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 8
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -2818,7 +2842,11 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(transition["harmonic"], 2)
         self.assertEqual(transition["lockin_xx"]["lia_status"]["raw"], 18)
         self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 16)
-        self.assertEqual(transition["problems"], [])
+        self.assertEqual(
+            transition["problems"],
+            ["lockin_xx filter overload during harmonic transition"],
+        )
+        self.assertTrue(transition["verification_passed"])
 
     def test_cli_frequency_sweep_separates_transition_latches_from_sample_window(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -3457,13 +3485,13 @@ class Sr830Tests(unittest.TestCase):
             Sr830(xy_resource, LockinRole.XY),
         )
 
-        self.assertIn("lockin_xy overloaded during sensitivity transition", problems)
+        self.assertEqual(problems, [])
         self.assertEqual(record["lockin_xy"]["lia_status"]["raw"], 4)
 
     def test_cli_excitation_overload_keeps_rejected_sample_and_cleans_up(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "1\n", "0\n", "0\n"]
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 20
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )

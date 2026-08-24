@@ -77,7 +77,6 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.050
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# autorange_max_steps = 2
 # A sweep's settle_s must be at least this multiplier times time_constant_s.
 # At the confirmed 0.3 s and 5.0 values, that lower bound is 1.5 s.
 settle_time_constants = 5.0
@@ -111,7 +110,6 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.010
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# autorange_max_steps = 1
 # A sweep's settle_s must be at least this multiplier times time_constant_s.
 # At the confirmed 0.3 s and 5.0 values, that lower bound is 1.5 s.
 settle_time_constants = 5.0

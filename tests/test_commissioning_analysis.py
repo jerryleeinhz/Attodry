@@ -88,6 +88,19 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual({row.actual_frequency_hz for row in rows}, {5622.0})
         self.assertEqual({item.x_value for item in statistics}, {5622.0})
 
+    def test_analysis_ignores_unused_output_overload_bit(self) -> None:
+        payload = self._sweep(completed=True)
+        xy = payload["points"][0]["samples"][0]["lockin_xy"]
+        xy["reading"]["overload"] = True
+        xy["lia_status"]["raw"] = 4
+        xy["lia_status"]["output_overload"] = True
+        path = self._write_json("output_overload_only.json", payload)
+
+        rows = load_sweep_samples(path)
+
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row.statuses == ("clean",) for row in rows))
+
     def test_formal_loader_excludes_transition_and_aggregates_samples(self) -> None:
         payload = self._sweep(completed=True)
         payload["points"][0]["transition_status"] = {

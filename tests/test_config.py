@@ -69,7 +69,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIsNone(config.lockin_xx.autorange_max_full_scale_v)
         self.assertIsNone(config.lockin_xx.autorange_target_occupancy)
         self.assertIsNone(config.lockin_xx.autorange_stable_samples)
-        self.assertIsNone(config.lockin_xx.autorange_max_steps)
         self.assertEqual(config.lockin_xy.sensitivity_mode, SensitivityMode.FIXED)
         self.assertEqual(config.lockin_xy.sensitivity_full_scale_v, 0.001)
         self.assertEqual(config.lockin_xx.settle_time_constants, 5.0)
@@ -176,8 +175,7 @@ class ConfigurationTests(unittest.TestCase):
             'autorange_min_full_scale_v = 0.010\n'
             'autorange_max_full_scale_v = 0.020\n'
             'autorange_target_occupancy = 0.85\n'
-            'autorange_stable_samples = 2\n'
-            'autorange_max_steps = 1',
+            'autorange_stable_samples = 2',
             1,
         ).replace(
             '{ min = 17.777, max = 100000.0, scale = "log", points = 10 }',
@@ -346,7 +344,6 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.01",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 1",
                 )
             ),
             1,
@@ -369,7 +366,6 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.02",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 1",
                 )
             ),
             1,
@@ -388,7 +384,6 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.050",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 1",
                 )
             ),
             1,
@@ -413,7 +408,6 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.050",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 2",
                 )
             ),
             1,
@@ -426,7 +420,7 @@ class ConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(config.lockin_xx.autorange_min_full_scale_v, 0.01)
         self.assertEqual(config.lockin_xx.autorange_max_full_scale_v, 0.05)
-        self.assertEqual(config.lockin_xx.autorange_max_steps, 2)
+        self.assertEqual(config.lockin_xx.autorange_full_scales_v, (0.010, 0.020, 0.050))
 
     def test_xx_three_level_ladder_requires_two_adjustments(self) -> None:
         text = self.simulation_text().replace(
@@ -439,14 +433,13 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.050",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 1",
                 )
             ),
             1,
         )
 
-        with self.assertRaisesRegex(ConfigError, "number of confirmed range transitions"):
-            self.load_text(text)
+        config = self.load_text(text)
+        self.assertEqual(config.lockin_xx.autorange_full_scales_v, (0.010, 0.020, 0.050))
 
     def test_bounded_autorange_rejects_role_swapped_bounds(self) -> None:
         xx_text = self.simulation_text().replace(
@@ -459,7 +452,6 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.01",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 1",
                 )
             ),
             1,
@@ -474,7 +466,6 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.02",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 1",
                 )
             ),
             1,
@@ -495,17 +486,15 @@ class ConfigurationTests(unittest.TestCase):
                     "autorange_max_full_scale_v = 0.02",
                     "autorange_target_occupancy = 0.85",
                     "autorange_stable_samples = 2",
-                    "autorange_max_steps = 1",
                 )
             ),
             1,
         )
         cases = (
             ("autorange_min_full_scale_v = 0.01", "autorange_min_full_scale_v = 0.005"),
-            ("autorange_max_full_scale_v = 0.02", "autorange_max_full_scale_v = 0.05"),
+            ("autorange_max_full_scale_v = 0.02", "autorange_max_full_scale_v = 0.2"),
             ("autorange_target_occupancy = 0.85", "autorange_target_occupancy = 1.0"),
             ("autorange_stable_samples = 2", "autorange_stable_samples = 3"),
-            ("autorange_max_steps = 1", "autorange_max_steps = 2"),
         )
         for old, new in cases:
             with self.subTest(field=old.split()[0]):
@@ -561,7 +550,6 @@ class ConfigurationTests(unittest.TestCase):
             "autorange_max_full_scale_v = 0.02\n",
             "autorange_target_occupancy = 0.85\n",
             "autorange_stable_samples = 2\n",
-            "autorange_max_steps = 1\n",
             "settle_time_constants = 5.0\n",
             'external_reference_edge = "rising"\n',
         ):

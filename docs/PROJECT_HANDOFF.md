@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-23
+Last updated: 2026-08-24
 
 ## Current stage
 
@@ -768,7 +768,7 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   readbacks without rejecting numeric display-bin or XX/XY differences. Analysis
   defaults to the XX actual frequency, and harmonic eligibility uses the higher of
   the requested and both actual frequencies. Non-finite/out-of-range values and
-  strict unlock, overload, instrument-error, and unsafe-transition checks remain
+  strict unlock, input/filter-overload, instrument-error, and unsafe-transition checks remain
   fail-closed. Offline configuration/fake-VISA, record, analysis, and boundary
   coverage passed; no real instrument was opened.
 - Both sweeps clear pending VISA responses before their first query and again before
@@ -783,9 +783,24 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   lower SINE OUT before reserve writes, restore any changed mode during cleanup,
   and fail closed on status/readback errors. After HARM writes, a first
   input/reserve-overload-only latch is retained as a discarded transition and
-  receives one additional settled verification read; repeated bit 0 or any other
-  unsafe transition status rejects the point. The offline suite passed with no
-  hardware I/O; the sweep measurement schema is now version 10.
+  receives one additional settled verification read; repeated bit 0/bit 1 or any other
+  unsafe transition status rejects the point. LIAS bit 2 is record-only for sweeps.
+  The offline suite passed with no hardware I/O; the sweep measurement schema is now
+  version 11.
+- The Lock-in daily and module guides now document the SR830 reserve gain split:
+  Reserve dB is a sensitivity-dependent interference ratio and allocation of
+  gain after the demodulator, not added total gain. They include the project-used
+  sensitivity table, a 20 mV AC/DC gain example, the distinction from output SNR,
+  and operational selection rules. This was documentation only; the checked-in
+  safety policy still permits only `normal`, and no hardware I/O occurred.
+- Bounded-auto no longer exposes `autorange_max_steps`; the selected min/max pair
+  resolves to the unique ladder in `lockin_safety.toml`. Widening moves only to the
+  adjacent rung and may repeat within one point when occupancy remains at least
+  0.85; narrowing still needs two consecutive fits. Sweep status handling records
+  LIAS bit 2 (`output_overload`) but ignores it because CH1/CH2 output is unused.
+  Input/reserve and filter overload candidates receive one settled recheck before
+  fail-closed rejection. The sweep measurement schema is now version 11; this was
+  verified offline with fake VISA and no hardware I/O.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

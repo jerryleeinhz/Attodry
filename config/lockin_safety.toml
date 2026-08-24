@@ -23,4 +23,5 @@ allowed_fixed_full_scales_v = [0.001, 0.010, 0.020, 0.050]
 allowed_reserve_modes = ["normal"]
 autorange_ladders_v = [
   [0.001, 0.010],
+  [0.010, 0.020, 0.050],
 ]

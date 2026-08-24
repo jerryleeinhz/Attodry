@@ -844,14 +844,17 @@ def _commissioning_sample(
     unlocked = bool(lia_status.get("reference_unlocked")) or not bool(
         reading.get("locked")
     )
-    overload = bool(reading.get("overload")) or any(
-        bool(lia_status.get(name))
-        for name in (
-            "input_or_reserve_overload",
-            "filter_overload",
-            "output_overload",
+    # Daily sweeps do not use the SR830 CH1/CH2 output path.  LIAS bit 2 is
+    # still preserved in each JSON sample for audit, but it must not make a
+    # formally accepted measurement disappear from default analysis.  For
+    # legacy records without decoded status, retain the recorded overload bit.
+    if lia_status:
+        overload = any(
+            bool(lia_status.get(name))
+            for name in ("input_or_reserve_overload", "filter_overload")
         )
-    )
+    else:
+        overload = bool(reading.get("overload"))
     error_status = int(instrument.get("error_status", 0))
     statuses: list[str] = []
     if problems:

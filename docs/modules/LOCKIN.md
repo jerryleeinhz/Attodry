@@ -68,7 +68,6 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.050
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# autorange_max_steps = 2
 settle_time_constants = 5.0
 
 [lockin_xy]
@@ -87,15 +86,14 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.010
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# autorange_max_steps = 1
 settle_time_constants = 5.0
 ```
 
 2026-08-22 日常默认改为两台都固定：XX 20 mV、XY 1 mV。只有操作者在本机
 `hardware.local.toml` 把某一角色明确切换为 `bounded_auto` 时，才执行该角色的
-自动判断。推荐自动阶梯为 XX 10 mV--20 mV--50 mV、XY 1 mV--10 mV；两者使用 0.85
-目标占用率、缩窄前两个连续安全样本。XX 每条连续扫描最多两次、且每次仅在相邻的项目
-确认档位间转换；XY 最多一次。10 mV 对已记录最大
+自动判断。推荐自动阶梯为 XX 10 mV--20 mV--50 mV；XY 可使用 1 mV--10 mV 或
+10 mV--20 mV--50 mV；两者使用 0.85 目标占用率、缩窄前两个连续安全样本。每次仅在
+相邻的项目确认档位间转换，同一点在放大后仍不安全时可以继续向上移动。10 mV 对已记录最大
 Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压或频率条件不会超过
 8.5 mV 阈值。
 
@@ -132,9 +130,40 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 | `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
 | `reserve_mode` | `high_reserve`/`normal`/`low_noise`，对应 `RMOD` 0/1/2；当前日常策略为 `normal`。 | 还必须出现在该角色 `lockin_safety.toml` 的 `allowed_reserve_modes` 中；改变时先降 SINE OUT，读回确认并在 cleanup 恢复。 |
 | `autorange_min_full_scale_v` / `autorange_max_full_scale_v` | 选中角色的自动范围边界。推荐 XX 10--50 mV 三档阶梯、XY 1--10 mV。 | 仅 `bounded_auto` 使用；XX 10--50 mV 自动按 10→20→50 mV 逐档转换。 |
-| `autorange_target_occupancy` | 0.85。 | 到达或超过阈值、或报告过载时，才允许上移一个档位；最大档仍不安全则 fail closed。 |
+| `autorange_target_occupancy` | 0.85。 | 到达或超过阈值才允许上移一个档位；最大档仍不安全则 fail closed。 |
 | `autorange_stable_samples` | 2 个连续安全样本。 | 符合更窄的相邻档位两次后，才允许下移一档；任一不合格样本重置计数。 |
-| `autorange_max_steps` | XX 三档为 2；XY 两档为 1。 | 每条连续扫描中允许的总转换次数，必须等于该项目确认阶梯的相邻转换数。 |
+| `autorange_*` 总步数 | 不再配置。 | `lockin_safety.toml` 的有序 ladder 决定相邻转换；一次点内必要时可连续放大，跨点缩窄仍受稳定样本条件限制。 |
+
+LIAS bit 2 (`output_overload`) 属于 SR830 未使用的 CH1/CH2 输出路径。本项目只记录原始
+状态，不把它作为 sweep 过载或自动量程判定；bit 0 (`input_or_reserve_overload`) 和 bit 1
+(`filter_overload`) 首次出现时各有一次 settled recheck，重复出现仍 fail closed。
+
+### Reserve 模式的物理含义
+
+`reserve_mode` 控制的不是额外总增益，而是 SR830 在相敏检波/ADC 前后的增益分配。
+full scale 决定从输入到 10 V 输出的总增益；`high_reserve` 使用较小的前端 AC 增益和
+较大的检波后 DC 增益，让非目标频率干扰较大时前端仍有余量；`low_noise` 反向分配，
+`normal` 居中。没有 Expand 时，手册表中的 Reserve dB 可作为检波后 DC gain 理解，
+而总增益保持不变。
+
+动态储备的幅值定义为：
+
+```text
+DR_dB = 20 log10(Vinterference,max / Vfull_scale)
+```
+
+例如 20 mV full scale 的总增益约 54 dB：`low_noise`/`normal`/`high_reserve` 的实际
+Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可容忍的非目标
+频率干扰约为 31.7 mV/317 mV/1.00 V。该估算不能突破 SR830 输入额定值，也不表示
+同频相干噪声会被消除。模式名称对应的实际 dB 随灵敏度改变，因此数据记录和诊断必须
+把 RMOD 与 `SENS?` 一起解释。
+
+模块运行规则是：默认 `normal`；仅在确认大异频干扰造成 `RESERVE OVLD` 后考虑
+`high_reserve`；干净输入和弱信号才考虑 `low_noise`。Reserve 不决定锁相输出的最低
+可测 SNR，后者主要由输入噪声密度、低通 ENBW/时间常数和平均决定。`FILTER OVLD`
+也不能用提高 Reserve 解决。完整常用档位表、计算例子和日常选择流程统一见
+[`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。当前版本化安全策略仍只
+允许 `normal`，其他模式说明不是硬件写入授权。
 
 `bounded_auto` 是可审计的预备阶段状态机，不是 SR830 的 `AGAN` 命令替代品。每次
 允许的 `SENS` 转换都必须读回新代码、保存转换记录、至少等待 1.5 s、消费并记录

@@ -1064,6 +1064,8 @@ def _run_frequency_sweep(
             preflight_xx, preflight_xy = controller.verify_existing_configuration(
                 frequency_hz=baseline_hz,
                 check_frequency=False,
+                ignore_output_overload=True,
+                transient_overload_recheck_s=args.settle_s,
             )
             writes_started = True
             reserve_setup = _new_sweep_reserve_setup(
@@ -1245,6 +1247,7 @@ def _run_frequency_sweep(
                 settle_s=args.settle_s,
                 writes_started=writes_started,
                 verify_frequency_match=False,
+                ignore_output_overload=True,
             )
             if preflight_xx is not None
             else {"attempted": False, "verified": True, "errors": []}
@@ -1352,6 +1355,8 @@ def _run_excitation_sweep(
             preflight_xx, preflight_xy = controller.verify_existing_configuration(
                 frequency_hz=baseline_hz,
                 check_frequency=False,
+                ignore_output_overload=True,
+                transient_overload_recheck_s=args.settle_s,
             )
             writes_started = True
             reserve_setup = _new_sweep_reserve_setup(
@@ -1514,6 +1519,7 @@ def _run_excitation_sweep(
                 settle_s=args.settle_s,
                 writes_started=writes_started,
                 verify_frequency_match=False,
+                ignore_output_overload=True,
             )
             if preflight_xx is not None
             else {"attempted": False, "verified": True, "errors": []}
@@ -1647,7 +1653,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 10,
+        "schema_version": 11,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -1658,8 +1664,17 @@ def _measurement_config_snapshot(
         "frequency_readback_policy": (
             "Sweep frequency requests and SR830 FREQ?/SNAP? readbacks are both "
             "recorded; display quantization or XX/XY differences are not rejected. "
-            "Only non-finite, out-of-range, unlock, overload, and instrument-error "
-            "conditions fail closed."
+            "Only non-finite, out-of-range, unlock, input/reserve overload, filter "
+            "overload, and instrument-error conditions fail closed."
+        ),
+        "output_overload_policy": (
+            "SR830 LIAS bit 2 (CH1/CH2 output overload) is retained in raw status "
+            "records but is ignored by daily sweep acceptance and autorange decisions; "
+            "the project does not use CH1/CH2 output readback."
+        ),
+        "status_recheck_policy": (
+            "A first input/reserve or filter overload latch is retained as an audit "
+            "candidate and re-read once after settling; a repeated latch fails closed."
         ),
         "setting_writes_enabled_by_command": True,
         "lockin_safety": asdict(config.lockin_safety),
@@ -1945,7 +1960,9 @@ def _configure_sweep_reserve_modes(
                 f"configured RMOD {target}."
             )
     if reserve_setup.get("write_performed"):
-        transition, problems = _consume_reserve_transition(lockin_xx, lockin_xy)
+        transition, problems = _consume_reserve_transition(
+            lockin_xx, lockin_xy, settle_s=settle_s
+        )
         reserve_setup["transition_status"] = transition
         if problems:
             raise Sr830Error("Unsafe reserve-mode transition: " + "; ".join(problems))
@@ -1964,7 +1981,7 @@ def _configure_sweep_reserve_modes(
 
 
 def _consume_reserve_transition(
-    lockin_xx: Sr830, lockin_xy: Sr830
+    lockin_xx: Sr830, lockin_xy: Sr830, *, settle_s: float = 0.0
 ) -> tuple[dict[str, object], list[str]]:
     xx = lockin_xx.read_harmonic_sample(1)
     xy = lockin_xy.read_harmonic_sample(1)
@@ -1973,8 +1990,10 @@ def _consume_reserve_transition(
         role = sample.reading.role.value
         if sample.lia_status.reference_unlocked:
             problems.append(f"lockin_{role} reference unlocked during reserve transition")
-        if sample.lia_status.any_overload:
-            problems.append(f"lockin_{role} overload during reserve transition")
+        if sample.lia_status.input_or_reserve_overload:
+            problems.append(f"lockin_{role} input/reserve overload during reserve transition")
+        if sample.lia_status.filter_overload:
+            problems.append(f"lockin_{role} filter overload during reserve transition")
         if sample.lia_status.frequency_range_changed:
             problems.append(f"lockin_{role} frequency range changed during reserve transition")
         if sample.lia_status.time_constant_changed:
@@ -1984,15 +2003,44 @@ def _consume_reserve_transition(
                 f"lockin_{role} instrument error during reserve transition is "
                 f"{sample.error_status}"
             )
-    return (
-        {
+    transition = {
             "captured_unix_s": time.time(),
             "lockin_xx": _audited_harmonic_sample_record(xx),
             "lockin_xy": _audited_harmonic_sample_record(xy),
             "problems": problems,
-        },
-        problems,
-    )
+        }
+    if (
+        problems
+        and _sweep_overload_recheck_eligible(xx, xy, problems)
+        and settle_s > 0
+    ):
+        transition["verification_required"] = True
+        time.sleep(settle_s)
+        verification_xx = lockin_xx.read_harmonic_sample(1)
+        verification_xy = lockin_xy.read_harmonic_sample(1)
+        verification_problems: list[str] = []
+        for sample in (verification_xx, verification_xy):
+            role = sample.reading.role.value
+            if sample.lia_status.reference_unlocked:
+                verification_problems.append(f"lockin_{role} reference unlocked during reserve transition")
+            if sample.lia_status.input_or_reserve_overload:
+                verification_problems.append(f"lockin_{role} input/reserve overload during reserve transition")
+            if sample.lia_status.filter_overload:
+                verification_problems.append(f"lockin_{role} filter overload during reserve transition")
+            if sample.lia_status.frequency_range_changed:
+                verification_problems.append(f"lockin_{role} frequency range changed during reserve transition")
+            if sample.lia_status.time_constant_changed:
+                verification_problems.append(f"lockin_{role} time constant changed during reserve transition")
+            if sample.error_status:
+                verification_problems.append(f"lockin_{role} instrument error during reserve transition is {sample.error_status}")
+        transition["verification"] = {
+            "captured_unix_s": time.time(),
+            "lockin_xx": _audited_harmonic_sample_record(verification_xx),
+            "lockin_xy": _audited_harmonic_sample_record(verification_xy),
+            "problems": verification_problems,
+        }
+        return transition, verification_problems
+    return transition, problems
 
 
 def _new_sweep_range_record(
@@ -2063,20 +2111,18 @@ def _autorange_policy_for_lockin(lockin: LockinConfig) -> AutorangePolicy | None
         lockin.autorange_max_full_scale_v,
         lockin.autorange_target_occupancy,
         lockin.autorange_stable_samples,
-        lockin.autorange_max_steps,
         lockin.autorange_full_scales_v,
     )
     if any(value is None for value in values):
         raise ValueError(
             f"lockin_{lockin.role.value} bounded_auto configuration is incomplete."
         )
-    minimum, maximum, occupancy, stable_samples, maximum_steps, full_scales = values
+    minimum, maximum, occupancy, stable_samples, full_scales = values
     return AutorangePolicy(
         float(minimum),
         float(maximum),
         float(occupancy),
         int(stable_samples),
-        int(maximum_steps),
         tuple(float(value) for value in full_scales),
     )
 
@@ -2134,6 +2180,7 @@ def _configure_sweep_sensitivities(
             lockin_xx,
             lockin_xy,
             allow_xx_output_overload=False,
+            settle_s=settle_s,
         )
         sensitivity_setup["transition_status"] = transition
         if problems:
@@ -2250,6 +2297,7 @@ def _apply_sweep_segment_ranges(
         lockin_xx,
         lockin_xy,
         allow_xx_output_overload=False,
+        settle_s=settle_s,
     )
     transition_record["status"] = transition
     sensitivity_setup["transition_status"] = transition
@@ -2324,153 +2372,216 @@ def _apply_sweep_autorange(
     settle_s: float,
     record: dict[str, object],
 ) -> None:
-    """Run one h1 preprobe for explicitly enabled roles before formal samples."""
+    """Apply adjacent range changes, repeating widening within one point.
+
+    Every first-read overload candidate is retained.  Input/reserve and filter
+    latches get exactly one settled recheck; output-overload (LIAS bit 2) is
+    retained in the raw sample but never drives acceptance or autorange.
+    """
 
     if not policies:
         return
     automatic_roles = frozenset(policies)
-    xx = lockin_xx.read_harmonic_sample(1)
-    xy = lockin_xy.read_harmonic_sample(1)
-    probe_problems = _autorange_probe_problems(
-        xx,
-        xy,
-        target_frequency_hz=target_frequency_hz,
-        frequency_rel_tolerance=frequency_rel_tolerance,
-        allowed_output_overload_roles=automatic_roles,
-    )
     autorange_record: dict[str, object] = {
         "enabled_roles": sorted(automatic_roles),
-        "probe": {
-            "captured_unix_s": time.time(),
-            "lockin_xx": _audited_harmonic_sample_record(xx),
-            "lockin_xy": _audited_harmonic_sample_record(xy),
-            "problems": probe_problems,
-            "decisions": {},
-        },
-        "transition_status": None,
-        "verification": None,
+        "probes": [],
+        "decisions": [],
+        "transitions": [],
+        "verifications": [],
     }
     record["autorange"] = autorange_record
-    probe = autorange_record["probe"]
-    if not isinstance(probe, dict):
-        raise TypeError("Autorange probe record must be a mapping.")
-    decisions = probe["decisions"]
-    if not isinstance(decisions, dict):
-        raise TypeError("Autorange decisions must be a mapping.")
-    if probe_problems:
-        raise Sr830Error("Autorange probe rejected: " + "; ".join(probe_problems))
-
-    samples_by_role = {"lockin_xx": xx, "lockin_xy": xy}
-    changes: dict[str, AutorangeDecision] = {}
-    failures: list[str] = []
-    for role, policy in policies.items():
-        state = states[role]
-        sample = samples_by_role[role]
-        decision = decide_autorange(
-            policy,
-            state,
-            amplitude_v=sample.reading.amplitude_v,
-            overload=sample.lia_status.output_overload,
-        )
-        states[role] = decision.state
-        decisions[role] = {
-            "prior_state": asdict(state),
-            "action": decision.action.value,
-            "occupancy": decision.occupancy,
-            "reason": decision.reason,
-            "next_state": asdict(decision.state),
-        }
-        if decision.action is AutorangeAction.FAIL:
-            failures.append(f"{role}: {decision.reason}")
-        elif decision.action is not AutorangeAction.KEEP:
-            changes[role] = decision
-    if failures:
-        raise Sr830Error("Autorange cannot remain within bounds: " + "; ".join(failures))
-    if not changes:
-        return
-
     ranges = sensitivity_setup.get("ranges")
     if not isinstance(ranges, dict):
         raise ValueError("Sweep sensitivity setup must contain per-role range records.")
     instruments = {"lockin_xx": lockin_xx, "lockin_xy": lockin_xy}
-    for role, decision in changes.items():
-        range_record = ranges.get(role)
-        if not isinstance(range_record, dict):
-            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
-        target_code = sensitivity_code(decision.state.current_full_scale_v)
-        range_record["write_attempted"] = True
-        range_record["autorange_write_attempted"] = True
-        instruments[role].set_sensitivity(target_code)
-        transitions = range_record.get("autorange_transitions")
-        if not isinstance(transitions, list):
-            raise ValueError(f"Sweep sensitivity setup has no transition list for {role}.")
-        transitions.append(
-            {
+
+    while True:
+        xx = lockin_xx.read_harmonic_sample(1)
+        xy = lockin_xy.read_harmonic_sample(1)
+        probe_problems = _autorange_probe_problems(
+            xx,
+            xy,
+            target_frequency_hz=target_frequency_hz,
+            frequency_rel_tolerance=frequency_rel_tolerance,
+            allowed_output_overload_roles=automatic_roles,
+        )
+        probe_record: dict[str, object] = {
+            "captured_unix_s": time.time(),
+            "lockin_xx": _audited_harmonic_sample_record(xx),
+            "lockin_xy": _audited_harmonic_sample_record(xy),
+            "problems": probe_problems,
+        }
+        probes = autorange_record["probes"]
+        assert isinstance(probes, list)
+        probes.append(probe_record)
+        if _sweep_overload_recheck_eligible(xx, xy, probe_problems):
+            time.sleep(settle_s)
+            verification_xx = lockin_xx.read_harmonic_sample(1)
+            verification_xy = lockin_xy.read_harmonic_sample(1)
+            verification_problems = _autorange_probe_problems(
+                verification_xx,
+                verification_xy,
+                target_frequency_hz=target_frequency_hz,
+                frequency_rel_tolerance=frequency_rel_tolerance,
+                allowed_output_overload_roles=automatic_roles,
+            )
+            probe_record["verification"] = {
+                "captured_unix_s": time.time(),
+                "lockin_xx": _audited_harmonic_sample_record(verification_xx),
+                "lockin_xy": _audited_harmonic_sample_record(verification_xy),
+                "problems": verification_problems,
+            }
+            if verification_problems:
+                raise Sr830Error(
+                    "Autorange probe rejected after overload recheck: "
+                    + "; ".join(verification_problems)
+                )
+            xx, xy, probe_problems = verification_xx, verification_xy, []
+        if probe_problems:
+            raise Sr830Error("Autorange probe rejected: " + "; ".join(probe_problems))
+
+        samples_by_role = {"lockin_xx": xx, "lockin_xy": xy}
+        changes: dict[str, AutorangeDecision] = {}
+        failures: list[str] = []
+        decision_record: dict[str, object] = {"captured_unix_s": time.time(), "roles": {}}
+        for role, policy in policies.items():
+            state = states[role]
+            sample = samples_by_role[role]
+            # Output-overload is deliberately not passed here.  The decision is
+            # occupancy-based; a verified input overload is handled by the
+            # fail-closed probe check above.
+            decision = decide_autorange(
+                policy,
+                state,
+                amplitude_v=sample.reading.amplitude_v,
+            )
+            states[role] = decision.state
+            roles = decision_record["roles"]
+            assert isinstance(roles, dict)
+            roles[role] = {
+                "prior_state": asdict(state),
                 "action": decision.action.value,
-                "target_sensitivity_code": target_code,
-                "target_full_scale_v": decision.state.current_full_scale_v,
                 "occupancy": decision.occupancy,
                 "reason": decision.reason,
+                "next_state": asdict(decision.state),
             }
-        )
-    time.sleep(settle_s)
-    for role, instrument in instruments.items():
-        range_record = ranges.get(role)
-        if not isinstance(range_record, dict):
-            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
-        expected_code = _sensitivity_record_int(
-            range_record, "current_sensitivity_code", role
-        )
-        if role in changes:
-            expected_code = sensitivity_code(changes[role].state.current_full_scale_v)
-        readback = instrument.read_sensitivity()
-        if readback != expected_code:
-            raise Sr830Error(
-                f"{role} autorange readback {readback} does not match requested "
-                f"range {expected_code}."
-            )
-        range_record["current_sensitivity_code"] = expected_code
+            if decision.action is AutorangeAction.FAIL:
+                failures.append(f"{role}: {decision.reason}")
+            elif decision.action is not AutorangeAction.KEEP:
+                changes[role] = decision
+        decisions = autorange_record["decisions"]
+        assert isinstance(decisions, list)
+        decisions.append(decision_record)
+        # Keep the first-probe shape as a compatibility view for existing
+        # notebooks; the list fields above are authoritative for multi-step
+        # widening within one point.
+        if "probe" not in autorange_record:
+            autorange_record["probe"] = probe_record
+        probe_record["decisions"] = decision_record["roles"]
+        if failures:
+            raise Sr830Error("Autorange cannot remain within bounds: " + "; ".join(failures))
+        if not changes:
+            return
 
-    narrowing_roles = frozenset(
-        role.removeprefix("lockin_")
-        for role, decision in changes.items()
-        if decision.action is AutorangeAction.NARROW
-    )
-    transition, transition_problems = _consume_sensitivity_transition(
-        lockin_xx,
-        lockin_xy,
-        allow_xx_output_overload=False,
-        allow_output_overload_roles=narrowing_roles,
-    )
-    transition["autorange_actions"] = {
-        role: decision.action.value for role, decision in changes.items()
-    }
-    autorange_record["transition_status"] = transition
-    if transition_problems:
-        raise Sr830Error(
-            "Unsafe autorange transition: " + "; ".join(transition_problems)
+        for role, decision in changes.items():
+            range_record = ranges.get(role)
+            if not isinstance(range_record, dict):
+                raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+            target_code = sensitivity_code(decision.state.current_full_scale_v)
+            range_record["write_attempted"] = True
+            range_record["autorange_write_attempted"] = True
+            instruments[role].set_sensitivity(target_code)
+            transitions = range_record.get("autorange_transitions")
+            if not isinstance(transitions, list):
+                raise ValueError(f"Sweep sensitivity setup has no transition list for {role}.")
+            transitions.append(
+                {
+                    "action": decision.action.value,
+                    "target_sensitivity_code": target_code,
+                    "target_full_scale_v": decision.state.current_full_scale_v,
+                    "occupancy": decision.occupancy,
+                    "reason": decision.reason,
+                }
+            )
+        time.sleep(settle_s)
+        for role, instrument in instruments.items():
+            range_record = ranges.get(role)
+            if not isinstance(range_record, dict):
+                raise ValueError(f"Sweep sensitivity setup is missing {role}.")
+            expected_code = _sensitivity_record_int(
+                range_record, "current_sensitivity_code", role
+            )
+            if role in changes:
+                expected_code = sensitivity_code(changes[role].state.current_full_scale_v)
+            readback = instrument.read_sensitivity()
+            if readback != expected_code:
+                raise Sr830Error(
+                    f"{role} autorange readback {readback} does not match requested "
+                    f"range {expected_code}."
+                )
+            range_record["current_sensitivity_code"] = expected_code
+
+        transition, transition_problems = _consume_sensitivity_transition(
+            lockin_xx,
+            lockin_xy,
+            settle_s=settle_s,
         )
-    time.sleep(settle_s)
-    verification_xx = lockin_xx.read_harmonic_sample(1)
-    verification_xy = lockin_xy.read_harmonic_sample(1)
-    verification_problems = _autorange_probe_problems(
-        verification_xx,
-        verification_xy,
-        target_frequency_hz=target_frequency_hz,
-        frequency_rel_tolerance=frequency_rel_tolerance,
-        allowed_output_overload_roles=frozenset(),
-    )
-    autorange_record["verification"] = {
-        "captured_unix_s": time.time(),
-        "lockin_xx": _audited_harmonic_sample_record(verification_xx),
-        "lockin_xy": _audited_harmonic_sample_record(verification_xy),
-        "problems": verification_problems,
-    }
-    if verification_problems:
-        raise Sr830Error(
-            "Autorange transition verification rejected: "
-            + "; ".join(verification_problems)
+        transition["autorange_actions"] = {
+            role: decision.action.value for role, decision in changes.items()
+        }
+        transitions = autorange_record["transitions"]
+        assert isinstance(transitions, list)
+        transitions.append(transition)
+        autorange_record.setdefault("transition_status", transition)
+        if transition_problems:
+            raise Sr830Error(
+                "Unsafe autorange transition: " + "; ".join(transition_problems)
+            )
+        time.sleep(settle_s)
+        verification_xx = lockin_xx.read_harmonic_sample(1)
+        verification_xy = lockin_xy.read_harmonic_sample(1)
+        verification_problems = _autorange_probe_problems(
+            verification_xx,
+            verification_xy,
+            target_frequency_hz=target_frequency_hz,
+            frequency_rel_tolerance=frequency_rel_tolerance,
+            allowed_output_overload_roles=automatic_roles,
         )
+        verification_record = {
+            "captured_unix_s": time.time(),
+            "lockin_xx": _audited_harmonic_sample_record(verification_xx),
+            "lockin_xy": _audited_harmonic_sample_record(verification_xy),
+            "problems": verification_problems,
+        }
+        verifications = autorange_record["verifications"]
+        assert isinstance(verifications, list)
+        verifications.append(verification_record)
+        autorange_record.setdefault("verification", verification_record)
+        if verification_problems:
+            raise Sr830Error(
+                "Autorange transition verification rejected: "
+                + "; ".join(verification_problems)
+            )
+        widening_roles = {
+            role for role, decision in changes.items()
+            if decision.action is AutorangeAction.WIDEN
+        }
+        if not widening_roles:
+            return
+        verification_samples = {
+            "lockin_xx": verification_xx,
+            "lockin_xy": verification_xy,
+        }
+        # Repeat within this point only when the newly selected range is still
+        # at/above the occupancy target.  A clean widened read must not be
+        # interpreted as a narrowing candidate until the next scan point.
+        if not any(
+            verification_samples[role].reading.amplitude_v
+            / states[role].current_full_scale_v
+            >= policies[role].target_occupancy
+            for role in widening_roles
+        ):
+            return
 
 
 def _autorange_probe_problems(
@@ -2479,7 +2590,7 @@ def _autorange_probe_problems(
     *,
     target_frequency_hz: float,
     frequency_rel_tolerance: float,
-    allowed_output_overload_roles: frozenset[str],
+    allowed_output_overload_roles: frozenset[str] = frozenset(),
 ) -> list[str]:
     problems: list[str] = []
     for sample in (xx, xy):
@@ -2490,10 +2601,8 @@ def _autorange_probe_problems(
             problems.append(f"{role} input/reserve overload")
         if sample.lia_status.filter_overload:
             problems.append(f"{role} filter overload")
-        if sample.lia_status.output_overload and not (
-            role in allowed_output_overload_roles and sample.lia_status.raw == 4
-        ):
-            problems.append(f"{role} output overload")
+        # LIAS bit 2 is the unused SR830 CH1/CH2 output path.  Keep it in the
+        # audited sample, but never reject a sweep point or drive autorange from it.
         if sample.lia_status.frequency_range_changed:
             problems.append(f"{role} frequency range changed unexpectedly")
         if sample.lia_status.time_constant_changed:
@@ -2512,6 +2621,29 @@ def _autorange_probe_problems(
     except Sr830Error as exc:
         problems.append(str(exc))
     return problems
+
+
+def _sweep_overload_recheck_eligible(
+    xx: Sr830HarmonicSample,
+    xy: Sr830HarmonicSample,
+    problems: list[str],
+) -> bool:
+    """Return whether a single delayed input/filter overload recheck is safe."""
+
+    if not any(
+        sample.lia_status.input_or_reserve_overload
+        or sample.lia_status.filter_overload
+        for sample in (xx, xy)
+    ):
+        return False
+    fatal_fragments = (
+        "reference is unlocked",
+        "frequency range changed",
+        "time constant changed",
+        "instrument error",
+        "frequency readback",
+    )
+    return not any(any(fragment in problem for fragment in fatal_fragments) for problem in problems)
 
 
 def _range_write_attempted(
@@ -2984,28 +3116,12 @@ def _capture_sweep_point(
                 time.sleep(sample_interval_s)
             xx = lockin_xx.read_harmonic_sample(harmonic)
             xy = lockin_xy.read_harmonic_sample(harmonic)
-            problems: list[str] = []
-            for sample in (xx, xy):
-                role = sample.reading.role.value
-                if sample.lia_status.reference_unlocked:
-                    problems.append(f"lockin_{role} reference is unlocked")
-                if sample.lia_status.any_overload:
-                    problems.append(f"lockin_{role} reports overload")
-                if sample.error_status:
-                    problems.append(
-                        f"lockin_{role} instrument error is {sample.error_status}"
-                    )
-            try:
-                _verify_frequency_readbacks(
-                    target_frequency_hz,
-                    xx.reading.frequency_hz,
-                    xy.reading.frequency_hz,
-                    rel_tolerance=frequency_rel_tolerance,
-                    absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
-                    check_match=False,
-                )
-            except Sr830Error as exc:
-                problems.append(str(exc))
+            problems = _autorange_probe_problems(
+                xx,
+                xy,
+                target_frequency_hz=target_frequency_hz,
+                frequency_rel_tolerance=frequency_rel_tolerance,
+            )
             sample_payload = {
                 "sample_index": sample_index,
                 "captured_unix_s": time.time(),
@@ -3014,6 +3130,29 @@ def _capture_sweep_point(
                 "lockin_xy": _audited_harmonic_sample_record(xy),
                 "problems": problems,
             }
+            if _sweep_overload_recheck_eligible(xx, xy, problems):
+                time.sleep(harmonic_settle_s)
+                verification_xx = lockin_xx.read_harmonic_sample(harmonic)
+                verification_xy = lockin_xy.read_harmonic_sample(harmonic)
+                verification_problems = _autorange_probe_problems(
+                    verification_xx,
+                    verification_xy,
+                    target_frequency_hz=target_frequency_hz,
+                    frequency_rel_tolerance=frequency_rel_tolerance,
+                )
+                sample_payload["status_recheck"] = {
+                    "initial_lockin_xx": sample_payload["lockin_xx"],
+                    "initial_lockin_xy": sample_payload["lockin_xy"],
+                    "initial_problems": problems,
+                    "captured_unix_s": time.time(),
+                    "lockin_xx": _audited_harmonic_sample_record(verification_xx),
+                    "lockin_xy": _audited_harmonic_sample_record(verification_xy),
+                    "problems": verification_problems,
+                }
+                xx, xy, problems = verification_xx, verification_xy, verification_problems
+                sample_payload["lockin_xx"] = _audited_harmonic_sample_record(xx)
+                sample_payload["lockin_xy"] = _audited_harmonic_sample_record(xy)
+                sample_payload["problems"] = problems
             raw_samples.append(sample_payload)
             if problems:
                 raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
@@ -3061,8 +3200,8 @@ def _consume_harmonic_transition(
             problems.append(f"lockin_{role} reference unlocked during harmonic transition")
         if sample.lia_status.input_or_reserve_overload:
             problems.append(f"lockin_{role} input/reserve overload during harmonic transition")
-        if sample.lia_status.output_overload:
-            problems.append(f"lockin_{role} output overload during harmonic transition")
+        if sample.lia_status.filter_overload:
+            problems.append(f"lockin_{role} filter overload during harmonic transition")
         if sample.lia_status.time_constant_changed:
             problems.append(f"lockin_{role} time constant changed during harmonic transition")
         if sample.error_status:
@@ -3075,6 +3214,10 @@ def _consume_harmonic_transition(
         candidate_latches.append("lockin_xx.input_or_reserve_overload")
     if xy.lia_status.input_or_reserve_overload:
         candidate_latches.append("lockin_xy.input_or_reserve_overload")
+    if xx.lia_status.filter_overload:
+        candidate_latches.append("lockin_xx.filter_overload")
+    if xy.lia_status.filter_overload:
+        candidate_latches.append("lockin_xy.filter_overload")
     return (
         {
             "harmonic": harmonic,
@@ -3100,12 +3243,12 @@ def _consume_and_verify_harmonic_transition(
     settle_s: float,
     allow_input_reserve_recheck: bool,
 ) -> tuple[dict[str, object], list[str]]:
-    """Consume one HARM-transition sample and recheck a lone input/reserve latch.
+    """Consume one HARM-transition sample and recheck transient overload latches.
 
-    LIAS bit 0 is latched and can briefly assert while the SR830 changes its
-    internal harmonic/filter path.  The first read is retained as audit data;
-    only a first-read bit-0-only problem is eligible for one settled recheck.
-    A second nonzero status remains a fail-closed transition rejection.
+    LIAS bit 0 and filter overload are latched and can briefly assert while the
+    SR830 changes its internal harmonic/filter path.  The first read is retained
+    as audit data; one clean settled recheck is allowed.  Output-overload bit 2
+    is deliberately record-only.
     """
 
     transition, problems = _consume_harmonic_transition(
@@ -3114,12 +3257,15 @@ def _consume_and_verify_harmonic_transition(
     if not problems:
         transition["verification_required"] = False
         return transition, problems
-    input_reserve_only = all("input/reserve overload" in problem for problem in problems)
-    if not allow_input_reserve_recheck or not input_reserve_only:
+    transient_only = all(
+        ("input/reserve overload" in problem or "filter overload" in problem)
+        for problem in problems
+    )
+    if not allow_input_reserve_recheck or not transient_only:
         transition["verification_required"] = False
         return transition, problems
     transition["verification_required"] = True
-    transition["verification_reason"] = "input/reserve overload candidate"
+    transition["verification_reason"] = "input/reserve or filter overload candidate"
     time.sleep(settle_s)
     verification, verification_problems = _consume_harmonic_transition(
         lockin_xx, lockin_xy, harmonic=harmonic
@@ -3181,27 +3327,23 @@ def _consume_sensitivity_transition(
     *,
     allow_xx_output_overload: bool = True,
     allow_output_overload_roles: frozenset[str] = frozenset(),
+    settle_s: float = 0.0,
 ) -> tuple[dict[str, object], list[str]]:
-    """Record and clear sensitivity-transition latches before strict verification.
+    """Record a SENS transition and recheck input/filter overload once.
 
-    Only an explicitly listed role's output-overload-only latch (`LIAS=4`) may
-    be discarded. This is used for a deliberate range narrowing; all other
-    overloads and transition latches remain failures.
+    The SR830 CH1/CH2 output path is not used by this project.  Its LIAS bit 2
+    is therefore retained in the raw sample but ignored here, regardless of the
+    legacy ``allow_*output_overload`` arguments.
     """
-
-    allowed_roles = set(allow_output_overload_roles)
-    if allow_xx_output_overload:
-        allowed_roles.add("xx")
     xx = lockin_xx.read_harmonic_sample(1)
     xy = lockin_xy.read_harmonic_sample(1)
     problems: list[str] = []
     for sample in (xx, xy):
         role = sample.reading.role.value
-        allowed_output_overload = (
-            role in allowed_roles and sample.lia_status.raw == 4
-        )
-        if sample.lia_status.any_overload and not allowed_output_overload:
-            problems.append(f"lockin_{role} overloaded during sensitivity transition")
+        if sample.lia_status.input_or_reserve_overload:
+            problems.append(f"lockin_{role} input/reserve overload during sensitivity transition")
+        if sample.lia_status.filter_overload:
+            problems.append(f"lockin_{role} filter overload during sensitivity transition")
         if sample.lia_status.reference_unlocked:
             problems.append(
                 f"lockin_{role} reference unlocked during sensitivity transition"
@@ -3214,20 +3356,49 @@ def _consume_sensitivity_transition(
             problems.append(
                 f"lockin_{role} instrument error status {sample.error_status}"
             )
-    return (
-        {
+    transition = {
+        "captured_unix_s": time.time(),
+        "ignored_record_only_latches": [
+            "lockin_xx.output_overload", "lockin_xy.output_overload"
+        ],
+            "allow_xx_output_overload": False,
+            "allow_output_overload_roles": [],
+        "lockin_xx": _audited_harmonic_sample_record(xx),
+        "lockin_xy": _audited_harmonic_sample_record(xy),
+        "problems": problems,
+    }
+    if (
+        problems
+        and _sweep_overload_recheck_eligible(xx, xy, problems)
+        and settle_s > 0
+    ):
+        transition["verification_required"] = True
+        time.sleep(settle_s)
+        verification_xx = lockin_xx.read_harmonic_sample(1)
+        verification_xy = lockin_xy.read_harmonic_sample(1)
+        verification_problems: list[str] = []
+        for sample in (verification_xx, verification_xy):
+            role = sample.reading.role.value
+            if sample.lia_status.input_or_reserve_overload:
+                verification_problems.append(f"lockin_{role} input/reserve overload during sensitivity transition")
+            if sample.lia_status.filter_overload:
+                verification_problems.append(f"lockin_{role} filter overload during sensitivity transition")
+            if sample.lia_status.reference_unlocked:
+                verification_problems.append(f"lockin_{role} reference unlocked during sensitivity transition")
+            if sample.lia_status.frequency_range_changed:
+                verification_problems.append(f"lockin_{role} frequency range changed unexpectedly")
+            if sample.lia_status.time_constant_changed:
+                verification_problems.append(f"lockin_{role} time constant changed unexpectedly")
+            if sample.error_status:
+                verification_problems.append(f"lockin_{role} instrument error status {sample.error_status}")
+        transition["verification"] = {
             "captured_unix_s": time.time(),
-            "expected_transient_latches": [
-                f"lockin_{role}.output_overload" for role in sorted(allowed_roles)
-            ],
-            "allow_xx_output_overload": allow_xx_output_overload,
-            "allow_output_overload_roles": sorted(allowed_roles),
-            "lockin_xx": _audited_harmonic_sample_record(xx),
-            "lockin_xy": _audited_harmonic_sample_record(xy),
-            "problems": problems,
-        },
-        problems,
-    )
+            "lockin_xx": _audited_harmonic_sample_record(verification_xx),
+            "lockin_xy": _audited_harmonic_sample_record(verification_xy),
+            "problems": verification_problems,
+        }
+        return transition, verification_problems
+    return transition, problems
 
 
 def _restore_scan_state(
@@ -3247,6 +3418,7 @@ def _restore_scan_state(
     restore_xx_reserve: bool = False,
     restore_xy_reserve: bool = False,
     verify_frequency_match: bool = True,
+    ignore_output_overload: bool = False,
 ) -> dict[str, object]:
     if not writes_started:
         return {"attempted": False, "verified": True, "errors": []}
@@ -3333,7 +3505,7 @@ def _restore_scan_state(
         time.sleep(settle_s)
         try:
             reserve_transition, transition_problems = _consume_reserve_transition(
-                lockin_xx, lockin_xy
+                lockin_xx, lockin_xy, settle_s=settle_s
             )
             errors.extend(transition_problems)
         except BaseException as exc:
@@ -3370,6 +3542,7 @@ def _restore_scan_state(
                     lockin_xx,
                     lockin_xy,
                     allow_xx_output_overload=restore_sensitivity,
+                    settle_s=settle_s,
                 )
             )
             errors.extend(transition_problems)
@@ -3381,7 +3554,12 @@ def _restore_scan_state(
         xy = lockin_xy.read_diagnostic(consume_status_latches=True)
         diagnostics = {"lockin_xx": asdict(xx), "lockin_xy": asdict(xy)}
         errors.extend(
-            _diagnostic_problems(xx, xy, check_frequency_match=verify_frequency_match)
+            _diagnostic_problems(
+                xx,
+                xy,
+                check_frequency_match=verify_frequency_match,
+                ignore_output_overload=ignore_output_overload,
+            )
         )
         if not math.isclose(xx.sine_output_v, 0.004, rel_tol=0.0, abs_tol=0.001):
             errors.append("lockin_xx did not read back 4 mVrms")
@@ -3569,6 +3747,7 @@ def _diagnostic_problems(
     xy: Sr830Diagnostic,
     *,
     check_frequency_match: bool = True,
+    ignore_output_overload: bool = False,
 ) -> list[str]:
     problems: list[str] = []
     if xx.identity == xy.identity:
@@ -3594,7 +3773,17 @@ def _diagnostic_problems(
         if diagnostic.lia_status is not None:
             if diagnostic.lia_status.reference_unlocked:
                 problems.append(f"lockin_{diagnostic.role.value} reference is unlocked")
-            if diagnostic.lia_status.any_overload:
+            if (
+                diagnostic.lia_status.any_overload
+                and not (
+                    ignore_output_overload
+                    and diagnostic.lia_status.output_overload
+                    and not (
+                        diagnostic.lia_status.input_or_reserve_overload
+                        or diagnostic.lia_status.filter_overload
+                    )
+                )
+            ):
                 problems.append(f"lockin_{diagnostic.role.value} reports overload")
         if diagnostic.error_status:
             problems.append(

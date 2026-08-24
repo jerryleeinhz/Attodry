@@ -762,6 +762,12 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   one additional settled verification read; a repeated latch or any other unsafe
   bit remains fail-closed. Fake-VISA coverage and the complete offline suite passed;
   no hardware resource was opened or written.
+- Documented the SR830 reserve gain-distribution model (2026-08-24): Reserve dB
+  is the dynamic-interference ratio and post-demodulation DC-gain allocation, not
+  extra total measurement gain. The daily and module guides now include the
+  sensitivity-dependent table, a 20 mV worked example, SNR distinction, and
+  fail-closed mode-selection guidance. This documentation-only change did not
+  alter configuration, code, policy allowlists, or hardware state.
 - Merged the operator-supplied station sweep profile into
   `config/hardware.example.toml`: fixed XX 1 V, fixed XY 10 mV, 4 mV--400 mV
   linear plus 0.45--5 V linear excitation segments, excitation XX h1 only with
@@ -770,3 +776,12 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   present in the safety allowlist. Local VISA addresses remain placeholders in the
   tracked example by repository policy and belong only in ignored
   `hardware.local.toml`. Configuration validation and the full fake-VISA suite pass.
+- Updated bounded-auto and sweep status handling (2026-08-24): the user-facing
+  `autorange_max_steps` field was removed; the versioned safety ladder now defines
+  adjacent transitions. A point may widen repeatedly (10→20→50 mV) when the new
+  range remains above 0.85, while narrowing still requires two consecutive fits.
+  LIAS bit 2 (`output_overload`) is retained as raw audit data but ignored for sweep
+  acceptance/autorange because CH1/CH2 output is unused. Bit 0 and bit 1 candidates
+  receive one settled recheck; repeated overload, unlock, or instrument errors remain
+  fail-closed. Sweep measurement schema is now version 11; all verification was
+  offline with fake VISA only.

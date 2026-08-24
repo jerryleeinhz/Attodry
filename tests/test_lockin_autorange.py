@@ -8,9 +8,11 @@ from attodry_control.lockin_autorange import (
 )
 
 
-XX_POLICY = AutorangePolicy(0.01, 0.02, 0.85, 2, 1)
-XX_THREE_LEVEL_POLICY = AutorangePolicy(0.01, 0.05, 0.85, 2, 2)
-XY_POLICY = AutorangePolicy(0.001, 0.01, 0.85, 2, 1)
+XX_POLICY = AutorangePolicy(0.01, 0.02, 0.85, 2)
+XX_THREE_LEVEL_POLICY = AutorangePolicy(
+    0.01, 0.05, 0.85, 2, (0.01, 0.02, 0.05)
+)
+XY_POLICY = AutorangePolicy(0.001, 0.01, 0.85, 2)
 
 
 class LockinAutorangeTests(unittest.TestCase):
@@ -26,7 +28,7 @@ class LockinAutorangeTests(unittest.TestCase):
             XX_POLICY, AutorangeState(0.01), amplitude_v=0.0085, overload=False
         )
         self.assertEqual(decision.action, AutorangeAction.WIDEN)
-        self.assertEqual(decision.state, AutorangeState(0.02, 1, 0))
+        self.assertEqual(decision.state, AutorangeState(0.02, 0))
 
     def test_overload_widens_immediately(self) -> None:
         decision = decide_autorange(
@@ -49,14 +51,14 @@ class LockinAutorangeTests(unittest.TestCase):
         )
 
         self.assertEqual(first.action, AutorangeAction.WIDEN)
-        self.assertEqual(first.state, AutorangeState(0.02, 1, 0))
+        self.assertEqual(first.state, AutorangeState(0.02, 0))
         self.assertEqual(second.action, AutorangeAction.WIDEN)
-        self.assertEqual(second.state, AutorangeState(0.05, 2, 0))
+        self.assertEqual(second.state, AutorangeState(0.05, 0))
 
     def test_three_level_xx_policy_fails_closed_after_second_widening(self) -> None:
         decision = decide_autorange(
             XX_THREE_LEVEL_POLICY,
-            AutorangeState(0.05, 2),
+            AutorangeState(0.05),
             amplitude_v=0.0425,
             overload=False,
         )
@@ -78,7 +80,7 @@ class LockinAutorangeTests(unittest.TestCase):
         )
         self.assertEqual(first.action, AutorangeAction.KEEP)
         self.assertEqual(second.action, AutorangeAction.NARROW)
-        self.assertEqual(second.state, AutorangeState(0.01, 1, 0))
+        self.assertEqual(second.state, AutorangeState(0.01, 0))
 
     def test_unfit_sample_resets_narrowing_counter(self) -> None:
         first = decide_autorange(
@@ -89,12 +91,12 @@ class LockinAutorangeTests(unittest.TestCase):
         )
         self.assertEqual(reset.state.stable_fit_samples, 0)
 
-    def test_adjustment_limit_prevents_oscillation(self) -> None:
+    def test_narrowing_can_recover_after_previous_widening(self) -> None:
         decision = decide_autorange(
-            XX_POLICY, AutorangeState(0.02, 1, 1), amplitude_v=0.008, overload=False
+            XX_POLICY, AutorangeState(0.02, 1), amplitude_v=0.008, overload=False
         )
-        self.assertEqual(decision.action, AutorangeAction.KEEP)
-        self.assertEqual(decision.state.current_full_scale_v, 0.02)
+        self.assertEqual(decision.action, AutorangeAction.NARROW)
+        self.assertEqual(decision.state.current_full_scale_v, 0.01)
 
     def test_rejects_non_finite_or_out_of_bound_inputs(self) -> None:
         with self.assertRaises(ValueError):
@@ -115,7 +117,7 @@ class LockinAutorangeTests(unittest.TestCase):
         )
 
         self.assertEqual(decision.action, AutorangeAction.WIDEN)
-        self.assertEqual(decision.state, AutorangeState(0.01, 1, 0))
+        self.assertEqual(decision.state, AutorangeState(0.01, 0))
         self.assertAlmostEqual(decision.occupancy, 0.85)
 
     def test_xy_policy_requires_two_safe_samples_before_narrowing(self) -> None:
@@ -128,7 +130,7 @@ class LockinAutorangeTests(unittest.TestCase):
 
         self.assertEqual(first.action, AutorangeAction.KEEP)
         self.assertEqual(second.action, AutorangeAction.NARROW)
-        self.assertEqual(second.state, AutorangeState(0.001, 1, 0))
+        self.assertEqual(second.state, AutorangeState(0.001, 0))
 
     def test_xy_policy_fails_closed_at_ten_millivolts(self) -> None:
         decision = decide_autorange(

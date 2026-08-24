@@ -20,7 +20,6 @@ class AutorangePolicy:
     maximum_full_scale_v: float
     target_occupancy: float
     stable_samples_before_narrowing: int
-    maximum_adjustment_steps: int
     configured_full_scales_v: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
@@ -49,11 +48,6 @@ class AutorangePolicy:
             raise ValueError("target_occupancy must be between 0 and 1")
         if self.stable_samples_before_narrowing < 1:
             raise ValueError("stable_samples_before_narrowing must be positive")
-        if self.maximum_adjustment_steps != len(self.full_scales_v) - 1:
-            raise ValueError(
-                "maximum_adjustment_steps must equal the number of confirmed "
-                "range transitions in the configured ladder"
-            )
 
     @property
     def full_scales_v(self) -> tuple[float, ...]:
@@ -67,7 +61,6 @@ class AutorangePolicy:
 @dataclass(frozen=True, slots=True)
 class AutorangeState:
     current_full_scale_v: float
-    adjustment_steps: int = 0
     stable_fit_samples: int = 0
 
 
@@ -84,14 +77,18 @@ def decide_autorange(
     state: AutorangeState,
     *,
     amplitude_v: float,
-    overload: bool,
+    overload: bool = False,
 ) -> AutorangeDecision:
-    """Return one deterministic pre-sampling range decision without I/O."""
+    """Return one deterministic adjacent-range decision without I/O.
+
+    ``overload`` is retained as a compatibility hook for callers that have an
+    independently verified input overload.  Sweep code must not pass SR830
+    ``LIAS`` bit 2 (the CH1/CH2 output-overload latch) here: that latch is
+    recorded for audit only and is intentionally ignored by the sweep policy.
+    """
 
     if state.current_full_scale_v not in policy.full_scales_v:
         raise ValueError("current_full_scale_v is outside the configured bounds")
-    if not 0 <= state.adjustment_steps <= policy.maximum_adjustment_steps:
-        raise ValueError("adjustment_steps is outside the configured limit")
     if state.stable_fit_samples < 0:
         raise ValueError("stable_fit_samples cannot be negative")
     if not math.isfinite(amplitude_v) or amplitude_v < 0:
@@ -101,27 +98,16 @@ def decide_autorange(
     current_index = policy.full_scales_v.index(state.current_full_scale_v)
     must_widen = overload or occupancy >= policy.target_occupancy
     if must_widen:
-        if (
-            current_index == len(policy.full_scales_v) - 1
-            or state.adjustment_steps >= policy.maximum_adjustment_steps
-        ):
+        if current_index == len(policy.full_scales_v) - 1:
             return AutorangeDecision(
                 AutorangeAction.FAIL,
-                AutorangeState(
-                    state.current_full_scale_v,
-                    state.adjustment_steps,
-                    0,
-                ),
+                AutorangeState(state.current_full_scale_v, 0),
                 occupancy,
                 "overload or target occupancy cannot be resolved within bounds",
             )
         return AutorangeDecision(
             AutorangeAction.WIDEN,
-            AutorangeState(
-                policy.full_scales_v[current_index + 1],
-                state.adjustment_steps + 1,
-                0,
-            ),
+            AutorangeState(policy.full_scales_v[current_index + 1], 0),
             occupancy,
             "overload" if overload else "target occupancy reached",
         )
@@ -129,11 +115,7 @@ def decide_autorange(
     if current_index == 0:
         return AutorangeDecision(
             AutorangeAction.KEEP,
-            AutorangeState(
-                state.current_full_scale_v,
-                state.adjustment_steps,
-                0,
-            ),
+            AutorangeState(state.current_full_scale_v, 0),
             occupancy,
             "minimum configured full scale is safe",
         )
@@ -146,32 +128,13 @@ def decide_autorange(
     if stable_fit_samples < policy.stable_samples_before_narrowing:
         return AutorangeDecision(
             AutorangeAction.KEEP,
-            AutorangeState(
-                state.current_full_scale_v,
-                state.adjustment_steps,
-                stable_fit_samples,
-            ),
+            AutorangeState(state.current_full_scale_v, stable_fit_samples),
             occupancy,
             "waiting for consecutive samples that fit the narrower range",
         )
-    if state.adjustment_steps >= policy.maximum_adjustment_steps:
-        return AutorangeDecision(
-            AutorangeAction.KEEP,
-            AutorangeState(
-                state.current_full_scale_v,
-                state.adjustment_steps,
-                stable_fit_samples,
-            ),
-            occupancy,
-            "adjustment limit reached; current range remains safe",
-        )
     return AutorangeDecision(
         AutorangeAction.NARROW,
-        AutorangeState(
-            policy.full_scales_v[current_index - 1],
-            state.adjustment_steps + 1,
-            0,
-        ),
+        AutorangeState(policy.full_scales_v[current_index - 1], 0),
         occupancy,
         "consecutive samples fit the narrower range",
     )

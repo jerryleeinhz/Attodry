@@ -123,7 +123,6 @@ class LockinConfig:
     autorange_max_full_scale_v: float | None
     autorange_target_occupancy: float | None
     autorange_stable_samples: int | None
-    autorange_max_steps: int | None
     autorange_full_scales_v: tuple[float, ...] | None
     settle_time_constants: float
     reserve_mode: ReserveMode
@@ -788,7 +787,6 @@ def _parse_lockin(
                 "autorange_max_full_scale_v",
                 "autorange_target_occupancy",
                 "autorange_stable_samples",
-                "autorange_max_steps",
             }
         )
     _strict_keys(
@@ -864,7 +862,6 @@ def _parse_lockin(
     autorange_max_full_scale_v = None
     autorange_target_occupancy = None
     autorange_stable_samples = None
-    autorange_max_steps = None
     autorange_full_scales_v = None
     if sensitivity_full_scale_v not in safety_role.allowed_fixed_full_scales_v:
         raise ConfigError(
@@ -886,11 +883,6 @@ def _parse_lockin(
         autorange_stable_samples = _integer(
             table["autorange_stable_samples"],
             f"{name}.autorange_stable_samples",
-            minimum=1,
-        )
-        autorange_max_steps = _integer(
-            table["autorange_max_steps"],
-            f"{name}.autorange_max_steps",
             minimum=1,
         )
         try:
@@ -917,7 +909,6 @@ def _parse_lockin(
                 autorange_max_full_scale_v,
                 autorange_target_occupancy,
                 autorange_stable_samples,
-                autorange_max_steps,
                 autorange_full_scales_v,
             )
         except (ConfigError, ValueError) as exc:
@@ -937,12 +928,6 @@ def _parse_lockin(
             )
         if autorange_full_scales_v is None:
             raise ConfigError(f"{name} has no configured autorange ladder.")
-        expected_max_steps = len(autorange_full_scales_v) - 1
-        if autorange_max_steps != expected_max_steps:
-            raise ConfigError(
-                f"{name}.autorange_max_steps must be {expected_max_steps} for its "
-                "confirmed/configured range transitions in the lockin_safety.toml ladder."
-            )
         if sensitivity_full_scale_v != autorange_min_full_scale_v:
             raise ConfigError(
                 f"{name}.sensitivity_full_scale_v must equal the autorange minimum."
@@ -988,7 +973,6 @@ def _parse_lockin(
         autorange_max_full_scale_v=autorange_max_full_scale_v,
         autorange_target_occupancy=autorange_target_occupancy,
         autorange_stable_samples=autorange_stable_samples,
-        autorange_max_steps=autorange_max_steps,
         autorange_full_scales_v=autorange_full_scales_v,
         settle_time_constants=settle_time_constants,
         reserve_mode=reserve_mode,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import math
+import time
 from typing import Callable, Protocol
 
 from .lockin_autorange import AutorangeAction, AutorangeDecision
@@ -860,6 +861,8 @@ class DualSr830Controller:
         *,
         frequency_hz: float,
         check_frequency: bool = True,
+        ignore_output_overload: bool = False,
+        transient_overload_recheck_s: float = 0.0,
     ) -> tuple[Sr830Diagnostic, Sr830Diagnostic]:
         """Read and validate an existing dual-SR830 configuration without writes."""
 
@@ -868,22 +871,43 @@ class DualSr830Controller:
         if xx.identity == xy.identity:
             raise Sr830Error("Both semantic roles returned the same SR830 identity.")
         verify_pair_readback(xx, xy, frequency_hz, check_frequency=check_frequency)
-        problems: list[str] = []
-        for diagnostic in (xx, xy):
-            if diagnostic.lia_status is None or diagnostic.error_status is None:
-                problems.append(
-                    f"lockin_{diagnostic.role.value} safety status is incomplete"
-                )
-                continue
-            if diagnostic.lia_status.reference_unlocked:
-                problems.append(f"lockin_{diagnostic.role.value} reference is unlocked")
-            if diagnostic.lia_status.any_overload:
-                problems.append(f"lockin_{diagnostic.role.value} reports overload")
-            if diagnostic.error_status:
-                problems.append(
-                    f"lockin_{diagnostic.role.value} error status is "
-                    f"{diagnostic.error_status}"
-                )
+        def status_problems(
+            diagnostics: tuple[Sr830Diagnostic, Sr830Diagnostic]
+        ) -> list[str]:
+            found: list[str] = []
+            for diagnostic in diagnostics:
+                if diagnostic.lia_status is None or diagnostic.error_status is None:
+                    found.append(
+                        f"lockin_{diagnostic.role.value} safety status is incomplete"
+                    )
+                    continue
+                if diagnostic.lia_status.reference_unlocked:
+                    found.append(f"lockin_{diagnostic.role.value} reference is unlocked")
+                if diagnostic.lia_status.input_or_reserve_overload:
+                    found.append(f"lockin_{diagnostic.role.value} input/reserve overload")
+                if diagnostic.lia_status.filter_overload:
+                    found.append(f"lockin_{diagnostic.role.value} filter overload")
+                if diagnostic.lia_status.output_overload and not ignore_output_overload:
+                    found.append(f"lockin_{diagnostic.role.value} reports output overload")
+                if diagnostic.error_status:
+                    found.append(
+                        f"lockin_{diagnostic.role.value} error status is "
+                        f"{diagnostic.error_status}"
+                    )
+            return found
+
+        diagnostics = (xx, xy)
+        problems = status_problems(diagnostics)
+        transient_only = bool(problems) and all(
+            "input/reserve overload" in problem or "filter overload" in problem
+            for problem in problems
+        )
+        if transient_only and transient_overload_recheck_s > 0:
+            time.sleep(transient_overload_recheck_s)
+            xx = self.lockin_xx.read_diagnostic(consume_status_latches=True)
+            xy = self.lockin_xy.read_diagnostic(consume_status_latches=True)
+            verify_pair_readback(xx, xy, frequency_hz, check_frequency=check_frequency)
+            problems = status_problems((xx, xy))
         if problems:
             raise Sr830Error(
                 "SR830 preflight status verification failed: " + "; ".join(problems)

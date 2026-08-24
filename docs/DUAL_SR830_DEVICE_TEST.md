@@ -295,12 +295,13 @@ documents every field:
 - `sensitivity_full_scale_v`: the fixed target, or the minimum range in that
   role's automatic policy. A fixed range is verified and written only when
   preflight differs.
-- `autorange_min_full_scale_v`, `autorange_max_full_scale_v`,
-  `autorange_target_occupancy = 0.85`, `autorange_stable_samples = 2`, and
-  `autorange_max_steps`: required only for a role explicitly set to
-  `bounded_auto`. The daily XX ladder is 10--20--50 mV with
-  `autorange_max_steps = 2`; XY remains 1--10 mV with `autorange_max_steps = 1`.
-  Each transition is fail-closed and recorded.
+ - `autorange_min_full_scale_v`, `autorange_max_full_scale_v`,
+  `autorange_target_occupancy = 0.85`, and `autorange_stable_samples = 2` are
+  required only for a role explicitly set to `bounded_auto`. The selected pair
+  must match a ladder in `config/lockin_safety.toml`; there is no user-facing
+  total-step field. Each adjacent transition is fail-closed and recorded, and
+  widening can repeat within one point when the new range is still above the
+  target occupancy.
 - `run_name` and `note`: required per-run audit metadata. The nonempty, safe
   filename label `run_name` is included in the JSON name; the nonempty `note`
   remains in the JSON record.

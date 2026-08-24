@@ -66,6 +66,69 @@ python -m attodry_control.lockin_test validate-config
 转换状态，并在 cleanup 时恢复扫描前的 RMOD。Reserve 写入始终在降低 SINE OUT 后进行，
 读回与状态确认失败会 fail closed。
 
+### Reserve dB、内部增益分配和选择方法
+
+SR830 显示或手册表格中的 Reserve dB **不是额外加到测量结果上的总增益**。在某个
+full-scale 灵敏度下，动态储备定义为仪器仍能保持规定测量准确度时，可容忍的最大
+非目标频率干扰与 full scale 的幅值比：
+
+```text
+dynamic_reserve_db = 20 log10(Vinterference,max / Vfull_scale)
+Vinterference,max ~= Vfull_scale * 10^(dynamic_reserve_db / 20)
+```
+
+这个换算是动态储备的解释，不是允许输入超过 SR830 额定值的许可；实际输入还必须满足
+仪器输入上限。与参考同频、同相干的串扰会直接进入测量结果，不能靠提高 Reserve 消除。
+
+SR830 从输入 full scale 到 10 V 输出的总增益由灵敏度决定：
+
+```text
+total_gain_db = 20 log10(10 V / Vfull_scale)
+```
+
+Reserve 模式只重新分配这段总增益。`low_noise` 在相敏检波/ADC 前使用较大的 AC 增益、
+检波后 DC 增益较小；`high_reserve` 降低前端 AC 增益以给大干扰留出余量，再在检波后用
+更大的 DC 增益恢复同一总增益；`normal` 位于两者之间。没有 Offset/Expand 时，可以用
+`AC gain dB + DC gain dB = total gain dB` 理解，其中表中的 Reserve dB 对应这段检波后
+DC gain。Expand 另行增加输出缩放，不提高动态储备。
+
+例如 20 mV full scale 的总增益约为 54 dB（500 倍）：
+
+| 模式 | 实际 Reserve / DC gain | 约略 AC gain | 约略可容忍非目标干扰 |
+| --- | ---: | ---: | ---: |
+| `low_noise` | 4 dB | 50 dB | 31.7 mVrms |
+| `normal` | 24 dB | 30 dB | 317 mVrms |
+| `high_reserve` | 34 dB | 20 dB | 1.00 Vrms |
+
+模式名称不是固定 dB；SR830 会随当前 `SENS`/full scale 选择实际值。当前项目常用档位的
+厂家表值如下：
+
+| Full scale | `low_noise` | `normal` | `high_reserve` |
+| ---: | ---: | ---: | ---: |
+| 1 mV | 10 dB | 40 dB | 60 dB |
+| 10 mV | 0 dB | 20 dB | 40 dB |
+| 20 mV | 4 dB | 24 dB | 34 dB |
+| 50 mV | 6 dB | 16 dB | 26 dB |
+| 1 V | 0 dB | 0 dB | 0 dB |
+
+因此同样是 `normal`，20 mV 和 50 mV 分别显示 24 dB 和 16 dB，但可容忍干扰均约为
+0.316 V。自动量程改变 `SENS` 时，模式名称可以保持 `normal`，实际 Reserve dB 仍会随
+量程改变；解释历史数据时必须同时查看 `reserve_mode` 和实际 `SENS?` 读回。
+
+日常选择原则：
+
+1. 默认使用 `normal`，只使用刚好避免 `RESERVE OVLD` 的储备，不盲目追求最大 dB。
+2. 确认输入没有超过额定值、接地和工频干扰没有异常后，如果仍有大的非目标频率干扰，
+   才考虑 `high_reserve`。它增加抗干扰余量，但不改善目标频率上的 SNR；超高 Reserve
+   还可能使 ADC 噪声更明显。
+3. 输入环境干净、目标信号很弱且没有 reserve overload 时，`low_noise` 才可能合适。
+4. `FILTER OVLD` 不应通过提高 Reserve 处理；应检查时间常数、滤波斜率和干扰，并按
+   SR830 规则降低 Reserve 或增加滤波。
+
+厂家完整定义和各灵敏度表见
+[SRS SR830 手册](https://www.thinksrs.com/downloads/PDFs/Manuals/SR830m.pdf)。当前版本化
+安全策略仍只允许 `normal`；上面的其他模式说明用于理解仪器，不构成日常写入授权。
+
 每个 sweep JSON 的 `measurement_config` 会保存解析后的 `lockin_safety`、文件路径和
 SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次允许的量程和时序。SR830
 的 `FREQ?` 显示精度会随频率改变，因此 sweep 不再因为请求频率、XX 读回和 XY 读回的
@@ -184,14 +247,14 @@ sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 1.0    # example station fixed range; XY example is 0.010
 ```
 
-`bounded_auto` 模式必须同时提供以下五个字段。XX 可填 10--20 mV、20--50 mV，或
-三档 10--20--50 mV；XY 唯一允许 1--10 mV。占用率和连续样本数是固定安全策略，
-`autorange_max_steps` 则必须恰好等于该阶梯的实际转换数，不能任意修改。
+`bounded_auto` 模式必须同时提供以下四个字段。XX 可填 10--20 mV、20--50 mV，或
+三档 10--20--50 mV；XY 可填 1--10 mV 或 10--20--50 mV。量程阶梯由版本化的
+`config/lockin_safety.toml` 唯一决定，操作者不再填写总步数。
 
 XX 的日常三档策略如下。`WIDEN` 每次只上移一个项目确认档位：第一次 10→20 mV，
-第二次 20→50 mV。两次转换用尽后，即使信号继续增大也不会再换档；50 mV 仍过载时
-扫描失败并执行安全 cleanup。`NARROW` 同样一次只下移一档，并计入同一个两次总额度，
-所以一次扫描不会来回追逐量程。
+第二次 20→50 mV。若某个点在放大一档后仍达到 0.85，占用率判断会在同一点继续向上
+移动下一档，直到安全或达到协议最大档位；50 mV 仍不安全时扫描失败并执行安全 cleanup。
+`NARROW` 一次只下移一档，连续两个符合更窄档位的安全样本后才允许缩窄。
 
 ```toml
 # XX bounded_auto：三档 10 mV -> 20 mV -> 50 mV。
@@ -201,7 +264,6 @@ autorange_min_full_scale_v = 0.010
 autorange_max_full_scale_v = 0.050
 autorange_target_occupancy = 0.85
 autorange_stable_samples = 2
-autorange_max_steps = 2
 ```
 
 ```toml
@@ -212,7 +274,6 @@ autorange_min_full_scale_v = 0.001
 autorange_max_full_scale_v = 0.010
 autorange_target_occupancy = 0.85
 autorange_stable_samples = 2
-autorange_max_steps = 1
 ```
 
 `settle_time_constants = 5.0` 的含义是每次改变频率、谐波、SINE OUT 或量程后，至少等待
@@ -220,14 +281,19 @@ autorange_max_steps = 1
 单个等待 interval，必须大于或等于上述下限。幅值扫描中每个实际 SINE OUT 改变等待两个
 interval，因此当前是 `2 × 1.5 = 3.0` s。
 
-### 谐波切换时的短暂 bit-0 过载复核
+### 谐波切换和 sweep 点的短暂过载复核
 
-SR830 的 `LIAS?` bit 0 同时表示输入或 Reserve overload，并且是锁存位。每次 HARM
+SR830 的 `LIAS?` bit 0 同时表示输入或 Reserve overload，并且是锁存位；bit 1 是
+滤波器过载。每次 HARM
 写入后的第一条状态读数会被单独记录为 discarded transition，不会进入正式曲线。
-如果第一条记录只有 input/reserve overload，程序会再等待一个 `settle_s`，读取一次
-复核；复核清零则继续正式样本，复核仍有 bit 0、unlock、其他 overload 或错误则拒绝该点。
+如果第一条记录只有 bit 0/bit 1，程序会再等待一个 `settle_s`，读取一次复核；复核
+清零则继续正式样本，复核仍有 bit 0、bit 1、unlock 或错误则拒绝该点。
 其它问题不享受复核。复核读数和是否通过都会写入该点的
 `harmonic_transition_status[*].verification`，方便区分“切换瞬态”与正式测量过载。
+LIAS bit 2 是未使用的 CH1/CH2 输出过载锁存；项目不使用 CH1/CH2 输出读数，因此 sweep
+只保留该位的原始值，不用它拒绝样本或驱动 bounded-auto。
+分析脚本也按相同规则处理：只要正式样本没有 `problems` 且 bit 0/bit 1 清零，单独的
+bit 2 不会被默认筛选为 overload；原始 `lia_status.raw` 仍可用于审计。
 
 ## SR830 全部硬件量程与项目安全白名单
 
@@ -296,7 +362,7 @@ sensitivity_full_scale_v = 0.050
 1. 依据厂家手册，把“电压 full scale → `SENS` 代码”加入
    `src/attodry_control/sr830_settings.py` 的项目映射；
 2. 若用于 `bounded_auto`，只增加一个角色适用的有序自动量程阶梯，并维持 0.85、2 个
-   稳定样本；`autorange_max_steps` 必须等于该阶梯中允许的相邻转换数；
+   稳定样本；相邻量程转换由该阶梯的有限长度自动决定，同一点需要时可连续向上移动；
 3. 更新严格配置验证、硬件/模拟模板、此表和阶段交接记录；
 4. 先运行映射、配置和 fake-VISA 离线测试；实际仪器首次写入新档位前，再单独取得
    硬件写入授权并检查过载/读回/cleanup。
