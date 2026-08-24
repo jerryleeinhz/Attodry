@@ -68,7 +68,6 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.050
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-settle_time_constants = 5.0
 
 [lockin_xy]
 reference_source = "external_ttl"
@@ -86,7 +85,12 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.010
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
+
+[lockin_sweep]
+# All sweep times are derived from the slower XX/XY time constant.
 settle_time_constants = 5.0
+samples_per_point = 3
+sample_interval_time_constants = 1.0
 ```
 
 2026-08-22 日常默认改为两台都固定：XX 20 mV、XY 1 mV。只有操作者在本机
@@ -110,7 +114,9 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 
 安全边界现在拆成两个职责：被忽略的 `hardware.local.toml` 保存本站地址、接线事实和
 本次扫描网格；同目录受版本控制的 `lockin_safety.toml` 保存项目允许的 full-scale
-白名单、autorange 阶梯、0.85 占用率、2 个稳定样本、最小 5 tau 和 4 mVrms cleanup。
+白名单、autorange 阶梯、0.85 占用率、2 个稳定样本和 4 mVrms cleanup。
+日常 sweep 的等待时间只由 `[lockin_sweep]` 的时间常数倍数推导，不属于
+`lockin_safety.toml`。
 两条日常 sweep 自动读取后者，操作者不需要先运行 `validate-config`；该命令只是可选
 的无 VISA 离线检查。每条 JSON 的 `measurement_config` 保存解析后的策略和 SHA-256，
 便于按历史记录复现安全边界。驱动层仍映射完整 SR830 电压量程（包含 1 V/SENS 26），
@@ -123,9 +129,8 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 | `input_mode` | `a_minus_b`，差分 A-B 测量。 | 两台都固定，避免把共模信号当作输运信号。 |
 | `shield_grounding` | `float`，输入屏蔽浮地。 | 两台都固定。 |
 | `input_coupling` | `ac`，交流耦合。 | 两台都固定。 |
-| `time_constant_s` | 数字滤波时间常数，固定 0.3 s。 | 本模块不自动选择时间常数。 |
-| `filter_slope_db_oct` | 低通滤波斜率，固定 24 dB/oct。 | 与时间常数共同定义带宽，不能在正式采样中变化。 |
-| `settle_time_constants` | 每次设置转换后等待的时间常数个数，最小 5.0。 | `[lockin_sweep].settle_s` 必须不小于两台的 `time_constant_s × settle_time_constants` 最大值；当前最短为 `5 × 0.3 s = 1.5 s`。 |
+| `time_constant_s` | 数字滤波时间常数；当前确认可选 0.3 s 或 1.0 s。 | 每台可独立设置；日常 sweep 使用较慢的一台自动推导所有秒数等待。 |
+| `filter_slope_db_oct` | SR830 低通滤波斜率；硬件可选 `6`、`12`、`18`、`24` dB/oct。当前项目确认值为 `24` dB/oct。 | 与时间常数共同定义带宽；正式采样中不能变化。当前代码和安全策略只放行 `24`，改用其他档位前必须同步更新安全策略、驱动映射、测试并重新确认 settling。 |
 | `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
 | `sensitivity_full_scale_v` | 固定模式的目标量程；自动模式的起始且最窄量程。日常默认 XX 20 mV、XY 1 mV。 | 自动模式中必须等于 `autorange_min_full_scale_v`。实际量程以 `SENS?` 读回为准。 |
 | `reserve_mode` | `high_reserve`/`normal`/`low_noise`，对应 `RMOD` 0/1/2；当前日常策略为 `normal`。 | 还必须出现在该角色 `lockin_safety.toml` 的 `allowed_reserve_modes` 中；改变时先降 SINE OUT，读回确认并在 cleanup 恢复。 |
@@ -137,6 +142,24 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 LIAS bit 2 (`output_overload`) 属于 SR830 未使用的 CH1/CH2 输出路径。本项目只记录原始
 状态，不把它作为 sweep 过载或自动量程判定；bit 0 (`input_or_reserve_overload`) 和 bit 1
 (`filter_overload`) 首次出现时各有一次 settled recheck，重复出现仍 fail closed。
+
+### SR830 滤波斜率速查（`OFSL`）
+
+SR830 的低通输出滤波器有四档。`OFSL?` 读回的是代码，配置文件里的
+`filter_slope_db_oct` 使用下面左列的物理单位：
+
+| `filter_slope_db_oct` | `OFSL` 代码 | 含义 |
+| ---: | ---: | --- |
+| `6` dB/oct | `0` | 滤波最弱、响应最快 |
+| `12` dB/oct | `1` | 中等滤波 |
+| `18` dB/oct | `2` | 较强滤波 |
+| `24` dB/oct | `3` | 滤波最强、抑制带外噪声最好 |
+
+斜率越大，带外干扰衰减越强，但瞬态响应和稳定等待要求通常更严格。修改
+`hardware.local.toml` 中的数值不会自动扩大项目白名单；当前日常运行必须保持
+`filter_slope_db_oct = 24`。若确实需要其他档位，必须同时修改
+`src/attodry_control/sr830_settings.py` 的映射、`config/lockin_safety.toml`、测试和
+settle 说明，并重新做硬件确认。
 
 ### Reserve 模式的物理含义
 
@@ -166,7 +189,7 @@ Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可
 允许 `normal`，其他模式说明不是硬件写入授权。
 
 `bounded_auto` 是可审计的预备阶段状态机，不是 SR830 的 `AGAN` 命令替代品。每次
-允许的 `SENS` 转换都必须读回新代码、保存转换记录、至少等待 1.5 s、消费并记录
+允许的 `SENS` 转换都必须读回新代码、保存转换记录、等待自动推导的 settle interval、消费并记录
 转换锁存、再次等待，并在正式样本前冻结量程。固定模式仍会在预检不匹配时采用相同
 的读回和审计要求。
 
@@ -199,13 +222,17 @@ Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可
 
 ### 时间常数和采样
 
-- 最后验收时间常数为 300 ms，滤波为 24 dB/oct。设置或连接改变后至少等待
-  5 个时间常数，即当前至少 1.5 s。
-- 对每个实际 SINE OUT (`SLVL`) 幅值改变，激励扫幅使用两个上述 interval：当前
-  至少 3.0 s，才读回输出并采集 h1；任一日常 sweep 的 `settle_s` 小于 1.5 s 都会在
-  打开 VISA 前失败。JSON 的 `source_step_settle_s` 记录该实际等待时间，不修改任何
-  相位设置。
-- 以 0.3 s 间隔采集的样本仍相关，不能把它们当作完全独立样本计算误差。
+- 每台 SR830 的 `time_constant_s` 当前确认可设为 0.3 s 或 1.0 s。sweep 取两台中较慢的
+  值 `τslow`，不再接受手动秒数 `settle_s`。
+- `[lockin_sweep].settle_time_constants`（至少 5.0）给出一次 transition 的倍数：
+  `settle_interval_s = τslow × settle_time_constants`。设定、频率、谐波或量程实际改变后，
+  程序使用两个 interval 与中间状态检查；0.3 s/5.0 时为 3.0 s，1.0 s/5.0 时为 10.0 s。
+- 每个实际 SINE OUT (`SLVL`) 幅值改变也使用两个 interval，随后读回输出并采集 h1。
+  JSON 记录派生的 `settle_interval_s`、`post_setting_settle_s`、`source_step_settle_s`，
+  不修改任何相位设置。
+- `[lockin_sweep].sample_interval_time_constants` 给出同一点重复样本的间隔：
+  `sample_interval_s = τslow × sample_interval_time_constants`。示例值 1.0 在 0.3 s/1.0 s
+  时间常数时分别为 0.3 s/1.0 s；这些仍是相关的稳定性样本，不能当作完全独立重复实验。
 - 第一版不要自动选择时间常数；保持固定噪声带宽，避免额外转换锁存和不可比数据。
 
 ### 灵敏度和自动量程
@@ -453,7 +480,7 @@ VISA、不读取状态锁存、不写设置。
 
 2026-08-21：为重做的 1/2/3 阶扫频和扫幅增加离线验证的显式
 `--all-harmonics` 选项。默认 sweep 仍只测 h1；只有提供该旗标时，才会在每个
-扫描点依次对两台仪器写 h2、h3，分别等待完整 `settle_s`，采样并在下一个点前
+扫描点依次对两台仪器写 h2、h3，分别等待当时配置推导出的完整 settle interval，采样并在下一个点前
 恢复 h1。首次真实三阶扫频在 121.122062 Hz 的 h2 第一个正式样本停下：XX
 `LIAS=18`（filter overload + frequency range changed），XY `LIAS=16`
 （frequency range changed），没有 unlock 或 instrument error。部分样本已保留；

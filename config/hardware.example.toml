@@ -77,9 +77,6 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.050
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# A sweep's settle_s must be at least this multiplier times time_constant_s.
-# At the confirmed 0.3 s and 5.0 values, that lower bound is 1.5 s.
-settle_time_constants = 5.0
 
 [lockin_xy]
 model = "SR830"
@@ -110,9 +107,6 @@ reserve_mode = "normal"
 # autorange_max_full_scale_v = 0.010
 # autorange_target_occupancy = 0.85
 # autorange_stable_samples = 2
-# A sweep's settle_s must be at least this multiplier times time_constant_s.
-# At the confirmed 0.3 s and 5.0 values, that lower bound is 1.5 s.
-settle_time_constants = 5.0
 
 [lockin_sweep]
 # Range tables expand to inclusive, strictly increasing points before VISA opens.
@@ -151,9 +145,13 @@ skip_unsupported_harmonics = true
 # the JSON filename; the note is preserved inside the JSON record.
 run_name = "test145degree"
 note = "45degree"
-settle_s = 1.5
+# The program derives all waits from the slower XX/XY time constant.  At 0.3 s,
+# this is a 1.5 s interval; setting changes use two intervals before formal data.
+settle_time_constants = 5.0
 samples_per_point = 3
-sample_interval_s = 0.3
+# Consecutive repeated samples are separated by this many slowest-filter time
+# constants.  They are stability samples, not statistically independent replicas.
+sample_interval_time_constants = 1.0
 external_series_resistance_ohm = 100000.0
 approximate_device_resistance_ohm = 100.0
 # Confirm this upper bound for every device state. It is used to calculate the

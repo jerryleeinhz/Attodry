@@ -354,11 +354,9 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   `hardware.local.toml`, so Git updates do not overwrite them. The daily guide now
   lists every accepted Lock-in/sweep field, including exact `fixed` and
   `bounded_auto` contracts and a terminal import-path check for obsolete CLI help.
-  `settle_time_constants` now enforces a pre-VISA lower bound on `settle_s` from
-  both SR830 time constants and is archived with each sweep; a fake-VISA test
-  covers the 0.3 s × 6.0 = 1.8 s floor and the 3.6 s source-step wait. The 67
-  Lock-in SR830 tests and source compilation passed; no hardware resource was
-  opened or written.
+  This historical timing contract was superseded on 2026-08-24 by the single
+  `[lockin_sweep]` multiplier contract recorded below. The 67 Lock-in SR830 tests
+  and source compilation passed; no hardware resource was opened or written.
 - Updated excitation-voltage preflight to calculate the device-terminal RMS
   voltage through the confirmed series divider, using a required
   `maximum_device_resistance_ohm` that cannot be below the analysis-only
@@ -734,8 +732,9 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
 
 - Added versioned `config/lockin_safety.toml`, automatically loaded beside every
   hardware TOML. It owns the project full-scale allowlists, bounded-auto ladders,
-  0.85 occupancy target, two stable samples, minimum settle policy, source bounds,
-  and cleanup amplitude; the complete SR830 hardware mapping remains separate.
+  0.85 occupancy target, two stable samples, source bounds, and cleanup amplitude;
+  daily sweep timing is configured separately in `[lockin_sweep]`, while the
+  complete SR830 hardware mapping remains separate.
 - Daily `sweep-frequency` and `sweep-excitation` now run directly after TOML loading;
   `validate-config` is an optional offline summary and never a prerequisite or VISA
   connection step. Sweep JSON records include the resolved policy and hash.
@@ -785,3 +784,17 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   receive one settled recheck; repeated overload, unlock, or instrument errors remain
   fail-closed. Sweep measurement schema is now version 11; all verification was
   offline with fake VISA only.
+- Documented the complete SR830 low-pass filter-slope choices: 6/12/18/24 dB/oct
+  (`OFSL` 0/1/2/3). The current project remains intentionally fixed at 24 dB/oct;
+  changing it requires synchronized driver, safety-policy, test, and settling-time
+  updates plus fresh hardware confirmation.
+- Simplified daily sweep timing (2026-08-24): removed user-facing `settle_s`,
+  per-role settling multipliers, and all `lockin_safety.toml` timing settings.
+  Each role retains only `time_constant_s` (confirmed 0.3 s or 1.0 s). The single
+  `[lockin_sweep].settle_time_constants` value (minimum 5.0) and
+  `sample_interval_time_constants` derive seconds from the slower role. Every
+  record now archives the slowest time constant, transition interval, two-interval
+  post-setting wait, and repeat-sample spacing in schema version 12. Repeated
+  samples are documented as stability readings, not statistically independent
+  replicas. Configuration, fake-VISA, and full offline test coverage passed; no
+  hardware resource was opened or written.

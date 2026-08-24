@@ -5,7 +5,6 @@ schema_version = 2
 minimum_source_voltage_v_rms = 0.004
 maximum_source_voltage_v_rms = 5.0
 cleanup_source_voltage_v_rms = 0.004
-minimum_settle_time_constants = 5.0
 target_occupancy = 0.85
 stable_samples_before_narrowing = 2
 

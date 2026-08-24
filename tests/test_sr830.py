@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 from pathlib import Path
@@ -1475,9 +1475,7 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--config", str(config_path),
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
@@ -1539,9 +1537,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,5622.80243375",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -1587,9 +1583,7 @@ class Sr830Tests(unittest.TestCase):
                     "--config", str(config_path),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -1608,7 +1602,7 @@ class Sr830Tests(unittest.TestCase):
             [write for write in xx_resource.writes if write.startswith("SENS ")],
             ["SENS 22", "SENS 21", "SENS 23"],
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 11)
+        self.assertEqual(result["measurement_config"]["schema_version"], 12)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -1622,7 +1616,6 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--config", str(config_path),
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -1677,9 +1670,7 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--config", str(config_path),
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -1731,9 +1722,7 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--config", str(config_path),
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -1775,37 +1764,17 @@ class Sr830Tests(unittest.TestCase):
                     "sweep-frequency",
                     "--config",
                     str(config_path),
-                    "--settle-s",
-                    "1.5",
                 ],
                 resource_manager_factory=lambda: manager,
             )
 
         self.assertEqual(manager.opened, [])
 
-    def test_frequency_sweep_rejects_short_settle_before_opening_visa(self) -> None:
-        factory_opened = False
-
-        def unopened_factory() -> FakeResourceManager:
-            nonlocal factory_opened
-            factory_opened = True
-            raise AssertionError("VISA must not open for an unsafe settle interval.")
-
-        with self.assertRaisesRegex(Sr830Error, "at least 1.5 s"):
-            run(
-                [
-                    "sweep-frequency",
-                    "--config",
-                    str(self._hardware_config()),
-                    "--points-hz",
-                    "17.777",
-                    "--settle-s",
-                    "1.49",
-                ],
-                resource_manager_factory=unopened_factory,
+    def test_frequency_sweep_rejects_legacy_manual_settle_override(self) -> None:
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            build_parser().parse_args(
+                ["sweep-frequency", "--settle-s", "1.5"]
             )
-
-        self.assertFalse(factory_opened)
 
     def test_cli_frequency_sweep_default_fixed_modes_do_not_autorange(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -1826,9 +1795,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,1000",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
@@ -1928,12 +1895,8 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-hz",
                     "17.777",
-                    "--settle-s",
-                    "1.5",
                     "--samples-per-point",
                     "1",
-                    "--sample-interval-s",
-                    "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2018,12 +1981,8 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-hz",
                     "17.777",
-                    "--settle-s",
-                    "1.5",
                     "--samples-per-point",
                     "1",
-                    "--sample-interval-s",
-                    "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2111,12 +2070,8 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-v",
                     "0.004,0.006",
-                    "--settle-s",
-                    "1.5",
                     "--samples-per-point",
                     "1",
-                    "--sample-interval-s",
-                    "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2209,12 +2164,8 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-hz",
                     "17.777,25",
-                    "--settle-s",
-                    "1.5",
                     "--samples-per-point",
                     "1",
-                    "--sample-interval-s",
-                    "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2294,12 +2245,8 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-hz",
                     "17.777",
-                    "--settle-s",
-                    "1.5",
                     "--samples-per-point",
                     "1",
-                    "--sample-interval-s",
-                    "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2348,9 +2295,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"XX": xx_resource, "XY": xy_resource}
@@ -2411,9 +2356,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"XX": xx_resource, "XY": xy_resource}
@@ -2445,9 +2388,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,1000",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -2460,7 +2401,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 11)
+        self.assertEqual(result["measurement_config"]["schema_version"], 12)
         self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
@@ -2504,9 +2445,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2549,9 +2488,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2594,9 +2531,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -2642,8 +2577,6 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-hz",
                     "17.777,38310.4813",
-                    "--settle-s",
-                    "1.5",
                     "--all-harmonics",
                     "--fail-on-unsupported-harmonics",
                 ],
@@ -2676,12 +2609,8 @@ class Sr830Tests(unittest.TestCase):
                     "XY",
                     "--points-hz",
                     "38310.4813,100000",
-                    "--settle-s",
-                    "1.5",
                     "--samples-per-point",
                     "1",
-                    "--sample-interval-s",
-                    "0",
                     "--all-harmonics",
                     "--skip-unsupported-harmonics",
                 ],
@@ -2736,9 +2665,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "34000",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--all-harmonics",
                     "--skip-unsupported-harmonics",
                 ],
@@ -2787,9 +2714,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--all-harmonics",
                 ],
                 resource_manager_factory=lambda: manager,
@@ -2827,9 +2752,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--all-harmonics",
                 ],
                 resource_manager_factory=lambda: manager,
@@ -2871,9 +2794,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,25",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
@@ -2913,9 +2834,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,50",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -2951,9 +2870,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-hz", "17.777,25",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -3017,9 +2934,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "5",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
@@ -3072,9 +2987,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "5",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -3128,9 +3041,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "0.0005",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
@@ -3143,25 +3054,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertAlmostEqual(result["points"][0]["source_readback_v_rms"], 0.2)
         self.assertIn("SLVL 0.004", xx_resource.writes)
 
-    def test_cli_excitation_sweep_requires_one_settle_interval_and_waits_two_after_source_step(self) -> None:
-        manager = FakeResourceManager({})
-        with self.assertRaisesRegex(Sr830Error, "at least 1.5 s"):
-            run(
-                [
-                    "sweep-excitation",
-                    "--config", str(self._hardware_config()),
-                    "--xx-address", "XX",
-                    "--xy-address", "XY",
-                    "--series-resistance-ohm", "100000",
-                    "--device-resistance-ohm", "500",
-                    "--max-device-current-a", "0.005",
-                    "--max-device-voltage-v", "0.5",
-                    "--settle-s", "0",
-                ],
-                resource_manager_factory=lambda: manager,
-            )
-        self.assertEqual(manager.opened, [])
-
+    def test_cli_excitation_sweep_derives_interval_and_waits_two_after_source_step(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -3185,9 +3078,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "500",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "0.5",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"XX": xx_resource, "XY": xy_resource}
@@ -3199,7 +3090,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["source_step_settle_s"], 3.0)
         self.assertEqual(result["points"][1]["source_step_settle_s"], 3.0)
 
-    def test_cli_sweep_enforces_time_constant_settle_floor(self) -> None:
+    def test_cli_sweep_derives_time_constant_settle_and_sample_intervals(self) -> None:
         config_path = self._hardware_config()
         config_path.write_text(
             config_path.read_text(encoding="utf-8").replace(
@@ -3207,20 +3098,6 @@ class Sr830Tests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        unopened = FakeResourceManager({})
-        with self.assertRaisesRegex(Sr830Error, "at least 1.8 s"):
-            run(
-                [
-                    "sweep-excitation",
-                    "--config", str(config_path),
-                    "--xx-address", "XX",
-                    "--xy-address", "XY",
-                    "--settle-s", "1.5",
-                ],
-                resource_manager_factory=lambda: unopened,
-            )
-        self.assertEqual(unopened.opened, [])
-
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -3241,9 +3118,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
-                    "--settle-s", "1.8",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"XX": xx_resource, "XY": xy_resource}
@@ -3254,12 +3129,57 @@ class Sr830Tests(unittest.TestCase):
         waits = [call.args[0] for call in sleeper.call_args_list]
         self.assertTrue(any(abs(wait - 1.8) < 1e-9 for wait in waits))
         self.assertTrue(any(abs(wait - 3.6) < 1e-9 for wait in waits))
-        self.assertEqual(result["settle_s"], 1.8)
-        self.assertAlmostEqual(result["time_constant_settle_floor_s"], 1.8)
+        self.assertEqual(result["settle_time_constants"], 6.0)
+        self.assertAlmostEqual(result["settle_interval_s"], 1.8)
+        self.assertAlmostEqual(result["post_setting_settle_s"], 3.6)
+        self.assertEqual(result["sample_interval_time_constants"], 1.0)
+        self.assertEqual(result["sample_interval_s"], 0.3)
         self.assertAlmostEqual(
-            result["measurement_config"]["sweep"]["time_constant_settle_floor_s"],
+            result["measurement_config"]["sweep"]["settle_interval_s"],
             1.8,
         )
+
+    def test_cli_sweep_time_constant_change_updates_all_derived_seconds(self) -> None:
+        config_path = self._hardware_config()
+        config_path.write_text(
+            config_path.read_text(encoding="utf-8").replace(
+                "time_constant_s = 0.3", "time_constant_s = 1.0", 1
+            ),
+            encoding="utf-8",
+        )
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep") as sleeper, redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation",
+                    "--config", str(config_path),
+                    "--xx-address", "XX",
+                    "--xy-address", "XY",
+                    "--points-v", "0.004",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        waits = [call.args[0] for call in sleeper.call_args_list]
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(result["slowest_time_constant_s"], 1.0)
+        self.assertEqual(result["settle_interval_s"], 5.0)
+        self.assertEqual(result["post_setting_settle_s"], 10.0)
+        self.assertEqual(result["sample_interval_s"], 1.0)
+        self.assertGreaterEqual(waits.count(1.0), 2)
+        self.assertIn(5.0, waits)
 
     def test_cli_excitation_sweep_uses_configured_role_harmonic_combination(self) -> None:
         config_path = self._hardware_config()
@@ -3290,9 +3210,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"XX": xx_resource, "XY": xy_resource}
@@ -3337,9 +3255,7 @@ class Sr830Tests(unittest.TestCase):
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: manager,
             )
@@ -3386,7 +3302,6 @@ class Sr830Tests(unittest.TestCase):
                     "--xy-address", "XY",
                     "--points-v", "0.004,2.0",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                 ],
                 resource_manager_factory=lambda: FakeResourceManager(
                     {"XX": xx_resource, "XY": xy_resource}
@@ -3457,9 +3372,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "5",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,
@@ -3517,9 +3430,7 @@ class Sr830Tests(unittest.TestCase):
                     "--device-resistance-ohm", "1000",
                     "--max-device-current-a", "0.005",
                     "--max-device-voltage-v", "5",
-                    "--settle-s", "1.5",
                     "--samples-per-point", "1",
-                    "--sample-interval-s", "0",
                     "--first-harmonic-only",
                 ],
                 resource_manager_factory=lambda: manager,

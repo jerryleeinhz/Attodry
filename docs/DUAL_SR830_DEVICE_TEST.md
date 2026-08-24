@@ -219,9 +219,12 @@ These are separate configuration-controlled device-only tests. The frequency sca
 4 mVrms and configured h1/h2/h3 detection at ten logarithmically spaced points
 from 17.777 Hz through 100 kHz. It writes only the internal frequency on
 `lockin_xx`; `lockin_xy` follows the external TTL reference. After each actual
-frequency change, the tool waits 1.5 seconds, records and clears transition
-status, waits another 1.5 seconds, then retains three sequential xx/xy samples
-0.3 seconds apart. Transition-period unlock, frequency-range-change, and overload
+frequency change, the tool derives its interval from the slower configured time
+constant: `τslow × settle_time_constants`; it waits one interval, records and
+clears transition status, waits another interval, then retains the configured
+sequential xx/xy samples spaced by `τslow × sample_interval_time_constants`.
+With the example 0.3 s / 5.0 / 1.0 settings this is 1.5 s, 1.5 s, then 0.3 s
+between samples. Transition-period unlock, frequency-range-change, and overload
 latches are retained as discarded transition data rather than accepted samples.
 An instrument error, unexpected time-constant change, or XX internal-reference
 unlock during transition fails immediately. Any unlock, overload, or error after
@@ -305,8 +308,12 @@ documents every field:
 - `run_name` and `note`: required per-run audit metadata. The nonempty, safe
   filename label `run_name` is included in the JSON name; the nonempty `note`
   remains in the JSON record.
-- `settle_s`, `samples_per_point`, and `sample_interval_s`: transition settling,
-  number of formal samples per point, and spacing between those samples.
+- `settle_time_constants`, `samples_per_point`, and
+  `sample_interval_time_constants`: transition settling multiplier, number of
+  formal samples per point, and repeat-sample spacing multiplier. The program
+  derives seconds from the slower XX/XY `time_constant_s`; `settle_s` and
+  `sample_interval_s` are no longer daily TOML or CLI fields. Repeat samples are
+  short-time stability readings, not guaranteed independent replicas.
 - `external_series_resistance_ohm`, `approximate_device_resistance_ohm`,
   `max_device_current_a_rms`, and `max_device_voltage_v_rms`: current conversion
   and fail-closed device bounds. Current is calculated with the configured
@@ -348,11 +355,12 @@ actual SR830 readbacks remain in `preflight`, `sensitivity_setup`, each point,
 and `cleanup`. Failure to write the audit file fails the command rather than
 reporting an unarchived measurement as complete.
 
-`--settle-s` is a transition-settling interval. Both daily sweep commands refuse
-an interval below 1.5 s before opening either VISA resource. At the current
-300 ms / 24 dB/oct bench setting, every actual `SLVL` (SINE OUT) change waits two
-intervals before the output readback and formal h1 sample: 3.0 s by default.
-This duration is recorded as root-level `source_step_settle_s` and for each
+Both daily sweep commands derive their transition interval as the slower XX/XY
+`time_constant_s × settle_time_constants`; the multiplier must be at least 5.0.
+At the example 300 ms / 24 dB/oct / 5.0 setting this is 1.5 s per interval.
+Every actual `SLVL` (SINE OUT) change waits two intervals before the output
+readback and formal h1 sample: 3.0 s in that example. This duration is recorded
+as root-level `source_step_settle_s` and for each
 written source point; a 4 mVrms baseline point that did not write `SLVL` records
 zero for its point-specific value. It is an acquisition-settling parameter, not
 a safety limit or an automatic phase correction.

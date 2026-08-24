@@ -271,10 +271,11 @@ Completed in Stage 3:
   least 1 µVrms and within-point circular spread at most 5 degrees; qualifying
   contiguous sections unwrap at ±180 degrees without bridging omitted points.
   Both controls are visible and can be set to `0.0`/`None` for raw-phase audit.
-  No phase setting or raw record is modified. The offline-only acquisition
-  correction also requires `--settle-s >= 1.5` s before VISA opens and waits two
-  intervals after every actual SINE OUT change (3.0 s at the current 300 ms,
-  24 dB/oct setting), recording `source_step_settle_s` in the JSON. Fake-VISA
+  No phase setting or raw record is modified. The then-current offline-only
+  acquisition correction required `--settle-s >= 1.5` s before VISA opens and
+  waited two intervals after every actual SINE OUT change (3.0 s at the current
+  300 ms, 24 dB/oct setting), recording `source_step_settle_s` in the JSON. It
+  was superseded by the schema-12 automatic multiplier contract below. Fake-VISA
   and offline matplotlib tests cover the behavior; no new hardware command was
   issued.
 - A retained all-harmonic scan reached 38.3104813 kHz/h3, which requires
@@ -360,11 +361,10 @@ Completed in Stage 3:
   including exact `fixed`/`bounded_auto` contracts and an import-path check for
   obsolete CLI help. Station-specific GPIB/VISA overrides remain only in ignored
   `hardware.local.toml`, so Git updates preserve them without replacing local
-  hardware data. `settle_time_constants` now has a real fail-closed effect:
-  `settle_s` is rejected before VISA opens unless it is at least the largest role
-  time-constant product, and the resolved floor is archived in each JSON. The
-  67 Lock-in SR830 tests and source compilation passed with fake VISA only; no
-  real instrument resource was opened or written.
+  hardware data. The timing behavior described in this historical entry was
+  superseded by the schema-12 single `[lockin_sweep]` multiplier contract below.
+  The 67 Lock-in SR830 tests and source compilation passed with fake VISA only;
+  no real instrument resource was opened or written.
 - Excitation-sweep device-voltage preflight now uses the circuit divider and a
   required, operator-confirmed `maximum_device_resistance_ohm` rather than
   treating SINE OUT itself as the device voltage. It validates the largest
@@ -756,7 +756,8 @@ Current Lock-in safety-policy follow-up (2026-08-23):
 - Added versioned `config/lockin_safety.toml`, automatically loaded beside the
   selected hardware TOML. It contains the project full-scale allowlists and
   bounded-auto ladders (XX 10→20→50 mV, XY 1→10 mV), 0.85 occupancy, two stable
-  samples, minimum settle policy, source bounds, and 4 mVrms cleanup. The driver
+  samples, source bounds, and 4 mVrms cleanup. Sweep timing is instead in the
+  user-facing `[lockin_sweep]` table. The driver
   retains the complete SR830 voltage-input map, including 1 V/SENS 26, but the
   hardware map is not itself daily write authorization.
 - Daily `sweep-frequency` and `sweep-excitation` require no preceding validation
@@ -785,8 +786,8 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   input/reserve-overload-only latch is retained as a discarded transition and
   receives one additional settled verification read; repeated bit 0/bit 1 or any other
   unsafe transition status rejects the point. LIAS bit 2 is record-only for sweeps.
-  The offline suite passed with no hardware I/O; the sweep measurement schema is now
-  version 11.
+  The offline suite passed with no hardware I/O; its former schema-11 record is
+  superseded by the schema-12 timing contract below.
 - The Lock-in daily and module guides now document the SR830 reserve gain split:
   Reserve dB is a sensitivity-dependent interference ratio and allocation of
   gain after the demodulator, not added total gain. They include the project-used
@@ -799,8 +800,23 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   0.85; narrowing still needs two consecutive fits. Sweep status handling records
   LIAS bit 2 (`output_overload`) but ignores it because CH1/CH2 output is unused.
   Input/reserve and filter overload candidates receive one settled recheck before
-  fail-closed rejection. The sweep measurement schema is now version 11; this was
-  verified offline with fake VISA and no hardware I/O.
+  fail-closed rejection. The former schema-11 timing record is superseded by the
+  schema-12 timing contract below; this behavior was verified offline with fake
+  VISA and no hardware I/O.
+- The SR830 low-pass filter choices are now documented: 6/12/18/24 dB/oct map to
+  `OFSL` codes 0/1/2/3. The checked-in project policy still accepts only 24 dB/oct;
+  another slope requires synchronized code, safety, test, settling, and hardware
+  confirmation changes.
+- Simplified daily sweep timing (2026-08-24): `settle_s`, per-role
+  `settle_time_constants`, and `lockin_safety.toml` timing settings are removed.
+  Each role now has only its SR830 `time_constant_s` (confirmed values 0.3 s or
+  1.0 s); `[lockin_sweep].settle_time_constants` (at least 5.0) and
+  `sample_interval_time_constants` are the two user-controlled timing
+  multipliers. The sweep derives every second value from the slower role, archives
+  `slowest_time_constant_s`, `settle_interval_s`, `post_setting_settle_s`, and
+  `sample_interval_s`, and treats repeat samples as stability readings rather than
+  independent replicas. Measurement schema version is 12. Configuration,
+  fake-VISA, and full offline tests passed; no hardware resource was opened.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

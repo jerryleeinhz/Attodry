@@ -232,15 +232,19 @@ SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、�
 | `input_mode` | 只能是 `"a_minus_b"`。 |
 | `shield_grounding` | 只能是 `"float"`。 |
 | `input_coupling` | 只能是 `"ac"`。 |
-| `time_constant_s` | 当前项目只能是 `0.3` s。 |
-| `filter_slope_db_oct` | 当前项目只能是 `24`。 |
+| `time_constant_s` | 当前项目确认可填 `0.3` 或 `1.0` s；必须是 SR830 的离散 `OFLT` 档位。两台可不同，sweep 自动使用较慢的一台计算等待和重复样本间隔。 |
+| `filter_slope_db_oct` | SR830 硬件可选 `6`、`12`、`18`、`24` dB/oct，对应 `OFSL` 代码 `0`、`1`、`2`、`3`；当前项目只能是 `24`。 |
 | `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
 | `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020`、`0.050` 或 XX `1.0` V。当前示例 fixed：XX `1.0`、XY `0.010`；在 `bounded_auto` 中它必须等于最小量程。 |
 | `reserve_mode` | `"high_reserve"`（RMOD 0）、`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。实际可用值还必须出现在 `lockin_safety.toml` 该角色的 `allowed_reserve_modes` 中；当前策略只放行 `"normal"`。 |
-| `settle_time_constants` | 有限数且至少 `5.0`。每次设置转换的 `settle_s` 必须不小于两台仪器中最大的 `time_constant_s × settle_time_constants`；当前 `0.3 × 5.0 = 1.5` s。该下限会在打开 VISA 前检查并归档。 |
 
 `fixed` 模式只保留 `sensitivity_mode` 和 `sensitivity_full_scale_v`；所有
 `autorange_*` 字段必须完全不存在（继续注释），并非“被忽略”。例如：
+
+滤波斜率补充：数值越大，低通滤波越陡、带外噪声抑制越强，但瞬态稳定时间通常
+越长。日常运行不要只改 `hardware.local.toml` 就切换斜率；项目代码、安全白名单和
+settle 验证当前只支持 `24 dB/oct`。如需 `6/12/18 dB/oct`，先按
+`docs/modules/LOCKIN.md` 的 `OFSL` 表同步修改并重新确认。
 
 ```toml
 sensitivity_mode = "fixed"
@@ -276,17 +280,30 @@ autorange_target_occupancy = 0.85
 autorange_stable_samples = 2
 ```
 
-`settle_time_constants = 5.0` 的含义是每次改变频率、谐波、SINE OUT 或量程后，至少等待
-五个锁相时间常数再继续；它不是另一个毫秒数。`[lockin_sweep].settle_s` 是实际使用的
-单个等待 interval，必须大于或等于上述下限。幅值扫描中每个实际 SINE OUT 改变等待两个
-interval，因此当前是 `2 × 1.5 = 3.0` s。
+日常 sweep 的时间参数只在 `[lockin_sweep]` 填写一次：
+
+```toml
+settle_time_constants = 5.0
+samples_per_point = 3
+sample_interval_time_constants = 1.0
+```
+
+程序取 XX/XY 中较慢的 `time_constant_s` 为 `τslow`，自动计算
+`settle_interval_s = τslow × settle_time_constants`。频率、谐波、SINE OUT 或量程发生
+实际改变后，正式样本前保留两次 interval 和中间状态检查；因此 0.3 s 时为 3.0 s，1.0 s
+时为 10.0 s。`settle_s` 已删除，日常配置和 CLI 都不能再手动填写秒数。
+
+`sample_interval_time_constants` 决定同一点重复样本之间的间隔：实际秒数为
+`τslow × sample_interval_time_constants`。示例的 `1.0` 在 0.3 s/1.0 s 时间常数下分别是
+0.3 s/1.0 s。它保持相对采样节奏，但**不**使样本成为统计独立副本；分析中的点内标准差
+应解释为短时间稳定性。若需要较长的近似独立间隔，应明确提高该倍数并记录实验目的。
 
 ### 谐波切换和 sweep 点的短暂过载复核
 
 SR830 的 `LIAS?` bit 0 同时表示输入或 Reserve overload，并且是锁存位；bit 1 是
 滤波器过载。每次 HARM
 写入后的第一条状态读数会被单独记录为 discarded transition，不会进入正式曲线。
-如果第一条记录只有 bit 0/bit 1，程序会再等待一个 `settle_s`，读取一次复核；复核
+如果第一条记录只有 bit 0/bit 1，程序会再等待一个自动计算的 settle interval，读取一次复核；复核
 清零则继续正式样本，复核仍有 bit 0、bit 1、unlock 或错误则拒绝该点。
 其它问题不享受复核。复核读数和是否通过都会写入该点的
 `harmonic_transition_status[*].verification`，方便区分“切换瞬态”与正式测量过载。
@@ -388,9 +405,9 @@ sensitivity_full_scale_v = 0.050
 | `skip_unsupported_harmonics` | 布尔值 `true` 或 `false`。为 `true` 时，超过 102 kHz 的 h2/h3 不写入仪器，而是在 JSON 写入 `skipped_harmonics`；日常高频扫描推荐 `true`。 |
 | `run_name` | 非空、最多 80 个字符；不可含控制字符或 `\ / : * ? " < > |`。可使用中文，且进入 JSON 文件名。 |
 | `note` | 非空、最多 2000 个字符且不可含 NUL；记录样品、接线改动或测试目的，写入 JSON 但不进入文件名。 |
-| `settle_s` | 有限正数，至少 1.5 s，且必须不小于上节的 time-constant 下限。它是每个普通转换实际等待的 interval；每次实际 `SLVL` 改变等待两倍。 |
+| `settle_time_constants` | 有限数且至少 `5.0`。程序以较慢的 XX/XY `time_constant_s × settle_time_constants` 自动计算一个 settle interval；不可再填写 `settle_s`。每次实际设置改变在正式样本前经过两个 interval。 |
 | `samples_per_point` | 整数，至少 1；版本库示例为 3。 |
-| `sample_interval_s` | 有限数，至少 0 s；版本库示例为 0.3 s。 |
+| `sample_interval_time_constants` | 有限非负数；同一点相邻样本间隔为较慢时间常数乘以该倍数。版本库示例为 `1.0`；这是相关的稳定性样本间隔，不是独立重复实验保证。 |
 | `external_series_resistance_ohm` | 正数，单位 Ω；外部串联电阻。SR830 固有 50 Ω 输出阻抗会自动加入。 |
 | `approximate_device_resistance_ohm` | 非负数，单位 Ω；允许为 `0`，但应填写当前可得的器件近似值。 |
 | `maximum_device_resistance_ohm` | 非负数，单位 Ω，且不能小于 `approximate_device_resistance_ohm`；这是操作者确认的器件电阻上界，而不是平均值。扫幅的器件端电压上界按 `Vsine × Rdevice,max / (Rseries + 50 Ω + Rdevice,max)` 计算。高阻、断线或接触异常可能超过这个上界时，必须先更新该值；缺失或不满足约束会在打开 VISA 前失败。 |

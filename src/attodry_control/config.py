@@ -124,7 +124,6 @@ class LockinConfig:
     autorange_target_occupancy: float | None
     autorange_stable_samples: int | None
     autorange_full_scales_v: tuple[float, ...] | None
-    settle_time_constants: float
     reserve_mode: ReserveMode
 
 
@@ -141,7 +140,6 @@ class LockinSafetyConfig:
     minimum_source_voltage_v_rms: float
     maximum_source_voltage_v_rms: float
     cleanup_source_voltage_v_rms: float
-    minimum_settle_time_constants: float
     target_occupancy: float
     stable_samples_before_narrowing: int
     lockin_xx: LockinSafetyRoleConfig
@@ -185,9 +183,9 @@ class LockinSweepConfig:
     skip_unsupported_harmonics: bool
     run_name: str
     note: str
-    settle_s: float
+    settle_time_constants: float
     samples_per_point: int
-    sample_interval_s: float
+    sample_interval_time_constants: float
     external_series_resistance_ohm: float
     approximate_device_resistance_ohm: float
     maximum_device_resistance_ohm: float
@@ -623,7 +621,6 @@ def _parse_lockin_safety(document: Mapping[str, Any]) -> LockinSafetyConfig:
             "minimum_source_voltage_v_rms",
             "maximum_source_voltage_v_rms",
             "cleanup_source_voltage_v_rms",
-            "minimum_settle_time_constants",
             "target_occupancy",
             "stable_samples_before_narrowing",
             "lockin_xx",
@@ -658,14 +655,6 @@ def _parse_lockin_safety(document: Mapping[str, Any]) -> LockinSafetyConfig:
             f"{name}.cleanup_source_voltage_v_rms must remain "
             f"{MINIMUM_SR830_SINE_OUTPUT_V:g} V RMS."
         )
-    minimum_settle = _positive_number(
-        document["minimum_settle_time_constants"],
-        f"{name}.minimum_settle_time_constants",
-    )
-    if minimum_settle < 5.0:
-        raise ConfigError(
-            f"{name}.minimum_settle_time_constants must be at least 5.0."
-        )
     target_occupancy = _number(
         document["target_occupancy"], f"{name}.target_occupancy"
     )
@@ -681,7 +670,6 @@ def _parse_lockin_safety(document: Mapping[str, Any]) -> LockinSafetyConfig:
         minimum_source_voltage_v_rms=minimum_source_v,
         maximum_source_voltage_v_rms=maximum_source_v,
         cleanup_source_voltage_v_rms=cleanup_source_v,
-        minimum_settle_time_constants=minimum_settle,
         target_occupancy=target_occupancy,
         stable_samples_before_narrowing=stable_samples,
         lockin_xx=_parse_lockin_safety_role(
@@ -775,7 +763,6 @@ def _parse_lockin(
         "filter_slope_db_oct",
         "sensitivity_mode",
         "sensitivity_full_scale_v",
-        "settle_time_constants",
         "reserve_mode",
     }
     if role is LockinRole.XY:
@@ -932,14 +919,6 @@ def _parse_lockin(
             raise ConfigError(
                 f"{name}.sensitivity_full_scale_v must equal the autorange minimum."
             )
-    settle_time_constants = _positive_number(
-        table["settle_time_constants"], f"{name}.settle_time_constants"
-    )
-    if settle_time_constants < safety.minimum_settle_time_constants:
-        raise ConfigError(
-            f"{name}.settle_time_constants must be at least "
-            f"{safety.minimum_settle_time_constants:.1f}."
-        )
     try:
         map_sr830_settings(
             reference_source=reference_source,
@@ -974,7 +953,6 @@ def _parse_lockin(
         autorange_target_occupancy=autorange_target_occupancy,
         autorange_stable_samples=autorange_stable_samples,
         autorange_full_scales_v=autorange_full_scales_v,
-        settle_time_constants=settle_time_constants,
         reserve_mode=reserve_mode,
     )
 
@@ -1001,9 +979,9 @@ def _parse_lockin_sweep(
             "skip_unsupported_harmonics",
             "run_name",
             "note",
-            "settle_s",
+            "settle_time_constants",
             "samples_per_point",
-            "sample_interval_s",
+            "sample_interval_time_constants",
             "external_series_resistance_ohm",
             "approximate_device_resistance_ohm",
             "maximum_device_resistance_ohm",
@@ -1196,9 +1174,13 @@ def _parse_lockin_sweep(
             f"{name} requires shared harmonic fields or all four role-specific "
             "harmonic fields."
         )
-    settle_s = _positive_number(table["settle_s"], f"{name}.settle_s")
-    if settle_s < 1.5:
-        raise ConfigError(f"{name}.settle_s must be at least 1.5 seconds.")
+    settle_time_constants = _positive_number(
+        table["settle_time_constants"], f"{name}.settle_time_constants"
+    )
+    if settle_time_constants < 5.0:
+        raise ConfigError(
+            f"{name}.settle_time_constants must be at least 5.0."
+        )
     external_termination = _boolean(
         table["external_50_ohm_termination"],
         f"{name}.external_50_ohm_termination",
@@ -1240,12 +1222,13 @@ def _parse_lockin_sweep(
         ),
         run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
         note=_sweep_note(table["note"], f"{name}.note"),
-        settle_s=settle_s,
+        settle_time_constants=settle_time_constants,
         samples_per_point=_integer(
             table["samples_per_point"], f"{name}.samples_per_point", minimum=1
         ),
-        sample_interval_s=_nonnegative_number(
-            table["sample_interval_s"], f"{name}.sample_interval_s"
+        sample_interval_time_constants=_nonnegative_number(
+            table["sample_interval_time_constants"],
+            f"{name}.sample_interval_time_constants",
         ),
         external_series_resistance_ohm=_positive_number(
             table["external_series_resistance_ohm"],

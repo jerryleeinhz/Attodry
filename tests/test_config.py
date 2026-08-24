@@ -71,7 +71,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIsNone(config.lockin_xx.autorange_stable_samples)
         self.assertEqual(config.lockin_xy.sensitivity_mode, SensitivityMode.FIXED)
         self.assertEqual(config.lockin_xy.sensitivity_full_scale_v, 0.001)
-        self.assertEqual(config.lockin_xx.settle_time_constants, 5.0)
+        self.assertEqual(config.lockin_sweep.settle_time_constants, 5.0)
+        self.assertEqual(config.lockin_sweep.sample_interval_time_constants, 1.0)
         self.assertEqual(config.lockin_xx.reserve_mode, ReserveMode.NORMAL)
         self.assertEqual(config.lockin_xy.reserve_mode, ReserveMode.NORMAL)
         self.assertIsNone(config.lockin_xx.external_reference_edge)
@@ -293,7 +294,7 @@ class ConfigurationTests(unittest.TestCase):
             ('input_mode = "a_minus_b"', 'input_mode = "a"', "input_mode"),
             ('shield_grounding = "float"', 'shield_grounding = "ground"', "shield_grounding"),
             ('input_coupling = "ac"', 'input_coupling = "dc"', "input_coupling"),
-            ("time_constant_s = 0.3", "time_constant_s = 1.0", "time_constant_s"),
+            ("time_constant_s = 0.3", "time_constant_s = 0.4", "time_constant_s"),
             ("filter_slope_db_oct = 24", "filter_slope_db_oct = 12", "filter_slope"),
             (
                 "sensitivity_full_scale_v = 0.020",
@@ -331,6 +332,23 @@ class ConfigurationTests(unittest.TestCase):
             "settle_time_constants = 5.0", "settle_time_constants = 4.9", 1
         )
         with self.assertRaisesRegex(ConfigError, "at least 5.0"):
+            self.load_text(text)
+
+    def test_lockin_accepts_confirmed_one_second_time_constant(self) -> None:
+        text = self.simulation_text().replace(
+            "time_constant_s = 0.3", "time_constant_s = 1.0", 1
+        )
+
+        config = self.load_text(text)
+
+        self.assertEqual(config.lockin_xx.time_constant_s, 1.0)
+
+    def test_lockin_sweep_rejects_legacy_second_based_timing_fields(self) -> None:
+        text = self.simulation_text().replace(
+            "settle_time_constants = 5.0",
+            "settle_time_constants = 5.0\nsettle_s = 1.5",
+        )
+        with self.assertRaisesRegex(ConfigError, "settle_s"):
             self.load_text(text)
 
     def test_xy_bounded_autorange_is_allowed_with_complete_policy(self) -> None:

@@ -43,7 +43,6 @@ filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.020
 reserve_mode = "normal"
-settle_time_constants = 5.0
 
 [lockin_xy]
 model = "SR830"
@@ -61,7 +60,6 @@ filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
 sensitivity_full_scale_v = 0.001
 reserve_mode = "normal"
-settle_time_constants = 5.0
 
 [lockin_sweep]
 frequency_ranges = [
@@ -82,9 +80,9 @@ excitation_xy_harmonics = [1, 2, 3]
 skip_unsupported_harmonics = true
 run_name = "simulation"
 note = "Simulation fixture."
-settle_s = 1.5
+settle_time_constants = 5.0
 samples_per_point = 3
-sample_interval_s = 0.3
+sample_interval_time_constants = 1.0
 external_series_resistance_ohm = 100000.0
 approximate_device_resistance_ohm = 500.0
 maximum_device_resistance_ohm = 500.0

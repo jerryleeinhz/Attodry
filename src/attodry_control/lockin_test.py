@@ -55,7 +55,6 @@ from .sr830_settings import (
 
 
 SR830_OUTPUT_RESISTANCE_OHM = 50.0
-MINIMUM_SWEEP_SETTLE_S = 1.5
 EXCITATION_SOURCE_STEP_SETTLE_INTERVALS = 2
 # The external SR830 frequency readback showed 54 ppm jitter at 50 Hz while
 # remaining locked and error-free.  The internal reference readback also has a
@@ -404,19 +403,7 @@ def _add_sweep_arguments(
 ) -> None:
     override_help = argparse.SUPPRESS if hide_overrides else None
     parser.add_argument(
-        "--settle-s",
-        type=_nonnegative_float,
-        help=(
-            override_help
-            or "Transition-settle interval in seconds. Excitation source steps use "
-            "two intervals. Overrides lockin_sweep.settle_s."
-        ),
-    )
-    parser.add_argument(
         "--samples-per-point", type=_positive_integer, help=override_help
-    )
-    parser.add_argument(
-        "--sample-interval-s", type=_nonnegative_float, help=override_help
     )
     harmonic_selection = parser.add_mutually_exclusive_group()
     harmonic_selection.add_argument(
@@ -1019,11 +1006,6 @@ def _run_frequency_sweep(
     config = settings["config"]
     if not isinstance(config, ControlConfig):
         raise ValueError("A validated hardware config is required for sweeps.")
-    if args.settle_s < MINIMUM_SWEEP_SETTLE_S:
-        raise Sr830Error(
-            "Frequency sweep requires at least 1.5 s per settle interval for "
-            "sensitivity and reference transitions."
-        )
     record_directory = _prepare_sweep_record_directory(args, settings)
     points = _validate_increasing_points(args.points_hz, "frequency")
     if points[0] < 0.001 or points[-1] > MAXIMUM_REFERENCE_FREQUENCY_HZ:
@@ -1295,9 +1277,16 @@ def _run_frequency_sweep(
             },
             "sensitivity_setup": sensitivity_setup,
             "reserve_setup": reserve_setup,
-            "settle_s": args.settle_s,
-            "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
+            "settle_time_constants": config.lockin_sweep.settle_time_constants,
+            "slowest_time_constant_s": args.slowest_time_constant_s,
+            "settle_interval_s": args.settle_s,
+            "post_setting_settle_s": (
+                EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+            ),
             "samples_per_point": args.samples_per_point,
+            "sample_interval_time_constants": (
+                config.lockin_sweep.sample_interval_time_constants
+            ),
             "sample_interval_s": args.sample_interval_s,
             "safety": frequency_safety,
             "points": records,
@@ -1320,11 +1309,6 @@ def _run_excitation_sweep(
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _resolve_sweep_settings(args, settings, scan="excitation")
     record_directory = _prepare_sweep_record_directory(args, settings)
-    if args.settle_s < MINIMUM_SWEEP_SETTLE_S:
-        raise Sr830Error(
-            "Excitation sweep requires at least 1.5 s per settle interval; "
-            "each SINE OUT step waits two intervals."
-        )
     points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
     harmonics_by_role = _requested_sweep_harmonics_by_role(args)
@@ -1555,10 +1539,17 @@ def _run_excitation_sweep(
             },
             "sensitivity_setup": sensitivity_setup,
             "reserve_setup": reserve_setup,
-            "settle_s": args.settle_s,
-            "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
+            "settle_time_constants": config.lockin_sweep.settle_time_constants,
+            "slowest_time_constant_s": args.slowest_time_constant_s,
+            "settle_interval_s": args.settle_s,
+            "post_setting_settle_s": (
+                EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+            ),
             "source_step_settle_s": source_step_settle_s,
             "samples_per_point": args.samples_per_point,
+            "sample_interval_time_constants": (
+                config.lockin_sweep.sample_interval_time_constants
+            ),
             "sample_interval_s": args.sample_interval_s,
             "safety": safety,
             "points": records,
@@ -1630,9 +1621,16 @@ def _measurement_config_snapshot(
         },
         "run_name": config.lockin_sweep.run_name,
         "note": config.lockin_sweep.note,
-        "settle_s": args.settle_s,
-        "time_constant_settle_floor_s": args.time_constant_settle_floor_s,
+        "settle_time_constants": config.lockin_sweep.settle_time_constants,
+        "slowest_time_constant_s": args.slowest_time_constant_s,
+        "settle_interval_s": args.settle_s,
+        "post_setting_settle_s": (
+            EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+        ),
         "samples_per_point": args.samples_per_point,
+        "sample_interval_time_constants": (
+            config.lockin_sweep.sample_interval_time_constants
+        ),
         "sample_interval_s": args.sample_interval_s,
         "output_directory": config.lockin_sweep.output_directory.as_posix(),
         "range_segments": _sweep_range_segments(args, scan=scan),
@@ -1653,7 +1651,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 11,
+        "schema_version": 12,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -2686,25 +2684,13 @@ def _resolve_sweep_settings(
             | set(args.configured_harmonics_by_role["xy"])
         )
     )
-    requested_settle_s = sweep.settle_s if args.settle_s is None else args.settle_s
-    time_constant_settle_floor_s = _time_constant_settle_floor_s(config)
-    if requested_settle_s < time_constant_settle_floor_s:
-        raise Sr830Error(
-            "Sweep settle_s must be at least "
-            f"{time_constant_settle_floor_s:g} s for the configured SR830 "
-            "time constants and settle_time_constants."
-        )
-    args.settle_s = requested_settle_s
-    args.time_constant_settle_floor_s = time_constant_settle_floor_s
+    args.slowest_time_constant_s = _slowest_lockin_time_constant_s(config)
+    args.settle_s = _time_constant_settle_interval_s(config)
+    args.sample_interval_s = _time_constant_sample_interval_s(config)
     args.samples_per_point = (
         sweep.samples_per_point
         if args.samples_per_point is None
         else args.samples_per_point
-    )
-    args.sample_interval_s = (
-        sweep.sample_interval_s
-        if args.sample_interval_s is None
-        else args.sample_interval_s
     )
     args.maximum_source_voltage_v = config.lockin_safety.maximum_source_voltage_v_rms
     if getattr(args, "skip_unsupported_harmonics", None) is None:
@@ -2766,13 +2752,27 @@ def _sweep_range_segments(
     return [asdict(segment) for segment in segments]
 
 
-def _time_constant_settle_floor_s(config: ControlConfig) -> float:
-    """Return the minimum post-setting wait implied by both SR830 filters."""
+def _slowest_lockin_time_constant_s(config: ControlConfig) -> float:
+    """Return the shared sweep cadence set by the slower SR830 filter."""
 
-    return max(
-        MINIMUM_SWEEP_SETTLE_S,
-        config.lockin_xx.time_constant_s * config.lockin_xx.settle_time_constants,
-        config.lockin_xy.time_constant_s * config.lockin_xy.settle_time_constants,
+    return max(config.lockin_xx.time_constant_s, config.lockin_xy.time_constant_s)
+
+
+def _time_constant_settle_interval_s(config: ControlConfig) -> float:
+    """Return one automatic settle interval for a daily sweep."""
+
+    return (
+        _slowest_lockin_time_constant_s(config)
+        * config.lockin_sweep.settle_time_constants
+    )
+
+
+def _time_constant_sample_interval_s(config: ControlConfig) -> float:
+    """Return the repeat-sample spacing derived from the slower SR830 filter."""
+
+    return (
+        _slowest_lockin_time_constant_s(config)
+        * config.lockin_sweep.sample_interval_time_constants
     )
 
 
