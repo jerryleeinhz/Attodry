@@ -49,7 +49,11 @@ channels. Select a suspect point, click `Apply point exclusions`, and rerun the
 plot cell; clearing the selections and applying restores all automatically
 retained points. The final optional export writes `selection_manifest.json`
 alongside the CSV/PNG/PDF outputs so the selected files, filters, and manual
-exclusions are reproducible.
+exclusions are reproducible. The manifest also records the exact
+`PHASE_MINIMUM_AMPLITUDE_V` and
+`PHASE_MAXIMUM_STANDARD_DEVIATION_DEG` values used for the exported figures, so
+phase plots made from the same raw data under different trust thresholds remain
+distinguishable and reproducible.
 Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
 opened automatically.
 
@@ -59,6 +63,62 @@ magnitude) on the left axis and measured phase on the right axis. Frequency is
 logarithmic and its title states the calibrated RMS current. Current--voltage
 plots use the same SINE OUT-derived RMS current on the x axis. A missing harmonic
 is labeled as missing rather than interpolated or combined with another order.
+
+### Harmonic current-power-law fitting
+
+When an excitation-amplitude record is loaded, the commissioning notebook also
+fits every available XX/XY and h1/h2/h3 channel independently. The current is
+calculated from the recorded path snapshot:
+
+```text
+I_RMS = V_SINE_OUT,RMS / (R_external + 50 ohm + R_device)
+```
+
+For a channel with harmonic order `n`, the analysis compares the free-exponent
+model and the expected fixed-order model in log-log space:
+
+```text
+log(R) = log(A) + p log(I)       (p is fitted)
+log(R) = log(A) + n log(I)       (n is fixed to 1, 2, or 3)
+```
+
+The direct exponent evidence is the fitted `p` and its approximate confidence
+interval. `delta_aicc_fixed_minus_free` is `AICc_fixed - AICc_free`; values at
+or below 2 mean that the fixed-order model is competitive, values above 6 are
+evidence for the free-exponent model, and values above 10 are strong evidence.
+The result also reports fixed/free R-squared, relative RMSE, current span in
+decades, replicate-based SNR, and the phase slope in degrees per current decade.
+R-squared is contextual only and is never used as the sole decision rule.
+
+The notebook keeps the thresholds in its first code cell inside the editable
+`SCALING_RULES` block. The defaults are:
+
+| Rule | Default | Meaning |
+| --- | ---: | --- |
+| `confidence_level` | 0.95 | Confidence level for the exponent interval |
+| `minimum_points` | 6 | Minimum current points used by a fit |
+| `minimum_current_decades` | 1.0 | Required `log10(Imax/Imin)` span |
+| `minimum_snr` | 3.0 | Exclude a point only when replicate SEM is available and SNR is lower |
+| `max_exponent_ci_width` | 0.5 | Maximum allowed width of the exponent interval |
+| `max_delta_aicc_consistent` | 2.0 | Fixed-order model remains competitive |
+| `min_delta_aicc_inconsistent` | 6.0 | Free-exponent model is clearly preferred |
+| `max_relative_rmse` | 0.10 | Maximum relative error of the fixed-order fit |
+| `max_phase_slope_deg_per_decade` | 5.0 | Phase-stability limit for the complex-response verdict |
+| `max_phase_span_deg` | 10.0 | Total unwrapped phase-span limit |
+
+Two verdicts are intentionally returned. `amplitude_verdict` asks whether the
+magnitude follows `I^n`. `complex_response_verdict` additionally requires the
+phase to remain stable. Thus a magnitude can be consistent with `I^2` while the
+full complex Vxy response is marked inconsistent because its phase rotates with
+current. The notebook returns `insufficient_data` when the point count or
+current range is too small, `ambiguous` when indicators disagree, and does not
+silently remove low-SNR or manually excluded points. Optional thresholds can be
+set to `None` in the notebook to disable that individual criterion.
+
+The optional export records the exact `SCALING_RULES` values and every fit
+result in `selection_manifest.json`, alongside one PNG/PDF fit figure per
+available channel. This makes results produced with different judgment rules
+reproducible and distinguishable.
 
 The daily source of truth for the variable path values is the ignored
 `config/hardware.local.toml` `[lockin_sweep]` table:

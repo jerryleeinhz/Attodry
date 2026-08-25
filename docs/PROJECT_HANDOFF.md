@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 ## Current stage
 
@@ -384,8 +384,9 @@ Completed in Stage 3:
   `clean` formal samples remain the visible automatic screen, and a point-level
   multi-select applies reproducible manual exclusions without changing raw JSON.
   When optional export is enabled, `selection_manifest.json` records the files,
-  filters, retained rows, and excluded point keys. This is analysis-only and has
-  no hardware imports or instrument operations.
+  filters, retained rows, excluded point keys, and the exact amplitude and
+  circular-spread phase-display thresholds used for the figures. This is
+  analysis-only and has no hardware imports or instrument operations.
 - Rerunning the notebook's formal-samples cell now first re-synchronizes the
   current widget filters. Consequently, an explicitly allowed rejected audit
   record cannot be silently retried using an earlier rejected-disabled filter;
@@ -832,6 +833,20 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   fail closed. All 140 directly relevant offline tests pass; the full local run
   reports 295 passed, 4 skipped, and one unrelated publication-plot failure from
   this workstation's NumPy/Matplotlib binary mismatch.
+- The commissioning notebook export now archives the exact
+  `PHASE_MINIMUM_AMPLITUDE_V` and
+  `PHASE_MAXIMUM_STANDARD_DEVIATION_DEG` values in
+  `selection_manifest.json`. Figures exported from the same raw data with
+  different phase-trust thresholds are therefore distinguishable and
+  reproducible. This is analysis-only and performs no hardware operation.
+- The commissioning notebook now exposes an editable `SCALING_RULES` block for
+  excitation harmonic power-law fits. Each available XX/XY × h1/h2/h3 channel
+  compares free `R=A·I^p` and fixed `R=A·I^n` models, records exponent confidence,
+  AICc, RMSE, current span, phase slope/span, and separate amplitude/complex
+  response verdicts. Optional exports archive the exact rules and fit results in
+  `selection_manifest.json` and write one fit figure per available channel.
+  The analysis core and synthetic-order tests are offline-only; no hardware
+  resource was opened or written.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

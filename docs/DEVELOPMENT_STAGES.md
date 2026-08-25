@@ -373,8 +373,9 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
   type is absent and both sets when both are selected. `clean` remains the
   default explicit quality screen; a point-level multi-select lets the operator
   remove suspect retained points without altering raw JSON. Optional export
-  writes the selected files, filters, and exclusions to `selection_manifest.json`
-  for reproducibility. This analysis-only path has no hardware imports.
+  writes the selected files, filters, exclusions, and exact phase minimum-amplitude
+  and maximum-circular-spread thresholds to `selection_manifest.json` for
+  reproducibility. This analysis-only path has no hardware imports.
 - Added role-specific harmonic selection in `[lockin_sweep]`:
   `frequency_xx_harmonics`, `frequency_xy_harmonics`,
   `excitation_xx_harmonics`, and `excitation_xy_harmonics` independently select
@@ -812,3 +813,15 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   pass. In the full local run, 295 tests pass and 4 skip; the sole unrelated
   publication-plot test is blocked by the workstation's NumPy/Matplotlib binary
   mismatch. No VISA resource was opened.
+- Added reproducible phase-quality export metadata (2026-08-25): the commissioning
+  notebook writes its exact minimum-amplitude and maximum-circular-spread phase
+  thresholds into `selection_manifest.json`. The targeted analysis suite passed
+  15 tests with 2 matplotlib-dependent skips, and all notebook code cells compile;
+  no hardware resource was opened or written.
+- Added editable excitation harmonic-scaling analysis (2026-08-25): the notebook
+  exposes `SCALING_RULES` for point count, current span, SNR, exponent confidence,
+  AICc, RMSE, and phase stability. The analysis compares free `I^p` and fixed
+  `I^n` models for every available XX/XY × h1/h2/h3 channel, reports separate
+  amplitude and complex-response verdicts, exports fit figures/results and the
+  exact rules in `selection_manifest.json`, and adds synthetic-order tests.
+  This is read-only analysis; no hardware resource was opened or written.

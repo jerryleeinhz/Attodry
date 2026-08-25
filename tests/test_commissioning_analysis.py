@@ -9,12 +9,14 @@ import unittest
 from unittest.mock import patch
 
 from attodry_control.commissioning_analysis import (
+    HarmonicScalingRules,
     ExcitationPathResistance,
     aggregate_sweep_samples,
     browse_and_load_commissioning_file,
     discover_commissioning_records,
     excitation_path_from_sweep_files,
     export_commissioning_csv,
+    fit_harmonic_scaling,
     load_sweep_sample_files,
     load_sweep_samples,
     plot_role_harmonic_sweep,
@@ -363,6 +365,71 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(float(phase_values[2]), 182.0)
         self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (degree)")
 
+    def test_harmonic_scaling_recovers_expected_order_and_phase(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=0.0)
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertEqual(fit.amplitude_verdict, "consistent")
+        self.assertEqual(fit.complex_response_verdict, "consistent")
+        self.assertAlmostEqual(fit.exponent or 0.0, 2.0, places=6)
+        self.assertAlmostEqual(fit.phase_slope_deg_per_decade or 0.0, 0.0, places=6)
+        self.assertLessEqual(fit.delta_aicc_fixed_minus_free or 0.0, 2.0)
+
+    def test_harmonic_scaling_rejects_a_distinct_exponent(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._scaling_rows(exponent=1.25, phase_slope_deg_per_decade=0.0)
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertEqual(fit.amplitude_verdict, "inconsistent")
+        self.assertFalse(
+            (fit.exponent_ci_low or 0.0) <= 2.0 <= (fit.exponent_ci_high or 0.0)
+        )
+        self.assertGreater(fit.delta_aicc_fixed_minus_free or 0.0, 6.0)
+
+    def test_harmonic_scaling_separates_amplitude_and_complex_phase_verdicts(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=20.0)
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertEqual(fit.amplitude_verdict, "consistent")
+        self.assertEqual(fit.complex_response_verdict, "inconsistent")
+        self.assertAlmostEqual(fit.phase_slope_deg_per_decade or 0.0, 20.0, places=6)
+
+    def test_harmonic_scaling_reports_insufficient_range(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=0.0)[:6]
+        rules = HarmonicScalingRules(minimum_current_decades=1.0)
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+            rules=rules,
+        )
+
+        self.assertEqual(fit.amplitude_verdict, "insufficient_data")
+        self.assertTrue(any("current span" in reason for reason in fit.reasons))
+
     def test_notebook_is_valid_json_and_all_code_cells_compile(self) -> None:
         path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"
         notebook = json.loads(path.read_text(encoding="utf-8"))
@@ -396,6 +463,21 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("def _load_selected_formal_samples():\n    _sync_filters()", code)
         self.assertIn("loaded = _load_selected_formal_samples()", code)
         self.assertIn("selection_manifest.json", code)
+        self.assertIn("'phase_display': {", code)
+        self.assertIn(
+            "'PHASE_MINIMUM_AMPLITUDE_V': PHASE_MINIMUM_AMPLITUDE_V", code
+        )
+        self.assertIn(
+            "'PHASE_MAXIMUM_STANDARD_DEVIATION_DEG': "
+            "PHASE_MAXIMUM_STANDARD_DEVIATION_DEG",
+            code,
+        )
+        self.assertIn("SCALING_RULES = HarmonicScalingRules", code)
+        self.assertIn("minimum_current_decades=1.0", code)
+        self.assertIn("fit_harmonic_scalings", code)
+        self.assertIn("plot_harmonic_scaling_fit", code)
+        self.assertIn("'harmonic_scaling_rules': asdict(SCALING_RULES)", code)
+        self.assertIn("'harmonic_scaling_results':", code)
         self.assertIn("if frequency_rows", code)
         self.assertIn("if excitation_rows", code)
         self.assertNotIn("browse_and_load_commissioning_file", code)
@@ -469,6 +551,43 @@ class CommissioningAnalysisTests(unittest.TestCase):
         for path in self.paths:
             if path.exists():
                 path.unlink()
+
+    def _scaling_rows(
+        self,
+        *,
+        exponent: float,
+        phase_slope_deg_per_decade: float,
+    ) -> tuple[object, ...]:
+        base = next(
+            row for row in load_sweep_samples(
+                self._write_json("scaling-base.json", self._sweep(completed=True))
+            )
+            if row.role == "xy"
+        )
+        path_resistance = 100_550.0
+        currents = tuple(1e-8 * (10.0 ** (index / 3.0)) for index in range(10))
+        rows = []
+        for point_index, current in enumerate(currents):
+            amplitude = 1.0e8 * current**exponent
+            phase = phase_slope_deg_per_decade * math.log10(current / currents[0])
+            for sample_index in range(3):
+                rows.append(
+                    replace(
+                        base,
+                        scan_type="excitation",
+                        point_index=point_index,
+                        sample_index=sample_index,
+                        source_v_rms=current * path_resistance,
+                        sine_output_v_rms=current * path_resistance,
+                        nominal_current_a_rms=current,
+                        harmonic=2,
+                        amplitude_v=amplitude,
+                        x_v=amplitude,
+                        y_v=0.0,
+                        phase_deg=phase,
+                    )
+                )
+        return tuple(rows)
 
     def _sweep(
         self, *, completed: bool, xy_lia_raw: int = 0
