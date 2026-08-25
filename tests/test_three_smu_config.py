@@ -14,6 +14,7 @@ from attodry_control.three_smu_config import (
     ThreeSmuScanPlan,
     generate_scan_points,
     load_three_smu_hardware,
+    load_three_smu_operation_config,
     load_three_smu_scan,
     validate_plan_targets,
 )
@@ -85,6 +86,103 @@ def hardware() -> ThreeSmuHardwareConfig:
 
 
 class ThreeSmuConfigTests(unittest.TestCase):
+    def test_single_daily_operation_config_reuses_gate_safety_limits(self) -> None:
+        text = """
+[smu_bias]
+model = "Keithley2400"
+address = "FAKE::1"
+timeout_ms = 1000
+source_mode = "voltage"
+compliance_current_a = 0.001
+compliance_voltage_v = 10.0
+source_min = -1.0
+source_max = 1.0
+ramp_step = 0.1
+readback_tolerance = 0.000001
+settle_s = 0.0
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_top]
+model = "Keithley2400"
+address = "FAKE::2"
+compliance_a = 0.001
+leakage_limit_a = 0.000001
+max_abs_voltage_v = 2.0
+ramp_step_v = 0.1
+readback_tolerance_v = 0.000001
+settle_s = 0.0
+
+[gate_top.smu]
+timeout_ms = 1000
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_bottom]
+model = "Keithley2400"
+address = "FAKE::3"
+compliance_a = 0.001
+leakage_limit_a = 0.000001
+max_abs_voltage_v = 2.0
+ramp_step_v = 0.1
+readback_tolerance_v = 0.000001
+settle_s = 0.0
+
+[gate_bottom.smu]
+timeout_ms = 1000
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[three_smu_run]
+output_directory = "runs"
+run_name = "fake-two-gate-map"
+note = "offline only"
+mode = "multi_smu_map"
+samples_per_point = 1
+delay_s = 0.0
+bidirectional = false
+serpentine = true
+finish_action = "zero_disable"
+point_count = 1
+pulse_high_s = 0.0
+pulse_period_s = 0.0
+
+[three_smu_run.smu_bias]
+role = "fixed"
+fixed = 0.001
+start = 0.0
+stop = 0.0
+step = 1.0
+
+[three_smu_run.gate_top]
+role = "sweep"
+fixed = 0.0
+start = -1.0
+stop = 1.0
+step = 1.0
+
+[three_smu_run.gate_bottom]
+role = "sweep"
+fixed = 0.0
+start = -1.0
+stop = 1.0
+step = 1.0
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hardware.local.toml"
+            path.write_text(text, encoding="utf-8")
+            operation = load_three_smu_operation_config(path)
+            self.assertEqual(operation.output_directory, Path(directory) / "runs")
+            self.assertEqual(operation.hardware.gate_top.source_max, 2.0)
+            self.assertEqual(operation.plan.gate_bottom.role, ChannelRole.SWEEP)
+            self.assertEqual(len(validate_plan_targets(operation.hardware, operation.plan)), 9)
+
     def test_checked_in_hardware_template_is_intentionally_not_ready(self) -> None:
         config = load_three_smu_hardware(HARDWARE_EXAMPLE)
         with self.assertRaisesRegex(ThreeSmuConfigError, "not ready"):

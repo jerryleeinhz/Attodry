@@ -1,291 +1,128 @@
-# Three-SMU / dual-gate module work package
+# Three-SMU / dual-gate 模块
 
-## 当前状态
+## 当前阶段
 
-状态：`offline complete`（S0，2026-08-21）。生产代码、fake-instrument
-测试、CLI、两个 Notebook 与审计/分析路径已经完成；尚未在目标电脑 `lyr`
-环境验收，也未连接真实 SMU 或发送任何真实写命令。
+状态：`S0 offline complete`（2026-08-25）。本分支实现了三台 Keithley 2400 的独立
+QCoDeS 模块、无 GUI CLI、调用同一 generator 的实时 Notebook，以及 accepted-only 分析
+Notebook。所有验证均为离线 fake-instrument 测试；真实 SMU 连接数和写命令数均为 **0**。
 
-日常配置、参数、离线 `describe`、未来真实运行门槛、数据分析和异常处置统一见
-[`THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)。在 S1/S2 获得
-明确授权前，只执行其中标为离线的步骤。
+本包落实 `PROJECT_MODULE_DEVELOPMENT_GUIDE.md` 的单配置、fail-closed、审计和 SSH 分析
+要求，并保留已建立的三角色范围：
 
-S0 交付结果：
+- `smu_bias`：source-drain bias；可选 voltage 或 current source；
+- `gate_top`：top gate；固定 voltage source、测量 leakage；
+- `gate_bottom`：bottom gate；固定 voltage source、测量 leakage。
 
-- 严格 hardware/scan TOML、语义角色 QCoDeS Keithley 2400 adapter、共享
-  session/generator、无 GUI CLI、实时 Notebook 和 accepted-only 分析 Notebook
-  均已实现；
-- 每个 run 生成 `metadata.json`、`raw.jsonl`、`data.csv`，保留 rejected/
-  partial/interrupted/cleanup 审计，默认 loader 只返回 completed/accepted/clean；
-- 34 个 Three-SMU focused tests 以及 174 项完整离线回归通过（当前环境有两个
-  optional matplotlib 测试跳过）；
-- 真实硬件连接数为 0，真实写命令数为 0。
+通用 `docs/modules/SMU.md` 中的两-gate 规划不能删除或替换这个 `smu_bias` 角色。本模块
+不接入 Lock-in、冷台、磁场或主 acquisition。
 
-该模块使用三台 SMU：
+日常使用与全部参数见 [`../THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)。
 
-- `smu_bias`：source-drain bias；第一版可选择电压源或电流源；
-- `gate_top`：top gate，电压源、电流测量；
-- `gate_bottom`：bottom gate，电压源、电流测量。
-
-第一版不读取或记录 Lock-in。以后把 `smu_bias` 替换为 Lock-in 激励时，应替换
-bias provider，而不是重写 gate 扫描、记录和分析模块。
-
-## 已确认的实现选择
-
-1. 硬件依赖使用 QCoDeS，Keithley 2400 调用方式参考已成功运行的本地程序：
-   `Electrical measurement/keithley2400_qcodes_ui.py`。
-2. 不移植 GUI、PySide 或 pyqtgraph 控制界面。
-3. 只保留一个底层 Python 控制与扫描引擎，提供两条上层路线：
-   - 无 GUI 的 CLI，适合可重复、可审计的正式运行；
-   - Jupyter Notebook 调用同一底层模块，适合逐点实时画图。
-4. 三台仪器的地址、量程和全部安全参数只放在 ignored local TOML 中，由用户
-   填写；checked-in 示例只能使用 `CHANGE_ME`，不能含看似可直接使用的限值。
-5. 保留参考程序中的 compliance、NPLC、source/measure autorange、四线制、
-   output 状态和 compliance-trip 检查，但采用本项目的 fail-closed 规则。
-6. 不复刻参考 GUI 的 G6--G9 界面验证阶段。生产代码和 fake-instrument 测试
-   通过后，由用户选择第一次正式扫描并单独授权；真实运行自身仍必须执行完整
-   preflight、限值检查、逐步 ramp、读回和 cleanup。
-
-## 模块目标
-
-1. 通过语义角色控制三台 SMU，不使用 `SMU1/2/3` 之类位置编号。
-2. 在打开 QCoDeS driver 前完成 strict TOML、扫描计划和安全范围验证。
-3. 同时支持固定值、关闭和扫描三种通道角色，并保留以下扫描模式：
-   - time trace；
-   - bias I-V；
-   - top-gate transfer；
-   - bottom-gate transfer；
-   - paired top/bottom-gate sweep；
-   - 一至三通道 multi-SMU map；
-   - software pulse。
-4. 扫描计划支持单向/双向、二维 serpentine、每点等待和每点多次采样。
-5. 每一点顺序读取三台 SMU并保存各自时间戳；不得把顺序读回描述为同步采样。
-6. 保存 source setpoint、V/I/R 读回、output、compliance/trip、gate leakage、
-   状态、错误、扫描坐标和 cleanup 结果。
-7. 默认分析只使用 `completed/accepted/clean` 正式样本；rejected、partial、
-   interrupted 和 cleanup 数据保留但只能显式选择。
-8. CLI 和 Notebook 的输出数据、状态判据和 cleanup 完全一致。
-
-## 非目标
-
-- 第一版不连接 SR830，不记录 X/Y/R/phase，也不计算 Lock-in resistance。
-- 不控制 attoDRY 温度或磁场，不修改现有 acquisition 主路径。
-- 不提供 GUI，不在 Notebook 中直接实例化 QCoDeS driver。
-- 不猜测 VISA 地址、compliance、leakage、source limit、ramp step、NPLC、
-  settle time、readback tolerance 或四线制设置。
-- 不把参考程序中直接跳变 setpoint、吞掉 I/O 异常或 compliance 后继续运行的
-  行为带入新模块。
-
-## 配置设计
-
-已增加两个文件：
-
-- `config/three_smu_hardware.example.toml`：三台 SMU 的本地硬件模板；
-- `config/three_smu_scan.example.toml`：可复制修改的扫描计划模板。
-
-本地实际文件建议为：
+## 架构与配置
 
 ```text
-config/three_smu_hardware.local.toml
-config/three_smu_scan.local.toml
+hardware.local.toml
+  ├─ [smu_bias]                 bias 安全与 2400 参数
+  ├─ [gate_top]/[gate_bottom]   共享 gate 安全限值（唯一来源）
+  │    └─ [.smu]                仅 timeout/NPLC/range/four-wire 等 2400 参数
+  └─ [three_smu_run]            run name/note/输出目录/扫描计划
+       └─ [smu_bias|gate_top|gate_bottom]  off/fixed/sweep
+             ↓
+three_smu_config → ThreeSmuSession/generator → CLI 或 live Notebook
+             ↓                                      ↓
+metadata.json + raw.jsonl + data.csv       accepted-only analysis Notebook
 ```
 
-两者必须加入 `.gitignore`。硬件 TOML 每个语义角色至少包含：
+日常只复制 `config/hardware.example.toml` 为 ignored 的 `config/hardware.local.toml`。
+模块 loader 只解析本模块相关表，因此别的未完成模块表不会阻塞 Three-SMU 的独立 `describe`。
+现有 `config.py` 也允许这些表共存，但不重复解释 SMU 细节。
 
-```toml
-[smu_bias] # gate_top / gate_bottom 结构相同
-model = "Keithley2400"
-address = "CHANGE_ME"
-timeout_ms = "CHANGE_ME"
-compliance_current_a = "CHANGE_ME"
-compliance_voltage_v = "CHANGE_ME"
-source_min = "CHANGE_ME"
-source_max = "CHANGE_ME"
-ramp_step = "CHANGE_ME"
-readback_tolerance = "CHANGE_ME"
-settle_s = "CHANGE_ME"
-nplc = "CHANGE_ME"
-source_auto_range = true
-measure_auto_range = true
-four_wire = false
-```
+Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` loader 仍保留，避免
+破坏旧离线资料；新的日常 CLI 和 Notebook 一律使用单一 `hardware.local.toml`。
 
-两个 gate 还必须设置 `leakage_limit_a`。Gate 第一版只允许 voltage-source；
-`smu_bias` 允许 voltage-source 或 current-source。所有 `CHANGE_ME`、重复地址、
-非法范围、leakage 高于 current compliance 等情况必须在构造 driver 前失败。
+## 已实现的安全行为
 
-扫描 TOML 使用 `[scan]` 加三张角色表。每个角色选择 `off/fixed/sweep`，扫描表
-设置 mode、samples per point、delay、bidirectional、serpentine 和结束动作。
-结束动作默认且推荐 `zero_disable`；若保留 `hold`，CLI 必须要求额外的显式
-`--authorize-hold`，不能仅凭 TOML 留在带输出状态。
+1. 静态 TOML、地址唯一性、角色/扫描形状和全点范围验证在 driver import 或连接前完成。
+2. `run` 需要 `--authorize-writes`；未经授权，工厂函数/QCoDeS import 都不执行。
+3. 读取 Keithley error queue 会消费状态项目，故还需单独的
+   `--authorize-status-consumption`。它不是普通离线或无副作用查询。
+4. 授权连接后的 query-only preflight 记录 identity、source mode/setpoint、output、V/I、
+   compliance/range、remote-sense 和状态。身份重复、output 已开、mode 不符、非零 source、
+   gate 非零电压读回或脏状态都会在设置写入前拒绝。
+5. `GateBackend`/`SafeGateController` 现在也要求以真实 `GatePreflightState` 确认安全状态，
+   不能把内存中的初始“零/off”当成仪器读回。Three-SMU 两个 gate 使用相同的预检规则。
+6. 配置与每个 setpoint 从零开始；输出只在零 setpoint 和读回确认后开启。所有 target 以
+   明确最大步长 ramp，每步检查 source/output/V/I、trip、near-compliance 和 gate leakage。
+7. 正常、异常、`Ctrl+C` 和 generator 提前关闭共享 cleanup：`smu_bias`、`gate_top`、
+   `gate_bottom` 依次回零/关 output。无法确认时 run 被拒绝，保留最后确认状态和 cleanup 错误，
+   要求人工检查；通信失败从不被记成零或 output-off。
 
-## QCoDeS 适配器边界
+未完成的硬件信息（型号/固件差异、实际地址、器件限值与接线）不能由代码猜测。任何实机
+步骤均需要该次计划的明确用户授权。
 
-已增加一个窄的 Keithley 2400 adapter，参考程序中已证实的调用包括：
+## 数据与分析
 
-```text
-mode("VOLT"/"CURR")
-compliancei(...) / compliancev(...)
-nplci(...) / nplcv(...)
-volt(...) / curr(...)
-output("on"/"off")
-:SOUR:VOLT:RANG:AUTO ON / :SOUR:CURR:RANG:AUTO ON
-:SENS:CURR:RANG:AUTO ON / :SENS:VOLT:RANG:AUTO ON
-:SYST:RSEN ON/OFF
-:READ?
-SENS:CURR:PROT:TRIP? / SENS:VOLT:PROT:TRIP?
-```
+每次 run 的独立目录包含：
 
-QCoDeS import candidates需兼容参考程序使用过的模块路径。任何命令错误都必须
-向上报告，不能用空 `except` 继续。QCoDeS 是硬件驱动依赖；第一版数据审计以
-JSONL/CSV/metadata 为必需输出，QCoDeS dataset 可作为镜像，但不能替代原始
-rejected/cleanup 记录。
+- `metadata.json`（schema v2）：请求的硬件/计划、实际 preflight、run name/note、配置路径、
+  import 路径、Git commit/dirty、主错误、cleanup 结果和清理错误；
+- `raw.jsonl`：保留 start/preflight/configure/ramp/sample/error/cleanup 原始事件；
+- `data.csv`：requested coordinate/source 与实际 readback V/I/R、output、trip/status 并列。
 
-## 安全状态机
+所有 rejected、partial、interrupted 记录保留。`load_three_smu_rows()` 和分析 Notebook 默认
+只返回 `completed + accepted + clean` 正式样本，需显式 opt-in 才会审计 rejected/problem。
 
-真实运行必须满足以下顺序：
+分析 notebook 通过 `DATA_DIRECTORY` 枚举本地、SSH 挂载或网络目录；不使用 Tk 文件选择器，
+跳过不完整 run。`multi_smu_map` 支持 bias/top/bottom 任意 1–3 个扫描轴。绘制 top-vs-bottom
+map 时，若 bias 也在扫描，`build_map(..., fixed_coordinates={'smu_bias': value})` 必须选择一个
+bias slice；固定 bias 的常见双 gate map 不需额外选择。
 
-1. CLI/Notebook 先加载并验证硬件 TOML 和扫描 TOML。
-2. 没有 `authorize_writes=True` 或 CLI `--authorize-writes` 时，不能导入 driver、
-   连接仪器或发送任何写命令。
-3. 连接后只读三台 `*IDN?`、source mode/setpoint 和 output；地址与物理身份必须
-   各不相同。
-4. 任一仪器连接时 output 已开启，停止并要求人工确认；不能静默接管未知输出。
-5. output 关闭时，先在当前模式将残留 setpoint 归零，再配置 source mode、
-   compliance、NPLC、range 和 four-wire。
-6. 在 0 setpoint 设置 compliance 后才允许开启输出。
-7. 所有目标使用配置的最大步长 ramp；每一步等待、读 V/I、验证 source readback、
-   compliance trip/near-limit 和 gate leakage。
-8. 任一读写、读回、compliance 或 leakage 失败立即停止正式扫描，保存 partial/
-   rejected 原始记录并进入 best-effort cleanup。
-9. cleanup 顺序：`smu_bias` 逐步归零并关闭，然后 `gate_top`、`gate_bottom` 逐步
-   归零并关闭，最后读取并保存可确认的状态，再断开。
-10. 通信失败不能记录成 0 或 output-off；保留最后确认状态，并明确提示人工查看
-    三台 SMU 面板。电脑/内核硬崩溃无法依靠 Python cleanup。
+## 接口
 
-## 已实现的代码边界
-
-```text
-src/attodry_control/three_smu_config.py    strict hardware/scan TOML
-src/attodry_control/keithley2400.py        QCoDeS Keithley 窄适配器
-src/attodry_control/three_smu.py            会话、安全 ramp、扫描 generator、记录
-src/attodry_control/three_smu_cli.py        describe/run CLI
-src/attodry_control/three_smu_analysis.py   accepted-only loader 与绘图
-notebooks/three_smu_live.ipynb              调用底层 generator 的实时图
-notebooks/three_smu_analysis.ipynb          只读 Browse/筛选/分析
-tests/test_three_smu_*.py                   fake driver、配置、扫描、cleanup、分析
-```
-
-为减少与其他模块 worktree 的冲突，第一版不要修改 `config.py`、`acquisition.py`、
-`storage.py` 或现有 gate controller；先交付独立的三 SMU 模块，最终由 Integration
-Chat 决定如何接入主 acquisition。
-
-## 两条使用路线
-
-### CLI
-
-已实现接口如下，命令选项以当前 `--help` 为准：
+离线配置检查：
 
 ```powershell
-python -m attodry_control.three_smu_cli describe `
-  --hardware config/three_smu_hardware.local.toml `
-  --plan config/three_smu_scan.local.toml
+python -m attodry_control.three_smu_cli describe --config config\hardware.local.toml
+```
 
+将来（当前未授权）的真实运行接口：
+
+```powershell
 python -m attodry_control.three_smu_cli run `
-  --hardware config/three_smu_hardware.local.toml `
-  --plan config/three_smu_scan.local.toml `
-  --output-dir run_data/three_smu `
-  --authorize-writes
+  --config config\hardware.local.toml `
+  --authorize-writes `
+  --authorize-status-consumption
 ```
 
-`describe` 必须完全离线；`run` 才能请求真实硬件授权。在 `LK_setup` 上所有命令
-必须在 `lyr` 环境运行，或直接调用该环境的 Python。
+`finish_action = "hold"` 还需要 `--authorize-hold`。Notebook 的两个授权 flag 默认均为
+`False`，且调用同一 `ThreeSmuSession`，不允许直接建立 QCoDeS driver 或使用另一套 ramp。
 
-### Notebook
-
-Notebook 只使用公共会话 API，不能直接调用 QCoDeS：
-
-```python
-AUTHORIZE_WRITES = False
-
-with ThreeSmuSession.open(
-    hardware, plan,
-    authorize_writes=AUTHORIZE_WRITES,
-) as session:
-    for sample in session.run(output_dir=OUTPUT_DIR):
-        live_plot.update(sample)
-```
-
-Notebook 默认 `AUTHORIZE_WRITES = False`；只有本次真实连接和写入已获明确授权，
-并复核两个本地 TOML 后，操作者才可手工改为 `True`。
-离开 `with`、点击中断或正常结束时都必须走同一个 cleanup。实时图只是消费者，
-不能拥有第二套 setpoint 或 safety 逻辑。
-
-## 数据与分析要求
-
-每次 run 使用独立目录，至少包含：
+## 代码与测试所有权
 
 ```text
-metadata.json     配置摘要、代码版本、开始/结束状态、cleanup 结果
-raw.jsonl         start/preflight/configure/ramp/sample/error/cleanup 全事件
-data.csv          正式逐点三 SMU 平铺数据
+config/hardware.example.toml               单一日常本地模板
+src/attodry_control/three_smu_config.py    严格模块 loader / 扫描点生成
+src/attodry_control/keithley2400.py        窄 QCoDeS 2400 adapter
+src/attodry_control/gates.py               共享 gate 预检/安全控制器
+src/attodry_control/three_smu.py            session、审计、cleanup、generator
+src/attodry_control/three_smu_cli.py        无 GUI describe/run
+src/attodry_control/three_smu_analysis.py   accepted-only 加载、发现和绘图
+notebooks/three_smu_live.ipynb              同 generator 的实时绘图
+notebooks/three_smu_analysis.ipynb          SSH-friendly read-only 分析
+tests/test_three_smu*.py                    配置、fake run、CLI/Notebook、分析
+tests/test_keithley2400.py / test_gates.py  adapter 与共享 gate 核心
 ```
 
-默认 loader 只返回完整 run 中无错误、无 compliance、无 gate leakage 的正式样本。
-Browse 功能选择 run 目录或数据文件；筛选项至少包含 completed/rejected、clean/
-problem、scan segment 和 SMU role。分析需提供 bias I-V、gate transfer、time trace、
-gate leakage、二维 map；不从三 SMU 数据推导 Lock-in 相位或电阻。
+本阶段执行的 focused fake-instrument 回归为 **58 项通过**（Three-SMU、Keithley 2400、
+gate safety 和共享 config），随后完整离线套件 **180 项通过（2 项可选绘图跳过）**。没有执行
+VISA discovery、QCoDeS 连接或真实仪器写入。
 
-## 开发与验收阶段
+## 下一阶段：S1 target offline
 
-### S0 - offline implementation
+只有用户授权 S1 后，才能在 `LK_setup` 的 `lyr` 环境做下列 **不连接 VISA** 的工作：安装/导入
+QCoDeS，运行测试，执行 `describe`，记录 Python/QCoDeS/PyVISA 版本。之后仍须另外授权实机
+query-only preflight，再另外授权小范围/单向写入扫描。
 
-状态：`offline complete`（2026-08-21）。
-
-- 完成严格配置、点生成器、QCoDeS adapter、共享 session、CLI、两个 Notebook。
-- fake instrument 覆盖正常、重复地址/身份、未知 active output、超限目标、
-  compliance、leakage、readback mismatch、通信失败、Ctrl+C 和 cleanup 顺序。
-- Notebook JSON/语法检查通过，且 Notebook 不直接导入 QCoDeS。
-- 相关测试和完整离线测试通过；无真实连接。
-
-### S1 - target offline
-
-- 在 `LK_setup` 的 `lyr` 环境安装 QCoDeS 和项目依赖。
-- 运行测试、CLI `describe`、Notebook import/compile；不连接 VISA。
-- 记录 Python/QCoDeS/PyVISA 版本和测试结果。
-
-### S2 - first real scan
-
-- 用户填写三台地址、安全范围、compliance、leakage、ramp/NPLC 和第一份计划。
-- 用户单独授权该计划的连接与写命令后直接运行，不新增 GUI G6--G9 阶段。
-- 运行前仍执行状态机中的 read-only preflight；第一次从最小实际范围开始。
-- 保存 ignored 原始目录，并报告写命令范围、cleanup 和人工面板确认。
-
-## 下一 Chat 开始前仍需用户填写
-
-代码阶段可以全部用 fake instrument 完成，不需要先回答以下值。第一次真实运行前
-必须填写：
-
-- 三台 Keithley 的 VISA 地址和从 `*IDN?` 读到的可区分身份；
-- `smu_bias` 采用 voltage-source 还是 current-source；
-- 三台 source min/max、最大 ramp step、settle 和 readback tolerance；
-- current/voltage compliance、两个 gate leakage trip；
-- NPLC、source/measure autorange、four-wire；
-- 第一次正式扫描的 mode、范围、步长、delay、双向/serpentine 和结束动作。
-
-## 新 Chat 启动提示
-
-```text
-请负责 Three-SMU / dual-gate 模块。工作区使用独立 branch `module/three-smu`
-和现有 three-smu worktree，不要在主 checkout 修改。先按 AGENTS.md 顺序完整
-阅读四份必读文档，再阅读 docs/modules/README.md 和 THREE_SMU.md。实现三台
-Keithley 2400（smu_bias、gate_top、gate_bottom）的 QCoDeS 无 GUI 模块：一个
-共享底层 Python session，同时提供 CLI 和调用同一 generator 的 Jupyter 实时图，
-并提供 accepted-only Browse/分析 Notebook。保留 TOML 中所有 compliance、
-leakage、range、ramp、NPLC、autorange、four-wire 和 finish 配置；第一版不连接
-或记录 Lock-in。参考本地 Electrical measurement/keithley2400_qcodes_ui.py 中
-已经成功的 QCoDeS 命令，但不要复制 GUI、直接跳变、吞异常或 compliance 后继续。
-默认只做离线代码与 fake-instrument 测试，不连接真实 SMU；任何真实连接或写命令
-等待我另行明确授权。完成后更新 DEVELOPMENT_STAGES 和 PROJECT_HANDOFF，提交到
-module/three-smu，并按模块交付格式报告。
-```
+第一次实机前操作者必须填写并复核：三台地址与可区分 identity、实际确切型号/手册适配、bias
+source mode、所有 source/compliance/leakage/ramp/settle/readback/NPLC/range/four-wire 值、
+样品接线，以及最小可接受扫描计划。不得以模板示例或 fake 测试值替代这些确认。

@@ -3,8 +3,9 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .three_smu_config import SEMANTIC_ROLES
 
@@ -39,6 +40,15 @@ class MapData:
     values: tuple[tuple[float, ...], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ThreeSmuRunSummary:
+    run_dir: Path
+    started_at: str | None
+    status: str
+    accepted: bool
+    run_name: str
+
+
 def resolve_run_dir(path: str | Path) -> Path:
     candidate = Path(path).expanduser().resolve()
     if candidate.is_file():
@@ -50,26 +60,43 @@ def resolve_run_dir(path: str | Path) -> Path:
     return candidate
 
 
-def browse_run_path() -> Path | None:
-    """Open a native chooser without importing any hardware-control module."""
+def discover_three_smu_runs(
+    data_directory: str | Path,
+    *,
+    include_rejected: bool = False,
+) -> tuple[ThreeSmuRunSummary, ...]:
+    """List complete local or SSH-mounted runs; silently skip incomplete folders."""
 
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-    except ImportError as exc:
-        raise RuntimeError("Native Browse requires tkinter") from exc
-    root = tk.Tk()
-    root.withdraw()
-    try:
-        selected = filedialog.askdirectory(title="Select Three-SMU run directory")
-        if not selected:
-            selected = filedialog.askopenfilename(
-                title="Select Three-SMU metadata or data file",
-                filetypes=(("Three-SMU data", "metadata.json data.csv"), ("All files", "*.*")),
+    root = Path(data_directory).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"{root} is not a data directory")
+    summaries: list[ThreeSmuRunSummary] = []
+    for candidate in root.iterdir():
+        if not candidate.is_dir():
+            continue
+        metadata_path = candidate / "metadata.json"
+        data_path = candidate / "data.csv"
+        if not metadata_path.is_file() or not data_path.is_file():
+            continue
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        accepted = (
+            metadata.get("status") == "completed" and metadata.get("accepted") is True
+        )
+        if not accepted and not include_rejected:
+            continue
+        summaries.append(
+            ThreeSmuRunSummary(
+                run_dir=candidate,
+                started_at=metadata.get("started_at"),
+                status=str(metadata.get("status", "unknown")),
+                accepted=accepted,
+                run_name=str(metadata.get("run_name", "")),
             )
-    finally:
-        root.destroy()
-    return None if not selected else Path(selected)
+        )
+    return tuple(sorted(summaries, key=lambda item: item.started_at or "", reverse=True))
 
 
 def load_three_smu_rows(
@@ -209,7 +236,18 @@ def build_map(
     y_role: str,
     value_role: str = "smu_bias",
     value_field: str = "current_a",
+    fixed_coordinates: Mapping[str, float] | None = None,
 ) -> MapData:
+    if x_role == y_role:
+        raise ValueError("x_role and y_role must be distinct")
+    fixed_coordinates = dict(fixed_coordinates or {})
+    for role, value in fixed_coordinates.items():
+        if role not in SEMANTIC_ROLES:
+            raise ValueError(f"fixed coordinate role must be one of: {', '.join(SEMANTIC_ROLES)}")
+        if role in {x_role, y_role}:
+            raise ValueError("fixed coordinate roles cannot be a plotted axis")
+        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            raise ValueError("fixed coordinate values must be finite")
     by_key = {
         (row.point_index, row.repeat_index, row.role): row for row in rows
     }
@@ -226,12 +264,24 @@ def build_map(
             value_row = by_key[(*point_key, value_role)]
         except KeyError as exc:
             raise ValueError("Map roles are not all present at every point") from exc
+        if any(
+            not math.isclose(
+                by_key[(*point_key, role)].coordinate,
+                float(value),
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            )
+            for role, value in fixed_coordinates.items()
+        ):
+            continue
         coordinate = (x_row.coordinate, y_row.coordinate)
         if coordinate in points:
             raise ValueError(f"Duplicate map coordinate {coordinate}")
         points[coordinate] = _numeric_field(value_row, value_field)
     x_values = tuple(sorted({point[0] for point in points}))
     y_values = tuple(sorted({point[1] for point in points}))
+    if not points:
+        raise ValueError("No map points remain after applying fixed_coordinates")
     if len(points) != len(x_values) * len(y_values):
         raise ValueError("Map is not a complete rectangular grid")
     return MapData(

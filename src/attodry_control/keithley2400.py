@@ -20,6 +20,14 @@ class KeithleyPreflight:
     source_mode: SourceMode
     source_setpoint: float
     output_enabled: bool
+    voltage_v: float | None = None
+    current_a: float | None = None
+    compliance_limit: float | None = None
+    source_range: float | None = None
+    measure_range: float | None = None
+    four_wire: bool | None = None
+    status: str | None = None
+    status_query_consumed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +38,8 @@ class KeithleyReading:
     output_enabled: bool
     compliance_trip: bool
     near_compliance: bool
-    status: str
+    status: str | None
+    status_query_consumed: bool = False
 
     @property
     def resistance_ohm(self) -> float | None:
@@ -83,6 +92,7 @@ class QcodesKeithley2400:
         self.role = role
         self.instrument = instrument
         self.config: SmuHardwareConfig | None = None
+        self._status_consumption_authorized = False
 
     def set_timeout(self, timeout_ms: int | None) -> None:
         if timeout_ms is None:
@@ -113,7 +123,45 @@ class QcodesKeithley2400:
             )
         setpoint = self._query_source(mode)
         output = _parse_bool(self.ask(":OUTP?"), f"{self.role} output")
-        return KeithleyPreflight(identity, mode, setpoint, output)
+        values = _parse_float_list(self.ask(":READ?"))
+        if len(values) < 2 or not all(math.isfinite(value) for value in values[:2]):
+            raise Keithley2400Error(
+                f"{self.role} :READ? did not return finite voltage/current"
+            )
+        source_function = "VOLT" if mode is SourceMode.VOLTAGE else "CURR"
+        measure_function = "CURR" if mode is SourceMode.VOLTAGE else "VOLT"
+        compliance = self._query_float(
+            f":SENS:{measure_function}:PROT?", f"{self.role} compliance"
+        )
+        source_range = self._query_float(
+            f":SOUR:{source_function}:RANG?", f"{self.role} source range"
+        )
+        measure_range = self._query_float(
+            f":SENS:{measure_function}:RANG?", f"{self.role} measure range"
+        )
+        four_wire = _parse_bool(self.ask(":SYST:RSEN?"), f"{self.role} remote sense")
+        status: str | None = None
+        if self._status_consumption_authorized:
+            status = self.ask(":SYST:ERR?").strip() or "0,No error"
+        return KeithleyPreflight(
+            identity=identity,
+            source_mode=mode,
+            source_setpoint=setpoint,
+            output_enabled=output,
+            voltage_v=values[0],
+            current_a=values[1],
+            compliance_limit=compliance,
+            source_range=source_range,
+            measure_range=measure_range,
+            four_wire=four_wire,
+            status=status,
+            status_query_consumed=self._status_consumption_authorized,
+        )
+
+    def authorize_status_consumption(self) -> None:
+        """Permit ``:SYST:ERR?`` during the subsequently audited run only."""
+
+        self._status_consumption_authorized = True
 
     def zero_residual(self, mode: SourceMode) -> None:
         if mode is SourceMode.VOLTAGE:
@@ -174,8 +222,10 @@ class QcodesKeithley2400:
             else "SENS:VOLT:PROT:TRIP?"
         )
         trip = _parse_bool(self.ask(trip_command), f"{self.role} compliance trip")
-        error = self.ask(":SYST:ERR?").strip()
-        status = error or "0,No error"
+        status: str | None = None
+        if self._status_consumption_authorized:
+            error = self.ask(":SYST:ERR?").strip()
+            status = error or "0,No error"
         near = (
             abs(current) >= 0.98 * float(config.compliance_current_a)
             if config.source_mode is SourceMode.VOLTAGE
@@ -189,6 +239,7 @@ class QcodesKeithley2400:
             compliance_trip=trip,
             near_compliance=near,
             status=status,
+            status_query_consumed=self._status_consumption_authorized,
         )
 
     def close(self) -> None:
@@ -210,6 +261,15 @@ class QcodesKeithley2400:
             ) from exc
         if not math.isfinite(value):
             raise Keithley2400Error(f"{self.role} returned non-finite source readback")
+        return value
+
+    def _query_float(self, command: str, name: str) -> float:
+        try:
+            value = float(self.ask(command).strip())
+        except ValueError as exc:
+            raise Keithley2400Error(f"{name} returned invalid numeric value") from exc
+        if not math.isfinite(value):
+            raise Keithley2400Error(f"{name} returned non-finite numeric value")
         return value
 
     def _require_configured(self) -> SmuHardwareConfig:

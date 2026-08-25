@@ -53,6 +53,10 @@ class FakeQcodesInstrument:
             ":SOUR:VOLT?": "0.125",
             ":OUTP?": "1",
             ":READ?": "0.125,0.0005,250",
+            ":SENS:CURR:PROT?": "0.001",
+            ":SOUR:VOLT:RANG?": "1.0",
+            ":SENS:CURR:RANG?": "0.001",
+            ":SYST:RSEN?": "0",
             "SENS:CURR:PROT:TRIP?": "0",
             ":SYST:ERR?": "0,No error",
         }
@@ -79,6 +83,8 @@ class Keithley2400AdapterTests(unittest.TestCase):
         state = adapter.preflight()
         self.assertTrue(state.output_enabled)
         self.assertEqual(state.source_setpoint, 0.125)
+        self.assertEqual(state.compliance_limit, 0.001)
+        self.assertFalse(state.four_wire)
         self.assertFalse(any(call[0] == "write" for call in instrument.calls))
         self.assertFalse(any(call[0] in {"volt", "curr", "output"} for call in instrument.calls))
 
@@ -114,6 +120,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
         adapter.configure(config())
+        adapter.authorize_status_consumption()
         reading = adapter.read()
         self.assertEqual(reading.voltage_v, 0.125)
         self.assertEqual(reading.current_a, 0.0005)
@@ -121,6 +128,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertFalse(reading.compliance_trip)
         self.assertFalse(reading.near_compliance)
         self.assertEqual(reading.resistance_ohm, 250.0)
+        self.assertTrue(reading.status_query_consumed)
 
 
 if __name__ == "__main__":

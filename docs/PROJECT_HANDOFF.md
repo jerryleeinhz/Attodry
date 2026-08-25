@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-21
+Last updated: 2026-08-25
 
 ## Current stage
 
@@ -215,11 +215,15 @@ follow-up:
   complete: semantic bias/top-gate/bottom-gate roles, one shared CLI/Notebook
   generator, retained scan modes, strict operator-filled safety configuration,
   auditable data, accepted-only analysis, and fail-closed cleanup. No real SMU
-  connection or setting write was performed.
+  connection or setting write was performed. The 2026-08-25 update reconciles
+  the module with the generic SMU plan without removing `smu_bias`, and makes
+  the existing gate limits the single source of truth in one local TOML.
 - `THREE_SMU_DAILY_OPERATION.md` now provides the operator-facing independent
   daily workflow and full parameter reference. It clearly separates the currently
   permitted offline `describe`/analysis path from future, separately authorized
-  connection and write steps; adding the guide did not perform hardware actions.
+  connection and write steps; its current version documents one local config,
+  dual-gate maps at fixed bias, status-queue authorization, and SSH-friendly
+  accepted-only analysis. Adding the guide did not perform hardware actions.
 - `INTEGRATION.md` requires commit IDs, tests, hardware-action reports, and known
   limitations from the four device modules before combination.
 - `docs/modules/README.md` defines shared permissions, `lyr` use, branch/worktree
@@ -255,6 +259,11 @@ Completed offline in Stage 5:
   `run`, and a shared safety/session generator. Supported plans cover time,
   bias I-V, separate or paired gates, one-to-three-channel maps, and software
   pulses with directional/serpentine options and repeated samples.
+- The 2026-08-25 Three-SMU refinement adds one-file operation loading, shared
+  gate preflight validation, explicit Keithley status-queue-consumption consent,
+  nonzero/mode/status fail-closed checks before settings writes, metadata schema
+  v2 provenance/cleanup errors, and remote-directory analysis with bias slices
+  for a two-gate map. The legacy two-file loader remains compatibility-only.
 - Each formal point records sequential per-role timestamps, source setpoint,
   V/I/R, output, compliance, gate leakage, status, scan coordinates, and cleanup
   results in `metadata.json`, `raw.jsonl`, and `data.csv`. Raw rejected,
@@ -265,6 +274,8 @@ Completed offline in Stage 5:
   compliance, leakage, readback mismatch, communication failure, Ctrl+C, and
   ordered zero-disable cleanup. Cleanup uncertainty rejects otherwise clean data
   and preserves last-confirmed state for manual verification.
+- The focused Three-SMU/gate/config/adapter/Notebook suite now has 58 passing
+  offline tests. No real SMU connection, status query, or write was performed.
 - Added audited simulation execution across SQLite start/raw/complete events,
   retry, resume, checkpoints, normal hold/zero cleanup, and failure cleanup.
 
@@ -303,7 +314,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 174 tests and passes in the current
+- The complete hardware-free suite contains 180 tests and passes in the current
   minimal environment with two optional matplotlib rendering tests skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.

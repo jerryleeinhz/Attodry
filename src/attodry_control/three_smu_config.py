@@ -135,8 +135,6 @@ class ThreeSmuHardwareConfig:
                 configured_addresses.append(config.address)
             for field_name in (
                 "timeout_ms",
-                "compliance_current_a",
-                "compliance_voltage_v",
                 "source_min",
                 "source_max",
                 "ramp_step",
@@ -146,6 +144,13 @@ class ThreeSmuHardwareConfig:
             ):
                 if getattr(config, field_name) is None:
                     errors.append(f"{role}.{field_name} is not configured")
+            compliance_field = (
+                "compliance_current_a"
+                if config.source_mode is SourceMode.VOLTAGE
+                else "compliance_voltage_v"
+            )
+            if getattr(config, compliance_field) is None:
+                errors.append(f"{role}.{compliance_field} is not configured")
             if role != "smu_bias" and config.leakage_limit_a is None:
                 errors.append(f"{role}.leakage_limit_a is not configured")
         if len(set(configured_addresses)) != len(configured_addresses):
@@ -211,6 +216,18 @@ class ThreeSmuScanPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class ThreeSmuOperationConfig:
+    """One local daily-operation file: shared gate limits plus Three-SMU plan."""
+
+    hardware: ThreeSmuHardwareConfig
+    plan: ThreeSmuScanPlan
+    output_directory: Path
+    run_name: str
+    note: str
+    config_path: Path
+
+
+@dataclass(frozen=True, slots=True)
 class ScanPoint:
     index: int
     segment: str
@@ -272,6 +289,79 @@ def load_three_smu_scan(path: str | Path) -> ThreeSmuScanPlan:
         **channels,
     )
     return plan
+
+
+def load_three_smu_operation_config(path: str | Path) -> ThreeSmuOperationConfig:
+    """Load the Three-SMU portion of the ordinary ``hardware.local.toml``.
+
+    ``gate_top`` and ``gate_bottom`` retain the shared gate-safety fields used by
+    the rest of the project.  Their nested ``[gate_*.smu]`` tables contain only
+    2400-specific settings, so voltage and leakage limits have one source of
+    truth.
+    """
+
+    config_path = Path(path).resolve()
+    document = _load_toml(config_path)
+    hardware = ThreeSmuHardwareConfig(
+        smu_bias=_parse_hardware_role(_table(document, "smu_bias"), "smu_bias"),
+        gate_top=_parse_operation_gate(_table(document, "gate_top"), "gate_top"),
+        gate_bottom=_parse_operation_gate(
+            _table(document, "gate_bottom"), "gate_bottom"
+        ),
+    )
+    run = _table(document, "three_smu_run")
+    expected = {
+        "mode",
+        "samples_per_point",
+        "delay_s",
+        "bidirectional",
+        "serpentine",
+        "finish_action",
+        "point_count",
+        "pulse_high_s",
+        "pulse_period_s",
+        "output_directory",
+        "run_name",
+        "note",
+        *SEMANTIC_ROLES,
+    }
+    _strict_keys(run, "three_smu_run", expected)
+    plan = ThreeSmuScanPlan(
+        mode=_enum(ScanMode, run["mode"], "three_smu_run.mode"),
+        samples_per_point=_integer(
+            run["samples_per_point"], "three_smu_run.samples_per_point", 1
+        ),
+        delay_s=_nonnegative(run["delay_s"], "three_smu_run.delay_s"),
+        bidirectional=_boolean(run["bidirectional"], "three_smu_run.bidirectional"),
+        serpentine=_boolean(run["serpentine"], "three_smu_run.serpentine"),
+        finish_action=_enum(
+            FinishAction, run["finish_action"], "three_smu_run.finish_action"
+        ),
+        point_count=_integer(run["point_count"], "three_smu_run.point_count", 1),
+        pulse_high_s=_nonnegative(
+            run["pulse_high_s"], "three_smu_run.pulse_high_s"
+        ),
+        pulse_period_s=_nonnegative(
+            run["pulse_period_s"], "three_smu_run.pulse_period_s"
+        ),
+        **{
+            role: _parse_channel(_table(run, role), f"three_smu_run.{role}")
+            for role in SEMANTIC_ROLES
+        },
+    )
+    output_directory = Path(
+        _string(run["output_directory"], "three_smu_run.output_directory")
+    )
+    if not output_directory.is_absolute():
+        output_directory = config_path.parent / output_directory
+    return ThreeSmuOperationConfig(
+        hardware=hardware,
+        plan=plan,
+        output_directory=output_directory.resolve(),
+        run_name=_string(run["run_name"], "three_smu_run.run_name"),
+        note=_note(run["note"], "three_smu_run.note"),
+        config_path=config_path,
+    )
 
 
 def validate_plan_targets(
@@ -514,6 +604,63 @@ def _parse_hardware_role(
     return config
 
 
+def _parse_operation_gate(table: Mapping[str, Any], role: str) -> SmuHardwareConfig:
+    expected = {
+        "model",
+        "address",
+        "compliance_a",
+        "leakage_limit_a",
+        "max_abs_voltage_v",
+        "ramp_step_v",
+        "readback_tolerance_v",
+        "settle_s",
+        "smu",
+    }
+    _strict_keys(table, role, expected)
+    smu = _table(table, "smu")
+    _strict_keys(
+        smu,
+        f"{role}.smu",
+        {
+            "timeout_ms",
+            "nplc",
+            "source_auto_range",
+            "measure_auto_range",
+            "four_wire",
+        },
+    )
+    max_abs = _placeholder_positive(table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v")
+    return SmuHardwareConfig(
+        role=role,
+        model=_string(table["model"], f"{role}.model"),
+        address=_string(table["address"], f"{role}.address"),
+        timeout_ms=_placeholder_integer(smu["timeout_ms"], f"{role}.smu.timeout_ms"),
+        source_mode=SourceMode.VOLTAGE,
+        compliance_current_a=_placeholder_positive(
+            table["compliance_a"], f"{role}.compliance_a"
+        ),
+        compliance_voltage_v=None,
+        source_min=None if max_abs is None else -max_abs,
+        source_max=max_abs,
+        ramp_step=_placeholder_positive(table["ramp_step_v"], f"{role}.ramp_step_v"),
+        readback_tolerance=_placeholder_positive(
+            table["readback_tolerance_v"], f"{role}.readback_tolerance_v"
+        ),
+        settle_s=_placeholder_nonnegative(table["settle_s"], f"{role}.settle_s"),
+        nplc=_placeholder_positive(smu["nplc"], f"{role}.smu.nplc"),
+        source_auto_range=_boolean(
+            smu["source_auto_range"], f"{role}.smu.source_auto_range"
+        ),
+        measure_auto_range=_boolean(
+            smu["measure_auto_range"], f"{role}.smu.measure_auto_range"
+        ),
+        four_wire=_boolean(smu["four_wire"], f"{role}.smu.four_wire"),
+        leakage_limit_a=_placeholder_positive(
+            table["leakage_limit_a"], f"{role}.leakage_limit_a"
+        ),
+    )
+
+
 def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
     _strict_keys(table, role, {"role", "fixed", "start", "stop", "step"})
     return ChannelPlan(
@@ -556,6 +703,12 @@ def _strict_keys(table: Mapping[str, Any], name: str, expected: set[str]) -> Non
 def _string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ThreeSmuConfigError(f"{name} must be a non-empty string")
+    return value.strip()
+
+
+def _note(value: Any, name: str) -> str:
+    if not isinstance(value, str):
+        raise ThreeSmuConfigError(f"{name} must be a string")
     return value.strip()
 
 

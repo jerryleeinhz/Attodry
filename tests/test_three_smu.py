@@ -102,7 +102,14 @@ class FakeAdapter:
     def preflight(self) -> KeithleyPreflight:
         self.log.append(("preflight", self.role))
         return KeithleyPreflight(
-            self.identity, SourceMode.VOLTAGE, self.source, self.output
+            self.identity,
+            SourceMode.VOLTAGE,
+            self.source,
+            self.output,
+            voltage_v=self.source,
+            current_a=self.source * 1e-3 if self.role == "smu_bias" else 1e-9,
+            status="0,No error",
+            status_query_consumed=True,
         )
 
     def zero_residual(self, mode) -> None:
@@ -138,6 +145,7 @@ class FakeAdapter:
             compliance_trip=self.trip_on_read == self.read_count,
             near_compliance=False,
             status="0,No error",
+            status_query_consumed=True,
         )
 
     def close(self) -> None:
@@ -148,6 +156,7 @@ def factory_set(
     *,
     active_role: str | None = None,
     duplicate_identity: bool = False,
+    initial_source: float = 0.0,
 ) -> tuple[dict[str, FakeAdapter], list[tuple], object]:
     log: list[tuple] = []
     adapters: dict[str, FakeAdapter] = {}
@@ -160,6 +169,7 @@ def factory_set(
             identity=identity,
             active_output=role == active_role,
         )
+        adapter.source = initial_source
         adapters[role] = adapter
         return adapter
 
@@ -190,9 +200,38 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 hardware(),
                 fixed_plan(),
                 authorize_writes=True,
+                authorize_status_consumption=True,
                 adapter_factory=factory,
             )
         self.assertFalse(any(item[0] in {"source", "output", "configure", "zero_residual"} for item in log))
+
+    def test_nonzero_preflight_setpoint_stops_without_any_setting_write(self) -> None:
+        _adapters, log, factory = factory_set(initial_source=0.1)
+        with self.assertRaisesRegex(ThreeSmuSafetyError, "not confirmed at zero"):
+            ThreeSmuSession.open(
+                hardware(),
+                fixed_plan(),
+                authorize_writes=True,
+                authorize_status_consumption=True,
+                adapter_factory=factory,
+            )
+        self.assertFalse(any(item[0] in {"source", "output", "configure", "zero_residual"} for item in log))
+
+    def test_status_consumption_authorization_is_checked_before_factory(self) -> None:
+        calls: list[str] = []
+
+        def factory(role, _config):
+            calls.append(role)
+            raise AssertionError("must not be called")
+
+        with self.assertRaisesRegex(ThreeSmuWriteNotAuthorized, "status_consumption"):
+            ThreeSmuSession.open(
+                hardware(),
+                fixed_plan(),
+                authorize_writes=True,
+                adapter_factory=factory,
+            )
+        self.assertEqual(calls, [])
 
     def test_duplicate_physical_identity_stops_before_writes(self) -> None:
         _adapters, log, factory = factory_set(duplicate_identity=True)
@@ -201,6 +240,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 hardware(),
                 fixed_plan(),
                 authorize_writes=True,
+                authorize_status_consumption=True,
                 adapter_factory=factory,
             )
         self.assertFalse(any(item[0] == "configure" for item in log))
@@ -212,6 +252,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 hardware(),
                 fixed_plan(bias=0.5, top=0.5),
                 authorize_writes=True,
+                authorize_status_consumption=True,
                 adapter_factory=factory,
                 sleep=lambda _: None,
             ) as session:
@@ -245,7 +286,8 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 with ThreeSmuSession.open(
                     hardware(),
                     fixed_plan(top=0.5),
-                    authorize_writes=True,
+                authorize_writes=True,
+                authorize_status_consumption=True,
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
@@ -265,7 +307,8 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 with ThreeSmuSession.open(
                     hardware(),
                     fixed_plan(),
-                    authorize_writes=True,
+                authorize_writes=True,
+                authorize_status_consumption=True,
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
@@ -281,7 +324,8 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 with ThreeSmuSession.open(
                     hardware(),
                     fixed_plan(),
-                    authorize_writes=True,
+                authorize_writes=True,
+                authorize_status_consumption=True,
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
@@ -296,7 +340,8 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 with ThreeSmuSession.open(
                     hardware(),
                     fixed_plan(),
-                    authorize_writes=True,
+                authorize_writes=True,
+                authorize_status_consumption=True,
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
@@ -320,7 +365,8 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 with ThreeSmuSession.open(
                     hardware(),
                     fixed_plan(),
-                    authorize_writes=True,
+                authorize_writes=True,
+                authorize_status_consumption=True,
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
@@ -340,7 +386,8 @@ class ThreeSmuSessionTests(unittest.TestCase):
                 with ThreeSmuSession.open(
                     hardware(),
                     fixed_plan(),
-                    authorize_writes=True,
+                authorize_writes=True,
+                authorize_status_consumption=True,
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:

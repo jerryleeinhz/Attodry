@@ -1,244 +1,202 @@
 # Three-SMU 独立日常操作
 
-本页是三台 Keithley 2400（`smu_bias`、`gate_top`、`gate_bottom`）的日常操作手册。
-模块可以脱离 Lock-in 和冷台单独配置、离线检查、运行和分析；第一版不连接或记录
-Lock-in，也不控制 attoDRY。
+本页适用于三台 Keithley 2400：`smu_bias`、`gate_top`、`gate_bottom`。它可脱离
+Lock-in、冷台和磁场模块独立使用；第一版不读取或记录 Lock-in，也不控制 attoDRY。
 
-当前验收状态为 **S0 offline complete**。现在允许执行本页的离线步骤；目标电脑验收、
-真实 SMU 连接和任何设置写入尚未获授权。看到 `--authorize-writes` 或把 Notebook 中
-`AUTHORIZE_WRITES` 改为 `True`，都表示将越过真实写入门槛，不能作为普通离线检查执行。
+当前状态是 **S0 offline complete（离线实现完成）**。允许的操作只有配置检查、fake-
+instrument 测试和只读数据分析。尚未获授权连接真实 SMU、查询真实仪器，或发送任何写命令。
 
-## 每天最短流程（当前可执行）
+## 每日离线流程
 
-在 `module/three-smu` checkout 中打开 PowerShell，激活项目环境，然后执行：
+在 `module/three-smu` worktree 中，先确认位置和分支：
 
 ```powershell
+git status --short --branch
+```
+
+它应显示 `## module/three-smu...`。然后从共享模板建立一个仅本机保存的配置：
+
+```powershell
+Copy-Item config\hardware.example.toml config\hardware.local.toml
+
 python -m attodry_control.three_smu_cli describe `
-  --hardware config/three_smu_hardware.local.toml `
-  --plan config/three_smu_scan.local.toml
+  --config config\hardware.local.toml
 ```
 
-`describe` 只读取并严格验证两个 TOML，计算扫描点和样本数，不导入 QCoDeS、不打开
-VISA 资源，也不发送仪器命令。成功输出中应有 `"hardware_opened": false`。这只证明
-配置在软件层面自洽，不证明地址可访问、接线正确或限值对器件安全。
+`describe` 只读 TOML、验证限值和扫描形状、计算点数；它不会导入 QCoDeS、打开 VISA 或发送
+仪器命令。成功输出必须含有 `"hardware_opened": false`。模板中的 `CHANGE_ME` 是故意的，
+因此只有填写完整后 `describe` 才会成功；成功也只证明软件配置自洽，不证明接线或器件安全。
 
-每日离线流程：
+每天先做：
 
-1. 确认 checkout/branch：`git status --short --branch` 应显示 `module/three-smu`。
-2. 检查两个本地 TOML，尤其是角色、单位、compliance、leakage、range、ramp 和
-   `finish_action`。
-3. 执行上面的 `describe`，核对模式、点数、样本数和 `hardware_opened`。
-4. 只读分析已有数据时打开 `notebooks/three_smu_analysis.ipynb`。
-5. 当前不要执行 `run`，也不要运行实时 Notebook 的硬件单元格。
+1. 检查 `git status`，不要在主 checkout 编辑本模块。
+2. 审核一个 `hardware.local.toml` 中的角色、单位、compliance、leakage、范围、ramp 和结束动作。
+3. 运行上面的 `describe` 并核对 mode、点数、样本数。
+4. 要分析既有数据时，仅打开 `notebooks/three_smu_analysis.ipynb`。
+5. 当前不要运行 `run`，不要把实时 Notebook 的任一授权开关改为 `True`。
 
-## 首次建立本地配置
+`hardware.local.toml` 被 `.gitignore` 排除。地址、器件限值、实验 note 和数据目录都不能提交。
 
-仓库提交的是可共享模板，实际地址和实验限值必须放在被忽略的本地文件中：
+## 一个配置文件的结构
 
-```powershell
-Copy-Item config\three_smu_hardware.example.toml config\three_smu_hardware.local.toml
-Copy-Item config\three_smu_scan.example.toml config\three_smu_scan.local.toml
+`config/hardware.example.toml` 是唯一日常模板。已有的 `[gate_top]` 和 `[gate_bottom]`
+仍是 gate 安全参数的唯一来源；不要另抄一份 gate 限值。
+
+```toml
+[smu_bias]
+model = "Keithley2400"
+address = "CHANGE_ME_BIAS_SMU_VISA_ADDRESS"
+source_mode = "voltage"       # 或 "current"
+compliance_current_a = "CHANGE_ME"
+compliance_voltage_v = "CHANGE_ME"
+source_min = "CHANGE_ME"
+source_max = "CHANGE_ME"
+ramp_step = "CHANGE_ME"
+readback_tolerance = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+timeout_ms = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_top]                     # gate_bottom 相同
+model = "Keithley2400"
+address = "CHANGE_ME_TOP_GATE_VISA_ADDRESS"
+compliance_a = "CHANGE_ME"
+leakage_limit_a = "CHANGE_ME"
+max_abs_voltage_v = "CHANGE_ME"
+ramp_step_v = "CHANGE_ME"
+readback_tolerance_v = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+
+[gate_top.smu]
+timeout_ms = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
 ```
 
-- `three_smu_hardware.example.toml` 故意包含 `CHANGE_ME`，不能直接连接硬件。
-- `three_smu_scan.example.toml` 中的数值仅演示格式，不是器件认可的安全参数。
-- `.local.toml` 不提交；不要把 VISA 地址、器件限值或实验数据加入 Git。
-- 每次复制/更新后都先运行 `describe`。
+`[smu_bias]` 的 `source_min/source_max/ramp_step/readback_tolerance` 单位由
+`source_mode` 决定：voltage 时为 V，current 时为 A。电压源必须给
+`compliance_current_a`，电流源必须给 `compliance_voltage_v`。`gate_top` 和
+`gate_bottom` 固定为电压源，单位均为 V，且 `leakage_limit_a <= compliance_a`。
+范围必须包含零，三台地址必须不同。
 
-## 三个语义角色
+`[gate_*.smu]` 只保存 2400 专属的 timeout、NPLC、量程和四线制设置；它不拥有
+voltage、leakage、compliance、ramp 或 settle 限值。这些共享 gate 限值仍只在父表中。
 
-| TOML 表 | 物理职责 | 允许的源模式 |
-|---|---|---|
-| `[smu_bias]` | source-drain bias | `voltage` 或 `current` |
-| `[gate_top]` | top-gate | 只能是 `voltage` |
-| `[gate_bottom]` | bottom-gate | 只能是 `voltage` |
+扫描和记录参数在同一个文件的 `[three_smu_run]`：
 
-三台仪器必须使用不同 VISA 地址；连接后的 identity 也必须互不重复。不要用“Keithley
-#1/#2/#3”代替语义角色，线缆标签、TOML 和样品端连接必须三者一致。
+```toml
+[three_smu_run]
+output_directory = "../data/three_smu"  # 相对本 TOML 文件
+run_name = "sample-A-dual-gate-map"
+note = "operator note; no secrets"
+mode = "multi_smu_map"
+samples_per_point = 1
+delay_s = 0.1
+bidirectional = false
+serpentine = true
+finish_action = "zero_disable"
+point_count = 1
+pulse_high_s = 0.0
+pulse_period_s = 0.0
 
-## 硬件 TOML 参数
+[three_smu_run.smu_bias]
+role = "fixed"
+fixed = 0.001
+start = 0.0
+stop = 0.0
+step = 1.0
 
-以下字段在三个角色表中都必须存在。`smu_bias` 的 source 单位取决于 `source_mode`；
-两个 gate 的 source 单位固定为 V。
+[three_smu_run.gate_top]
+role = "sweep"
+fixed = 0.0
+start = -1.0
+stop = 1.0
+step = 0.02
+```
 
-| 字段 | 单位/类型 | 含义与约束 |
-|---|---|---|
-| `model` | 字符串 | 当前必须为 `Keithley2400`。 |
-| `address` | VISA 字符串 | 本地实际地址；三台必须不同，不能含 `CHANGE_ME`。 |
-| `timeout_ms` | ms，整数 | VISA 超时，必须至少为 1。 |
-| `source_mode` | 枚举 | `voltage`/`current`；gate 只能为 `voltage`。 |
-| `compliance_current_a` | A | 正数；电压源模式下限制输出电流。 |
-| `compliance_voltage_v` | V | 正数；电流源模式下限制输出电压。 |
-| `source_min` | V 或 A | 软件允许的最小 source；必须有限且不大于 0。 |
-| `source_max` | V 或 A | 软件允许的最大 source；必须有限且不小于 0，并大于 `source_min`。 |
-| `ramp_step` | V 或 A | 每次 source 变化的最大步长，必须为正。 |
-| `readback_tolerance` | V 或 A | source readback 与目标的最大允许偏差，必须为正。 |
-| `settle_s` | s | 每个 ramp 步后的等待时间，必须非负。 |
-| `nplc` | power-line cycles | 测量积分时间，必须为正。越大通常越慢、抗噪更强。 |
-| `source_auto_range` | bool | source autorange 开关。 |
-| `measure_auto_range` | bool | measure autorange 开关。 |
-| `four_wire` | bool | 是否启用四线测量；必须与实际接线一致。 |
-| `leakage_limit_a` | A | 仅 gate 必填；正数且不能高于该 gate 的 `compliance_current_a`。 |
+每个角色都有 `role = "off" | "fixed" | "sweep"`，以及 `fixed/start/stop/step`。
+`step` 始终填正数；实际扫向由 start/stop 决定。`multi_smu_map` 可以扫描 1–3 个角色，
+因此支持“固定 bias、扫描两个 gate”。例如上例中再令
+`[three_smu_run.gate_bottom] role = "sweep"`，即可形成双 gate map；bias 保持 `fixed`。
 
-`source_min/max` 是独立软件边界，不等于仪器额定范围。所有扫描点会在构造硬件驱动前
-与这里的边界比较；超界时应修改扫描计划或由操作者重新确认安全限值，不能靠扩大范围
-绕过错误。
+| mode | sweep 角色 |
+|---|---|
+| `time_trace` | 无 |
+| `bias_iv` | 仅 `smu_bias` |
+| `top_gate_transfer` / `bottom_gate_transfer` | 对应一个 gate |
+| `paired_gate` | 两个 gate，点数必须相同 |
+| `multi_smu_map` | 1–3 个角色，可 serpentine |
+| `software_pulse` | 恰好一个角色 |
 
-## 扫描 TOML 参数
+非 pulse 模式的两个 pulse 时间必须为零。`finish_action` 日常应为 `zero_disable`；
+`hold` 还要求 CLI 的额外 `--authorize-hold`，不能作为便利默认值。
 
-### `[scan]`
+## 未来真实运行门槛（当前未授权）
 
-| 字段 | 类型/单位 | 说明 |
-|---|---|---|
-| `mode` | 枚举 | `time_trace`、`bias_iv`、`top_gate_transfer`、`bottom_gate_transfer`、`paired_gate`、`multi_smu_map` 或 `software_pulse`。 |
-| `samples_per_point` | 整数 | 每个正式点的重复样本数，至少 1。 |
-| `delay_s` | s | 到达正式目标后、采样前的公共等待时间，必须非负。 |
-| `bidirectional` | bool | 扫完正向路径后追加反向路径。 |
-| `serpentine` | bool | 多维 map 使用蛇形路径；一般只对 `multi_smu_map` 有意义。 |
-| `finish_action` | 枚举 | 推荐 `zero_disable`；`hold` 还要求额外 `--authorize-hold`。 |
-| `point_count` | 整数 | `time_trace` 的点数或 `software_pulse` 的周期数，至少 1。 |
-| `pulse_high_s` | s | 软件脉冲高电平时间；非脉冲模式必须为 0。 |
-| `pulse_period_s` | s | 软件脉冲周期；非脉冲模式必须为 0，脉冲时不得小于 `pulse_high_s`。 |
-
-### `[smu_bias]`、`[gate_top]`、`[gate_bottom]`
-
-| 字段 | 类型/单位 | 说明 |
-|---|---|---|
-| `role` | 枚举 | `off`、`fixed` 或 `sweep`。 |
-| `fixed` | V 或 A | `fixed` 时的目标；`off` 时通常保持 0。 |
-| `start` | V 或 A | `sweep` 起点；软件脉冲模式中为 low。 |
-| `stop` | V 或 A | `sweep` 终点；软件脉冲模式中为 high。 |
-| `step` | V 或 A | sweep 步长的正幅值；即使角色为 `off/fixed` 也需保留正值。 |
-
-扫描单位始终跟随对应硬件角色的 `source_mode`。例如 voltage-source bias 的
-`start = 0.001` 表示 1 mV；current-source bias 则表示 1 mA。不要从数值大小猜单位。
-
-## 模式和角色组合
-
-| `mode` | 合法的 sweep 组合 | 关键规则 |
-|---|---|---|
-| `time_trace` | 无 sweep | 三台只能 `off/fixed`；使用 `point_count`。 |
-| `bias_iv` | 仅 `smu_bias` | gate 可 `off/fixed`。 |
-| `top_gate_transfer` | 仅 `gate_top` | bias/bottom 可 `off/fixed`。 |
-| `bottom_gate_transfer` | 仅 `gate_bottom` | bias/top 可 `off/fixed`。 |
-| `paired_gate` | top 和 bottom | 两个 gate 生成的点数必须相同。 |
-| `multi_smu_map` | 1–3 个角色 | 可组合 bias/top/bottom，支持 serpentine。 |
-| `software_pulse` | 恰好 1 个角色 | `start=low`、`stop=high`，使用脉冲时间和 `point_count`。 |
-
-非 `software_pulse` 模式必须令 `pulse_high_s = 0.0`、`pulse_period_s = 0.0`。
-`bidirectional` 会追加返程点；预计记录数还要乘以 `samples_per_point`。最终以
-`describe` 输出的点数和样本数为准。
-
-## 真实运行（当前未授权）
-
-下面是接口说明，不是当前执行许可。只有完成目标电脑离线验收、填写并人工复核本地
-限值，而且用户对本次真实连接和写入另行明确授权后，才可运行：
+以下命令是接口说明，不是操作许可：
 
 ```powershell
 python -m attodry_control.three_smu_cli run `
-  --hardware config/three_smu_hardware.local.toml `
-  --plan config/three_smu_scan.local.toml `
-  --output-dir run_data/three_smu `
-  --authorize-writes
+  --config config\hardware.local.toml `
+  --authorize-writes `
+  --authorize-status-consumption
 ```
 
-若 `finish_action = "hold"`，CLI 还会要求 `--authorize-hold`。日常默认使用
-`zero_disable`；`hold` 会让输出在正常结束后保持启用，不能当作方便选项。
+除了本次扫描的明确连接/写入授权，还必须给 `--authorize-status-consumption`。Keithley 的
+错误队列查询会消费队列项目，程序不会把这种有副作用的状态读取伪装成普通只读查询。若使用
+`finish_action = "hold"`，还必须另给 `--authorize-hold`。
 
-真实运行前必须逐项确认：
+获授权的程序仍会先验证：身份唯一、source mode 正确、output 已关闭、source setpoint 和
+gate 电压读回在零附近、已查询的状态干净。任一项失败时不配置或接管仪器。之后才可配置
+compliance/NPLC/range/four-wire、从零开启输出、按受限步长 ramp，并在每步记录 V/I、setpoint、
+output、trip、near-compliance、leakage 和状态。
 
-- 三台仪器的物理角色、VISA 地址、线缆和样品端一致，且各不重复；
-- 三台前面板均显示 output off，source setpoint 为零；
-- 器件允许的 bias/gate 极限、compliance、gate leakage limit 和 ramp step 已由操作者确认；
-- `four_wire`、source mode 和实际接线一致；
-- 完整扫描目标均在硬件 TOML 的 source range 内；
-- 默认结束行为为 `zero_disable`，输出目录有足够空间；
-- 已明确本次授权边界。授权连接不自动等于授权写入，授权小范围测试也不等于授权完整扫描。
+异常、Ctrl+C 与正常的 `zero_disable` 都走同一 cleanup：先 `smu_bias`，再 top/bottom gate，
+逐步回零并关闭输出。通信失败绝不表示仪器已归零；记录保留最后确认读回，并要求人工查看面板。
 
-连接后会先做只查询 preflight。若发现任一 output 已开，程序应停止且不进行配置写入，
-必须人工检查前面板和接线。只有 output 已关时，程序才会确认零 setpoint、配置安全参数，
-然后按有界 ramp 执行。三个角色的正式读数是依次读取并各自带时间戳，不是同时采样。
+## Notebook 和数据分析
 
-## 实时 Notebook（当前未授权）
-
-`notebooks/three_smu_live.ipynb` 与 CLI 调用同一个 `ThreeSmuSession` 和扫描 generator，
-不是另一套控制逻辑。默认：
+`notebooks/three_smu_live.ipynb` 使用同一 `ThreeSmuSession` generator，不直接导入 QCoDeS。
+它默认：
 
 ```python
 AUTHORIZE_WRITES = False
+AUTHORIZE_STATUS_CONSUMPTION = False
 ```
 
-保持 `False` 时会 fail closed；不要为了“看看图”改成 `True`。只有真实运行获得明确授权
-后，才可复核 `HARDWARE_TOML`、`PLAN_TOML`、`OUTPUT_DIR`，再人工改变这一门槛。
-实时图显示 bias 电流随时间变化，但数据仍由底层 session 写入标准 run 目录。
+只有未来针对本次真实扫描的明确授权才能同时修改这两个值。
 
-## 数据、状态和 accepted-only 分析
-
-每次真实 run 会在 `run_data/three_smu` 下建立独立目录，包含：
+每个 run 目录含：
 
 | 文件 | 内容 |
 |---|---|
-| `metadata.json` | 配置快照、run 状态、accepted 与 cleanup 结果。 |
-| `raw.jsonl` | 原始事件审计；保留 rejected、partial、interrupted 和 cleanup 事件。 |
-| `data.csv` | 便于检查的长表数据。 |
+| `metadata.json` | schema v2、requested 配置/计划、实际 preflight、run name/note、Git/import/config provenance、结束状态和 cleanup 错误。 |
+| `raw.jsonl` | start/preflight/configure/ramp/sample/error/cleanup 原始审计事件。 |
+| `data.csv` | 每点 requested source、实际 V/I/R、setpoint、状态和质量标记。 |
 
-打开 `notebooks/three_smu_analysis.ipynb`，将 `RUN_PATH` 指向 run 目录、
-`metadata.json` 或 `data.csv`。默认保持：
+`notebooks/three_smu_analysis.ipynb` 不使用桌面文件选择器。设置 `DATA_DIRECTORY` 为本地目录、SSH
+挂载目录或网络盘；它默认列出 completed/accepted run，跳过不完整目录，并选最新一个。也可手动
+设置 `RUN_PATH`。默认：
 
 ```python
 INCLUDE_REJECTED = False
 INCLUDE_PROBLEM = False
 ```
 
-默认 loader 只返回 run 为 `completed`、`accepted=true` 且样本为 clean 的数据。
-`INCLUDE_REJECTED/INCLUDE_PROBLEM` 只用于审计，不能把问题数据混入默认科学分析。
-Notebook 支持 bias I-V、gate transfer、time trace、gate leakage 和 2D map；第一版没有
-Lock-in 数据，也不计算基于 Lock-in 的电阻或相位。
+问题/拒绝数据只用于审计，不能混入默认分析。双 gate map 若 bias 也被扫描，绘图时须选择一个
+bias slice，例如 `fixed_coordinates={'smu_bias': 0.001}`；若 bias 固定，则不需要 slice。
 
-## 正常结束、中断和异常
+## 常见停止原因
 
-- `zero_disable`：依次对 bias、top gate、bottom gate ramp 到零并关闭输出，再保存最终确认读回。
-- `Ctrl+C` 或异常：记录 interrupted/partial/rejected 原始事件并进入同一清理路径。
-- 任一步通信失败：不能推断 source 为零或 output 已关。只相信最后一次确认读回，停止继续实验，
-  在记录中查明未确认角色，并人工查看三台前面板。
-- cleanup 未确认成功：run 不应 accepted；不得只看进程已经退出就拔线或改接线。
-- 电脑硬崩溃无法保证软件清理，恢复后必须先人工确认三台 SMU 状态。
+- `CHANGE_ME` / 缺字段：仍在用模板或配置不完整；修 TOML，再运行 `describe`。
+- address / identity 重复：停止，核对 VISA、序列号和线缆标签，不要交换软件角色规避。
+- target outside source range：检查单位和计划；未经新的器件安全确认不要扩大范围。
+- output already enabled、non-zero preflight 或状态不干净：不自动接管；人工检查前面板和样品。
+- leakage、trip、near-compliance、readback mismatch：保留审计记录并停止；不要通过提高阈值继续。
 
-## 常见问题
-
-### `CHANGE_ME`、缺字段或类型错误
-
-正在使用模板或本地配置未填完。修正 `.local.toml` 后重新执行 `describe`；不要修改解析器
-来接受占位符。
-
-### duplicate address / identity
-
-两个语义角色指向同一资源，或连接后两台返回相同 identity。停止，不要交换软件角色来
-规避错误；检查 VISA 地址、GPIB 地址、USB 序列号和实际线缆标签。
-
-### target outside source range
-
-扫描点超出本地硬件边界。先检查单位与角色，再缩小 scan；只有操作者重新确认器件安全
-边界时才能修改 `source_min/max`。
-
-### output already enabled
-
-preflight 发现既有输出。程序应在配置写入前停止。人工确认三台前面板、样品状态和最后
-已知 setpoint；不得自动关闭后立即重试。
-
-### leakage、compliance、near-compliance 或 readback mismatch
-
-视为安全拒绝，不继续后续扫描。保留 raw audit，检查器件、接线、量程、compliance 和
-限值；获得新的实验决定前不要提高阈值。
-
-### QCoDeS/VISA 找不到或导入失败
-
-`describe` 不会验证 VISA 可用性。真实连接阶段再核对当前 Python 环境、QCoDeS driver、
-VISA backend 和系统资源管理器；排障过程仍不得发送设置写命令，除非该步骤另有授权。
-
-## 相关文档
-
-- 模块设计、阶段边界和验收条件：[`modules/THREE_SMU.md`](modules/THREE_SMU.md)
-- 全项目硬件规则：[`HARDWARE_AND_SAFETY.md`](HARDWARE_AND_SAFETY.md)
-- 当前交接状态：[`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md)
-- 开发阶段：[`DEVELOPMENT_STAGES.md`](DEVELOPMENT_STAGES.md)
+相关设计与阶段边界见 [`modules/THREE_SMU.md`](modules/THREE_SMU.md)。

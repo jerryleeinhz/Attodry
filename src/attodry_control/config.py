@@ -177,6 +177,12 @@ def load_config(path: str | Path) -> ControlConfig:
             "gate_top",
             "gate_bottom",
         }
+        # These optional tables are parsed by the independent Three-SMU module.
+        # Keeping them admissible here permits one daily hardware.local.toml
+        # without making an unrelated controller validate SMU-only details.
+        expected_tables.update(
+            {"smu_bias", "three_smu_run"}.intersection(document)
+        )
         if project.mode is RunMode.HARDWARE:
             expected_tables.add("visa")
         _strict_keys(document, "top level", expected_tables)
@@ -443,7 +449,10 @@ def _parse_gate(
         "settle_s",
     }
     mode_keys = {"backend"} if mode is RunMode.SIMULATION else {"model", "address"}
-    _strict_keys(table, name, common_keys | mode_keys)
+    if mode is RunMode.HARDWARE and "smu" in table and not isinstance(table["smu"], dict):
+        raise ConfigError(f"{name}.smu must be a table.")
+    optional_smu = {"smu"} if mode is RunMode.HARDWARE and "smu" in table else set()
+    _strict_keys(table, name, common_keys | mode_keys | optional_smu)
     parser = _positive_number if mode is RunMode.SIMULATION else _hardware_number
     compliance = parser(table["compliance_a"], f"{name}.compliance_a")
     leakage = parser(table["leakage_limit_a"], f"{name}.leakage_limit_a")

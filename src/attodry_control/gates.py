@@ -24,10 +24,28 @@ class GateReadbackMismatch(GateSafetyError):
     pass
 
 
+class GatePreflightRejected(GateSafetyError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class GatePreflightState:
+    """Query-only physical state needed before a gate backend may write."""
+
+    identity: str
+    output_enabled: bool
+    source_setpoint_v: float
+    voltage_read_v: float
+    current_read_a: float
+    status: str | None = None
+
+
 class GateBackend(Protocol):
     """Model-specific primitive operations; implementations must check I/O errors."""
 
     def set_current_compliance(self, current_a: float) -> None: ...
+
+    def preflight(self) -> GatePreflightState: ...
 
     def set_output(self, enabled: bool) -> None: ...
 
@@ -65,6 +83,39 @@ class GateSafetyLimits:
             raise ValueError("settle_s must be finite and non-negative.")
 
 
+def validate_gate_preflight(
+    role: str,
+    state: GatePreflightState,
+    limits: GateSafetyLimits,
+) -> None:
+    """Reject any unconfirmed, enabled, or non-zero state without writing."""
+
+    if not state.identity.strip():
+        raise GatePreflightRejected(f"gate_{role} returned an empty identity")
+    values = {
+        "source setpoint": state.source_setpoint_v,
+        "voltage readback": state.voltage_read_v,
+        "current readback": state.current_read_a,
+    }
+    for name, value in values.items():
+        if not math.isfinite(value):
+            raise GatePreflightRejected(f"gate_{role} {name} is not finite")
+    if state.output_enabled:
+        raise GatePreflightRejected(
+            f"gate_{role} output is already enabled; check the front panel manually"
+        )
+    if abs(state.source_setpoint_v) > limits.readback_tolerance_v:
+        raise GatePreflightRejected(
+            f"gate_{role} source setpoint is not confirmed at zero"
+        )
+    if abs(state.voltage_read_v) > limits.readback_tolerance_v:
+        raise GatePreflightRejected(
+            f"gate_{role} voltage readback is not confirmed at zero"
+        )
+    if state.status is not None and not _status_is_clean(state.status):
+        raise GatePreflightRejected(f"gate_{role} instrument status is not clean")
+
+
 class SafeGateController:
     """Fail-closed gate controller independent of a particular SMU command set."""
 
@@ -88,6 +139,18 @@ class SafeGateController:
         self.events: list[str] = []
         self._last_commanded_voltage_v = 0.0
         self._output_enabled = False
+        self._preflight_confirmed = False
+
+    def preflight(self) -> GatePreflightState:
+        """Query and validate the real instrument state before any write."""
+
+        state = self.backend.preflight()
+        validate_gate_preflight(self.role, state, self.limits)
+        self._last_commanded_voltage_v = 0.0
+        self._output_enabled = False
+        self._preflight_confirmed = True
+        self.events.append(f"gate_{self.role}.preflight_confirmed")
+        return state
 
     def read_state(self) -> GateState:
         voltage = self._finite_readback(
@@ -109,6 +172,8 @@ class SafeGateController:
 
     def enable_output(self) -> None:
         self._require_write_authorization()
+        if not self._preflight_confirmed:
+            self.preflight()
         try:
             self.backend.set_current_compliance(self.limits.compliance_a)
             self.backend.set_voltage(0.0)
@@ -222,6 +287,14 @@ class SafeGateController:
         if not math.isfinite(value):
             raise GateSafetyError(f"{name} must be finite.")
         return float(value)
+
+
+def _status_is_clean(status: str) -> bool:
+    prefix = status.strip().split(",", 1)[0].strip()
+    try:
+        return int(float(prefix)) == 0
+    except ValueError:
+        return False
 
 
 def ramp_values(start_v: float, stop_v: float, max_step_v: float) -> tuple[float, ...]:

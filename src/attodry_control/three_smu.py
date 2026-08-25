@@ -7,6 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 import math
 from pathlib import Path
+import subprocess
 import time
 from typing import Any, Callable, Generator, Protocol
 from uuid import uuid4
@@ -16,6 +17,7 @@ from .keithley2400 import (
     KeithleyReading,
     open_keithley2400,
 )
+from .gates import GatePreflightState, GateSafetyLimits, validate_gate_preflight
 from .three_smu_config import (
     ChannelRole,
     FinishAction,
@@ -117,6 +119,7 @@ class ThreeSmuSession:
         plan: ThreeSmuScanPlan,
         *,
         authorize_writes: bool = False,
+        authorize_status_consumption: bool = False,
         adapter_factory: Callable[[str, SmuHardwareConfig], SmuAdapter] = open_keithley2400,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
@@ -126,10 +129,19 @@ class ThreeSmuSession:
             raise ThreeSmuWriteNotAuthorized(
                 "Three-SMU connection and writes require authorize_writes=True"
             )
+        if not authorize_status_consumption:
+            raise ThreeSmuWriteNotAuthorized(
+                "Three-SMU runs require authorize_status_consumption=True because "
+                "the Keithley error-queue query consumes status entries"
+            )
         adapters: dict[str, SmuAdapter] = {}
         try:
             for role in SEMANTIC_ROLES:
                 adapters[role] = adapter_factory(role, hardware.by_role()[role])
+            for adapter in adapters.values():
+                authorize_status = getattr(adapter, "authorize_status_consumption", None)
+                if callable(authorize_status):
+                    authorize_status()
             preflight = {role: adapters[role].preflight() for role in SEMANTIC_ROLES}
             active = [
                 role for role, state in preflight.items() if state.output_enabled
@@ -144,6 +156,63 @@ class ThreeSmuSession:
             if len(set(identities)) != len(identities):
                 raise ThreeSmuSafetyError(
                     "Preflight identities are not distinct; no setting write was sent"
+                )
+            preflight_errors: list[str] = []
+            for role, state in preflight.items():
+                config = hardware.by_role()[role]
+                assert config.readback_tolerance is not None
+                if state.source_mode is not config.source_mode:
+                    preflight_errors.append(
+                        f"{role} source mode is {state.source_mode.value}, expected "
+                        f"{config.source_mode.value}"
+                    )
+                if abs(state.source_setpoint) > config.readback_tolerance:
+                    preflight_errors.append(
+                        f"{role} source setpoint {state.source_setpoint:g} is not "
+                        "confirmed at zero"
+                    )
+                if not state.status_query_consumed:
+                    preflight_errors.append(
+                        f"{role} status queue was not explicitly queried"
+                    )
+                elif not _status_is_clean(state.status):
+                    preflight_errors.append(f"{role} instrument status is not clean")
+                if role != "smu_bias":
+                    assert config.compliance_current_a is not None
+                    assert config.leakage_limit_a is not None
+                    assert config.source_max is not None
+                    try:
+                        validate_gate_preflight(
+                            role,
+                            GatePreflightState(
+                                identity=state.identity,
+                                output_enabled=state.output_enabled,
+                                source_setpoint_v=state.source_setpoint,
+                                voltage_read_v=float(state.voltage_v),
+                                current_read_a=float(state.current_a),
+                                status=state.status,
+                            ),
+                            GateSafetyLimits(
+                                max_abs_voltage_v=config.source_max,
+                                compliance_a=config.compliance_current_a,
+                                leakage_limit_a=config.leakage_limit_a,
+                                ramp_step_v=float(config.ramp_step),
+                                readback_tolerance_v=config.readback_tolerance,
+                                settle_s=float(config.settle_s),
+                            ),
+                        )
+                    except (TypeError, ValueError) as exc:
+                        preflight_errors.append(
+                            f"{role} preflight readback is incomplete: {exc}"
+                        )
+                    except ThreeSmuError:
+                        raise
+                    except Exception as exc:
+                        preflight_errors.append(f"{role} gate preflight: {exc}")
+            if preflight_errors:
+                raise ThreeSmuSafetyError(
+                    "Preflight rejected unsafe or unexpected instrument state; no "
+                    "setting write was sent: " + "; ".join(preflight_errors)
                 )
             return cls(
                 hardware,
@@ -186,12 +255,23 @@ class ThreeSmuSession:
         self,
         *,
         output_dir: str | Path,
+        run_name: str = "",
+        note: str = "",
+        config_path: str | Path | None = None,
     ) -> Generator[ThreeSmuSample, None, None]:
         if self._closed:
             raise ThreeSmuError("Session is closed")
         if self._run_active or self._recorder is not None:
             raise ThreeSmuError("A Three-SMU session supports one audited run")
-        recorder = _RunRecorder(Path(output_dir), self.hardware, self.plan, self.preflight)
+        recorder = _RunRecorder(
+            Path(output_dir),
+            self.hardware,
+            self.plan,
+            self.preflight,
+            run_name=run_name,
+            note=note,
+            config_path=None if config_path is None else Path(config_path),
+        )
         self._recorder = recorder
         self.last_run_dir = recorder.run_dir
         self._run_active = True
@@ -468,7 +548,9 @@ class ThreeSmuSession:
             problems.append(f"{role} compliance trip")
         if reading.near_compliance:
             problems.append(f"{role} near compliance limit")
-        if not _status_is_clean(reading.status):
+        if not reading.status_query_consumed:
+            problems.append(f"{role} status queue was not explicitly queried")
+        elif not _status_is_clean(reading.status):
             problems.append(f"{role} instrument error: {reading.status}")
         if role != "smu_bias" and expected_output:
             assert config.leakage_limit_a is not None
@@ -481,6 +563,7 @@ class ThreeSmuSession:
 
     def _cleanup(self, recorder: "_RunRecorder", *, reason: str) -> dict[str, Any]:
         actions: list[dict[str, Any]] = []
+        cleanup_errors: list[dict[str, str]] = []
         manual = False
         for role in SEMANTIC_ROLES:
             if role not in self._configured:
@@ -494,6 +577,9 @@ class ThreeSmuSession:
             )
             if not zero_confirmed:
                 manual = True
+                cleanup_errors.append(
+                    {"role": role, "stage": "zero", "error": "zero ramp unconfirmed"}
+                )
             output_off_confirmed = False
             try:
                 self.adapters[role].set_output(False)
@@ -508,6 +594,13 @@ class ThreeSmuSession:
                 output_off_confirmed = not problems
                 if problems:
                     manual = True
+                    cleanup_errors.append(
+                        {
+                            "role": role,
+                            "stage": "disable_readback",
+                            "error": "; ".join(problems),
+                        }
+                    )
                 recorder.event(
                     "cleanup_disable",
                     {
@@ -518,6 +611,13 @@ class ThreeSmuSession:
                 )
             except Exception as exc:
                 manual = True
+                cleanup_errors.append(
+                    {
+                        "role": role,
+                        "stage": "disable",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
                 recorder.event(
                     "cleanup_disable_error",
                     {"role": role, "error": f"{type(exc).__name__}: {exc}"},
@@ -534,6 +634,7 @@ class ThreeSmuSession:
             "reason": reason,
             "manual_verification_required": manual,
             "actions": actions,
+            "cleanup_errors": cleanup_errors,
             "last_confirmed": {
                 role: _timed_reading_dict(reading)
                 for role, reading in self.last_confirmed.items()
@@ -563,6 +664,10 @@ class _RunRecorder:
         hardware: ThreeSmuHardwareConfig,
         plan: ThreeSmuScanPlan,
         preflight: dict[str, KeithleyPreflight],
+        *,
+        run_name: str,
+        note: str,
+        config_path: Path | None,
     ) -> None:
         output_root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -577,7 +682,7 @@ class _RunRecorder:
         self._writer.writeheader()
         self._closed = False
         self.metadata: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "code_version": _code_version(),
             "status": "running",
             "accepted": False,
@@ -589,6 +694,23 @@ class _RunRecorder:
             "plan": _jsonable(asdict(plan)),
             "preflight": {
                 role: _jsonable(asdict(state)) for role, state in preflight.items()
+            },
+            "requested": {
+                "hardware": {
+                    role: _jsonable(asdict(config))
+                    for role, config in hardware.by_role().items()
+                },
+                "plan": _jsonable(asdict(plan)),
+            },
+            "actual_preflight": {
+                role: _jsonable(asdict(state)) for role, state in preflight.items()
+            },
+            "run_name": run_name,
+            "note": note,
+            "provenance": {
+                "config_path": None if config_path is None else str(config_path.resolve()),
+                "import_path": str(Path(__file__).resolve()),
+                **_git_provenance(),
             },
         }
         self._write_metadata()
@@ -621,6 +743,7 @@ class _RunRecorder:
         }
         for role in SEMANTIC_ROLES:
             record[f"{role}_coordinate"] = sample.coordinates.get(role, 0.0)
+            record[f"{role}_requested_source"] = sample.coordinates.get(role, 0.0)
             timed = sample.readings[role]
             reading = timed.reading
             record.update(
@@ -683,7 +806,9 @@ def ramp_values(start: float, stop: float, max_step: float) -> tuple[float, ...]
     return tuple(start + delta * index / count for index in range(1, count + 1))
 
 
-def _status_is_clean(status: str) -> bool:
+def _status_is_clean(status: str | None) -> bool:
+    if status is None:
+        return False
     prefix = status.strip().split(",", 1)[0].strip()
     try:
         return int(float(prefix)) == 0
@@ -704,6 +829,7 @@ def _csv_fields() -> list[str]:
         fields.extend(
             [
                 f"{role}_coordinate",
+                f"{role}_requested_source",
                 f"{role}_timestamp",
                 f"{role}_source_setpoint",
                 f"{role}_voltage_v",
@@ -765,3 +891,29 @@ def _code_version() -> str:
         return version("attodry-transport-control")
     except PackageNotFoundError:
         return "0.1.0+uninstalled"
+
+
+def _git_provenance() -> dict[str, Any]:
+    root = Path(__file__).resolve().parents[2]
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=2,
+        ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=root,
+                capture_output=True,
+                check=True,
+                text=True,
+                timeout=2,
+            ).stdout.strip()
+        )
+        return {"git_commit": commit, "git_dirty": dirty}
+    except (OSError, subprocess.SubprocessError):
+        return {"git_commit": None, "git_dirty": None}

@@ -113,7 +113,7 @@ python -m attodry_control.monitor --database PATH --run-id RUN_ID
 python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --inject-first-unlock
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --csv analysis_output/run.csv
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --publication-dir analysis_output/RUN_ID --format png --format pdf
-python -m attodry_control.three_smu_cli describe --hardware config/three_smu_hardware.local.toml --plan config/three_smu_scan.local.toml
+python -m attodry_control.three_smu_cli describe --config config/hardware.local.toml
 python -m attodry_control.three_smu_cli run --help
 ```
 
