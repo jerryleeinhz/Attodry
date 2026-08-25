@@ -133,6 +133,7 @@ class HarmonicScalingRules:
     max_relative_rmse: float | None = 0.10
     max_phase_slope_deg_per_decade: float | None = 5.0
     max_phase_span_deg: float | None = 10.0
+    scalar_background_mode: str = "auto"
     complex_background_mode: str = "auto"
     complex_free_exponent_min: float = 0.05
     complex_free_exponent_max: float = 6.0
@@ -144,6 +145,10 @@ class HarmonicScalingRules:
             raise ValueError("minimum_points must be at least 3.")
         if not math.isfinite(self.minimum_current_decades) or self.minimum_current_decades < 0.0:
             raise ValueError("minimum_current_decades must be finite and non-negative.")
+        if self.scalar_background_mode not in {"auto", "none", "with_offset"}:
+            raise ValueError(
+                "scalar_background_mode must be 'auto', 'none', or 'with_offset'."
+            )
         if self.complex_background_mode not in {"auto", "none", "with_offset"}:
             raise ValueError(
                 "complex_background_mode must be 'auto', 'none', or 'with_offset'."
@@ -220,6 +225,47 @@ class ComplexHarmonicScalingModel:
 
 
 @dataclass(frozen=True, slots=True)
+class ScalarHarmonicScalingModel:
+    """One phase-blind ``R=b+A(I/I_ref)^p`` magnitude model.
+
+    ``R`` is the measured lock-in amplitude.  X/Y and phase are deliberately
+    not used by this model; ``phase_ignored`` is archived so that this choice
+    remains explicit in exported analysis results.
+    """
+
+    name: str
+    includes_background: bool
+    free_exponent: bool
+    phase_ignored: bool
+    current_reference_a_rms: float
+    exponent: float
+    exponent_standard_error: float | None
+    exponent_ci_low: float | None
+    exponent_ci_high: float | None
+    background_v: float
+    response_v_at_reference_current: float
+    r_squared: float | None
+    relative_rmse: float | None
+    weighted_residual_sum_squares: float | None
+    aicc: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class ScalarHarmonicScalingAssessment:
+    """Selection and fixed-vs-free decision for phase-blind magnitude fits."""
+
+    models: tuple[ScalarHarmonicScalingModel, ...]
+    selected_fixed_model: ScalarHarmonicScalingModel | None
+    selected_free_model: ScalarHarmonicScalingModel | None
+    background_verdict: str
+    background_delta_aicc: float | None
+    exponent_ci_width: float | None
+    delta_aicc_fixed_minus_free: float | None
+    power_law_verdict: str
+    reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ComplexHarmonicScalingAssessment:
     """Selection and fixed-vs-free decision across complex scaling models."""
 
@@ -258,6 +304,7 @@ class HarmonicScalingFit:
     free_r_squared: float | None
     fixed_relative_rmse: float | None
     free_relative_rmse: float | None
+    log_leave_one_out_relative_rmse: float | None
     delta_aicc_fixed_minus_free: float | None
     phase_slope_deg_per_decade: float | None
     phase_span_deg: float | None
@@ -276,9 +323,28 @@ class HarmonicScalingFit:
     complex_exponent_ci_width: float | None
     complex_delta_aicc_fixed_minus_free: float | None
     complex_fixed_relative_rmse: float | None
+    complex_leave_one_out_relative_rmse: float | None
     complex_power_law_verdict: str
     complex_reasons: tuple[str, ...]
     complex_models: tuple[ComplexHarmonicScalingModel, ...]
+    scalar_fit_point_count: int
+    scalar_excluded_point_count: int
+    scalar_background_mode: str
+    scalar_selected_model: str | None
+    scalar_background_verdict: str
+    scalar_background_delta_aicc: float | None
+    scalar_exponent: float | None
+    scalar_exponent_standard_error: float | None
+    scalar_exponent_ci_low: float | None
+    scalar_exponent_ci_high: float | None
+    scalar_exponent_ci_width: float | None
+    scalar_delta_aicc_fixed_minus_free: float | None
+    scalar_fixed_relative_rmse: float | None
+    scalar_leave_one_out_relative_rmse: float | None
+    scalar_power_law_verdict: str
+    scalar_phase_ignored: bool
+    scalar_reasons: tuple[str, ...]
+    scalar_models: tuple[ScalarHarmonicScalingModel, ...]
     reasons: tuple[str, ...]
     points: tuple[HarmonicScalingPoint, ...]
 
@@ -287,6 +353,7 @@ class HarmonicScalingFit:
         values.pop("points", None)
         values["reasons"] = list(self.reasons)
         values["complex_reasons"] = list(self.complex_reasons)
+        values["scalar_reasons"] = list(self.scalar_reasons)
         return values
 
 
@@ -661,6 +728,7 @@ def fit_harmonic_scaling(
     points = _harmonic_scaling_points(selected, resolved_path, resolved_rules)
     included = tuple(point for point in points if point.included)
     complex_included = tuple(point for point in points if point.complex_included)
+    scalar_included = included
     current_values = tuple(point.current_a_rms for point in included)
     current_min = min(current_values) if current_values else None
     current_max = max(current_values) if current_values else None
@@ -740,6 +808,25 @@ def fit_harmonic_scaling(
         expected_order=harmonic,
         rules=resolved_rules,
     )
+    scalar_assessment = _assess_scalar_harmonic_scaling(
+        scalar_included,
+        expected_order=harmonic,
+        rules=resolved_rules,
+    )
+    log_leave_one_out_rmse = _leave_one_out_log_relative_rmse(
+        included,
+        expected_order=harmonic,
+    )
+    scalar_leave_one_out_rmse = _leave_one_out_scalar_relative_rmse(
+        scalar_included,
+        expected_order=harmonic,
+        selected_model=scalar_assessment.selected_fixed_model,
+    )
+    complex_leave_one_out_rmse = _leave_one_out_complex_relative_rmse(
+        complex_included,
+        expected_order=harmonic,
+        selected_model=complex_assessment.selected_fixed_model,
+    )
 
     if len(included) >= resolved_rules.minimum_points and (
         current_decades is not None
@@ -810,6 +897,7 @@ def fit_harmonic_scaling(
         free_r_squared=free_r_squared,
         fixed_relative_rmse=fixed_rmse,
         free_relative_rmse=free_rmse,
+        log_leave_one_out_relative_rmse=log_leave_one_out_rmse,
         delta_aicc_fixed_minus_free=delta_aicc,
         phase_slope_deg_per_decade=phase_slope,
         phase_span_deg=phase_span,
@@ -854,9 +942,54 @@ def fit_harmonic_scaling(
             if complex_assessment.selected_fixed_model is not None
             else None
         ),
+        complex_leave_one_out_relative_rmse=complex_leave_one_out_rmse,
         complex_power_law_verdict=complex_assessment.power_law_verdict,
         complex_reasons=complex_assessment.reasons,
         complex_models=complex_assessment.models,
+        scalar_fit_point_count=len(scalar_included),
+        scalar_excluded_point_count=len(points) - len(scalar_included),
+        scalar_background_mode=resolved_rules.scalar_background_mode,
+        scalar_selected_model=(
+            scalar_assessment.selected_fixed_model.name
+            if scalar_assessment.selected_fixed_model is not None
+            else None
+        ),
+        scalar_background_verdict=scalar_assessment.background_verdict,
+        scalar_background_delta_aicc=scalar_assessment.background_delta_aicc,
+        scalar_exponent=(
+            scalar_assessment.selected_free_model.exponent
+            if scalar_assessment.selected_free_model is not None
+            else None
+        ),
+        scalar_exponent_standard_error=(
+            scalar_assessment.selected_free_model.exponent_standard_error
+            if scalar_assessment.selected_free_model is not None
+            else None
+        ),
+        scalar_exponent_ci_low=(
+            scalar_assessment.selected_free_model.exponent_ci_low
+            if scalar_assessment.selected_free_model is not None
+            else None
+        ),
+        scalar_exponent_ci_high=(
+            scalar_assessment.selected_free_model.exponent_ci_high
+            if scalar_assessment.selected_free_model is not None
+            else None
+        ),
+        scalar_exponent_ci_width=scalar_assessment.exponent_ci_width,
+        scalar_delta_aicc_fixed_minus_free=(
+            scalar_assessment.delta_aicc_fixed_minus_free
+        ),
+        scalar_fixed_relative_rmse=(
+            scalar_assessment.selected_fixed_model.relative_rmse
+            if scalar_assessment.selected_fixed_model is not None
+            else None
+        ),
+        scalar_leave_one_out_relative_rmse=scalar_leave_one_out_rmse,
+        scalar_power_law_verdict=scalar_assessment.power_law_verdict,
+        scalar_phase_ignored=True,
+        scalar_reasons=scalar_assessment.reasons,
+        scalar_models=scalar_assessment.models,
         reasons=tuple(dict.fromkeys(reasons)),
         points=points,
     )
@@ -893,7 +1026,7 @@ def plot_harmonic_scaling_fit(
     *,
     destination: str | Path | None = None,
 ):
-    """Plot raw magnitude fits plus the selected complex-background model."""
+    """Plot all three scaling views and their relative residuals."""
 
     try:
         import matplotlib.pyplot as plt
@@ -916,7 +1049,15 @@ def plot_harmonic_scaling_fit(
         ),
         None,
     )
-    residual_label = "fixed-fit residual"
+    selected_scalar_model = next(
+        (
+            model
+            for model in fit.scalar_models
+            if model.name == fit.scalar_selected_model
+        ),
+        None,
+    )
+    residual_values: list[tuple[float, float, str, str]] = []
     if included:
         x_values = [point.current_a_rms for point in included]
         y_values = [point.amplitude_v for point in included]
@@ -942,6 +1083,28 @@ def plot_harmonic_scaling_fit(
                 color="tab:green",
                 label=f"free I^{fit.exponent:.3g}",
             )
+        if selected_scalar_model is not None:
+            scalar_predictions = [
+                _scalar_model_prediction(selected_scalar_model, point.current_a_rms)
+                for point in included
+            ]
+            axis.plot(
+                x_values,
+                scalar_predictions,
+                color="tab:red",
+                linewidth=1.6,
+                label=f"{selected_scalar_model.name} (phase-blind)",
+            )
+            residual_values.extend(
+                (
+                    point.current_a_rms,
+                    (point.amplitude_v - predicted)
+                    / max(abs(predicted), 1e-30),
+                    "tab:red",
+                    "scalar R residual",
+                )
+                for point, predicted in zip(included, scalar_predictions)
+            )
         if selected_complex_model is not None:
             complex_predictions = [
                 _complex_model_prediction(selected_complex_model, point.current_a_rms)
@@ -954,37 +1117,47 @@ def plot_harmonic_scaling_fit(
                 linewidth=1.6,
                 label=selected_complex_model.name,
             )
-            residual_values = [
+            residual_values.extend(
                 (
                     point.current_a_rms,
                     math.hypot(point.x_v - predicted_x, point.y_v - predicted_y)
                     / max(math.hypot(predicted_x, predicted_y), 1e-30),
+                    "tab:purple",
+                    "complex residual",
                 )
                 for point, (predicted_x, predicted_y) in zip(
                     included, complex_predictions
                 )
-            ]
-            residual_label = "selected complex residual"
-        else:
-            residual_values = []
+            )
+        if fit.fixed_intercept_log is not None:
             for point in included:
-                if fit.fixed_intercept_log is None:
-                    continue
                 predicted = (
                     math.exp(fit.fixed_intercept_log)
                     * point.current_a_rms ** fit.expected_order
                 )
                 residual_values.append(
-                    (point.current_a_rms, (point.amplitude_v - predicted) / predicted)
+                    (
+                        point.current_a_rms,
+                        (point.amplitude_v - predicted) / max(abs(predicted), 1e-30),
+                        "tab:orange",
+                        "log fixed residual",
+                    )
                 )
-            residual_label = "fixed-fit residual"
         if residual_values:
             residual_axis.axhline(0.0, color="0.25", linewidth=0.8)
-            residual_axis.scatter(
-                [item[0] for item in residual_values],
-                [item[1] for item in residual_values],
-                color="tab:orange",
-            )
+            seen_labels: set[str] = set()
+            for color in ("tab:orange", "tab:red", "tab:purple"):
+                items = [item for item in residual_values if item[2] == color]
+                if not items:
+                    continue
+                label = items[0][3]
+                residual_axis.scatter(
+                    [item[0] for item in items],
+                    [item[1] for item in items],
+                    color=color,
+                    label=label if label not in seen_labels else None,
+                )
+                seen_labels.add(label)
     if excluded:
         axis.scatter(
             [point.current_a_rms for point in excluded],
@@ -998,18 +1171,30 @@ def plot_harmonic_scaling_fit(
     residual_axis.set_xscale("log")
     residual_axis.set_xlabel("SINE OUT current (A RMS)")
     axis.set_ylabel(f"V{fit.role} h{fit.harmonic} R (V RMS)")
-    residual_axis.set_ylabel(residual_label)
+    residual_axis.set_ylabel("relative residual")
     axis.set_title(
         f"V{fit.role} h{fit.harmonic} scaling · "
-        f"amp={fit.amplitude_verdict}, raw phase={fit.complex_response_verdict}\n"
-        f"complex={fit.complex_power_law_verdict} ({fit.complex_selected_model or 'unavailable'})"
+        f"log={fit.amplitude_verdict}, scalar R={fit.scalar_power_law_verdict}, "
+        f"raw phase={fit.complex_response_verdict}\n"
+        f"complex={fit.complex_power_law_verdict} "
+        f"({fit.complex_selected_model or 'unavailable'})"
     )
     axis.grid(True, which="both", alpha=0.2)
     residual_axis.grid(True, which="both", alpha=0.2)
     axis.legend()
+    if residual_values:
+        residual_axis.legend()
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure
+
+
+def _scalar_model_prediction(
+    model: ScalarHarmonicScalingModel,
+    current_a_rms: float,
+) -> float:
+    scale = (current_a_rms / model.current_reference_a_rms) ** model.exponent
+    return model.background_v + model.response_v_at_reference_current * scale
 
 
 def _complex_model_prediction(
@@ -1165,6 +1350,563 @@ def _log_power_fit(
         "relative_rmse": relative_rmse,
         "aicc": aicc,
     }
+
+
+def _leave_one_out_log_relative_rmse(
+    points: Sequence[HarmonicScalingPoint],
+    *,
+    expected_order: int,
+) -> float | None:
+    if len(points) < 4:
+        return None
+    errors: list[float] = []
+    for held_out_index, held_out in enumerate(points):
+        training = tuple(
+            point for index, point in enumerate(points) if index != held_out_index
+        )
+        fit = _log_power_fit(
+            tuple(math.log(point.current_a_rms) for point in training),
+            tuple(math.log(point.amplitude_v) for point in training),
+            tuple(point.amplitude_v for point in training),
+            fixed_slope=float(expected_order),
+            sigma_y=tuple(
+                (
+                    point.amplitude_standard_error_v / point.amplitude_v
+                    if point.amplitude_standard_error_v > 0.0
+                    else None
+                )
+                for point in training
+            ),
+        )
+        predicted = math.exp(
+            (fit["intercept"] or 0.0)
+            + expected_order * math.log(held_out.current_a_rms)
+        )
+        errors.append(
+            (predicted - held_out.amplitude_v)
+            / max(abs(held_out.amplitude_v), 1e-30)
+        )
+    return math.sqrt(fmean(error**2 for error in errors))
+
+
+def _leave_one_out_scalar_relative_rmse(
+    points: Sequence[HarmonicScalingPoint],
+    *,
+    expected_order: int,
+    selected_model: ScalarHarmonicScalingModel | None,
+) -> float | None:
+    if selected_model is None or len(points) < 4:
+        return None
+    current_reference = math.sqrt(
+        min(point.current_a_rms for point in points)
+        * max(point.current_a_rms for point in points)
+    )
+    errors: list[float] = []
+    for held_out_index, held_out in enumerate(points):
+        training = tuple(
+            point for index, point in enumerate(points) if index != held_out_index
+        )
+        model = _fit_scalar_power_law(
+            training,
+            name="scalar_cross_validation",
+            exponent=float(expected_order),
+            includes_background=selected_model.includes_background,
+            current_reference=current_reference,
+        )
+        predicted = _scalar_model_prediction(model, held_out.current_a_rms)
+        errors.append(
+            (predicted - held_out.amplitude_v)
+            / max(abs(held_out.amplitude_v), 1e-30)
+        )
+    return math.sqrt(fmean(error**2 for error in errors))
+
+
+def _leave_one_out_complex_relative_rmse(
+    points: Sequence[HarmonicScalingPoint],
+    *,
+    expected_order: int,
+    selected_model: ComplexHarmonicScalingModel | None,
+) -> float | None:
+    if selected_model is None or len(points) < 4:
+        return None
+    current_reference = math.sqrt(
+        min(point.current_a_rms for point in points)
+        * max(point.current_a_rms for point in points)
+    )
+    errors: list[float] = []
+    for held_out_index, held_out in enumerate(points):
+        training = tuple(
+            point for index, point in enumerate(points) if index != held_out_index
+        )
+        model = _fit_complex_power_law(
+            training,
+            name="complex_cross_validation",
+            exponent=float(expected_order),
+            includes_background=selected_model.includes_background,
+            current_reference=current_reference,
+        )
+        predicted_x, predicted_y = _complex_model_prediction(
+            model, held_out.current_a_rms
+        )
+        predicted_amplitude = math.hypot(predicted_x, predicted_y)
+        errors.append(
+            (predicted_amplitude - held_out.amplitude_v)
+            / max(abs(held_out.amplitude_v), 1e-30)
+        )
+    return math.sqrt(fmean(error**2 for error in errors))
+
+
+def _assess_scalar_harmonic_scaling(
+    points: Sequence[HarmonicScalingPoint],
+    *,
+    expected_order: int,
+    rules: HarmonicScalingRules,
+) -> ScalarHarmonicScalingAssessment:
+    """Compare phase-blind amplitude models with non-negative ``b`` and ``A``."""
+
+    reasons: list[str] = [
+        "phase is ignored; this fit uses measured amplitude R only"
+    ]
+    if len(points) < rules.minimum_points:
+        reasons.append(f"requires at least {rules.minimum_points} scalar fit points")
+        return _empty_scalar_scaling_assessment(reasons)
+    current_min = min(point.current_a_rms for point in points)
+    current_max = max(point.current_a_rms for point in points)
+    if current_min <= 0.0 or current_max <= current_min:
+        reasons.append("scalar-fit current values must span positive values")
+        return _empty_scalar_scaling_assessment(reasons)
+    current_decades = math.log10(current_max / current_min)
+    if current_decades < rules.minimum_current_decades:
+        reasons.append(
+            f"scalar-fit current span is {current_decades:.3g} decades; "
+            f"requires {rules.minimum_current_decades:.3g}"
+        )
+        return _empty_scalar_scaling_assessment(reasons)
+    current_reference = math.sqrt(current_min * current_max)
+    no_offset_fixed = _fit_scalar_power_law(
+        points,
+        name="scalar_no_offset_fixed_order",
+        exponent=float(expected_order),
+        includes_background=False,
+        current_reference=current_reference,
+    )
+    no_offset_free = _fit_free_scalar_power_law(
+        points,
+        name="scalar_no_offset_free_order",
+        includes_background=False,
+        current_reference=current_reference,
+        confidence_level=rules.confidence_level,
+        exponent_min=rules.complex_free_exponent_min,
+        exponent_max=rules.complex_free_exponent_max,
+    )
+    offset_fixed = _fit_scalar_power_law(
+        points,
+        name="scalar_offset_fixed_order",
+        exponent=float(expected_order),
+        includes_background=True,
+        current_reference=current_reference,
+    )
+    offset_free = _fit_free_scalar_power_law(
+        points,
+        name="scalar_offset_free_order",
+        includes_background=True,
+        current_reference=current_reference,
+        confidence_level=rules.confidence_level,
+        exponent_min=rules.complex_free_exponent_min,
+        exponent_max=rules.complex_free_exponent_max,
+    )
+    models = (no_offset_fixed, no_offset_free, offset_fixed, offset_free)
+    background_delta = _aicc_difference(no_offset_fixed, offset_fixed)
+    background_verdict = _background_verdict(background_delta, rules)
+    if rules.scalar_background_mode == "none":
+        selected_fixed = no_offset_fixed
+        selected_free = no_offset_free
+    elif rules.scalar_background_mode == "with_offset":
+        selected_fixed = offset_fixed
+        selected_free = offset_free
+    else:
+        selected_fixed = min(
+            (no_offset_fixed, offset_fixed), key=_finite_aicc_sort_key
+        )
+        selected_free = (
+            offset_free if selected_fixed.includes_background else no_offset_free
+        )
+    delta_aicc = _aicc_difference(selected_fixed, selected_free)
+    exponent_width = (
+        selected_free.exponent_ci_high - selected_free.exponent_ci_low
+        if (
+            selected_free.exponent_ci_low is not None
+            and selected_free.exponent_ci_high is not None
+        )
+        else None
+    )
+    verdict, verdict_reasons = _scalar_power_law_verdict(
+        expected_order=expected_order,
+        fixed_model=selected_fixed,
+        free_model=selected_free,
+        exponent_ci_width=exponent_width,
+        delta_aicc=delta_aicc,
+        rules=rules,
+    )
+    reasons.extend(verdict_reasons)
+    if rules.scalar_background_mode == "auto":
+        reasons.append(
+            "automatic scalar background selection chose "
+            f"{selected_fixed.name} by corrected AIC"
+        )
+    return ScalarHarmonicScalingAssessment(
+        models=models,
+        selected_fixed_model=selected_fixed,
+        selected_free_model=selected_free,
+        background_verdict=background_verdict,
+        background_delta_aicc=background_delta,
+        exponent_ci_width=exponent_width,
+        delta_aicc_fixed_minus_free=delta_aicc,
+        power_law_verdict=verdict,
+        reasons=tuple(dict.fromkeys(reasons)),
+    )
+
+
+def _empty_scalar_scaling_assessment(
+    reasons: Sequence[str],
+) -> ScalarHarmonicScalingAssessment:
+    return ScalarHarmonicScalingAssessment(
+        models=(),
+        selected_fixed_model=None,
+        selected_free_model=None,
+        background_verdict="insufficient_data",
+        background_delta_aicc=None,
+        exponent_ci_width=None,
+        delta_aicc_fixed_minus_free=None,
+        power_law_verdict="insufficient_data",
+        reasons=tuple(reasons),
+    )
+
+
+def _fit_free_scalar_power_law(
+    points: Sequence[HarmonicScalingPoint],
+    *,
+    name: str,
+    includes_background: bool,
+    current_reference: float,
+    confidence_level: float,
+    exponent_min: float,
+    exponent_max: float,
+) -> ScalarHarmonicScalingModel:
+    """Profile a phase-blind amplitude exponent with a bounded search."""
+
+    lower = exponent_min
+    upper = exponent_max
+    grid_count = 121
+    grid = tuple(
+        lower + (upper - lower) * index / (grid_count - 1)
+        for index in range(grid_count)
+    )
+    grid_models = tuple(
+        _fit_scalar_power_law(
+            points,
+            name=name,
+            exponent=exponent,
+            includes_background=includes_background,
+            current_reference=current_reference,
+            free_exponent=True,
+        )
+        for exponent in grid
+    )
+    best_index = min(
+        range(len(grid_models)),
+        key=lambda index: _finite_aicc_sort_key(grid_models[index]),
+    )
+    best = grid_models[best_index]
+    if 0 < best_index < len(grid_models) - 1:
+        left = grid[best_index - 1]
+        right = grid[best_index + 1]
+        golden_ratio = (math.sqrt(5.0) - 1.0) / 2.0
+        left_inner = right - golden_ratio * (right - left)
+        right_inner = left + golden_ratio * (right - left)
+        left_model = _fit_scalar_power_law(
+            points,
+            name=name,
+            exponent=left_inner,
+            includes_background=includes_background,
+            current_reference=current_reference,
+            free_exponent=True,
+        )
+        right_model = _fit_scalar_power_law(
+            points,
+            name=name,
+            exponent=right_inner,
+            includes_background=includes_background,
+            current_reference=current_reference,
+            free_exponent=True,
+        )
+        for _ in range(60):
+            if _finite_aicc_sort_key(left_model) <= _finite_aicc_sort_key(right_model):
+                right = right_inner
+                right_inner = left_inner
+                right_model = left_model
+                left_inner = right - golden_ratio * (right - left)
+                left_model = _fit_scalar_power_law(
+                    points,
+                    name=name,
+                    exponent=left_inner,
+                    includes_background=includes_background,
+                    current_reference=current_reference,
+                    free_exponent=True,
+                )
+            else:
+                left = left_inner
+                left_inner = right_inner
+                left_model = right_model
+                right_inner = left + golden_ratio * (right - left)
+                right_model = _fit_scalar_power_law(
+                    points,
+                    name=name,
+                    exponent=right_inner,
+                    includes_background=includes_background,
+                    current_reference=current_reference,
+                    free_exponent=True,
+                )
+        best = min((left_model, right_model), key=_finite_aicc_sort_key)
+    exponent_step = min(0.01, (upper - lower) / 100.0)
+    if lower < best.exponent - exponent_step and best.exponent + exponent_step < upper:
+        low = _fit_scalar_power_law(
+            points,
+            name=name,
+            exponent=best.exponent - exponent_step,
+            includes_background=includes_background,
+            current_reference=current_reference,
+            free_exponent=True,
+        )
+        high = _fit_scalar_power_law(
+            points,
+            name=name,
+            exponent=best.exponent + exponent_step,
+            includes_background=includes_background,
+            current_reference=current_reference,
+            free_exponent=True,
+        )
+        second_derivative = (
+            (low.weighted_residual_sum_squares or 0.0)
+            - 2.0 * (best.weighted_residual_sum_squares or 0.0)
+            + (high.weighted_residual_sum_squares or 0.0)
+        ) / exponent_step**2
+        parameter_count = (2 if includes_background else 1) + 1
+        degrees_of_freedom = len(points) - parameter_count
+        residual_scale = (
+            (best.weighted_residual_sum_squares or 0.0) / degrees_of_freedom
+            if degrees_of_freedom > 0
+            else None
+        )
+        exponent_standard_error = (
+            math.sqrt(2.0 * residual_scale / second_derivative)
+            if (
+                residual_scale is not None
+                and residual_scale >= 0.0
+                and second_derivative > 0.0
+            )
+            else None
+        )
+        if exponent_standard_error is not None:
+            z_value = NormalDist().inv_cdf((1.0 + confidence_level) / 2.0)
+            return replace(
+                best,
+                exponent_standard_error=exponent_standard_error,
+                exponent_ci_low=best.exponent - z_value * exponent_standard_error,
+                exponent_ci_high=best.exponent + z_value * exponent_standard_error,
+            )
+    return best
+
+
+def _fit_scalar_power_law(
+    points: Sequence[HarmonicScalingPoint],
+    *,
+    name: str,
+    exponent: float,
+    includes_background: bool,
+    current_reference: float,
+    free_exponent: bool = False,
+) -> ScalarHarmonicScalingModel:
+    if not math.isfinite(exponent) or exponent <= 0.0:
+        raise ValueError("A scalar power-law exponent must be finite and positive.")
+    scaled_current = tuple(
+        (point.current_a_rms / current_reference) ** exponent for point in points
+    )
+    observations = tuple(point.amplitude_v for point in points)
+    weights = tuple(
+        1.0 / point.amplitude_standard_error_v**2
+        if (
+            math.isfinite(point.amplitude_standard_error_v)
+            and point.amplitude_standard_error_v > 0.0
+        )
+        else 1.0
+        for point in points
+    )
+    background, response = _weighted_nonnegative_affine_fit(
+        scaled_current,
+        observations,
+        weights,
+        includes_background=includes_background,
+    )
+    predictions = tuple(
+        background + response * value for value in scaled_current
+    )
+    residuals = tuple(
+        observation - prediction
+        for observation, prediction in zip(observations, predictions)
+    )
+    weighted_sse = sum(
+        weight * residual**2 for weight, residual in zip(weights, residuals)
+    )
+    total_weight = sum(weights)
+    weighted_mean = sum(
+        weight * observation for weight, observation in zip(weights, observations)
+    ) / total_weight
+    total = sum(
+        weight * (observation - weighted_mean) ** 2
+        for weight, observation in zip(weights, observations)
+    )
+    r_squared = (
+        1.0
+        if total == 0.0 and weighted_sse == 0.0
+        else (0.0 if total == 0.0 else 1.0 - weighted_sse / total)
+    )
+    relative_rmse = math.sqrt(
+        fmean(
+            ((prediction - observation) / max(abs(observation), 1e-30)) ** 2
+            for prediction, observation in zip(predictions, observations)
+        )
+    )
+    parameter_count = (2 if includes_background else 1) + (1 if free_exponent else 0)
+    return ScalarHarmonicScalingModel(
+        name=name,
+        includes_background=includes_background,
+        free_exponent=free_exponent,
+        phase_ignored=True,
+        current_reference_a_rms=current_reference,
+        exponent=exponent,
+        exponent_standard_error=None,
+        exponent_ci_low=None,
+        exponent_ci_high=None,
+        background_v=background,
+        response_v_at_reference_current=response,
+        r_squared=r_squared,
+        relative_rmse=relative_rmse,
+        weighted_residual_sum_squares=weighted_sse,
+        aicc=_corrected_aicc(
+            weighted_sse,
+            observation_count=len(points),
+            parameter_count=parameter_count,
+        ),
+    )
+
+
+def _weighted_nonnegative_affine_fit(
+    x: Sequence[float],
+    y: Sequence[float],
+    weights: Sequence[float],
+    *,
+    includes_background: bool,
+) -> tuple[float, float]:
+    """Fit ``b + A*x`` while preventing negative amplitude/background terms."""
+
+    def score(background: float, response: float) -> float:
+        return sum(
+            weight * (observation - background - response * value) ** 2
+            for value, observation, weight in zip(x, y, weights)
+        )
+
+    denominator = sum(weight * value**2 for value, weight in zip(x, weights))
+    if denominator <= 0.0:
+        raise ValueError("Scalar scaling current values must vary from zero.")
+    response = max(
+        0.0,
+        sum(weight * value * observation for value, observation, weight in zip(x, y, weights))
+        / denominator,
+    )
+    candidates = [(0.0, response)]
+    if includes_background:
+        total_weight = sum(weights)
+        weighted_x = sum(weight * value for value, weight in zip(x, weights))
+        weighted_y = sum(weight * observation for observation, weight in zip(y, weights))
+        weighted_xy = sum(
+            weight * value * observation
+            for value, observation, weight in zip(x, y, weights)
+        )
+        line_denominator = total_weight * denominator - weighted_x**2
+        if line_denominator > 0.0:
+            background = (denominator * weighted_y - weighted_x * weighted_xy) / line_denominator
+            response = (total_weight * weighted_xy - weighted_x * weighted_y) / line_denominator
+            if background >= 0.0 and response >= 0.0:
+                candidates.append((background, response))
+        background = max(0.0, weighted_y / total_weight)
+        candidates.append((background, 0.0))
+    return min(candidates, key=lambda pair: score(*pair))
+
+
+def _scalar_power_law_verdict(
+    *,
+    expected_order: int,
+    fixed_model: ScalarHarmonicScalingModel,
+    free_model: ScalarHarmonicScalingModel,
+    exponent_ci_width: float | None,
+    delta_aicc: float | None,
+    rules: HarmonicScalingRules,
+) -> tuple[str, tuple[str, ...]]:
+    reasons: list[str] = []
+    if free_model.exponent_ci_low is None or free_model.exponent_ci_high is None:
+        return "ambiguous", ("scalar free exponent could not be estimated",)
+    ci_epsilon = max(1e-9, abs(expected_order) * 1e-9)
+    ci_contains_order = (
+        free_model.exponent_ci_low - ci_epsilon
+        <= expected_order
+        <= free_model.exponent_ci_high + ci_epsilon
+    )
+    if not ci_contains_order:
+        reasons.append(
+            f"expected order {expected_order} is outside the scalar exponent CI"
+        )
+    narrow_enough = (
+        rules.max_exponent_ci_width is None
+        or (
+            exponent_ci_width is not None
+            and exponent_ci_width <= rules.max_exponent_ci_width
+        )
+    )
+    if not narrow_enough and exponent_ci_width is not None:
+        reasons.append(
+            f"scalar exponent CI width {exponent_ci_width:.3g} exceeds "
+            f"{rules.max_exponent_ci_width:.3g}"
+        )
+    rmse_ok = (
+        rules.max_relative_rmse is None
+        or (
+            fixed_model.relative_rmse is not None
+            and fixed_model.relative_rmse <= rules.max_relative_rmse
+        )
+    )
+    if not rmse_ok and fixed_model.relative_rmse is not None:
+        reasons.append(
+            f"scalar fixed-order relative RMSE {fixed_model.relative_rmse:.3g} "
+            f"exceeds {rules.max_relative_rmse:.3g}"
+        )
+    fixed_competitive = (
+        rules.max_delta_aicc_consistent is None
+        or (
+            delta_aicc is not None
+            and delta_aicc <= rules.max_delta_aicc_consistent
+        )
+    )
+    free_preferred = (
+        rules.min_delta_aicc_inconsistent is not None
+        and delta_aicc is not None
+        and delta_aicc > rules.min_delta_aicc_inconsistent
+    )
+    if ci_contains_order and narrow_enough and fixed_competitive and rmse_ok:
+        return "consistent", tuple(reasons)
+    if not ci_contains_order and free_preferred:
+        return "inconsistent", tuple(reasons)
+    return "ambiguous", tuple(reasons)
 
 
 def _assess_complex_harmonic_scaling(

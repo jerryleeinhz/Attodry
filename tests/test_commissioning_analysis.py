@@ -414,6 +414,74 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual(fit.complex_response_verdict, "inconsistent")
         self.assertAlmostEqual(fit.phase_slope_deg_per_decade or 0.0, 20.0, places=6)
 
+    def test_scalar_fit_ignores_phase_and_recovers_quadratic_magnitude(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=37.0)
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertTrue(fit.scalar_phase_ignored)
+        self.assertEqual(fit.scalar_power_law_verdict, "consistent")
+        self.assertAlmostEqual(fit.scalar_exponent or 0.0, 2.0, places=6)
+        self.assertEqual(fit.scalar_selected_model, "scalar_no_offset_fixed_order")
+        self.assertEqual(fit.scalar_background_verdict, "not_needed")
+        self.assertEqual(len(fit.scalar_models), 4)
+        json.dumps(fit.as_dict())
+
+    def test_scalar_fit_rejects_distinct_exponent_even_with_phase_rotation(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._scaling_rows(exponent=1.25, phase_slope_deg_per_decade=45.0)
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertEqual(fit.scalar_power_law_verdict, "inconsistent")
+        self.assertFalse(
+            (fit.scalar_exponent_ci_low or 0.0)
+            <= 2.0
+            <= (fit.scalar_exponent_ci_high or 0.0)
+        )
+        self.assertGreater(fit.scalar_delta_aicc_fixed_minus_free or 0.0, 6.0)
+
+    def test_scalar_fit_recovers_nonnegative_amplitude_background(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        base_rows = self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=29.0)
+        currents = tuple(row.nominal_current_a_rms or 0.0 for row in base_rows)
+        current_reference = math.sqrt(min(currents) * max(currents))
+        rows = tuple(
+            replace(
+                row,
+                amplitude_v=3.0e-6
+                + 1.0e-6 * (row.nominal_current_a_rms / current_reference) ** 2,
+            )
+            for row in base_rows
+        )
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertEqual(fit.scalar_selected_model, "scalar_offset_fixed_order")
+        selected = next(
+            model for model in fit.scalar_models
+            if model.name == fit.scalar_selected_model
+        )
+        self.assertAlmostEqual(selected.background_v, 3.0e-6, places=12)
+        self.assertAlmostEqual(selected.response_v_at_reference_current, 1.0e-6, places=12)
+        self.assertEqual(fit.scalar_power_law_verdict, "consistent")
+
     def test_harmonic_scaling_reports_insufficient_range(self) -> None:
         path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
         rows = self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=0.0)[:6]
@@ -550,6 +618,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
             code,
         )
         self.assertIn("SCALING_RULES = HarmonicScalingRules", code)
+        self.assertIn("scalar_background_mode='auto'", code)
         self.assertIn("minimum_current_decades=1.0", code)
         self.assertIn("complex_background_mode='auto'", code)
         self.assertIn("complex_free_exponent_min=0.05", code)
@@ -557,6 +626,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("plot_harmonic_scaling_fit", code)
         self.assertIn("'harmonic_scaling_rules': asdict(SCALING_RULES)", code)
         self.assertIn("'harmonic_scaling_results':", code)
+        self.assertIn("scalar_R_verdict", code)
         self.assertIn("if frequency_rows", code)
         self.assertIn("if excitation_rows", code)
         self.assertNotIn("browse_and_load_commissioning_file", code)

@@ -835,3 +835,12 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   distinct audit. Synthetic tests cover correct quadratic data with a complex
   background, a wrong background-corrected exponent, and forced no-offset mode.
   This is read-only analysis; no hardware resource was opened or written.
+- Added a phase-blind scalar-amplitude comparison (2026-08-25): every available
+  excitation channel now also compares `R=b+A(I/Iref)^n` and
+  `R=b+A(I/Iref)^p`, with non-negative background/response terms and an
+  editable `scalar_background_mode`. This fit uses only measured amplitude R;
+  phase and X/Y are ignored and the exported `scalar_phase_ignored` flag makes
+  that choice auditable. Notebook figures overlay the log, scalar-R, and
+  background-aware complex fits, while the summary displays all three verdicts.
+  Synthetic phase-rotation tests and notebook compilation pass; no hardware
+  resource was opened or written.

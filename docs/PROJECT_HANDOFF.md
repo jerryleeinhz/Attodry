@@ -858,6 +858,14 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   audit. Synthetic offline tests cover a true quadratic response obscured by a
   complex background and a wrong exponent. No hardware resource was opened or
   written.
+- The notebook now adds a phase-blind scalar-amplitude fit for the same channels.
+  It compares `R=b+A(I/Iref)^n` with `R=b+A(I/Iref)^p`, constrains the
+  amplitude/background terms non-negative, and exposes
+  `scalar_background_mode` (`auto`/`none`/`with_offset`). It uses no
+  phase, X, or Y; `scalar_phase_ignored` and `scalar_R_verdict` are retained
+  in the fit export. Figures overlay log-space, scalar-R, and complex curves,
+  and the notebook summary presents all three verdicts. Offline phase-rotation
+  and wrong-order tests pass; no hardware resource was opened or written.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

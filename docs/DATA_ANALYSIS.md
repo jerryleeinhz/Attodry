@@ -90,6 +90,21 @@ The result also reports fixed/free R-squared, relative RMSE, current span in
 decades, replicate-based SNR, and the phase slope in degrees per current decade.
 R-squared is contextual only and is never used as the sole decision rule.
 
+For a phase-unstable channel, the notebook also performs an independent
+phase-blind scalar fit directly on the measured magnitude. It uses the same
+retained current points and replicate amplitude SEM weights, but never reads
+phase, X, or Y. The models are `R = b + A (I / I_ref)^n` and
+`R = b + A (I / I_ref)^p`, with the no-background pair setting `b=0`.
+The background pair fits `b` and `A` with non-negative constraints.
+`scalar_background_mode = "auto"` selects the fixed-order background
+treatment by corrected AIC, while `"none"` and `"with_offset"` force a
+choice. `scalar_R_verdict` is therefore the result to use when phase is not
+trusted. It is separate from `amplitude_verdict` (the log-space fit) and
+from the complex X/Y result. The exported `scalar_phase_ignored = true` flag
+makes the phase-blind decision explicit. AICc values are only comparable
+within one residual space; do not rank scalar, log, and complex AICc against
+each other.
+
 The offset-aware physical-order result instead fits the complex lock-in vector
 `Z = X + iY`. It calculates all four models below, where `B` is a complex
 background (independent amplitude and phase) and `I_ref` is the geometric mean
@@ -127,20 +142,28 @@ The notebook keeps the thresholds in its first code cell inside the editable
 | `max_relative_rmse` | 0.10 | Maximum relative error of the fixed-order fit |
 | `max_phase_slope_deg_per_decade` | 5.0 | Phase-stability limit for the complex-response verdict |
 | `max_phase_span_deg` | 10.0 | Total unwrapped phase-span limit |
+| `scalar_background_mode` | `"auto"` | Choose `"auto"`, force `b=0` with `"none"`, or fit non-negative `b` with `"with_offset"` |
 | `complex_background_mode` | `"auto"` | Choose `"auto"`, force no background with `"none"`, or force a complex background with `"with_offset"` |
 | `complex_free_exponent_min` / `max` | 0.05 / 6.0 | Visible search interval for the free complex exponent |
 
-Three conclusions are intentionally returned. `amplitude_verdict` asks whether
-the raw magnitude follows `I^n`; `complex_response_verdict` is the existing
-raw-phase stability audit; and `complex_power_law_verdict` is the background-aware
-complex result to use when deciding the physical harmonic order. A raw phase can
-rotate with current solely because `B` and `C·I^n` have different phases, while
-the complex fit remains consistent. `complex_background_verdict` records whether
-the data prefer `B`, and `complex_models` records all fitted vectors, AICc and
+Four conclusions are intentionally returned. `amplitude_verdict` asks whether
+the raw magnitude follows `I^n` in log space; `scalar_R_verdict` asks the same
+question in voltage-amplitude space while ignoring phase; `complex_response_verdict`
+is the raw-phase stability audit; and `complex_power_law_verdict` is the
+background-aware complex result to use when deciding the physical harmonic
+order. A raw phase can rotate with current solely because `B` and `C·I^n` have
+different phases, while either magnitude or complex fit remains consistent.
+`scalar_models` and `complex_models` record all fitted parameters, AICc and
 residuals. The notebook returns `insufficient_data` when point count or current
 range is too small, `ambiguous` when indicators disagree, and does not silently
-remove low-SNR or manually excluded points. Optional numerical thresholds can be
-set to `None` in the notebook to disable that individual criterion.
+remove low-SNR or manually excluded points. Optional numerical thresholds can
+be set to `None` in the notebook to disable that individual criterion.
+
+The comparison summary also reports leave-one-current-point-out relative RMSE
+for the log, scalar-R, and complex fixed-order curves
+(`*_leave_one_out_relative_rmse`). These values are computed in the common
+measured-amplitude space, so they are useful for choosing among methods; they
+are descriptive cross-validation errors, not additional safety gates.
 
 The optional export records the exact `SCALING_RULES` values and every fit
 result in `selection_manifest.json`, alongside one PNG/PDF fit figure per
