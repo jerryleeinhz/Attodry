@@ -49,6 +49,19 @@ interrupt_policy = "abort"
 # accepting the already-observed temperature preparation.
 resume_recheck_s = 30.0
 
+# Commissioning temperature-stability scan. Timing and the definition of stable
+# come from [temperature_stability]; movement, overshoot, and interruption policy
+# come from [temperature_run], so those safety facts are not duplicated here.
+[temperature_scan]
+start_k = 1.7
+stop_k = 2.7
+step_k = 0.1
+run_name = "temperature_1p7_to_2p7"
+note = "First stepwise temperature-stability timing scan."
+# Relative to this TOML. Raw JSONL is flushed throughout the run; the command
+# also writes a final summary JSON and one-row-per-stable-point CSV.
+output_directory = "../run_data/temperature_commissioning"
+
 [cleanup]
 normal_end_field_policy = "hold"
 exception_field_policy = "zero"

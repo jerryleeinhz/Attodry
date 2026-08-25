@@ -1,0 +1,139 @@
+# Temperature stability scan 运行指南
+
+## 当前边界
+
+`attodry-temperature-scan` 是独立的 Temperature commissioning 模块，用于按
+设定点逐步升温，并记录每一点从 setpoint 确认到首次进入容差带和最终满足稳定
+窗口所需的时间。
+
+当前实现状态是 **target offline complete**：配置、fake-DLL、故障清理、中断和进程
+恢复已在本机与 `LK_setup` 的确切 `lyr` 环境验证，但新的多点编排没有连接真实
+attoDRY。不要把已有单点温控验收等同于这条新扫描已 commissioned。目标用户目录下
+没有现存 `hardware.local.toml`；真实运行前必须先建立/核对本地配置与 DLL 路径。
+
+第一次计划的完整扫描是 1.7 K 到 2.7 K、步长 0.1 K，共 11 点。真实连接和写入
+必须等操作者再次确认；建议先单独授权 1.7 K 到 1.8 K 的最小编排验收，再决定是否
+执行完整 1.7 K 到 2.7 K 扫描。
+
+## 单一配置入口
+
+所有日常值保存在 ignored 的 `config/hardware.local.toml`。扫描表只保存网格、记录
+名称和输出目录：
+
+```toml
+[temperature_scan]
+start_k = 1.7
+stop_k = 2.7
+step_k = 0.1
+run_name = "temperature_1p7_to_2p7"
+note = "First stepwise temperature-stability timing scan."
+output_directory = "../run_data/temperature_commissioning"
+```
+
+稳定定义不在扫描表中重复，继续使用 `[temperature_stability]`：
+
+```toml
+tolerance_k = 0.01
+stable_range_k = 0.005
+stable_dwell_s = 30.0
+poll_interval_s = 1.0
+wait_timeout_s = 7200.0
+```
+
+安全和中断继续使用 `[temperature_run]` 中已有的 `max_delta_k`、
+`max_overshoot_k`、`interrupt_policy` 和 `resume_recheck_s`。
+`pre_measure_wait_s` 与 `[temperature_run].target_k` 不参与稳定扫描；它们仍只服务
+原有单点日常运行。这样网格、稳定判据和安全事实各有一个来源。
+
+当前命令只接受升温网格。降温时同一个正向过冲判据含义不同，因此在另行确认降温
+安全和验收规则前不会把负步长默认为安全。
+
+## 离线检查（不会加载 DLL）
+
+在项目根目录、`lyr` 环境中先确认 checkout：
+
+```powershell
+git status --short --branch
+git log -1 --oneline
+C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -c `
+  "import attodry_control; print(attodry_control.__file__)"
+```
+
+检查配置和网格：
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path src).Path
+C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -c `
+  "from attodry_control.config import load_temperature_operation_config as load; from attodry_control.scans import temperature_scan_points; c=load('config/hardware.local.toml'); s=c.temperature_scan; print(s); print(temperature_scan_points(s.start_k,s.stop_k,s.step_k))"
+C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
+  attodry_control.temperature_scan --help
+```
+
+不要在 target-offline 阶段添加 `--authorize-temperature-scan`。缺少该 flag 时，命令
+在加载 DLL、创建连接或写 setpoint 前拒绝。
+
+## 经单独授权后的真实命令
+
+确认 GUI 已 Disconnect、没有其他进程占用 attoDRY，并确认本次允许完整网格后运行：
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path src).Path
+C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
+  attodry_control.temperature_scan `
+  --config config\hardware.local.toml `
+  --authorize-temperature-scan
+```
+
+程序对每个点执行：读取完整状态，检查样品温度移动，确认 Full Temperature Control
+开启，确认 setpoint，随后从 setpoint 确认时刻开始稳定计时。正常完成后保持 2.7 K
+目标和温控开启，只断开 Python 的 DLL/COM 连接。
+
+## 记录内容
+
+输出目录中生成三份同名前缀文件：
+
+- `*_progress.jsonl`：每个状态样本、转换、中断和完成点实时追加并 flush；
+- `*_summary.json`：最终 completed/rejected/interrupted 摘要；
+- `*_stable_times.csv`：每个已稳定点一行，便于直接查看耗时。
+
+每点分别记录请求 setpoint、DLL 实际 setpoint 读回、实际样品温度、
+`time_to_first_tolerance_s`、`time_to_stable_s`，以及稳定窗口的 minimum、maximum、
+peak-to-peak 和样本数。记录还包含 resolved 配置、run name/note、Git commit、错误、
+cleanup 和最后确认状态。
+
+通信失败不代表温控已关闭。若最终读回或 close 失败，记录只保存最后确认状态并要求
+人工查看 GUI，不会写成安全完成。
+
+## 中断和恢复
+
+`abort` 或硬故障会保留当前点的所有原始样本，尝试关闭 Full Temperature Control，
+然后退出。`continue` 和 `wait-confirmation` 只有在 setpoint、控制、错误码和过冲判据
+仍全部确认安全时才继续；继续后当前点的稳定窗口从头计时，不拼接中断前的 dwell。
+
+进程退出后，可用同一 TOML 和进度文件从第一个未完成点继续：
+
+```powershell
+C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
+  attodry_control.temperature_scan `
+  --config config\hardware.local.toml `
+  --authorize-temperature-scan `
+  --resume-progress run_data\temperature_commissioning\<run>_progress.jsonl
+```
+
+恢复前会逐字段比较当前 TOML 和进度文件归档的扫描契约。已完成点保留；中断的部分点
+会重新确认控制和 setpoint，并从新的稳定窗口开始。已完成的进度文件不能再次恢复。
+
+## 停止条件
+
+以下任一情况立即拒绝当前扫描并进入失败清理：
+
+- 实际样品温度达到当前点 `target + max_overshoot_k`；
+- Full Temperature Control 关闭或 setpoint 改变；
+- attoDRY 返回非零错误码；
+- DLL/COM 读取、写入、readback 或记录持久化失败；
+- 当前样品温度移动超过 `max_delta_k`；
+- 当前点超过 `temperature_stability.wait_timeout_s` 仍未稳定；
+- `Ctrl+C` 的有效策略最终选择中止。
+
+真实升温耗时由样品、热接触和控制器决定。脚本不会承诺 1.7 K 到 2.7 K 在固定
+30 分钟内完成，也不会自动修改 PID 或 heater 参数。

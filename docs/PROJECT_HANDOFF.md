@@ -668,6 +668,30 @@ that state against the device before using it. Fake-DLL, simulated-station, and
 SQLite tests cover the new paths. No real hardware interruption/recovery was
 performed, and the full real attoDRY measurement engine is still pending.
 
+Temperature stability-scan follow-up (2026-08-25): the Temperature branch now has
+an offline-complete, explicitly gated ascending scan CLI. The unified hardware TOML
+adds `[temperature_scan]` with the planned 1.7--2.7 K/0.1 K grid, run metadata, and
+output directory while reusing the existing stability, movement, 0.2 K overshoot,
+and interruption settings. The full grid is validated before DLL loading. Each point
+keeps control-before-setpoint order and archives requested/actual setpoint, actual
+sample temperature, time to first tolerance, time to stable, and the stable-window
+range. Incremental JSONL, final JSON, and CSV retain partial and completed evidence;
+soft interruption restarts the current dwell, and process resume skips only
+contiguous completed points after an exact configuration check. Failure attempts
+disable temperature control; normal completion holds the final target/control.
+Source/test compilation and all 315 offline tests passed (5 optional matplotlib
+skips). Target-offline then passed from a DLL-free isolated snapshot on
+`LK_setup` with exact 64-bit Python 3.12.13 `lyr`: compileall and all 315 tests
+passed with 0 skips, the example expanded to 11 points, CLI help passed, and the
+unauthorized command stopped before DLL loading. Snapshot SHA-256 was
+`CB8CAC713B92FB414E6382710878DA8E7DA39CAA5EB26CB765FB90F331BA3DBC`.
+The target snapshot directory and transferred archive were verified, removed,
+and confirmed absent after validation.
+No existing `hardware.local.toml` was found below the target user profile, so the
+ignored station-local config and DLL path still need creation/verification before
+hardware use. No real DLL, connection, setpoint, or toggle was used. Real
+1.7--1.8 K and full 1.7--2.7 K execution each require fresh operator authorization.
+
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
 

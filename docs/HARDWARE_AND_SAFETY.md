@@ -105,4 +105,7 @@ path resistance, including series components and termination/loading effects.
 
 ## Vendor files
 
-Vendor DLLs are permitted in this repository when explicitly versioned (for example in `vendor/`). If a runtime-specific location is required, configure it in `config/hardware.local.toml`. Preserve vendor manuals and installation packages outside the Python repository.
+Whether the vendor DLL binary is tracked is a repository packaging decision, not
+a hardware-safety or commissioning restriction. Runtime-specific DLL paths still
+belong in `config/hardware.local.toml`; local paths must not be copied into tracked
+configuration or raw public exports.

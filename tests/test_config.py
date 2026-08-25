@@ -613,6 +613,44 @@ class ConfigurationTests(unittest.TestCase):
             ):
                 load_temperature_operation_config("test.toml")
 
+    def test_temperature_scan_loads_unified_grid_and_audit_fields(self) -> None:
+        with patch(
+            "attodry_control.config.Path.open",
+            mock_open(read_data=HARDWARE_EXAMPLE_CONFIG.read_bytes()),
+        ):
+            config = load_temperature_operation_config("test.toml")
+
+        self.assertIsNotNone(config.temperature_scan)
+        scan = config.temperature_scan
+        assert scan is not None
+        self.assertEqual((scan.start_k, scan.stop_k, scan.step_k), (1.7, 2.7, 0.1))
+        self.assertEqual(scan.run_name, "temperature_1p7_to_2p7")
+        self.assertEqual(
+            scan.output_directory, Path("../run_data/temperature_commissioning")
+        )
+
+    def test_temperature_scan_rejects_unknown_field_before_hardware(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            "start_k = 1.7", "start_k = 1.7\nunknown_option = true"
+        )
+        with self.assertRaisesRegex(ConfigError, r"temperature_scan.*unknown_option"):
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
+
+    def test_temperature_scan_requires_step_to_land_on_stop(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            "step_k = 0.1", "step_k = 0.3"
+        )
+        with self.assertRaisesRegex(ConfigError, "land exactly"):
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
+
     def test_malformed_toml_is_reported_as_configuration_error(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Invalid TOML"):
             self.load_text('[project\nmode = "simulation"')

@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from .lockin_autorange import AutorangePolicy
 from .models import LockinRole
 from .safety import MagnetLimits
+from .scans import temperature_scan_points
 from .sr830_settings import (
     ExternalReferenceEdge,
     InputCoupling,
@@ -87,11 +88,22 @@ class TemperatureRunConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TemperatureScanConfig:
+    start_k: float
+    stop_k: float
+    step_k: float
+    run_name: str
+    note: str
+    output_directory: Path
+
+
+@dataclass(frozen=True, slots=True)
 class TemperatureOperationConfig:
     cryostat: CryostatConfig
     magnet: MagnetConfig
     temperature_stability: StabilityConfig
     temperature_run: TemperatureRunConfig
+    temperature_scan: TemperatureScanConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -306,7 +318,11 @@ def load_config(
             document,
             "top level",
             expected_tables,
-            {"temperature_run"} if project.mode is RunMode.HARDWARE else set(),
+            (
+                {"temperature_run", "temperature_scan"}
+                if project.mode is RunMode.HARDWARE
+                else set()
+            ),
         )
 
         cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
@@ -546,6 +562,52 @@ def _parse_temperature_run(
     )
 
 
+def _parse_temperature_scan(
+    table: Mapping[str, Any],
+    cryostat: CryostatConfig,
+    temperature_run: TemperatureRunConfig,
+) -> TemperatureScanConfig:
+    name = "temperature_scan"
+    _strict_keys(
+        table,
+        name,
+        {
+            "start_k",
+            "stop_k",
+            "step_k",
+            "run_name",
+            "note",
+            "output_directory",
+        },
+    )
+    start_k = _positive_number(table["start_k"], f"{name}.start_k")
+    stop_k = _positive_number(table["stop_k"], f"{name}.stop_k")
+    step_k = _positive_number(table["step_k"], f"{name}.step_k")
+    if not cryostat.temperature_min_k <= start_k <= cryostat.temperature_max_k:
+        raise ConfigError("temperature_scan.start_k is outside cryostat limits.")
+    if not cryostat.temperature_min_k <= stop_k <= cryostat.temperature_max_k:
+        raise ConfigError("temperature_scan.stop_k is outside cryostat limits.")
+    if stop_k + temperature_run.max_overshoot_k > cryostat.temperature_max_k:
+        raise ConfigError(
+            "temperature_scan stop plus temperature_run.max_overshoot_k exceeds "
+            "the cryostat limit."
+        )
+    try:
+        temperature_scan_points(start_k, stop_k, step_k)
+    except ValueError as exc:
+        raise ConfigError(f"Invalid temperature_scan grid: {exc}") from exc
+    return TemperatureScanConfig(
+        start_k=start_k,
+        stop_k=stop_k,
+        step_k=step_k,
+        run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
+        note=_sweep_note(table["note"], f"{name}.note"),
+        output_directory=_relative_directory(
+            table["output_directory"], f"{name}.output_directory"
+        ),
+    )
+
+
 def load_temperature_operation_config(
     path: str | Path,
 ) -> TemperatureOperationConfig:
@@ -561,6 +623,7 @@ def load_temperature_operation_config(
         "magnet",
         "temperature_stability",
         "temperature_run",
+        "temperature_scan",
         "cleanup",
         "visa",
         "lockin_xx",
@@ -591,11 +654,19 @@ def load_temperature_operation_config(
     temperature_run = _parse_temperature_run(
         _table(document, "temperature_run"), cryostat
     )
+    temperature_scan = (
+        _parse_temperature_scan(
+            _table(document, "temperature_scan"), cryostat, temperature_run
+        )
+        if "temperature_scan" in document
+        else None
+    )
     return TemperatureOperationConfig(
         cryostat=cryostat,
         magnet=magnet,
         temperature_stability=temperature_stability,
         temperature_run=temperature_run,
+        temperature_scan=temperature_scan,
     )
 
 

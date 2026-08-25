@@ -821,3 +821,48 @@ remains pending explicit hardware authorization.
   corresponding hardware recheck before relying on the token.
 - Added fake-DLL, simulated-station, configuration, and SQLite tests. No vendor DLL
   was loaded and no real instrument was connected for this feature.
+
+## Stage 7 follow-up - ascending temperature stability scan
+
+Status: target-offline complete (2026-08-25); real multi-point commissioning
+remains pending separate authorization.
+
+- Added strict `[temperature_scan]` configuration for the 1.7--2.7 K, 0.1 K
+  ascending grid, `run_name`, `note`, and a TOML-relative output directory.
+  Stability timing remains solely in `[temperature_stability]`; movement,
+  0.2 K overshoot, and interruption behavior remain solely in `[temperature_run]`.
+- Added the explicitly gated `attodry-temperature-scan` entry point. The entire
+  grid and consecutive movement bound are validated before DLL loading; the real
+  path is unavailable without `--authorize-temperature-scan`.
+- Every point preserves the commissioned control-before-setpoint order and records
+  requested setpoint, actual setpoint readback, actual sample temperature,
+  time-to-first-tolerance, time-to-stable, and stable-window range statistics.
+- Raw state/transition/interruption records are fsynced incrementally to JSONL.
+  Final JSON and CSV retain completed, rejected, and interrupted outcomes, resolved
+  configuration, Git commit, cleanup errors, and last confirmed state.
+- Soft interruption recovery requires a fresh full-state recheck and restarts the
+  current dwell window. `--resume-progress` verifies the archived configuration,
+  preserves contiguous completed points, and repeats the first incomplete point.
+- Failure attempts idempotently disable temperature control when a write may have
+  occurred. Normal completion holds the final target with control enabled. A
+  communication/readback failure never claims confirmed shutdown.
+- Source/test compilation and the complete offline suite passed: 315 tests, with
+  5 optional matplotlib-dependent skips. Fake-DLL cases cover authorization before
+  DLL load, successful timing, overshoot cleanup, soft interruption, and process
+  resume. No real DLL was loaded, no attoDRY connection was opened, and no hardware
+  command was sent.
+- Target-offline passed from an isolated, DLL-free source snapshot on `LK_setup`
+  using `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`, Python 3.12.13 64-bit.
+  Import resolved to that snapshot's `src`; compileall and all 315 tests passed
+  with 0 skips. The strict example parsed to all 11 points, CLI help passed, and
+  invoking the scan without authorization returned the expected pre-DLL error.
+  Snapshot SHA-256 was
+  `CB8CAC713B92FB414E6382710878DA8E7DA39CAA5EB26CB765FB90F331BA3DBC`.
+  The dedicated target directory and transferred archive were path-verified,
+  removed after validation, and confirmed absent.
+  No existing `hardware.local.toml` was found under the target user profile, so
+  this stage validated the tracked example rather than claiming station-local
+  configuration readiness.
+- A real run requires new authorization plus creation/verification of the ignored
+  local TOML and DLL path. The recommended first orchestration write is
+  1.7--1.8 K before the full 1.7--2.7 K scan.

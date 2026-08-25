@@ -20,8 +20,9 @@ Before any real connection or write, record:
   legacy DLL device type;
 - sign-to-physical-direction mapping for controller X and Z.
 
-Do not store local addresses or DLL paths in Git. Put them only in the ignored
-`config/hardware.local.toml`.
+Do not store local addresses or machine-specific DLL paths in Git. Put those
+values only in the ignored `config/hardware.local.toml`; this does not set a
+policy for whether the DLL binary itself is packaged in the repository.
 
 ## 1. Dual SR830 device-only test
 

@@ -10,7 +10,7 @@ attoDRY legacy DLL 适配器已经完成离线 fake-DLL 实现。目标电脑曾
 T0 contract audit 和 T1 offline behavior tests 已于 2026-08-21 完成。温度公共
 接口收敛为 `read_state()`、`ensure_temperature_control(enabled)`、
 `set_temperature(target_k)` 和 `wait_for_temperature(target_k)`；不包含 PID、
-磁场或扫描组合。fake-DLL 已覆盖温度读失败、控制状态、setpoint 读回、连续
+磁场或跨硬件扫描组合。fake-DLL 已覆盖温度读失败、控制状态、setpoint 读回、连续
 稳定窗口、错误和超时。T4 所需的显式授权 commissioning CLI 已完成 fake-DLL
 验证。首次真实 T4 尝试已发送一次 1.75 K setpoint，但因 DLL 立即读回仍为
 2.0 K 而 fail closed，未开启温控；随后 5 次只读状态均确认 setpoint 已异步更新为
@@ -59,6 +59,15 @@ acquisition 的中断事件现在明确记录 `repeat-interrupted-condition`；�
 attoDRY 并确认目标、控制和错误状态。
 该策略和恢复语义已用 fake-DLL、模拟站和 SQLite 离线测试覆盖，尚未在真实硬件上
 人为触发中断恢复。
+
+新增的单模块 `temperature_scan` commissioning 编排按 `[temperature_scan]` 的
+1.7--2.7 K、0.1 K 升温网格逐点调用同一 attoDRY 安全接口。它复用
+`[temperature_stability]` 的 tolerance/range/dwell/timeout 和
+`[temperature_run]` 的 max-delta、0.2 K overshoot 与中断策略，不复制这些事实。
+每点保存请求值、实际 setpoint、实际样品温度、首次进入容差和完整稳定所需时间；
+JSONL 逐样本持久化，最终另存 summary JSON 与 CSV。中断后当前点的稳定窗口重启，
+进程恢复从第一个未完成点继续。该路径当前只完成 fake-DLL 离线验证，真实多点扫描
+尚未授权或 commissioned。
 
 ## 模块目标
 
@@ -318,6 +327,29 @@ JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
 实时终止线。该决定不改写历史数据，也不表示样品达到 setpoint；Integration 必须
 把每次测量的 `sample_temperature_k` 与 setpoint 一起保存。
 
+### T5 - ascending stability-timing scan（target offline complete：2026-08-25）
+
+- 新增严格 `[temperature_scan]` 网格和 `attodry-temperature-scan` CLI；只有显式
+  `--authorize-temperature-scan` 才能加载 DLL 和进入真实写路径。
+- 1.7--2.7 K/0.1 K 的 11 点路径在打开资源前完整展开并验证，只允许升温；降温保护
+  语义尚未确认，因此不接受负步长。
+- 每点保持已验收的 control-before-setpoint 顺序，并用真实 sample sensor 判定
+  tolerance/range/dwell。正常结束保持最终目标与控制；失败尝试关闭并确认温控。
+- 每个 raw sample 和 transition 增量写入 JSONL；summary JSON 和 CSV 记录每点实际
+  setpoint、实际样品温度、首次进入容差和满足稳定窗口的耗时。
+- `continue`/`wait-confirmation` 后重新复查状态并重启当前点稳定窗口；进程退出后的
+  `--resume-progress` 只跳过连续完成点，拒绝配置不一致或已完成记录。
+- fake-DLL、配置、网格、过冲清理、软中断和进程恢复测试通过；未加载真实 DLL，未
+  连接 attoDRY，未发送 setpoint 或 toggle。
+- `LK_setup` target-offline 使用确切的 64 位 Python 3.12.13 `lyr` 和独立 DLL-free
+  快照完成：compileall、315 项测试（0 skipped）、11 点配置展开、CLI help 与无授权
+  pre-DLL 拒绝均通过；快照 SHA-256 为
+  `CB8CAC713B92FB414E6382710878DA8E7DA39CAA5EB26CB765FB90F331BA3DBC`。
+  验证后的目标目录和传输压缩包已逐路径核对、删除并确认不存在。
+- 目标用户目录下没有现存 `hardware.local.toml`，因此真实执行前仍需建立/核对 ignored
+  本地配置和 DLL 路径。真实执行需另行确认，建议先验收 1.7--1.8 K，再决定完整
+  1.7--2.7 K。
+
 ## 预计文件所有权
 
 - `src/attodry_control/attodry.py`
@@ -326,10 +358,12 @@ JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
 - `src/attodry_control/attodry_test.py`（只读验收）
 - `src/attodry_control/temperature_test.py`（写入 commissioning，双重授权）
 - `src/attodry_control/temperature_run.py`（无额外授权参数的日常运行入口）
+- `src/attodry_control/temperature_scan.py`（显式授权的多点 commissioning 入口）
 - `tests/test_attodry.py`
 - `tests/test_config.py`
 - `tests/test_stability.py`
 - `docs/TEMPERATURE_RUN_GUIDE.md`
+- `docs/TEMPERATURE_SCAN_GUIDE.md`
 
 `attodry.py` 同时服务 Magnetic 模块。若两个 Chat 并行，必须使用不同 worktree，
 并由 Integration 重新运行冲突后的完整测试。

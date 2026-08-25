@@ -82,6 +82,7 @@ python -m attodry_control.lockin_test sweep-excitation --help
 python -m attodry_control.attodry_test --help
 python -m attodry_control.temperature_test --help
 python -m attodry_control.temperature_run --help
+python -m attodry_control.temperature_scan --help
 python -m attodry_control.lockin_test --help
 ```
 
@@ -95,6 +96,12 @@ python -m attodry_control.lockin_test --help
 [`docs/TEMPERATURE_RUN_GUIDE.md`](docs/TEMPERATURE_RUN_GUIDE.md)。原
 `temperature_commissioning.local.toml` 和 `attodry-temperature-test` 仅保留给
 严格稳定性诊断。
+
+逐点温度稳定性计时使用同一个 `hardware.local.toml` 中的
+`[temperature_scan]` 网格，并复用 `[temperature_stability]` 和
+`[temperature_run]` 的安全/中断参数。新命令当前只完成离线验证，真实多点写入仍需
+单独确认并带 `--authorize-temperature-scan`；操作、实时 JSONL 和断点恢复说明见
+[`docs/TEMPERATURE_SCAN_GUIDE.md`](docs/TEMPERATURE_SCAN_GUIDE.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
 `config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别

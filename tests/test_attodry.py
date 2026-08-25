@@ -5,6 +5,7 @@ import io
 import json
 import math
 from pathlib import Path
+import shutil
 import unittest
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ from attodry_control.models import VectorField
 from attodry_control.safety import SafetyViolation
 from attodry_control.temperature_test import run as run_temperature_test
 from attodry_control.temperature_run import run as run_temperature_operation
+from attodry_control.temperature_scan import run as run_temperature_scan
 
 
 class FakeAttoDryDll:
@@ -1236,6 +1238,220 @@ failure_policy = "hold-current"
             [item["action"] for item in result["interruptions"]],
             ["continue", "continue-after-confirmation"],
         )
+
+    def temperature_scan_config(
+        self, *, start_k: float = 1.7, stop_k: float = 1.9, step_k: float = 0.1
+    ) -> tuple[Path, Path]:
+        path = Path(".test-tmp") / "temperature_scan_hardware.toml"
+        output_directory = path.parent / "temperature-scan-output"
+        path.parent.mkdir(exist_ok=True)
+        self.addCleanup(path.unlink, missing_ok=True)
+        self.addCleanup(shutil.rmtree, output_directory, True)
+        text = Path("config/hardware.example.toml").read_text(encoding="utf-8")
+        text = text.replace("start_k = 1.7", f"start_k = {start_k}")
+        text = text.replace("stop_k = 2.7", f"stop_k = {stop_k}")
+        text = text.replace("step_k = 0.1", f"step_k = {step_k}")
+        text = text.replace(
+            "stable_dwell_s = 30.0\npoll_interval_s = 1.0\nwait_timeout_s = 7200.0",
+            "stable_dwell_s = 2.0\npoll_interval_s = 1.0\nwait_timeout_s = 10.0",
+        )
+        text = text.replace(
+            'output_directory = "../run_data/temperature_commissioning"',
+            'output_directory = "temperature-scan-output"',
+        )
+        path.write_text(text, encoding="utf-8")
+        return path, output_directory
+
+    def test_temperature_scan_requires_authorization_before_dll_load(self) -> None:
+        config_path, output_directory = self.temperature_scan_config()
+        loaded: list[Path] = []
+
+        with self.assertRaises(AttoDryAuthorizationError):
+            run_temperature_scan(
+                ["--config", str(config_path)],
+                dll_loader=lambda path: loaded.append(Path(path)),
+            )
+
+        self.assertEqual(loaded, [])
+        self.assertFalse(output_directory.exists())
+
+    def test_temperature_scan_records_stability_time_and_incremental_audit(
+        self,
+    ) -> None:
+        config_path, _ = self.temperature_scan_config()
+        self.dll.sample_temperature_k = 1.7
+        self.dll.user_temperature_k = 1.7
+        self.dll.temperature_follows_setpoint = True
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run_temperature_scan(
+                [
+                    "--config",
+                    str(config_path),
+                    "--authorize-temperature-scan",
+                ],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["outcome"], "completed")
+        self.assertEqual(
+            [point["requested_temperature_k"] for point in result["points"]],
+            [1.7, 1.8, 1.9],
+        )
+        self.assertTrue(
+            all(point["time_to_stable_s"] >= 2.0 for point in result["points"])
+        )
+        self.assertEqual(self.dll.events.count("set_temperature"), 3)
+        self.assertLess(
+            self.dll.events.index("toggle_temperature_control"),
+            self.dll.events.index("set_temperature"),
+        )
+        self.assertTrue(Path(result["stable_times_csv"]).is_file())
+        progress = Path(result["progress_jsonl"]).read_text(encoding="utf-8")
+        self.assertIn('"event": "temperature_sample"', progress)
+        self.assertEqual(progress.count('"event": "point_completed"'), 3)
+
+    def test_temperature_scan_failure_disables_control(self) -> None:
+        config_path, _ = self.temperature_scan_config(
+            start_k=1.7, stop_k=1.7, step_k=0.1
+        )
+        self.dll.sample_temperature_k = 1.91
+        self.dll.user_temperature_k = 1.7
+        self.dll.temperature_control = 1
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            AttoDryError, "overshoot limit"
+        ):
+            run_temperature_scan(
+                [
+                    "--config",
+                    str(config_path),
+                    "--authorize-temperature-scan",
+                ],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertEqual(
+            result["recovery_actions"],
+            ["temperature_control_disabled_after_failure"],
+        )
+        self.assertFalse(result["final_state"]["temperature_control_enabled"])
+
+    def test_temperature_scan_continue_restarts_stability_window(self) -> None:
+        config_path, _ = self.temperature_scan_config(
+            start_k=1.7, stop_k=1.7, step_k=0.1
+        )
+        text = config_path.read_text(encoding="utf-8").replace(
+            'interrupt_policy = "abort"',
+            'interrupt_policy = "continue"',
+        ).replace(
+            "resume_recheck_s = 30.0",
+            "resume_recheck_s = 1.0",
+        )
+        config_path.write_text(text, encoding="utf-8")
+        self.dll.sample_temperature_k = 1.7
+        self.dll.user_temperature_k = 1.7
+        self.dll.temperature_follows_setpoint = True
+
+        class InterruptOnce:
+            def __init__(self) -> None:
+                self.interrupted = False
+
+            def __call__(self, _: float) -> None:
+                if not self.interrupted:
+                    self.interrupted = True
+                    raise KeyboardInterrupt
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            run_temperature_scan(
+                [
+                    "--config",
+                    str(config_path),
+                    "--authorize-temperature-scan",
+                ],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=InterruptOnce(),
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["interruptions"][0]["action"], "continue")
+        self.assertEqual(result["points"][0]["successful_attempt_index"], 1)
+        progress = Path(result["progress_jsonl"]).read_text(encoding="utf-8")
+        self.assertIn('"phase": "resume_recheck"', progress)
+
+    def test_temperature_scan_resume_skips_completed_points(self) -> None:
+        config_path, _ = self.temperature_scan_config(
+            start_k=1.7, stop_k=1.8, step_k=0.1
+        )
+        self.dll.sample_temperature_k = 1.7
+        self.dll.user_temperature_k = 1.7
+        self.dll.temperature_follows_setpoint = True
+        first_output = io.StringIO()
+        with redirect_stdout(first_output):
+            run_temperature_scan(
+                [
+                    "--config",
+                    str(config_path),
+                    "--authorize-temperature-scan",
+                ],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+        first_result = json.loads(first_output.getvalue())
+        progress_path = Path(first_result["progress_jsonl"])
+        retained: list[str] = []
+        for line in progress_path.read_text(encoding="utf-8").splitlines():
+            event = json.loads(line)
+            if event.get("event") == "scan_finished":
+                continue
+            if event.get("point_index") == 1:
+                continue
+            retained.append(line)
+        progress_path.write_text("\n".join(retained) + "\n", encoding="utf-8")
+
+        resumed_dll = FakeAttoDryDll()
+        resumed_dll.sample_temperature_k = 1.7
+        resumed_dll.user_temperature_k = 1.7
+        resumed_dll.temperature_control = 1
+        resumed_dll.temperature_follows_setpoint = True
+        resumed_output = io.StringIO()
+        with redirect_stdout(resumed_output):
+            run_temperature_scan(
+                [
+                    "--config",
+                    str(config_path),
+                    "--authorize-temperature-scan",
+                    "--resume-progress",
+                    str(progress_path),
+                ],
+                dll_loader=lambda _: resumed_dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 124.0,
+            )
+
+        result = json.loads(resumed_output.getvalue())
+        self.assertEqual(len(result["points"]), 2)
+        self.assertEqual(resumed_dll.events.count("set_temperature"), 1)
+        self.assertAlmostEqual(result["points"][1]["requested_temperature_k"], 1.8)
 
 
 class StepClock:

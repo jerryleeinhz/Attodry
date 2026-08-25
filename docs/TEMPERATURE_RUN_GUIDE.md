@@ -21,11 +21,14 @@ attoDRY、开启 Full Temperature Control，并写入配置的样品温度目标
 | --- | --- | --- |
 | `config/hardware.local.toml` | 硬件地址和所有日常温控参数 | 是，通常只改 `target_k` |
 | `src/attodry_control/temperature_run.py` | 日常温控运行入口 | 否 |
+| `src/attodry_control/temperature_scan.py` | 多点稳定性计时扫描；当前仅离线完成 | 否 |
 | `src/attodry_control/attodry.py` | attoDRY DLL 驱动和读回检查 | 否 |
 | `src/attodry_control/temperature_test.py` | commissioning/严格稳定性诊断 | 否 |
 | `src/attodry_control/acquisition.py`、`storage.py` | 测量时保存实际温度 | 否 |
 
 `temperature_test.py` 的许多直接参数是开发和诊断接口，不是推荐的日常运行方式。
+多点扫描的统一配置、记录和恢复见 `TEMPERATURE_SCAN_GUIDE.md`；它不会改变本页
+单点 30 分钟运行的验收语义。
 
 ## 一次性配置
 
