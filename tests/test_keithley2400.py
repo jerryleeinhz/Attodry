@@ -1,7 +1,11 @@
 from dataclasses import replace
 import unittest
 
-from attodry_control.keithley2400 import QcodesKeithley2400
+from attodry_control.keithley2400 import (
+    QcodesKeithley2400,
+    VisaKeithley2400Monitor,
+    open_keithley2400_monitor,
+)
 from attodry_control.three_smu_config import SmuHardwareConfig, SourceMode
 
 
@@ -82,6 +86,50 @@ class FakeQcodesInstrument:
         self.closed = True
 
 
+class FakeVisaResource:
+    """Minimal query-only VISA double: it intentionally has no write method."""
+
+    def __init__(self, *, identity="KEITHLEY,MODEL 2400,4321,1.0"):
+        self.identity = identity
+        self.timeout = None
+        self.closed = False
+        self.queries = []
+        self.responses = {
+            "*IDN?": identity,
+            ":SOUR:FUNC?": "VOLT",
+            ":SOUR:VOLT?": "0.125",
+            ":OUTP?": "0",
+            ":READ?": "0.125,0.0000005,250000",
+            ":SENS:CURR:PROT?": "0.001",
+            ":SOUR:VOLT:RANG?": "1.0",
+            ":SENS:CURR:RANG?": "0.001",
+            ":SYST:RSEN?": "0",
+            "SENS:CURR:PROT:TRIP?": "0",
+            ":SYST:ERR?": "0,No error",
+        }
+
+    def query(self, command):
+        self.queries.append(command)
+        return self.responses[command]
+
+    def close(self):
+        self.closed = True
+
+
+class FakeVisaManager:
+    def __init__(self, resource):
+        self.resource = resource
+        self.opened = []
+        self.closed = False
+
+    def open_resource(self, address):
+        self.opened.append(address)
+        return self.resource
+
+    def close(self):
+        self.closed = True
+
+
 class Keithley2400AdapterTests(unittest.TestCase):
     def test_preflight_is_query_only(self) -> None:
         instrument = FakeQcodesInstrument()
@@ -135,6 +183,37 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertFalse(reading.near_compliance)
         self.assertEqual(reading.resistance_ohm, 250.0)
         self.assertTrue(reading.status_query_consumed)
+
+    def test_live_monitor_queries_state_without_consuming_error_queue_by_default(self) -> None:
+        resource = FakeVisaResource()
+        reading = VisaKeithley2400Monitor("smu_bias", resource).read_monitor()
+        self.assertEqual(reading.identity, "KEITHLEY,MODEL 2400,4321,1.0")
+        self.assertEqual(reading.voltage_v, 0.125)
+        self.assertEqual(reading.current_a, 0.0000005)
+        self.assertEqual(reading.resistance_ohm, 250000.0)
+        self.assertFalse(reading.output_enabled)
+        self.assertFalse(reading.status_queue_consumed)
+        self.assertNotIn(":SYST:ERR?", resource.queries)
+        self.assertFalse(hasattr(resource, "write"))
+
+    def test_live_monitor_status_queue_consumption_is_explicit(self) -> None:
+        resource = FakeVisaResource()
+        reading = VisaKeithley2400Monitor("smu_bias", resource).read_monitor(
+            consume_status_queue=True
+        )
+        self.assertTrue(reading.status_queue_consumed)
+        self.assertEqual(reading.status, "0,No error")
+        self.assertIn(":SYST:ERR?", resource.queries)
+
+    def test_open_live_monitor_sets_only_local_timeout_and_closes_resource(self) -> None:
+        resource = FakeVisaResource()
+        manager = FakeVisaManager(resource)
+        monitor = open_keithley2400_monitor("smu_bias", config(), manager)
+        self.assertEqual(manager.opened, ["FAKE::1"])
+        self.assertEqual(resource.timeout, 5000)
+        self.assertEqual(resource.queries, [])
+        monitor.close()
+        self.assertTrue(resource.closed)
 
 
 if __name__ == "__main__":

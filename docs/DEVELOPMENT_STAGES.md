@@ -200,7 +200,7 @@ uncommissioned and require separate explicit authorization.
 ## Stage 5 - gate SMUs and integrated acquisition
 
 Status: model-independent offline core and the independent Three-SMU QCoDeS S0
-module are complete (updated 2026-08-25); target-computer and real-SMU commissioning
+module are complete (updated 2026-08-26); target-computer and real-SMU commissioning
 remain pending explicit authorization and operator-filled limits.
 
 - Added an explicitly write-authorized, model-independent gate controller with
@@ -254,8 +254,20 @@ remain pending explicit authorization and operator-filled limits.
   preflight rejection, and common `GatePreflightState` validation. The remote
   analysis notebook enumerates a data directory rather than opening a desktop
   chooser, and a bias slice can be selected for a two-gate map.
-- 63 focused fake-instrument/config/adapter/CLI/Notebook/analysis/gate tests
-  pass. No real VISA resource was opened and no real setting command was sent.
+- Added `three_smu_cli monitor-live`: an independent raw-VISA, query-only terminal
+  monitor for the three configured semantic roles. It reports plan role, actual
+  V/I/R, source/output, compliance/trip/ranges/sense/identity and non-corrective
+  safety warnings; it has no configure/ramp/output/cleanup path. Its default does
+  not consume `:SYST:ERR?`; `--consume-status-queue` remains explicit, and the
+  monitor may not run concurrently with a scan.
+- The daily `describe`, `monitor-live`, and `run` commands now default to the
+  ignored `config/hardware.local.toml`. Before any scan driver/VISA resource is
+  opened, `run` prints the validated plan and requires exact `RUN THREE SMU`;
+  `finish_action = "hold"` separately requires `HOLD OUTPUTS`. This replaces
+  repetitive CLI flags without making writes or error-queue consumption automatic.
+- 71 focused fake-instrument/config/adapter/CLI/Notebook/analysis/gate tests
+  pass, including query-only monitor/error-queue and exact-confirmation coverage.
+  No real VISA resource was opened and no real setting command was sent.
 
 ## Stage 6 - analysis and notebook migration
 
@@ -298,7 +310,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 185 tests and passes in the current minimal
+- The full offline suite covers 193 tests and passes in the current minimal
   environment with two optional matplotlib rendering tests skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

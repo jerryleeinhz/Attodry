@@ -196,7 +196,7 @@ Completed offline in Stage 4:
   the ignored control-computer path.
 
 Current boundary: all hardware-free work through Stage 7, the independent
-Three-SMU QCoDeS S0 module, integrated dual-SR830 harmonic validation, and the
+Three-SMU QCoDeS S0 module plus query-only monitor, integrated dual-SR830 harmonic validation, and the
 attoDRY read-only connection are complete. Three-SMU target-computer validation,
 all real SMU connections/writes, attoDRY setting writes, integration of the
 independent SMU module into the main acquisition, and real end-to-end acquisition
@@ -220,12 +220,17 @@ follow-up:
   each gate parent table the single source of truth for that gate in one local
   TOML. The latest safety refinement allows every role to select voltage/current
   source independently while always enforcing its own absolute V/I boundaries.
+  The 2026-08-26 update adds a raw-VISA query-only three-SMU terminal monitor and
+  converts daily scan consent to exact, per-run terminal confirmations before any
+  QCoDeS/VISA resource is opened.
 - `THREE_SMU_DAILY_OPERATION.md` now provides the operator-facing independent
   daily workflow and full parameter reference. It clearly separates the currently
   permitted offline `describe`/analysis path from future, separately authorized
   connection and write steps; its current version documents one local config,
   dual-gate maps at fixed bias, status-queue authorization, and SSH-friendly
-  accepted-only analysis. Adding the guide did not perform hardware actions.
+  accepted-only analysis. `THREE_SMU_LIVE_MONITOR.md` records the no-write,
+  non-concurrent monitor boundary and opt-in error-queue consumption. Adding the
+  guides did not perform hardware actions.
 - `INTEGRATION.md` requires commit IDs, tests, hardware-action reports, and known
   limitations from the four device modules before combination.
 - `docs/modules/README.md` defines shared permissions, `lyr` use, branch/worktree
@@ -275,6 +280,16 @@ Completed offline in Stage 5:
   voltage-source-gate-only trip. Existing local hardware TOML requires explicit
   field migration because the loader will not infer new V/I limits from old
   unit-ambiguous source ranges; recorded run data remains unchanged.
+- The 2026-08-26 daily-operation refinement defaults `describe`, `monitor-live`,
+  and `run` to the ignored local TOML. A scan displays the complete validated plan
+  and requires exact `RUN THREE SMU` before opening QCoDeS/VISA; a hold run also
+  requires `HOLD OUTPUTS`. This retains deliberate human consent while removing
+  routine authorization flags from the command line.
+- Added an independent raw-VISA query-only Three-SMU monitor that displays all
+  three roles' plan state, source/output, V/I/R, compliance/trip/ranges/sense,
+  identity and safety warnings without configure/ramp/output/cleanup methods.
+  Default monitoring leaves the consumptive Keithley error queues untouched;
+  `--consume-status-queue` is explicit and monitoring is prohibited during scans.
 - Each formal point records sequential per-role timestamps, source setpoint,
   V/I/R, output, compliance, gate leakage, status, scan coordinates, and cleanup
   results in `metadata.json`, `raw.jsonl`, and `data.csv`. Raw rejected,
@@ -286,8 +301,9 @@ Completed offline in Stage 5:
   mismatch, communication failure, Ctrl+C, and
   ordered zero-disable cleanup. Cleanup uncertainty rejects otherwise clean data
   and preserves last-confirmed state for manual verification.
-- The focused Three-SMU/gate/config/adapter/Notebook suite now has 63 passing
-  offline tests. No real SMU connection, status query, or write was performed.
+- The focused Three-SMU/gate/config/adapter/Notebook suite now has 71 passing
+  offline tests, including live monitor/error-queue and exact-confirmation paths.
+  No real SMU connection, status query, or write was performed.
 - Added audited simulation execution across SQLite start/raw/complete events,
   retry, resume, checkpoints, normal hold/zero cleanup, and failure cleanup.
 
@@ -326,7 +342,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 185 tests and passes in the current
+- The complete hardware-free suite contains 193 tests and passes in the current
   minimal environment with two optional matplotlib rendering tests skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.

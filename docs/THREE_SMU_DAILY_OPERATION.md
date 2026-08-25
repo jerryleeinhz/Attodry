@@ -19,8 +19,7 @@ git status --short --branch
 ```powershell
 Copy-Item config\hardware.example.toml config\hardware.local.toml
 
-python -m attodry_control.three_smu_cli describe `
-  --config config\hardware.local.toml
+python -m attodry_control.three_smu_cli describe
 ```
 
 `describe` 只读 TOML、验证限值和扫描形状、计算点数；它不会导入 QCoDeS、打开 VISA 或发送
@@ -33,7 +32,7 @@ python -m attodry_control.three_smu_cli describe `
 2. 审核一个 `hardware.local.toml` 中的角色、单位、compliance、leakage、范围、ramp 和结束动作。
 3. 运行上面的 `describe` 并核对 mode、点数、样本数。
 4. 要分析既有数据时，仅打开 `notebooks/three_smu_analysis.ipynb`。
-5. 当前不要运行 `run`，不要把实时 Notebook 的任一授权开关改为 `True`。
+5. 当前不要运行 `monitor-live` 或 `run`，不要把实时 Notebook 的任一授权开关改为 `True`。
 
 `hardware.local.toml` 被 `.gitignore` 排除。地址、器件限值、实验 note 和数据目录都不能提交。
 
@@ -171,22 +170,47 @@ step = 0.02
 | `software_pulse` | 恰好一个角色 |
 
 非 pulse 模式的两个 pulse 时间必须为零。`finish_action` 日常应为 `zero_disable`；
-`hold` 还要求 CLI 的额外 `--authorize-hold`，不能作为便利默认值。
+`hold` 会在每次运行时要求第二次精确确认，不能作为便利默认值。
+
+## 未来的实时状态监控（当前未授权连接）
+
+以下命令是将来获得**本次真实查询授权**后的接口说明；本模块当前仍只完成 fake-
+instrument 验证，不能据此连接真实 SMU：
+
+```powershell
+python -m attodry_control.three_smu_cli monitor-live
+```
+
+它默认每秒轮询一次三台配置的 SMU，并显示每个语义角色的计划角色、source mode/setpoint、
+实际 V/I/R、output、compliance/trip、source/measurement range、2/4-wire sense 和 identity。
+这是独立于 Lock-in 和冷台的观察命令：它不配置、不 ramp、不切换 output、不保存 run 数据，关闭
+VISA 资源也不改变仪器状态。出现 warning 时只报告，操作者必须停止并人工判断，不能依赖监控
+自动纠正状态。
+
+默认不会查询 `:SYST:ERR?`，因为 Keithley error queue 是消费式队列，状态会显示为未知。只有需要
+审计当前错误队列且已获此操作授权时才显式使用：
+
+```powershell
+python -m attodry_control.three_smu_cli monitor-live --consume-status-queue
+```
+
+可用 `--samples N --interval-s SECONDS` 做有限采样；`--samples 0`（默认）持续运行到 `Ctrl+C`。
+不得在扫描进行时并发运行该监控，也不得将其输出当成启动扫描前的授权或完整 preflight。完整
+监控边界见 [`THREE_SMU_LIVE_MONITOR.md`](THREE_SMU_LIVE_MONITOR.md)。
 
 ## 未来真实运行门槛（当前未授权）
 
 以下命令是接口说明，不是操作许可：
 
 ```powershell
-python -m attodry_control.three_smu_cli run `
-  --config config\hardware.local.toml `
-  --authorize-writes `
-  --authorize-status-consumption
+python -m attodry_control.three_smu_cli run
 ```
 
-除了本次扫描的明确连接/写入授权，还必须给 `--authorize-status-consumption`。Keithley 的
-错误队列查询会消费队列项目，程序不会把这种有副作用的状态读取伪装成普通只读查询。若使用
-`finish_action = "hold"`，还必须另给 `--authorize-hold`。
+`run` 自动读取 `config/hardware.local.toml`，先打印 config、模式、点数、所有角色 source 范围
+和绝对 V/I 边界，再要求在终端输入精确的 `RUN THREE SMU`。输入错误或 EOF 时，程序在导入
+QCoDeS、打开 VISA 前退出。该确认明确同意连接三台 SMU、发送设置写入并读取（从而消费）三台
+仪器的 error queue；不再依赖容易遗漏的日常命令行授权 flag。若 `finish_action = "hold"`，还会
+额外要求输入 `HOLD OUTPUTS`，因为输出会被保留开启。
 
 获授权的程序仍会先验证：身份唯一、source mode 正确、output 已关闭、source setpoint 与当前
 source mode 对应的实际读回在零附近、实际 V/I 均未越过各自绝对边界、已查询的状态干净。

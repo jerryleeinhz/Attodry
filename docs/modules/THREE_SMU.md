@@ -2,9 +2,10 @@
 
 ## 当前阶段
 
-状态：`S0 offline complete`（2026-08-25）。本分支实现了三台 Keithley 2400 的独立
-QCoDeS 模块、无 GUI CLI、调用同一 generator 的实时 Notebook，以及 accepted-only 分析
-Notebook。所有验证均为离线 fake-instrument 测试；真实 SMU 连接数和写命令数均为 **0**。
+状态：`S0 offline complete`（2026-08-26）。本分支实现了三台 Keithley 2400 的独立
+QCoDeS 扫描模块、无 GUI CLI、调用同一 generator 的实时 Notebook、accepted-only 分析
+Notebook，以及独立的 query-only 终端实时监控。所有验证均为离线 fake-instrument 测试；
+真实 SMU 连接、查询和写命令数均为 **0**。
 
 本包落实 `PROJECT_MODULE_DEVELOPMENT_GUIDE.md` 的单配置、fail-closed、审计和 SSH 分析
 要求，并保留已建立的三角色范围：
@@ -45,9 +46,11 @@ Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` 双文�
 ## 已实现的安全行为
 
 1. 静态 TOML、地址唯一性、角色/扫描形状和全点范围验证在 driver import 或连接前完成。
-2. `run` 需要 `--authorize-writes`；未经授权，工厂函数/QCoDeS import 都不执行。
-3. 读取 Keithley error queue 会消费状态项目，故还需单独的
-   `--authorize-status-consumption`。它不是普通离线或无副作用查询。
+2. `run` 默认读取 `config/hardware.local.toml`，但在 QCoDeS/VISA import 或连接前显示完整
+   扫描摘要，并要求每次终端精确输入 `RUN THREE SMU`。拒绝/EOF 均不会打开资源；该确认明确涵盖
+   设置写入与 run 所需的 error-queue 消耗。
+3. `finish_action = "hold"` 还要求第二个 `HOLD OUTPUTS` 确认。它不会成为日常默认，也不会因
+   配置文件中已有 hold 而自动保留输出。
 4. 授权连接后的 query-only preflight 记录 identity、source mode/setpoint、output、V/I、
    compliance/range、remote-sense 和状态。身份重复、output 已开、mode 不符、当前 source
    变量非零、任一 V/I 绝对边界越界或脏状态都会在设置写入前拒绝；voltage-source
@@ -64,6 +67,10 @@ Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` 双文�
 8. 正常、异常、`Ctrl+C` 和 generator 提前关闭共享 cleanup：`smu_bias`、`gate_top`、
    `gate_bottom` 依次回零/关 output。无法确认时 run 被拒绝，保留最后确认状态和 cleanup 错误，
    要求人工检查；通信失败从不被记成零或 output-off。
+9. `monitor-live` 使用没有 configure/set-source/set-output/cleanup 方法的独立 raw-VISA
+   query adapter。它显示三台的 V/I/R、source/output、compliance/trip、range/sense、identity
+   和安全 warning；只关闭本地 handle，绝不改变 SMU 状态。默认不读 `:SYST:ERR?`，只有显式
+   `--consume-status-queue` 才会消费 error queue。它不得与 scan 并发，也不替代 preflight。
 
 未完成的硬件信息（型号/固件差异、实际地址、器件限值与接线）不能由代码猜测。任何实机
 步骤均需要该次计划的明确用户授权。
@@ -90,20 +97,26 @@ bias slice；固定 bias 的常见双 gate map 不需额外选择。
 离线配置检查：
 
 ```powershell
-python -m attodry_control.three_smu_cli describe --config config\hardware.local.toml
+python -m attodry_control.three_smu_cli describe
 ```
 
-将来（当前未授权）的真实运行接口：
+将来（当前未授权）的 query-only 状态接口：
 
 ```powershell
-python -m attodry_control.three_smu_cli run `
-  --config config\hardware.local.toml `
-  --authorize-writes `
-  --authorize-status-consumption
+python -m attodry_control.three_smu_cli monitor-live
+python -m attodry_control.three_smu_cli monitor-live --consume-status-queue
 ```
 
-`finish_action = "hold"` 还需要 `--authorize-hold`。Notebook 的两个授权 flag 默认均为
-`False`，且调用同一 `ThreeSmuSession`，不允许直接建立 QCoDeS driver 或使用另一套 ramp。
+将来（当前未授权）的真实扫描接口：
+
+```powershell
+python -m attodry_control.three_smu_cli run
+```
+
+`run` 会显示计划并要求精确的 `RUN THREE SMU`；`finish_action = "hold"` 再要求
+`HOLD OUTPUTS`。Notebook 的两个授权 flag 默认均为 `False`，且调用同一 `ThreeSmuSession`，
+不允许直接建立 QCoDeS driver 或使用另一套 ramp。实时监控的完整操作边界见
+[`../THREE_SMU_LIVE_MONITOR.md`](../THREE_SMU_LIVE_MONITOR.md)。
 
 ## 代码与测试所有权
 
@@ -113,7 +126,8 @@ src/attodry_control/three_smu_config.py    严格模块 loader / 扫描点生成
 src/attodry_control/keithley2400.py        窄 QCoDeS 2400 adapter
 src/attodry_control/gates.py               共享 gate 预检/安全控制器
 src/attodry_control/three_smu.py            session、审计、cleanup、generator
-src/attodry_control/three_smu_cli.py        无 GUI describe/run
+src/attodry_control/three_smu_live.py       query-only 实时监控的警告/终端面板
+src/attodry_control/three_smu_cli.py        无 GUI describe/monitor-live/run
 src/attodry_control/three_smu_analysis.py   accepted-only 加载、发现和绘图
 notebooks/three_smu_live.ipynb              同 generator 的实时绘图
 notebooks/three_smu_analysis.ipynb          SSH-friendly read-only 分析
@@ -121,8 +135,9 @@ tests/test_three_smu*.py                    配置、fake run、CLI/Notebook、�
 tests/test_keithley2400.py / test_gates.py  adapter 与共享 gate 核心
 ```
 
-本阶段执行的 focused fake-instrument 回归为 **63 项通过**（Three-SMU、Keithley 2400、
-gate safety 和共享 config），随后完整离线套件 **185 项通过（2 项可选绘图跳过）**。没有执行
+本阶段执行的 focused fake-instrument 回归为 **71 项通过**（Three-SMU、Keithley 2400、
+gate safety 和共享 config，含 live-monitor/error-queue 与确认流程），随后完整离线套件
+**193 项通过（2 项可选绘图跳过）**。没有执行
 VISA discovery、QCoDeS 连接或真实仪器写入。
 
 ## 下一阶段：S1 target offline
