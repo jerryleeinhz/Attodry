@@ -1492,7 +1492,11 @@ class Sr830Tests(unittest.TestCase):
 
     def test_sweep_commands_default_to_station_local_hardware_config(self) -> None:
         parser = build_parser()
-        for command in ("sweep-frequency", "sweep-excitation"):
+        for command in (
+            "sweep-frequency",
+            "sweep-excitation",
+            "sweep-frequency-excitation",
+        ):
             with self.subTest(command=command):
                 args = parser.parse_args([command])
                 self.assertEqual(args.config, Path("config/hardware.local.toml"))

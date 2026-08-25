@@ -179,6 +179,8 @@ class LockinSweepConfig:
     frequency_xy_harmonics: tuple[int, ...]
     excitation_xx_harmonics: tuple[int, ...]
     excitation_xy_harmonics: tuple[int, ...]
+    combined_xx_harmonics: tuple[int, ...]
+    combined_xy_harmonics: tuple[int, ...]
     skip_unsupported_harmonics: bool
     run_name: str
     note: str
@@ -985,6 +987,8 @@ def _parse_lockin_sweep(
             "frequency_xy_harmonics",
             "excitation_xx_harmonics",
             "excitation_xy_harmonics",
+            "combined_xx_harmonics",
+            "combined_xy_harmonics",
         },
     )
     frequency_points_present = "frequency_points_hz" in table
@@ -1157,6 +1161,28 @@ def _parse_lockin_sweep(
             f"{name} requires shared harmonic fields or all four role-specific "
             "harmonic fields."
         )
+    combined_harmonic_fields = ("combined_xx_harmonics", "combined_xy_harmonics")
+    combined_present = tuple(field for field in combined_harmonic_fields if field in table)
+    if combined_present and len(combined_present) != len(combined_harmonic_fields):
+        raise ConfigError(
+            f"{name} combined harmonic selection requires both fields: "
+            + ", ".join(combined_harmonic_fields)
+            + "."
+        )
+    if combined_present:
+        combined_xx_harmonics = _selected_role_sweep_harmonics(
+            table["combined_xx_harmonics"], f"{name}.combined_xx_harmonics"
+        )
+        combined_xy_harmonics = _selected_role_sweep_harmonics(
+            table["combined_xy_harmonics"], f"{name}.combined_xy_harmonics"
+        )
+    else:
+        combined_xx_harmonics = excitation_xx_harmonics
+        combined_xy_harmonics = excitation_xy_harmonics
+    if not combined_xx_harmonics and not combined_xy_harmonics:
+        raise ConfigError(
+            f"{name} combined sweep must select at least one XX or XY harmonic."
+        )
     settle_time_constants = _positive_number(
         table["settle_time_constants"], f"{name}.settle_time_constants"
     )
@@ -1199,6 +1225,8 @@ def _parse_lockin_sweep(
         frequency_xy_harmonics=frequency_xy_harmonics,
         excitation_xx_harmonics=excitation_xx_harmonics,
         excitation_xy_harmonics=excitation_xy_harmonics,
+        combined_xx_harmonics=combined_xx_harmonics,
+        combined_xy_harmonics=combined_xy_harmonics,
         skip_unsupported_harmonics=_boolean(
             table["skip_unsupported_harmonics"],
             f"{name}.skip_unsupported_harmonics",

@@ -326,6 +326,30 @@ def build_parser() -> argparse.ArgumentParser:
         config=Path("config/hardware.local.toml"),
         handler=_run_excitation_sweep,
     )
+    combined_sweep = subparsers.add_parser(
+        "sweep-frequency-excitation",
+        help="Sweep the configured frequency and excitation grids as a 2-D matrix.",
+    )
+    _add_pair_arguments(combined_sweep, hide_overrides=True)
+    _add_sweep_arguments(combined_sweep, hide_overrides=True)
+    unsupported_policy = combined_sweep.add_mutually_exclusive_group()
+    unsupported_policy.add_argument(
+        "--skip-unsupported-harmonics",
+        action="store_true",
+        dest="skip_unsupported_harmonics",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    unsupported_policy.add_argument(
+        "--fail-on-unsupported-harmonics",
+        action="store_false",
+        dest="skip_unsupported_harmonics",
+        help=argparse.SUPPRESS,
+    )
+    combined_sweep.set_defaults(
+        config=Path("config/hardware.local.toml"),
+        handler=_run_frequency_excitation_sweep,
+    )
     return parser
 
 
@@ -1302,6 +1326,324 @@ def _run_frequency_sweep(
     return 0
 
 
+def _run_frequency_excitation_sweep(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    """Run the configured frequency-by-excitation matrix sweep."""
+
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    _resolve_sweep_settings(args, settings, scan="frequency_excitation")
+    config = settings["config"]
+    if not isinstance(config, ControlConfig):
+        raise ValueError("A validated hardware config is required for sweeps.")
+    record_directory = _prepare_sweep_record_directory(args, settings)
+    frequencies = _validate_increasing_points(args.points_hz, "frequency")
+    amplitudes = _validate_increasing_points(args.points_v, "excitation")
+    if frequencies[0] < 0.001 or frequencies[-1] > MAXIMUM_REFERENCE_FREQUENCY_HZ:
+        raise ValueError(
+            "Frequency sweep points must be within "
+            f"0.001-{MAXIMUM_REFERENCE_FREQUENCY_HZ:g} Hz."
+        )
+    safety = _validate_excitation_safety(args, amplitudes)
+    harmonics_by_role = _requested_sweep_harmonics_by_role(args)
+    harmonics = _requested_sweep_harmonics(args)
+    if not args.skip_unsupported_harmonics:
+        _validate_harmonic_detection_frequencies(frequencies, harmonics)
+    baseline_hz = float(settings["frequency_hz"])
+    baseline_source_v = _sweep_baseline_source_voltage(settings)
+    source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+    frequency_specs = args.frequency_point_specs
+    excitation_specs = args.excitation_point_specs
+    first_point_spec = _combined_point_spec(
+        frequency_specs[0], excitation_specs[0]
+    )
+    records: list[dict[str, object]] = []
+    frequency_records: list[dict[str, object]] = []
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        controller = DualSr830Controller(lockin_xx, lockin_xy)
+        preflight_xx = None
+        preflight_xy = None
+        sensitivity_setup: dict[str, object] | None = None
+        reserve_setup: dict[str, object] | None = None
+        writes_started = False
+        failure: BaseException | None = None
+        interface_clear: dict[str, object] = {"at_start": None, "before_cleanup": None}
+        try:
+            interface_clear["at_start"] = _clear_pair_interfaces(
+                lockin_xx, lockin_xy
+            )
+            preflight_xx, preflight_xy = controller.verify_existing_configuration(
+                frequency_hz=baseline_hz,
+                check_frequency=False,
+                ignore_output_overload=True,
+                transient_overload_recheck_s=args.settle_s,
+            )
+            writes_started = True
+            reserve_setup = _new_sweep_reserve_setup(
+                config.lockin_xx,
+                config.lockin_xy,
+                original_xx_reserve_mode=preflight_xx.reserve_mode,
+                original_xy_reserve_mode=preflight_xy.reserve_mode,
+            )
+            _configure_sweep_reserve_modes(
+                lockin_xx,
+                lockin_xy,
+                reserve_setup=reserve_setup,
+                settle_s=args.settle_s,
+            )
+            sensitivity_setup = _new_sweep_sensitivity_setup(
+                lockin_xx_config=config.lockin_xx,
+                lockin_xy_config=config.lockin_xy,
+                original_xx_sensitivity=preflight_xx.sensitivity,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                initial_full_scale_overrides=_point_range_full_scales(first_point_spec),
+            )
+            _configure_sweep_sensitivities(
+                lockin_xx,
+                lockin_xy,
+                sensitivity_setup=sensitivity_setup,
+                settle_s=args.settle_s,
+            )
+            autorange_policies, autorange_states = _new_sweep_autorange_controls(
+                config.lockin_xx,
+                config.lockin_xy,
+                sensitivity_setup=sensitivity_setup,
+            )
+            for frequency_index, target_hz in enumerate(frequencies):
+                if frequency_index > 0:
+                    lockin_xx.set_minimum_sine_output()
+                    time.sleep(source_step_settle_s)
+                frequency_record: dict[str, object] = {
+                    "frequency_index": frequency_index,
+                    "target_frequency_hz": target_hz,
+                    "frequency_readback_hz": None,
+                    "actual_frequency_hz": None,
+                    "source_reset_before_frequency": frequency_index > 0,
+                    "transition_status": None,
+                    "skipped_harmonics": [],
+                    "point_indices": [],
+                }
+                frequency_records.append(frequency_record)
+                wrote_frequency = not math.isclose(
+                    target_hz, baseline_hz, rel_tol=0.0, abs_tol=1e-12
+                )
+                if wrote_frequency:
+                    lockin_xx.set_internal_reference_frequency(target_hz)
+                    time.sleep(args.settle_s)
+                    transition, transition_problems = _consume_frequency_transition(
+                        lockin_xx, lockin_xy
+                    )
+                    frequency_record["transition_status"] = transition
+                    if transition_problems:
+                        raise Sr830Error(
+                            "Unsafe frequency transition: "
+                            + "; ".join(transition_problems)
+                        )
+                time.sleep(args.settle_s)
+                xx_readback = lockin_xx.read_reference_frequency()
+                xy_readback = lockin_xy.read_reference_frequency()
+                frequency_record["frequency_readback_hz"] = {
+                    "lockin_xx": xx_readback,
+                    "lockin_xy": xy_readback,
+                }
+                frequency_record["actual_frequency_hz"] = xx_readback
+                _validate_frequency_observations(target_hz, xx_readback, xy_readback)
+                point_harmonics, skipped_harmonics = _harmonics_for_frequency(
+                    max(target_hz, xx_readback, xy_readback),
+                    harmonics,
+                    skip_unsupported=args.skip_unsupported_harmonics,
+                )
+                frequency_record["skipped_harmonics"] = skipped_harmonics
+                for excitation_index, source_v in enumerate(amplitudes):
+                    point_spec = _combined_point_spec(
+                        frequency_specs[frequency_index],
+                        excitation_specs[excitation_index],
+                    )
+                    wrote_source = not math.isclose(
+                        source_v, baseline_source_v, rel_tol=0.0, abs_tol=1e-12
+                    )
+                    requested_nominal_current_a = (
+                        source_v / safety["nominal_total_resistance_ohm"]
+                    )
+                    point_record: dict[str, object] = {
+                        "point_index": len(records),
+                        "frequency_index": frequency_index,
+                        "excitation_index": excitation_index,
+                        "target_frequency_hz": target_hz,
+                        "requested_frequency_hz": target_hz,
+                        "actual_frequency_hz": xx_readback,
+                        "frequency_readback_hz": {
+                            "lockin_xx": xx_readback,
+                            "lockin_xy": xy_readback,
+                        },
+                        "source_v_rms": source_v,
+                        "source_readback_v_rms": None,
+                        "source_readback_safety": None,
+                        "source_step_settle_s": (
+                            source_step_settle_s if wrote_source else 0.0
+                        ),
+                        "requested_nominal_current_a_rms": requested_nominal_current_a,
+                        "nominal_current_a_rms": None,
+                        "range_segment_index": point_spec.segment_index,
+                        "requested_full_scale_v": _point_range_full_scales(point_spec),
+                        "write_performed": wrote_source,
+                        "skipped_harmonics": list(skipped_harmonics),
+                        "harmonic_transition_status": [],
+                        "samples": [],
+                    }
+                    records.append(point_record)
+                    frequency_record["point_indices"].append(point_record["point_index"])
+                    if wrote_source:
+                        lockin_xx.set_sine_output(source_v)
+                        time.sleep(source_step_settle_s)
+                    else:
+                        time.sleep(args.settle_s)
+                    output_readback = lockin_xx.read_sine_output()
+                    point_record["source_readback_v_rms"] = output_readback
+                    source_readback_safety = _validate_excitation_safety(
+                        args, (output_readback,)
+                    )
+                    point_record["source_readback_safety"] = source_readback_safety
+                    point_record["nominal_current_a_rms"] = output_readback / float(
+                        source_readback_safety["nominal_total_resistance_ohm"]
+                    )
+                    _apply_sweep_segment_ranges(
+                        lockin_xx,
+                        lockin_xy,
+                        sensitivity_setup=sensitivity_setup,
+                        point_spec=point_spec,
+                        lockin_xx_config=config.lockin_xx,
+                        lockin_xy_config=config.lockin_xy,
+                        settle_s=args.settle_s,
+                        record=point_record,
+                    )
+                    _apply_sweep_autorange(
+                        lockin_xx,
+                        lockin_xy,
+                        sensitivity_setup=sensitivity_setup,
+                        policies=autorange_policies,
+                        states=autorange_states,
+                        target_frequency_hz=xx_readback,
+                        frequency_rel_tolerance=1e-5,
+                        settle_s=args.settle_s,
+                        record=point_record,
+                    )
+                    _capture_sweep_point(
+                        lockin_xx,
+                        lockin_xy,
+                        target_frequency_hz=xx_readback,
+                        harmonics=point_harmonics,
+                        selected_roles_by_harmonic=_roles_by_harmonic(
+                            point_harmonics, harmonics_by_role
+                        ),
+                        harmonic_settle_s=args.settle_s,
+                        samples=args.samples_per_point,
+                        sample_interval_s=args.sample_interval_s,
+                        record=point_record,
+                        frequency_rel_tolerance=1e-5,
+                    )
+        except BaseException as exc:
+            failure = exc
+            interface_clear["before_cleanup"] = _clear_pair_interfaces(
+                lockin_xx, lockin_xy, suppress_errors=True
+            )
+        cleanup = (
+            _restore_scan_state(
+                lockin_xx,
+                lockin_xy,
+                baseline_hz=baseline_hz,
+                original_xx_sensitivity=preflight_xx.sensitivity,
+                original_xy_sensitivity=preflight_xy.sensitivity,
+                restore_sensitivity=_range_write_attempted(
+                    sensitivity_setup, "lockin_xx"
+                ),
+                restore_xy_sensitivity=_range_write_attempted(
+                    sensitivity_setup, "lockin_xy"
+                ),
+                original_xx_reserve_mode=preflight_xx.reserve_mode,
+                original_xy_reserve_mode=preflight_xy.reserve_mode,
+                restore_xx_reserve=_reserve_write_attempted(
+                    reserve_setup, "lockin_xx"
+                ),
+                restore_xy_reserve=_reserve_write_attempted(
+                    reserve_setup, "lockin_xy"
+                ),
+                restore_frequency=True,
+                settle_s=args.settle_s,
+                writes_started=writes_started,
+                verify_frequency_match=False,
+                ignore_output_overload=True,
+            )
+            if preflight_xx is not None
+            else {"attempted": False, "verified": True, "errors": []}
+        )
+        result = {
+            "scan": "frequency_excitation",
+            "completed": failure is None and cleanup["verified"],
+            "outcome": _sweep_outcome(failure, cleanup),
+            "captured_unix_s": time.time(),
+            "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+            "status_latches_consumed": True,
+            "run_metadata": _sweep_run_metadata(settings),
+            "measurement_config": _measurement_config_snapshot(
+                settings,
+                args,
+                scan="frequency_excitation",
+                excitation_path={
+                    **safety,
+                    "external_50_ohm_termination": False,
+                },
+            ),
+            "preflight": {
+                "lockin_xx": None if preflight_xx is None else asdict(preflight_xx),
+                "lockin_xy": None if preflight_xy is None else asdict(preflight_xy),
+            },
+            "frequency_points_hz": frequencies,
+            "excitation_points_v_rms": amplitudes,
+            "grid_shape": {
+                "frequency_points": len(frequencies),
+                "excitation_points": len(amplitudes),
+                "total_points": len(frequencies) * len(amplitudes),
+            },
+            "traversal": (
+                "frequency_outer_excitation_ascending; source returns to 4 mVrms "
+                "before each frequency change"
+            ),
+            "frequency_range_segments": [asdict(item) for item in args.frequency_range_segments],
+            "excitation_range_segments": [asdict(item) for item in args.excitation_range_segments],
+            "requested_harmonics": harmonics,
+            "requested_harmonics_by_role": harmonics_by_role,
+            "skip_unsupported_harmonics": args.skip_unsupported_harmonics,
+            "sensitivity_modes": {
+                "lockin_xx": config.lockin_xx.sensitivity_mode.value,
+                "lockin_xy": config.lockin_xy.sensitivity_mode.value,
+            },
+            "sensitivity_setup": sensitivity_setup,
+            "reserve_setup": reserve_setup,
+            "settle_time_constants": config.lockin_sweep.settle_time_constants,
+            "slowest_time_constant_s": args.slowest_time_constant_s,
+            "settle_interval_s": args.settle_s,
+            "post_setting_settle_s": EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s,
+            "source_step_settle_s": source_step_settle_s,
+            "samples_per_point": args.samples_per_point,
+            "sample_interval_time_constants": config.lockin_sweep.sample_interval_time_constants,
+            "sample_interval_s": args.sample_interval_s,
+            "safety": safety,
+            "frequency_records": frequency_records,
+            "points": records,
+            "cleanup": cleanup,
+            "interface_clear": interface_clear,
+            "error": None if failure is None else str(failure),
+        }
+        _emit_sweep_result(record_directory, result)
+        if failure is not None:
+            raise failure
+        if not cleanup["verified"]:
+            raise Sr830Error("Frequency/excitation sweep cleanup could not be verified.")
+    return 0
+
+
 def _run_excitation_sweep(
     args: argparse.Namespace, factory: Callable[[], object]
 ) -> int:
@@ -1607,7 +1949,14 @@ def _measurement_config_snapshot(
 
     sweep_snapshot: dict[str, object] = {
         "points": (
-            tuple(args.points_hz) if scan == "frequency" else tuple(args.points_v)
+            {
+                "frequency_hz": tuple(args.points_hz),
+                "source_v_rms": tuple(args.points_v),
+            }
+            if scan == "frequency_excitation"
+            else tuple(args.points_hz)
+            if scan == "frequency"
+            else tuple(args.points_v)
         ),
         "harmonics": _requested_sweep_harmonics(args),
         "harmonics_by_role": _requested_sweep_harmonics_by_role(args),
@@ -1633,8 +1982,22 @@ def _measurement_config_snapshot(
         ),
         "sample_interval_s": args.sample_interval_s,
         "output_directory": config.lockin_sweep.output_directory.as_posix(),
-        "range_segments": _sweep_range_segments(args, scan=scan),
-        "point_range_plan": [asdict(spec) for spec in args.point_specs],
+        "range_segments": (
+            {
+                "frequency": [asdict(item) for item in args.frequency_range_segments],
+                "excitation": [asdict(item) for item in args.excitation_range_segments],
+            }
+            if scan == "frequency_excitation"
+            else _sweep_range_segments(args, scan=scan)
+        ),
+        "point_range_plan": (
+            {
+                "frequency": [asdict(spec) for spec in args.frequency_point_specs],
+                "excitation": [asdict(spec) for spec in args.excitation_point_specs],
+            }
+            if scan == "frequency_excitation"
+            else [asdict(spec) for spec in args.point_specs]
+        ),
     }
     if scan == "frequency":
         sweep_snapshot["frequency_source_voltage_v_rms"] = (
@@ -1642,6 +2005,20 @@ def _measurement_config_snapshot(
         )
         sweep_snapshot["source_step_settle_s"] = (
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+        )
+        sweep_snapshot["skip_unsupported_harmonics"] = (
+            args.skip_unsupported_harmonics
+        )
+    elif scan == "frequency_excitation":
+        sweep_snapshot["frequency_source_voltage_v_rms"] = (
+            config.lockin_sweep.frequency_source_voltage_v_rms
+        )
+        sweep_snapshot["source_step_settle_s"] = (
+            EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+        )
+        sweep_snapshot["traversal"] = (
+            "frequency outer loop, ascending excitation inner loop; source returns "
+            "to the 4 mVrms minimum before each frequency change"
         )
         sweep_snapshot["skip_unsupported_harmonics"] = (
             args.skip_unsupported_harmonics
@@ -2676,6 +3053,11 @@ def _resolve_sweep_settings(
             "xx": sweep.excitation_xx_harmonics,
             "xy": sweep.excitation_xy_harmonics,
         }
+    elif scan == "frequency_excitation":
+        args.configured_harmonics_by_role = {
+            "xx": sweep.combined_xx_harmonics,
+            "xy": sweep.combined_xy_harmonics,
+        }
     else:
         raise ValueError(f"Unsupported sweep type: {scan}.")
     args.configured_harmonics = tuple(
@@ -2705,6 +3087,21 @@ def _resolve_sweep_settings(
                 SweepPointConfig(value, None, None, None) for value in args.points_hz
             )
             args.range_segments = ()
+        return
+    if scan == "frequency_excitation":
+        args.frequency_point_specs = sweep.frequency_point_specs
+        args.frequency_range_segments = sweep.frequency_ranges
+        args.excitation_point_specs = sweep.excitation_point_specs
+        args.excitation_range_segments = sweep.excitation_ranges
+        args.points_hz = sweep.frequency_points_hz
+        args.points_v = sweep.excitation_points_v_rms
+        args.point_specs = sweep.excitation_point_specs
+        args.range_segments = sweep.excitation_ranges
+        args.maximum_device_resistance_ohm = sweep.maximum_device_resistance_ohm
+        args.series_resistance_ohm = sweep.external_series_resistance_ohm
+        args.device_resistance_ohm = sweep.approximate_device_resistance_ohm
+        args.max_device_current_a = sweep.max_device_current_a_rms
+        args.max_device_voltage_v = sweep.max_device_voltage_v_rms
         return
     if args.points_v is None:
         args.points_v = sweep.excitation_points_v_rms
@@ -2743,6 +3140,28 @@ def _point_range_full_scales(point_spec: SweepPointConfig) -> dict[str, float | 
         "lockin_xx": point_spec.xx_full_scale_v,
         "lockin_xy": point_spec.xy_full_scale_v,
     }
+
+
+def _combined_point_spec(
+    frequency_spec: SweepPointConfig,
+    excitation_spec: SweepPointConfig,
+) -> SweepPointConfig:
+    """Merge boundary range overrides for one frequency/excitation cell."""
+
+    return SweepPointConfig(
+        value=excitation_spec.value,
+        segment_index=excitation_spec.segment_index,
+        xx_full_scale_v=(
+            excitation_spec.xx_full_scale_v
+            if excitation_spec.xx_full_scale_v is not None
+            else frequency_spec.xx_full_scale_v
+        ),
+        xy_full_scale_v=(
+            excitation_spec.xy_full_scale_v
+            if excitation_spec.xy_full_scale_v is not None
+            else frequency_spec.xy_full_scale_v
+        ),
+    )
 
 
 def _sweep_range_segments(

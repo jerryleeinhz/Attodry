@@ -849,3 +849,13 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   coefficients, exponent, AICc, and relative RMSE; overlaid curves use matching
   formula labels. This is read-only presentation logic and introduces no
   hardware path.
+- Added frequency×excitation matrix sweeps (2026-08-25): the new
+  `sweep-frequency-excitation` command traverses the configured frequency grid
+  outside and the ascending SINE OUT grid inside, returning to 4 mVrms before
+  frequency changes. Combined harmonic selections inherit the excitation role
+  lists unless explicitly overridden, and each JSON archives actual frequency,
+  SINE OUT readback, current, range, status, and grid-index records. The
+  analysis loader now accepts combined records and provides multi-frequency
+  current–Vxx/Vxy curves grouped by actual frequency; the notebook exposes a
+  combined-record selector and exports it in `selection_manifest.json`. Offline
+  tests and notebook compilation pass; no hardware resource was opened.

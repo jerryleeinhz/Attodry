@@ -17,10 +17,10 @@ does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 ## Standalone SR830 commissioning sweeps
 
 Open `notebooks/sr830_commissioning_sweeps.ipynb` in the `lyr` environment to
-browse and plot the standalone frequency/excitation JSON records under
-`run_data/commissioning`. The notebook is read-only unless its final
+browse and plot the standalone frequency/excitation or combined
+frequency×excitation JSON records under `run_data/commissioning`. The notebook is read-only unless its final
 `SAVE_OUTPUTS` switch is explicitly enabled. Its first controls cell provides
-record/sample filters, remote-directory frequency/excitation selectors, and the
+record/sample filters, remote-directory frequency/excitation/combined selectors, and the
 complete excitation-path resistance calibration.
 
 The catalog filters record status as `completed`, `rejected`, `diagnostic`,
@@ -31,7 +31,7 @@ opt-in. Formal samples can be filtered as `clean`, `problem`, `unlocked`,
 from the plotted rows.
 
 Set `DATA_DIRECTORY` once, click `Refresh records`, select a frequency record,
-an excitation record, or both, then click `Load selected records`. This works
+an excitation record, a frequency×amplitude record, or any combination, then click `Load selected records`. This works
 when the kernel is running remotely through VSCode/SSH because it lists files
 on the kernel computer rather than opening a desktop dialog. The visible `Only
 completed records` checkbox defaults to selected; formal-sample status is a
@@ -39,7 +39,9 @@ multi-select UI and rejected records still require the separate audit checkbox.
 Loading immediately populates the point selectors; then apply any exclusions and
 run the plot cell. Rerun the formal-samples cell only after changing the
 formal-sample filter. A frequency-only selection produces only frequency figures;
-an excitation-only selection produces only current--voltage figures.
+an excitation-only selection produces only current--voltage figures. A combined
+record produces one current--Vxx/Vxy curve per actual frequency; the amplitude
+axis is the SINE OUT readback converted through the recorded excitation path.
 
 `clean` is the default automatic quality screen. It excludes formal samples
 already marked `problem`, `unlocked`, `overload`, or `instrument_error` while
@@ -63,6 +65,11 @@ magnitude) on the left axis and measured phase on the right axis. Frequency is
 logarithmic and its title states the calibrated RMS current. Current--voltage
 plots use the same SINE OUT-derived RMS current on the x axis. A missing harmonic
 is labeled as missing rather than interpolated or combined with another order.
+
+For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
+`amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency
+readback. This keeps frequency-dependent I--V curves separate and makes any
+frequency quantization visible in the legend.
 
 ### Harmonic current-power-law fitting
 

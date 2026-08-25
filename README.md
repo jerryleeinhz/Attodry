@@ -96,8 +96,8 @@ python -m attodry_control.lockin_test --help
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
 `config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别
 保存在 `[lockin_xx]` 与 `[lockin_xy]`：当前 `hardware.example.toml` 示例固定为
-XX 1 V、XY 10 mV；只有把某一角色显式改为 `bounded_auto` 时才启用该角色的自动量程。配置完成后，频率扫描和幅值
-扫描分别直接运行：
+XX 1 V、XY 10 mV；只有把某一角色显式改为 `bounded_auto` 时才启用该角色的自动量程。配置完成后，频率扫描、幅值
+扫描或频率×幅值二维扫描分别直接运行：
 
 扫频期间的固定 XX SINE OUT 幅值填写在
 `[lockin_sweep].frequency_source_voltage_v_rms`（0.004--5.0 Vrms）；扫频结束后仍
@@ -114,6 +114,7 @@ XX 1 V、XY 10 mV；只有把某一角色显式改为 `bounded_auto` 时才启�
 ```powershell
 python -m attodry_control.lockin_test sweep-frequency
 python -m attodry_control.lockin_test sweep-excitation
+python -m attodry_control.lockin_test sweep-frequency-excitation
 ```
 
 两条命令默认读取 `config\hardware.local.toml`；仅当配置文件位于其他位置时才
@@ -126,6 +127,9 @@ python -m attodry_control.lockin_test sweep-excitation
 `excitation_xx_harmonics`、`excitation_xy_harmonics` 分别决定每类扫描正式保留的
 XX/XY 谐波。每项可填 `[1, 3]`、`[2]` 或 `[]`；每类扫描至少选择一个角色。未正式选择的
 伴随通道仍会读取并参与安全判决，完成或失败清理仍会恢复两台 SR830 到 h1。
+二维扫描可用 `combined_xx_harmonics` 与 `combined_xy_harmonics` 单独选择；省略时
+继承 `excitation_*`。它按频率外层、幅值内层遍历两个配置区间，并将实际频率和 SINE
+OUT 读回值保存到同一个 JSON。
 
 在没有任何 sweep 或其他程序占用同一对 VISA 地址时，可用下面的只读面板实时查看
 XX/XY 的电压、相位、频率、量程和锁定状态：

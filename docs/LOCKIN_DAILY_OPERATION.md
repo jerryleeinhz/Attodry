@@ -1,6 +1,6 @@
 # Dual-SR830 日常扫频与扫幅
 
-本页是 Lock-in 日常数据采集入口。它只覆盖两条独立的设备扫描命令；不包含
+本页是 Lock-in 日常数据采集入口。它覆盖扫频、扫幅和频率×幅值二维矩阵三类设备扫描命令；不包含
 attoDRY、PPMS、SMU 或旋转台控制。
 
 日常扫描的单一参数来源是本机、被 Git 忽略的
@@ -10,6 +10,7 @@ attoDRY、PPMS、SMU 或旋转台控制。
 conda activate lyr
 python -m attodry_control.lockin_test sweep-frequency
 python -m attodry_control.lockin_test sweep-excitation
+python -m attodry_control.lockin_test sweep-frequency-excitation
 ```
 
 ### 本机地址与版本更新
@@ -445,6 +446,7 @@ sensitivity_full_scale_v = 0.050
 | `xx_full_scale_v` / `xy_full_scale_v` | 可选的区间级固定量程覆盖；只能填写安全协议白名单中的 SR830 full scale（当前 1、10、20、50 mV，XX 另有 1 V）。省略时使用对应 `[lockin_xx]`/`[lockin_xy]` 的设置；`bounded_auto` 角色必须省略。量程只在区间边界切换，并记录读回和状态。 |
 | `frequency_xx_harmonics` / `frequency_xy_harmonics` | 分别选择扫频正式曲线中的 XX/XY 谐波。每项为升序组合，只能含 1、2、3；`[]` 表示该角色不进入正式曲线。两项合起来至少选一个。 |
 | `excitation_xx_harmonics` / `excitation_xy_harmonics` | 分别选择扫幅正式曲线中的 XX/XY 谐波；规则同上，且可与扫频不同。例：`excitation_xx_harmonics = []`、`excitation_xy_harmonics = [2]` 只输出 XY h2 曲线。 |
+| `combined_xx_harmonics` / `combined_xy_harmonics` | 频率×幅值二维扫描 `sweep-frequency-excitation` 的正式 XX/XY 谐波选择；省略时分别继承 `excitation_*`。二维扫描记录每个频率的实际读回值和每个幅值点，至少一项非空。 |
 | `frequency_harmonics` / `excitation_harmonics` | 旧版兼容字段；每个列表会同样应用到 XX 和 XY。二者都必须是非空升序组合，且不可与四个角色专用字段混用。 |
 | `harmonics` | 更旧的兼容字段；一个非空升序组合同时应用到两类扫描和两台仪器，且不可与任何新字段混用。新建或修改日常配置应使用四个角色专用字段。 |
 | `skip_unsupported_harmonics` | 布尔值 `true` 或 `false`。为 `true` 时，超过 102 kHz 的 h2/h3 不写入仪器，而是在 JSON 写入 `skipped_harmonics`；日常高频扫描推荐 `true`。 |
@@ -480,6 +482,26 @@ SR830 的幅值量化或显示精度造成的任意差异都会写入审计记�
 覆盖仍可用于一次性离线测试，此时不带区间级量程覆盖。每个 JSON 的
 `measurement_config.sweep.range_segments`、`point_range_plan` 以及每点的
 `range_segment_index`/`range_transition` 保存展开后的实际计划和量程切换证据。
+
+### 频率×幅值二维扫描
+
+在 `[lockin_sweep]` 同时配置 `frequency_ranges` 与 `excitation_ranges` 后运行：
+
+```powershell
+python -m attodry_control.lockin_test sweep-frequency-excitation
+```
+
+程序按“频率外层、幅值升序内层”遍历笛卡尔积。切换到下一个频率前，XX SINE OUT
+先回到 4 mVrms 安全基线；每个网格点保存请求/实际频率、请求/读回幅值、按读回
+SINE OUT 计算的 RMS 电流、量程计划、状态锁存和正式样本。顶层 JSON 的
+`frequency_records` 保存每个实际频率及其 `point_indices` 便于按频率审计，
+`grid_shape` 给出二维网格尺寸；失败记录仍
+保留为 `completed=false`，不会进入默认分析。
+
+Notebook 对这种记录提供 `plot_multi_frequency_iv_curves`：横轴是读回 SINE OUT
+换算的 RMS 电流，纵轴可以选 `x_v`、`y_v`、`amplitude_v` 或 `phase_deg`，每条
+颜色曲线对应一个实际读回频率。频率轻微量化抖动会按读回分辨率聚类，不会用请求值
+替代实际频率。
 
 线性模式也可按点数配置，例如 `{ min = 0.16, max = 5.0, scale = "linear", points = 16 }`
 生成 16 个从 0.16 到 5.0 Vrms、端点包含的线性等距点；此时不要再写 `step`。

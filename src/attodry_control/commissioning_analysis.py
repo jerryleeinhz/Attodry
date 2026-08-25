@@ -115,6 +115,20 @@ class SweepStatistic:
 
 
 @dataclass(frozen=True, slots=True)
+class MultiFrequencyIVStatistic:
+    """One aggregated point for a frequency-by-excitation I--V curve."""
+
+    frequency_hz: float
+    current_a_rms: float
+    role: str
+    harmonic: int
+    metric: str
+    mean: float
+    standard_deviation: float
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
 class HarmonicScalingRules:
     """Notebook-editable rules for current-power-law analysis.
 
@@ -542,8 +556,9 @@ def excitation_path_from_sweep_files(
         if not isinstance(payload, dict) or payload.get("scan") not in {
             "frequency",
             "excitation",
+            "frequency_excitation",
         }:
-            raise ValueError(f"{path} is not a frequency or excitation sweep.")
+            raise ValueError(f"{path} is not a supported lock-in sweep.")
         recorded = _recorded_excitation_path(payload)
         if recorded is None:
             raise ValueError(
@@ -571,8 +586,9 @@ def load_sweep_samples(
     if not isinstance(payload, dict) or payload.get("scan") not in {
         "frequency",
         "excitation",
+        "frequency_excitation",
     }:
-        raise ValueError("Selected file is not a frequency or excitation sweep.")
+        raise ValueError("Selected file is not a supported lock-in sweep.")
     completed = payload.get("completed") is True
     if not completed and not include_rejected:
         raise ValueError(
@@ -628,7 +644,7 @@ def load_sweep_sample_files(
     sample_statuses: Iterable[str] | None = None,
     roles: Iterable[str] | None = None,
 ) -> tuple[CommissioningSample, ...]:
-    """Load selected sweep files without combining frequency and excitation scans."""
+    """Load selected sweep files without combining incompatible scan types."""
 
     rows = tuple(
         row
@@ -644,7 +660,7 @@ def load_sweep_sample_files(
         raise ValueError("At least one selected sweep file with formal samples is required.")
     scan_types = {row.scan_type for row in rows}
     if len(scan_types) != 1:
-        raise ValueError("Load frequency and excitation files separately.")
+        raise ValueError("Load frequency, excitation, and combined files separately.")
     return rows
 
 
@@ -688,6 +704,79 @@ def aggregate_sweep_samples(
             SweepStatistic(
                 x_value=x_value,
                 role=role,
+                metric=metric,
+                mean=mean,
+                standard_deviation=spread,
+                count=len(values),
+            )
+        )
+    return tuple(statistics)
+
+
+def aggregate_frequency_excitation_iv(
+    rows: Sequence[CommissioningSample],
+    *,
+    role: str,
+    harmonic: int,
+    metric: str = "amplitude_v",
+    excitation_path: ExcitationPathResistance | None = None,
+) -> tuple[MultiFrequencyIVStatistic, ...]:
+    """Aggregate a combined scan into one I--V curve per actual frequency.
+
+    The current is always calculated from each recorded SINE OUT readback and
+    the archived excitation-path resistance.  Frequency is taken from the
+    per-point SR830 readback, not the requested grid value.  Small readback
+    jitter is clustered using a relative tolerance so one physical frequency
+    produces one curve.
+    """
+
+    if role not in PLOT_ROLES:
+        raise ValueError(f"Unknown role: {role}")
+    if harmonic not in PLOT_HARMONICS:
+        raise ValueError(f"Unsupported harmonic: {harmonic}")
+    if metric not in SWEEP_METRICS:
+        raise ValueError(f"Unsupported metric: {metric}")
+    if not rows:
+        raise ValueError("No sweep samples match the selected filters.")
+    if {row.scan_type for row in rows} != {"frequency_excitation"}:
+        raise ValueError("Multi-frequency I--V analysis requires a combined sweep.")
+    selected = tuple(
+        row for row in rows if row.role == role and row.harmonic == harmonic
+    )
+    if not selected:
+        return ()
+    resolved_path = _single_excitation_path_for_rows(selected, excitation_path)
+    # First assign rows to frequency bins.  The readback is retained as the
+    # representative value; only sub-readback-resolution jitter is clustered.
+    frequency_bins: list[tuple[float, list[CommissioningSample]]] = []
+    for row in sorted(selected, key=lambda item: (item.actual_frequency_hz, item.point_index)):
+        for representative, bin_rows in frequency_bins:
+            if math.isclose(
+                row.actual_frequency_hz,
+                representative,
+                rel_tol=2e-6,
+                abs_tol=1e-6,
+            ):
+                bin_rows.append(row)
+                break
+        else:
+            frequency_bins.append((row.actual_frequency_hz, [row]))
+    grouped: dict[tuple[float, float], list[float]] = {}
+    for frequency_hz, bin_rows in frequency_bins:
+        for row in bin_rows:
+            current = resolved_path.current_from_sine_output(row.sine_output_v_rms)
+            grouped.setdefault((frequency_hz, current), []).append(
+                float(getattr(row, metric))
+            )
+    statistics: list[MultiFrequencyIVStatistic] = []
+    for (frequency_hz, current), values in sorted(grouped.items()):
+        mean, spread = _mean_and_standard_deviation(values, metric=metric)
+        statistics.append(
+            MultiFrequencyIVStatistic(
+                frequency_hz=frequency_hz,
+                current_a_rms=current,
+                role=role,
+                harmonic=harmonic,
                 metric=metric,
                 mean=mean,
                 standard_deviation=spread,
@@ -2901,6 +2990,67 @@ def plot_role_harmonic_sweep(
     right_handles, right_labels = phase_axis.get_legend_handles_labels()
     if left_handles or right_handles:
         voltage_axis.legend(left_handles + right_handles, left_labels + right_labels)
+    if destination is not None:
+        figure.savefig(destination, dpi=200)
+    return figure
+
+
+def plot_multi_frequency_iv_curves(
+    rows: Sequence[CommissioningSample],
+    *,
+    role: str,
+    harmonic: int,
+    metric: str = "amplitude_v",
+    excitation_path: ExcitationPathResistance | None = None,
+    destination: str | Path | None = None,
+):
+    """Plot combined-sweep I--V curves, with one colored curve per frequency."""
+
+    statistics = aggregate_frequency_excitation_iv(
+        rows,
+        role=role,
+        harmonic=harmonic,
+        metric=metric,
+        excitation_path=excitation_path,
+    )
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise RuntimeError(
+            "Plotting requires: python -m pip install -e '.[analysis]'"
+        ) from exc
+    figure, axis = plt.subplots(figsize=(7.0, 4.8), constrained_layout=True)
+    frequencies = sorted({item.frequency_hz for item in statistics})
+    colormap = plt.get_cmap("viridis")
+    denominator = max(len(frequencies) - 1, 1)
+    for index, frequency_hz in enumerate(frequencies):
+        selected = [item for item in statistics if item.frequency_hz == frequency_hz]
+        color = colormap(index / denominator)
+        axis.errorbar(
+            [item.current_a_rms for item in selected],
+            [item.mean for item in selected],
+            yerr=[item.standard_deviation for item in selected],
+            marker="o",
+            linewidth=1.2,
+            capsize=3,
+            color=color,
+            label=f"{frequency_hz:.7g} Hz",
+        )
+    if statistics and all(item.current_a_rms > 0.0 for item in statistics):
+        axis.set_xscale("log")
+    axis.set_xlabel("SINE OUT current (A RMS)")
+    axis.set_ylabel(
+        {
+            "x_v": "X (V RMS)",
+            "y_v": "Y (V RMS)",
+            "amplitude_v": "R (V RMS)",
+            "phase_deg": "Phase (degree)",
+        }[metric]
+    )
+    axis.set_title(f"Combined sweep · I–V{role} · h{harmonic}")
+    axis.grid(True, alpha=0.25)
+    if frequencies:
+        axis.legend(title="Actual frequency")
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure

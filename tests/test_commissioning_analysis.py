@@ -19,6 +19,7 @@ from attodry_control.commissioning_analysis import (
     fit_harmonic_scaling,
     load_sweep_sample_files,
     load_sweep_samples,
+    aggregate_frequency_excitation_iv,
     plot_role_harmonic_sweep,
     plot_six_role_harmonic_sweeps,
 )
@@ -89,6 +90,34 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual({row.target_frequency_hz for row in rows}, {5622.80243375})
         self.assertEqual({row.actual_frequency_hz for row in rows}, {5622.0})
         self.assertEqual({item.x_value for item in statistics}, {5622.0})
+
+    def test_combined_sweep_aggregates_one_iv_curve_per_actual_frequency(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["scan"] = "frequency_excitation"
+        payload["measurement_config"] = self._measurement_config_path()
+        payload["points"] = []
+        for point_index, frequency_hz in enumerate((17.777, 316.1)):
+            for excitation_v, amplitude in ((0.004, 1.0), (0.008, 4.0)):
+                point = {
+                    "point_index": point_index * 2 + int(excitation_v * 1000),
+                    "target_frequency_hz": frequency_hz,
+                    "actual_frequency_hz": frequency_hz,
+                    "source_v_rms": excitation_v,
+                    "source_readback_v_rms": excitation_v,
+                    "nominal_current_a_rms": None,
+                    "samples": [self._sample(xx_amplitude=amplitude)],
+                }
+                payload["points"].append(point)
+        path = self._write_json("combined.json", payload)
+
+        rows = load_sweep_samples(path)
+        statistics = aggregate_frequency_excitation_iv(
+            rows, role="xx", harmonic=1
+        )
+
+        self.assertEqual({item.frequency_hz for item in statistics}, {17.777, 316.1})
+        self.assertEqual(len(statistics), 4)
+        self.assertEqual({item.current_a_rms for item in statistics}, {0.004 / 100550.0, 0.008 / 100550.0})
 
     def test_analysis_ignores_unused_output_overload_bit(self) -> None:
         payload = self._sweep(completed=True)

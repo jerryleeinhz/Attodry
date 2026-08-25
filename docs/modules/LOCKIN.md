@@ -21,6 +21,13 @@
 `bounded_auto` 角色不允许区间覆盖。展开点、区间索引、量程切换和读回都写入每次 sweep
 的审计 JSON；旧的点数组仍作为过渡格式接受。
 
+新增 `sweep-frequency-excitation` 频率×幅值矩阵扫描：频率区间为外层循环，幅值
+区间为内层递增循环，每次改频率前 XX SINE OUT 返回 4 mVrms。`combined_xx_harmonics`
+和 `combined_xy_harmonics` 可在 `[lockin_sweep]` 中独立选择正式谐波，省略时继承
+扫幅选择。JSON 的 `frequency_records` 和每个点的 `frequency_index`/
+`excitation_index`、实际频率与 SINE OUT 读回值构成完整二维审计；该命令沿用原有
+电流/电压安全边界、量程策略和 overload 判定。
+
 这些是上次真实读回，不是对当前面板状态的持续保证。受版本控制的
 `hardware.example.toml` 模板已按操作者最新文件改为 XX 1 V、XY 10 mV、100/150 Ω
 电阻参数和分段扫幅网格；这不改变上面记录的历史真实读回。受版本控制的硬件和模拟
@@ -485,6 +492,11 @@ JSON 和标准错误文件只保存在该 clone 的忽略 `run_data` 目录；�
 使用同一计算。若扫频/扫幅记录没有某个谐波，只明确标记缺失而不推断。计算优先
 使用保存的 SINE OUT 读回，旧扫频记录没有读回时才采用记录的 4 mV 设定值；不打开
 VISA、不读取状态锁存、不写设置。
+
+二维记录在 Notebook 中用 `plot_multi_frequency_iv_curves` 绘制：横轴为每点 SINE OUT
+读回值按完整串联电阻换算的 RMS 电流，纵轴可选 `x_v`、`y_v`、`amplitude_v` 或
+`phase_deg`，颜色分别表示实际频率。频率读回的微小量化抖动按读回分辨率聚类；不以
+请求频率替代实际频率，也不把不同频率混成一条曲线。
 
 2026-08-21：为重做的 1/2/3 阶扫频和扫幅增加离线验证的显式
 `--all-harmonics` 选项。默认 sweep 仍只测 h1；只有提供该旗标时，才会在每个

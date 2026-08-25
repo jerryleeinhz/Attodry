@@ -879,6 +879,16 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   archived in measurement schema 7, while legacy point arrays remain accepted. This
   feature was verified with configuration and fake-VISA tests only; no hardware was
   opened or written.
+- Added the frequency×excitation matrix sweep and its read-only analysis path
+  (2026-08-25). `sweep-frequency-excitation` traverses frequency outside and
+  ascending SINE OUT amplitude inside, returns to 4 mVrms before each frequency
+  change, and archives actual frequency/source readbacks, derived current,
+  range/status evidence, and grid indices in `frequency_excitation` JSON. The
+  combined harmonic lists default to the excitation lists but can be selected
+  independently. The analysis loader and Notebook now select combined records
+  and plot one current–Vxx/Vxy curve per actual frequency; exports include the
+  combined files and selection metadata. Fake-VISA, analysis, full offline suite,
+  and Notebook compilation passed; no hardware resource was opened or written.
 
 ## Current profile update - operator-supplied hardware example
 

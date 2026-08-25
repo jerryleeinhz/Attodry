@@ -137,6 +137,11 @@ frequency_xx_harmonics = [1, 2, 3]
 frequency_xy_harmonics = [1, 2, 3]
 excitation_xx_harmonics = [1]
 excitation_xy_harmonics = [1, 2, 3]
+# Optional selections for sweep-frequency-excitation. When omitted, these
+# default to the excitation selections above. Use [] for either role, but at
+# least one of the two combined lists must contain a harmonic.
+combined_xx_harmonics = [1]
+combined_xy_harmonics = [1, 2, 3]
 # At high fundamental frequencies, retain supported orders and record skipped ones.
 skip_unsupported_harmonics = true
 # Range mode and target/policy belong to [lockin_xx] and [lockin_xy], not this
