@@ -430,6 +430,83 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual(fit.amplitude_verdict, "insufficient_data")
         self.assertTrue(any("current span" in reason for reason in fit.reasons))
 
+    def test_complex_background_recovers_quadratic_response(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._complex_scaling_rows(
+            exponent=2.0,
+            background_x_v=1.0e-6,
+            background_y_v=-0.5e-6,
+            response_x_v_at_reference_current=2.0e-8,
+            response_y_v_at_reference_current=1.0e-8,
+        )
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertEqual(fit.complex_selected_model, "offset_fixed_order")
+        self.assertEqual(fit.complex_background_verdict, "preferred")
+        self.assertEqual(fit.complex_power_law_verdict, "consistent")
+        self.assertAlmostEqual(fit.complex_exponent or 0.0, 2.0, places=5)
+        self.assertGreater(fit.complex_background_delta_aicc or 0.0, 6.0)
+        selected = next(
+            model for model in fit.complex_models
+            if model.name == fit.complex_selected_model
+        )
+        self.assertAlmostEqual(selected.background_x_v, 1.0e-6, places=12)
+        self.assertAlmostEqual(selected.background_y_v, -0.5e-6, places=12)
+        json.dumps(fit.as_dict())
+
+    def test_complex_background_rejects_wrong_exponent(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._complex_scaling_rows(
+            exponent=1.25,
+            background_x_v=1.0e-6,
+            background_y_v=-0.5e-6,
+            response_x_v_at_reference_current=2.0e-8,
+            response_y_v_at_reference_current=1.0e-8,
+        )
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        self.assertEqual(fit.complex_selected_model, "offset_fixed_order")
+        self.assertEqual(fit.complex_power_law_verdict, "inconsistent")
+        self.assertFalse(
+            (fit.complex_exponent_ci_low or 0.0)
+            <= 2.0
+            <= (fit.complex_exponent_ci_high or 0.0)
+        )
+        self.assertGreater(fit.complex_delta_aicc_fixed_minus_free or 0.0, 6.0)
+
+    def test_complex_background_mode_can_force_no_offset(self) -> None:
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        rows = self._complex_scaling_rows(
+            exponent=2.0,
+            background_x_v=1.0e-6,
+            background_y_v=-0.5e-6,
+            response_x_v_at_reference_current=2.0e-8,
+            response_y_v_at_reference_current=1.0e-8,
+        )
+
+        fit = fit_harmonic_scaling(
+            rows,
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+            rules=HarmonicScalingRules(complex_background_mode="none"),
+        )
+
+        self.assertEqual(fit.complex_selected_model, "no_offset_fixed_order")
+        self.assertEqual(fit.complex_background_verdict, "preferred")
+
     def test_notebook_is_valid_json_and_all_code_cells_compile(self) -> None:
         path = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"
         notebook = json.loads(path.read_text(encoding="utf-8"))
@@ -474,6 +551,8 @@ class CommissioningAnalysisTests(unittest.TestCase):
         )
         self.assertIn("SCALING_RULES = HarmonicScalingRules", code)
         self.assertIn("minimum_current_decades=1.0", code)
+        self.assertIn("complex_background_mode='auto'", code)
+        self.assertIn("complex_free_exponent_min=0.05", code)
         self.assertIn("fit_harmonic_scalings", code)
         self.assertIn("plot_harmonic_scaling_fit", code)
         self.assertIn("'harmonic_scaling_rules': asdict(SCALING_RULES)", code)
@@ -570,6 +649,8 @@ class CommissioningAnalysisTests(unittest.TestCase):
         for point_index, current in enumerate(currents):
             amplitude = 1.0e8 * current**exponent
             phase = phase_slope_deg_per_decade * math.log10(current / currents[0])
+            x_value = amplitude * math.cos(math.radians(phase))
+            y_value = amplitude * math.sin(math.radians(phase))
             for sample_index in range(3):
                 rows.append(
                     replace(
@@ -582,8 +663,52 @@ class CommissioningAnalysisTests(unittest.TestCase):
                         nominal_current_a_rms=current,
                         harmonic=2,
                         amplitude_v=amplitude,
-                        x_v=amplitude,
-                        y_v=0.0,
+                        x_v=x_value,
+                        y_v=y_value,
+                        phase_deg=phase,
+                    )
+                )
+        return tuple(rows)
+
+    def _complex_scaling_rows(
+        self,
+        *,
+        exponent: float,
+        background_x_v: float,
+        background_y_v: float,
+        response_x_v_at_reference_current: float,
+        response_y_v_at_reference_current: float,
+    ) -> tuple[object, ...]:
+        base = next(
+            row for row in load_sweep_samples(
+                self._write_json("complex-scaling-base.json", self._sweep(completed=True))
+            )
+            if row.role == "xy"
+        )
+        path_resistance = 100_550.0
+        currents = tuple(1e-8 * (10.0 ** (index / 3.0)) for index in range(10))
+        current_reference = math.sqrt(currents[0] * currents[-1])
+        rows = []
+        for point_index, current in enumerate(currents):
+            scale = (current / current_reference) ** exponent
+            x_value = background_x_v + response_x_v_at_reference_current * scale
+            y_value = background_y_v + response_y_v_at_reference_current * scale
+            amplitude = math.hypot(x_value, y_value)
+            phase = math.degrees(math.atan2(y_value, x_value))
+            for sample_index in range(3):
+                rows.append(
+                    replace(
+                        base,
+                        scan_type="excitation",
+                        point_index=point_index,
+                        sample_index=sample_index,
+                        source_v_rms=current * path_resistance,
+                        sine_output_v_rms=current * path_resistance,
+                        nominal_current_a_rms=current,
+                        harmonic=2,
+                        amplitude_v=amplitude,
+                        x_v=x_value,
+                        y_v=y_value,
                         phase_deg=phase,
                     )
                 )

@@ -74,21 +74,43 @@ calculated from the recorded path snapshot:
 I_RMS = V_SINE_OUT,RMS / (R_external + 50 ohm + R_device)
 ```
 
-For a channel with harmonic order `n`, the analysis compares the free-exponent
-model and the expected fixed-order model in log-log space:
+For a channel with harmonic order `n`, the raw-magnitude audit compares the
+free-exponent model and the expected fixed-order model in log-log space:
 
 ```text
 log(R) = log(A) + p log(I)       (p is fitted)
 log(R) = log(A) + n log(I)       (n is fixed to 1, 2, or 3)
 ```
 
-The direct exponent evidence is the fitted `p` and its approximate confidence
+This raw `R` comparison has no additive background term. Its direct exponent evidence is the fitted `p` and its approximate confidence
 interval. `delta_aicc_fixed_minus_free` is `AICc_fixed - AICc_free`; values at
 or below 2 mean that the fixed-order model is competitive, values above 6 are
 evidence for the free-exponent model, and values above 10 are strong evidence.
 The result also reports fixed/free R-squared, relative RMSE, current span in
 decades, replicate-based SNR, and the phase slope in degrees per current decade.
 R-squared is contextual only and is never used as the sole decision rule.
+
+The offset-aware physical-order result instead fits the complex lock-in vector
+`Z = X + iY`. It calculates all four models below, where `B` is a complex
+background (independent amplitude and phase) and `I_ref` is the geometric mean
+of the retained current range:
+
+```text
+Z = C (I / I_ref)^n
+Z = C (I / I_ref)^p
+Z = B + C (I / I_ref)^n
+Z = B + C (I / I_ref)^p
+```
+
+This is more appropriate than fitting a scalar `R = A·I^n + b`: the background
+and response can have different phases, so in general
+`|B + C·I^n|` is not equal to `b + A·I^n`. In `complex_background_mode = "auto"`,
+corrected AIC first chooses the lower-AIC fixed-order model with or without `B`,
+then compares it with the free-exponent model using the same background choice.
+`"none"` forces the no-background pair and `"with_offset"` forces the
+background pair. The free complex exponent is profiled over 0.05–6.0; a result
+at a search boundary has no exponent confidence interval and remains
+`ambiguous` rather than being accepted.
 
 The notebook keeps the thresholds in its first code cell inside the editable
 `SCALING_RULES` block. The defaults are:
@@ -105,14 +127,19 @@ The notebook keeps the thresholds in its first code cell inside the editable
 | `max_relative_rmse` | 0.10 | Maximum relative error of the fixed-order fit |
 | `max_phase_slope_deg_per_decade` | 5.0 | Phase-stability limit for the complex-response verdict |
 | `max_phase_span_deg` | 10.0 | Total unwrapped phase-span limit |
+| `complex_background_mode` | `"auto"` | Choose `"auto"`, force no background with `"none"`, or force a complex background with `"with_offset"` |
+| `complex_free_exponent_min` / `max` | 0.05 / 6.0 | Visible search interval for the free complex exponent |
 
-Two verdicts are intentionally returned. `amplitude_verdict` asks whether the
-magnitude follows `I^n`. `complex_response_verdict` additionally requires the
-phase to remain stable. Thus a magnitude can be consistent with `I^2` while the
-full complex Vxy response is marked inconsistent because its phase rotates with
-current. The notebook returns `insufficient_data` when the point count or
-current range is too small, `ambiguous` when indicators disagree, and does not
-silently remove low-SNR or manually excluded points. Optional thresholds can be
+Three conclusions are intentionally returned. `amplitude_verdict` asks whether
+the raw magnitude follows `I^n`; `complex_response_verdict` is the existing
+raw-phase stability audit; and `complex_power_law_verdict` is the background-aware
+complex result to use when deciding the physical harmonic order. A raw phase can
+rotate with current solely because `B` and `C·I^n` have different phases, while
+the complex fit remains consistent. `complex_background_verdict` records whether
+the data prefer `B`, and `complex_models` records all fitted vectors, AICc and
+residuals. The notebook returns `insufficient_data` when point count or current
+range is too small, `ambiguous` when indicators disagree, and does not silently
+remove low-SNR or manually excluded points. Optional numerical thresholds can be
 set to `None` in the notebook to disable that individual criterion.
 
 The optional export records the exact `SCALING_RULES` values and every fit

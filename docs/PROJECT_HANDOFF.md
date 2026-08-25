@@ -847,6 +847,17 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   `selection_manifest.json` and write one fit figure per available channel.
   The analysis core and synthetic-order tests are offline-only; no hardware
   resource was opened or written.
+- The same notebook now provides an offset-aware complex harmonic fit for the
+  cases where a scalar `R=A·I^n+b` would be physically misleading. It fits
+  `Z=X+iY` using no-background/fixed-order, no-background/free-order,
+  complex-background/fixed-order, and complex-background/free-order models.
+  `SCALING_RULES.complex_background_mode` can automatically select by AICc or
+  force either background treatment. Results archive the selected model, complex
+  background and response vectors, AICc/RMSE/exponent confidence, and a separate
+  `complex_power_law_verdict`; raw phase slope/span remain a non-destructive
+  audit. Synthetic offline tests cover a true quadratic response obscured by a
+  complex background and a wrong exponent. No hardware resource was opened or
+  written.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`

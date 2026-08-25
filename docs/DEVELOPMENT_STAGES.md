@@ -825,3 +825,13 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   amplitude and complex-response verdicts, exports fit figures/results and the
   exact rules in `selection_manifest.json`, and adds synthetic-order tests.
   This is read-only analysis; no hardware resource was opened or written.
+- Extended the harmonic-scaling analysis with an optional complex background
+  (2026-08-25): all available channels now additionally compare `Z=C(I/Iref)^n`,
+  `Z=C(I/Iref)^p`, `Z=B+C(I/Iref)^n`, and `Z=B+C(I/Iref)^p` using X/Y directly.
+  The editable `complex_background_mode` selects automatic AICc selection,
+  no-background, or forced-background comparisons. The exported result records
+  fitted background/response vectors, AICc, residuals, exponent confidence, and
+  a background-aware `complex_power_law_verdict`; raw-phase stability remains a
+  distinct audit. Synthetic tests cover correct quadratic data with a complex
+  background, a wrong background-corrected exponent, and forced no-offset mode.
+  This is read-only analysis; no hardware resource was opened or written.
