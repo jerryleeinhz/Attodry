@@ -51,10 +51,16 @@ class SmuHardwareConfig:
     source_mode: SourceMode
     compliance_current_a: float | None
     compliance_voltage_v: float | None
-    source_min: float | None
-    source_max: float | None
-    ramp_step: float | None
-    readback_tolerance: float | None
+    max_abs_voltage_v: float | None
+    max_abs_current_a: float | None
+    source_min_v: float | None
+    source_max_v: float | None
+    ramp_step_v: float | None
+    readback_tolerance_v: float | None
+    source_min_a: float | None
+    source_max_a: float | None
+    ramp_step_a: float | None
+    readback_tolerance_a: float | None
     settle_s: float | None
     nplc: float | None
     source_auto_range: bool
@@ -65,15 +71,17 @@ class SmuHardwareConfig:
     def __post_init__(self) -> None:
         if self.role not in SEMANTIC_ROLES:
             raise ThreeSmuConfigError(f"Unknown semantic SMU role {self.role!r}")
-        if self.role != "smu_bias" and self.source_mode is not SourceMode.VOLTAGE:
-            raise ThreeSmuConfigError(f"{self.role}.source_mode must be 'voltage'")
         if self.timeout_ms is not None and self.timeout_ms < 1:
             raise ThreeSmuConfigError(f"{self.role}.timeout_ms must be positive")
         for field_name in (
             "compliance_current_a",
             "compliance_voltage_v",
-            "ramp_step",
-            "readback_tolerance",
+            "max_abs_voltage_v",
+            "max_abs_current_a",
+            "ramp_step_v",
+            "readback_tolerance_v",
+            "ramp_step_a",
+            "readback_tolerance_a",
             "nplc",
         ):
             value = getattr(self, field_name)
@@ -87,19 +95,24 @@ class SmuHardwareConfig:
             raise ThreeSmuConfigError(
                 f"{self.role}.settle_s must be finite and non-negative"
             )
-        if self.source_min is not None and self.source_max is not None:
-            if not (
-                math.isfinite(self.source_min)
-                and math.isfinite(self.source_max)
-                and self.source_min < self.source_max
-            ):
-                raise ThreeSmuConfigError(
-                    f"{self.role}.source_min must be below source_max"
-                )
-            if not self.source_min <= 0 <= self.source_max:
-                raise ThreeSmuConfigError(
-                    f"{self.role} source range must include zero"
-                )
+        self._validate_source_range("v", self.max_abs_voltage_v)
+        self._validate_source_range("a", self.max_abs_current_a)
+        if (
+            self.compliance_current_a is not None
+            and self.max_abs_current_a is not None
+            and self.compliance_current_a > self.max_abs_current_a
+        ):
+            raise ThreeSmuConfigError(
+                f"{self.role}.compliance_current_a cannot exceed max_abs_current_a"
+            )
+        if (
+            self.compliance_voltage_v is not None
+            and self.max_abs_voltage_v is not None
+            and self.compliance_voltage_v > self.max_abs_voltage_v
+        ):
+            raise ThreeSmuConfigError(
+                f"{self.role}.compliance_voltage_v cannot exceed max_abs_voltage_v"
+            )
         if self.leakage_limit_a is not None:
             if not math.isfinite(self.leakage_limit_a) or self.leakage_limit_a <= 0:
                 raise ThreeSmuConfigError(
@@ -112,6 +125,70 @@ class SmuHardwareConfig:
                 raise ThreeSmuConfigError(
                     f"{self.role}.leakage_limit_a cannot exceed compliance_current_a"
                 )
+            if (
+                self.max_abs_current_a is not None
+                and self.leakage_limit_a > self.max_abs_current_a
+            ):
+                raise ThreeSmuConfigError(
+                    f"{self.role}.leakage_limit_a cannot exceed max_abs_current_a"
+                )
+
+    @property
+    def source_min(self) -> float | None:
+        return (
+            self.source_min_v
+            if self.source_mode is SourceMode.VOLTAGE
+            else self.source_min_a
+        )
+
+    @property
+    def source_max(self) -> float | None:
+        return (
+            self.source_max_v
+            if self.source_mode is SourceMode.VOLTAGE
+            else self.source_max_a
+        )
+
+    @property
+    def ramp_step(self) -> float | None:
+        return (
+            self.ramp_step_v
+            if self.source_mode is SourceMode.VOLTAGE
+            else self.ramp_step_a
+        )
+
+    @property
+    def readback_tolerance(self) -> float | None:
+        return (
+            self.readback_tolerance_v
+            if self.source_mode is SourceMode.VOLTAGE
+            else self.readback_tolerance_a
+        )
+
+    def _validate_source_range(self, unit: str, absolute_limit: float | None) -> None:
+        minimum = getattr(self, f"source_min_{unit}")
+        maximum = getattr(self, f"source_max_{unit}")
+        if minimum is None or maximum is None:
+            return
+        if not (
+            math.isfinite(minimum)
+            and math.isfinite(maximum)
+            and minimum < maximum
+        ):
+            raise ThreeSmuConfigError(
+                f"{self.role}.source_min_{unit} must be below source_max_{unit}"
+            )
+        if not minimum <= 0 <= maximum:
+            raise ThreeSmuConfigError(
+                f"{self.role} {unit.upper()} source range must include zero"
+            )
+        if absolute_limit is not None and (
+            abs(minimum) > absolute_limit or abs(maximum) > absolute_limit
+        ):
+            raise ThreeSmuConfigError(
+                f"{self.role} {unit.upper()} source range exceeds max_abs_"
+                f"{'voltage_v' if unit == 'v' else 'current_a'}"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,23 +212,29 @@ class ThreeSmuHardwareConfig:
                 configured_addresses.append(config.address)
             for field_name in (
                 "timeout_ms",
-                "source_min",
-                "source_max",
-                "ramp_step",
-                "readback_tolerance",
+                "compliance_current_a",
+                "compliance_voltage_v",
+                "max_abs_voltage_v",
+                "max_abs_current_a",
                 "settle_s",
                 "nplc",
             ):
                 if getattr(config, field_name) is None:
                     errors.append(f"{role}.{field_name} is not configured")
-            compliance_field = (
-                "compliance_current_a"
-                if config.source_mode is SourceMode.VOLTAGE
-                else "compliance_voltage_v"
-            )
-            if getattr(config, compliance_field) is None:
-                errors.append(f"{role}.{compliance_field} is not configured")
-            if role != "smu_bias" and config.leakage_limit_a is None:
+            suffix = "v" if config.source_mode is SourceMode.VOLTAGE else "a"
+            for field_name in (
+                f"source_min_{suffix}",
+                f"source_max_{suffix}",
+                f"ramp_step_{suffix}",
+                f"readback_tolerance_{suffix}",
+            ):
+                if getattr(config, field_name) is None:
+                    errors.append(f"{role}.{field_name} is not configured")
+            if (
+                role != "smu_bias"
+                and config.source_mode is SourceMode.VOLTAGE
+                and config.leakage_limit_a is None
+            ):
                 errors.append(f"{role}.leakage_limit_a is not configured")
         if len(set(configured_addresses)) != len(configured_addresses):
             errors.append("all three SMU addresses must be distinct")
@@ -538,10 +621,16 @@ def _parse_hardware_role(
         "source_mode",
         "compliance_current_a",
         "compliance_voltage_v",
-        "source_min",
-        "source_max",
-        "ramp_step",
-        "readback_tolerance",
+        "max_abs_voltage_v",
+        "max_abs_current_a",
+        "source_min_v",
+        "source_max_v",
+        "ramp_step_v",
+        "readback_tolerance_v",
+        "source_min_a",
+        "source_max_a",
+        "ramp_step_a",
+        "readback_tolerance_a",
         "settle_s",
         "nplc",
         "source_auto_range",
@@ -551,8 +640,6 @@ def _parse_hardware_role(
     expected = common | ({"leakage_limit_a"} if role != "smu_bias" else set())
     _strict_keys(table, role, expected)
     source_mode = _enum(SourceMode, table["source_mode"], f"{role}.source_mode")
-    if role != "smu_bias" and source_mode is not SourceMode.VOLTAGE:
-        raise ThreeSmuConfigError(f"{role}.source_mode must be 'voltage'")
     config = SmuHardwareConfig(
         role=role,
         model=_string(table["model"], f"{role}.model"),
@@ -565,11 +652,23 @@ def _parse_hardware_role(
         compliance_voltage_v=_placeholder_positive(
             table["compliance_voltage_v"], f"{role}.compliance_voltage_v"
         ),
-        source_min=_placeholder_number(table["source_min"], f"{role}.source_min"),
-        source_max=_placeholder_number(table["source_max"], f"{role}.source_max"),
-        ramp_step=_placeholder_positive(table["ramp_step"], f"{role}.ramp_step"),
-        readback_tolerance=_placeholder_positive(
-            table["readback_tolerance"], f"{role}.readback_tolerance"
+        max_abs_voltage_v=_placeholder_positive(
+            table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v"
+        ),
+        max_abs_current_a=_placeholder_positive(
+            table["max_abs_current_a"], f"{role}.max_abs_current_a"
+        ),
+        source_min_v=_placeholder_number(table["source_min_v"], f"{role}.source_min_v"),
+        source_max_v=_placeholder_number(table["source_max_v"], f"{role}.source_max_v"),
+        ramp_step_v=_placeholder_positive(table["ramp_step_v"], f"{role}.ramp_step_v"),
+        readback_tolerance_v=_placeholder_positive(
+            table["readback_tolerance_v"], f"{role}.readback_tolerance_v"
+        ),
+        source_min_a=_placeholder_number(table["source_min_a"], f"{role}.source_min_a"),
+        source_max_a=_placeholder_number(table["source_max_a"], f"{role}.source_max_a"),
+        ramp_step_a=_placeholder_positive(table["ramp_step_a"], f"{role}.ramp_step_a"),
+        readback_tolerance_a=_placeholder_positive(
+            table["readback_tolerance_a"], f"{role}.readback_tolerance_a"
         ),
         settle_s=_placeholder_nonnegative(table["settle_s"], f"{role}.settle_s"),
         nplc=_placeholder_positive(table["nplc"], f"{role}.nplc"),
@@ -588,19 +687,6 @@ def _parse_hardware_role(
             )
         ),
     )
-    if config.source_min is not None and config.source_max is not None:
-        if not config.source_min < config.source_max:
-            raise ThreeSmuConfigError(f"{role}.source_min must be below source_max")
-        if not config.source_min <= 0 <= config.source_max:
-            raise ThreeSmuConfigError(f"{role} source range must include zero")
-    if (
-        config.leakage_limit_a is not None
-        and config.compliance_current_a is not None
-        and config.leakage_limit_a > config.compliance_current_a
-    ):
-        raise ThreeSmuConfigError(
-            f"{role}.leakage_limit_a cannot exceed compliance_current_a"
-        )
     return config
 
 
@@ -608,11 +694,20 @@ def _parse_operation_gate(table: Mapping[str, Any], role: str) -> SmuHardwareCon
     expected = {
         "model",
         "address",
+        "source_mode",
         "compliance_a",
+        "compliance_voltage_v",
         "leakage_limit_a",
         "max_abs_voltage_v",
+        "max_abs_current_a",
+        "source_min_v",
+        "source_max_v",
         "ramp_step_v",
         "readback_tolerance_v",
+        "source_min_a",
+        "source_max_a",
+        "ramp_step_a",
+        "readback_tolerance_a",
         "settle_s",
         "smu",
     }
@@ -629,22 +724,35 @@ def _parse_operation_gate(table: Mapping[str, Any], role: str) -> SmuHardwareCon
             "four_wire",
         },
     )
-    max_abs = _placeholder_positive(table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v")
     return SmuHardwareConfig(
         role=role,
         model=_string(table["model"], f"{role}.model"),
         address=_string(table["address"], f"{role}.address"),
         timeout_ms=_placeholder_integer(smu["timeout_ms"], f"{role}.smu.timeout_ms"),
-        source_mode=SourceMode.VOLTAGE,
+        source_mode=_enum(SourceMode, table["source_mode"], f"{role}.source_mode"),
         compliance_current_a=_placeholder_positive(
             table["compliance_a"], f"{role}.compliance_a"
         ),
-        compliance_voltage_v=None,
-        source_min=None if max_abs is None else -max_abs,
-        source_max=max_abs,
-        ramp_step=_placeholder_positive(table["ramp_step_v"], f"{role}.ramp_step_v"),
-        readback_tolerance=_placeholder_positive(
+        compliance_voltage_v=_placeholder_positive(
+            table["compliance_voltage_v"], f"{role}.compliance_voltage_v"
+        ),
+        max_abs_voltage_v=_placeholder_positive(
+            table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v"
+        ),
+        max_abs_current_a=_placeholder_positive(
+            table["max_abs_current_a"], f"{role}.max_abs_current_a"
+        ),
+        source_min_v=_placeholder_number(table["source_min_v"], f"{role}.source_min_v"),
+        source_max_v=_placeholder_number(table["source_max_v"], f"{role}.source_max_v"),
+        ramp_step_v=_placeholder_positive(table["ramp_step_v"], f"{role}.ramp_step_v"),
+        readback_tolerance_v=_placeholder_positive(
             table["readback_tolerance_v"], f"{role}.readback_tolerance_v"
+        ),
+        source_min_a=_placeholder_number(table["source_min_a"], f"{role}.source_min_a"),
+        source_max_a=_placeholder_number(table["source_max_a"], f"{role}.source_max_a"),
+        ramp_step_a=_placeholder_positive(table["ramp_step_a"], f"{role}.ramp_step_a"),
+        readback_tolerance_a=_placeholder_positive(
+            table["readback_tolerance_a"], f"{role}.readback_tolerance_a"
         ),
         settle_s=_placeholder_nonnegative(table["settle_s"], f"{role}.settle_s"),
         nplc=_placeholder_positive(smu["nplc"], f"{role}.smu.nplc"),

@@ -24,6 +24,7 @@ from .three_smu_config import (
     SEMANTIC_ROLES,
     ScanPoint,
     SmuHardwareConfig,
+    SourceMode,
     ThreeSmuHardwareConfig,
     ThreeSmuScanPlan,
     generate_scan_points,
@@ -161,6 +162,8 @@ class ThreeSmuSession:
             for role, state in preflight.items():
                 config = hardware.by_role()[role]
                 assert config.readback_tolerance is not None
+                assert config.max_abs_voltage_v is not None
+                assert config.max_abs_current_a is not None
                 if state.source_mode is not config.source_mode:
                     preflight_errors.append(
                         f"{role} source mode is {state.source_mode.value}, expected "
@@ -177,10 +180,37 @@ class ThreeSmuSession:
                     )
                 elif not _status_is_clean(state.status):
                     preflight_errors.append(f"{role} instrument status is not clean")
-                if role != "smu_bias":
+                if state.voltage_v is None or not math.isfinite(state.voltage_v):
+                    preflight_errors.append(f"{role} voltage readback is unavailable")
+                elif abs(state.voltage_v) > config.max_abs_voltage_v:
+                    preflight_errors.append(
+                        f"{role} voltage readback {state.voltage_v:g} V exceeds "
+                        f"max_abs_voltage_v {config.max_abs_voltage_v:g} V"
+                    )
+                if state.current_a is None or not math.isfinite(state.current_a):
+                    preflight_errors.append(f"{role} current readback is unavailable")
+                elif abs(state.current_a) > config.max_abs_current_a:
+                    preflight_errors.append(
+                        f"{role} current readback {state.current_a:g} A exceeds "
+                        f"max_abs_current_a {config.max_abs_current_a:g} A"
+                    )
+                measured_source = (
+                    state.voltage_v
+                    if config.source_mode is SourceMode.VOLTAGE
+                    else state.current_a
+                )
+                if (
+                    measured_source is not None
+                    and math.isfinite(measured_source)
+                    and abs(measured_source) > config.readback_tolerance
+                ):
+                    preflight_errors.append(
+                        f"{role} measured {config.source_mode.value} is not "
+                        "confirmed at zero"
+                    )
+                if role != "smu_bias" and config.source_mode is SourceMode.VOLTAGE:
                     assert config.compliance_current_a is not None
                     assert config.leakage_limit_a is not None
-                    assert config.source_max is not None
                     try:
                         validate_gate_preflight(
                             role,
@@ -193,7 +223,7 @@ class ThreeSmuSession:
                                 status=state.status,
                             ),
                             GateSafetyLimits(
-                                max_abs_voltage_v=config.source_max,
+                                max_abs_voltage_v=config.max_abs_voltage_v,
                                 compliance_a=config.compliance_current_a,
                                 leakage_limit_a=config.leakage_limit_a,
                                 ramp_step_v=float(config.ramp_step),
@@ -535,6 +565,8 @@ class ThreeSmuSession:
         config = self.hardware.by_role()[role]
         problems: list[str] = []
         assert config.readback_tolerance is not None
+        assert config.max_abs_voltage_v is not None
+        assert config.max_abs_current_a is not None
         if abs(reading.source_setpoint - expected_source) > config.readback_tolerance:
             problems.append(
                 f"{role} source readback mismatch: {reading.source_setpoint:g} "
@@ -544,6 +576,27 @@ class ThreeSmuSession:
             problems.append(
                 f"{role} output readback is {reading.output_enabled}, expected {expected_output}"
             )
+        measured_source = (
+            reading.voltage_v
+            if config.source_mode is SourceMode.VOLTAGE
+            else reading.current_a
+        )
+        if abs(measured_source - expected_source) > config.readback_tolerance:
+            unit = "V" if config.source_mode is SourceMode.VOLTAGE else "A"
+            problems.append(
+                f"{role} measured source mismatch: {measured_source:g} {unit} "
+                f"vs {expected_source:g} {unit}"
+            )
+        if abs(reading.voltage_v) > config.max_abs_voltage_v:
+            problems.append(
+                f"{role} voltage {reading.voltage_v:g} V exceeds "
+                f"max_abs_voltage_v {config.max_abs_voltage_v:g} V"
+            )
+        if abs(reading.current_a) > config.max_abs_current_a:
+            problems.append(
+                f"{role} current {reading.current_a:g} A exceeds "
+                f"max_abs_current_a {config.max_abs_current_a:g} A"
+            )
         if reading.compliance_trip:
             problems.append(f"{role} compliance trip")
         if reading.near_compliance:
@@ -552,7 +605,11 @@ class ThreeSmuSession:
             problems.append(f"{role} status queue was not explicitly queried")
         elif not _status_is_clean(reading.status):
             problems.append(f"{role} instrument error: {reading.status}")
-        if role != "smu_bias" and expected_output:
+        if (
+            role != "smu_bias"
+            and config.source_mode is SourceMode.VOLTAGE
+            and expected_output
+        ):
             assert config.leakage_limit_a is not None
             if abs(reading.current_a) > config.leakage_limit_a:
                 problems.append(
@@ -682,7 +739,7 @@ class _RunRecorder:
         self._writer.writeheader()
         self._closed = False
         self.metadata: dict[str, Any] = {
-            "schema_version": 2,
+            "schema_version": 3,
             "code_version": _code_version(),
             "status": "running",
             "accepted": False,

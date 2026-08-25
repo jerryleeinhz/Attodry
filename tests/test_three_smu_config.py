@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
@@ -64,10 +65,16 @@ def smu(role: str, address: str) -> SmuHardwareConfig:
         source_mode=SourceMode.VOLTAGE,
         compliance_current_a=1e-3,
         compliance_voltage_v=10.0,
-        source_min=-2.0,
-        source_max=2.0,
-        ramp_step=0.25,
-        readback_tolerance=1e-6,
+        max_abs_voltage_v=10.0,
+        max_abs_current_a=1e-3,
+        source_min_v=-2.0,
+        source_max_v=2.0,
+        ramp_step_v=0.25,
+        readback_tolerance_v=1e-6,
+        source_min_a=-1e-3,
+        source_max_a=1e-3,
+        ramp_step_a=1e-4,
+        readback_tolerance_a=1e-9,
         settle_s=0.0,
         nplc=1.0,
         source_auto_range=True,
@@ -95,10 +102,16 @@ timeout_ms = 1000
 source_mode = "voltage"
 compliance_current_a = 0.001
 compliance_voltage_v = 10.0
-source_min = -1.0
-source_max = 1.0
-ramp_step = 0.1
-readback_tolerance = 0.000001
+max_abs_voltage_v = 10.0
+max_abs_current_a = 0.001
+source_min_v = -1.0
+source_max_v = 1.0
+ramp_step_v = 0.1
+readback_tolerance_v = 0.000001
+source_min_a = -0.001
+source_max_a = 0.001
+ramp_step_a = 0.0001
+readback_tolerance_a = 0.000000001
 settle_s = 0.0
 nplc = 1.0
 source_auto_range = true
@@ -108,11 +121,20 @@ four_wire = false
 [gate_top]
 model = "Keithley2400"
 address = "FAKE::2"
+source_mode = "voltage"
 compliance_a = 0.001
+compliance_voltage_v = 3.0
 leakage_limit_a = 0.000001
-max_abs_voltage_v = 2.0
+max_abs_voltage_v = 3.0
+max_abs_current_a = 0.001
+source_min_v = -2.0
+source_max_v = 2.0
 ramp_step_v = 0.1
 readback_tolerance_v = 0.000001
+source_min_a = -0.001
+source_max_a = 0.001
+ramp_step_a = 0.0001
+readback_tolerance_a = 0.000000001
 settle_s = 0.0
 
 [gate_top.smu]
@@ -125,11 +147,20 @@ four_wire = false
 [gate_bottom]
 model = "Keithley2400"
 address = "FAKE::3"
-compliance_a = 0.001
+source_mode = "voltage"
+compliance_a = 0.0005
+compliance_voltage_v = 4.0
 leakage_limit_a = 0.000001
-max_abs_voltage_v = 2.0
+max_abs_voltage_v = 4.0
+max_abs_current_a = 0.0005
+source_min_v = -2.0
+source_max_v = 2.0
 ramp_step_v = 0.1
 readback_tolerance_v = 0.000001
+source_min_a = -0.0005
+source_max_a = 0.0005
+ramp_step_a = 0.0001
+readback_tolerance_a = 0.000000001
 settle_s = 0.0
 
 [gate_bottom.smu]
@@ -180,6 +211,9 @@ step = 1.0
             operation = load_three_smu_operation_config(path)
             self.assertEqual(operation.output_directory, Path(directory) / "runs")
             self.assertEqual(operation.hardware.gate_top.source_max, 2.0)
+            self.assertEqual(operation.hardware.gate_top.max_abs_voltage_v, 3.0)
+            self.assertEqual(operation.hardware.gate_bottom.max_abs_voltage_v, 4.0)
+            self.assertEqual(operation.hardware.gate_bottom.max_abs_current_a, 0.0005)
             self.assertEqual(operation.plan.gate_bottom.role, ChannelRole.SWEEP)
             self.assertEqual(len(validate_plan_targets(operation.hardware, operation.plan)), 9)
 
@@ -205,18 +239,36 @@ step = 1.0
             with self.assertRaisesRegex(ThreeSmuConfigError, "unknown"):
                 load_three_smu_hardware(path)
 
-    def test_gate_cannot_be_current_source(self) -> None:
-        text = HARDWARE_EXAMPLE.read_text(encoding="utf-8")
-        marker = "[gate_top]"
-        before, after = text.split(marker, 1)
-        after = after.replace(
-            'source_mode = "voltage"', 'source_mode = "current"', 1
+    def test_gate_can_be_current_source_with_current_unit_limits(self) -> None:
+        top = replace(
+            smu("gate_top", "FAKE::2"),
+            source_mode=SourceMode.CURRENT,
+            leakage_limit_a=None,
         )
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "hardware.toml"
-            path.write_text(before + marker + after, encoding="utf-8")
-            with self.assertRaisesRegex(ThreeSmuConfigError, "must be 'voltage'"):
-                load_three_smu_hardware(path)
+        configured = ThreeSmuHardwareConfig(
+            smu("smu_bias", "FAKE::1"),
+            top,
+            smu("gate_bottom", "FAKE::3"),
+        )
+        configured.require_ready()
+        self.assertEqual(configured.gate_top.source_min, -1e-3)
+        self.assertEqual(configured.gate_top.ramp_step, 1e-4)
+
+    def test_compliance_cannot_exceed_matching_absolute_limit(self) -> None:
+        with self.assertRaisesRegex(
+            ThreeSmuConfigError, "compliance_current_a cannot exceed"
+        ):
+            replace(
+                smu("gate_top", "FAKE::2"),
+                compliance_current_a=2e-3,
+            )
+
+    def test_source_range_cannot_exceed_matching_absolute_limit(self) -> None:
+        with self.assertRaisesRegex(ThreeSmuConfigError, "source range exceeds"):
+            replace(
+                smu("gate_top", "FAKE::2"),
+                source_max_a=2e-3,
+            )
 
     def test_duplicate_configured_address_is_rejected(self) -> None:
         top = smu("gate_top", "FAKE::1")

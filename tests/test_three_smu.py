@@ -1,3 +1,4 @@
+from dataclasses import replace
 import json
 from pathlib import Path
 import tempfile
@@ -32,10 +33,16 @@ def hardware() -> ThreeSmuHardwareConfig:
             source_mode=SourceMode.VOLTAGE,
             compliance_current_a=1e-3,
             compliance_voltage_v=10.0,
-            source_min=-2.0,
-            source_max=2.0,
-            ramp_step=0.25,
-            readback_tolerance=1e-6,
+            max_abs_voltage_v=10.0,
+            max_abs_current_a=1e-3,
+            source_min_v=-2.0,
+            source_max_v=2.0,
+            ramp_step_v=0.25,
+            readback_tolerance_v=1e-6,
+            source_min_a=-1e-3,
+            source_max_a=1e-3,
+            ramp_step_a=1e-4,
+            readback_tolerance_a=1e-9,
             settle_s=0.0,
             nplc=1.0,
             source_auto_range=True,
@@ -47,6 +54,18 @@ def hardware() -> ThreeSmuHardwareConfig:
         item("smu_bias", "FAKE::1"),
         item("gate_top", "FAKE::2"),
         item("gate_bottom", "FAKE::3"),
+    )
+
+
+def current_source_gate_hardware() -> ThreeSmuHardwareConfig:
+    configured = hardware()
+    return replace(
+        configured,
+        gate_top=replace(
+            configured.gate_top,
+            source_mode=SourceMode.CURRENT,
+            leakage_limit_a=None,
+        ),
     )
 
 
@@ -82,12 +101,14 @@ class FakeAdapter:
         self,
         role: str,
         log: list[tuple],
+        hardware_config: SmuHardwareConfig,
         *,
         identity: str | None = None,
         active_output: bool = False,
     ) -> None:
         self.role = role
         self.log = log
+        self.hardware_config = hardware_config
         self.identity = identity or f"KEITHLEY,2400,{role},1"
         self.output = active_output
         self.source = 0.0
@@ -98,16 +119,26 @@ class FakeAdapter:
         self.trip_on_read: int | None = None
         self.leak_on_read: int | None = None
         self.readback_offset = 0.0
+        self.voltage_override: float | None = None
+        self.current_override: float | None = None
 
     def preflight(self) -> KeithleyPreflight:
         self.log.append(("preflight", self.role))
         return KeithleyPreflight(
             self.identity,
-            SourceMode.VOLTAGE,
+            self.hardware_config.source_mode,
             self.source,
             self.output,
-            voltage_v=self.source,
-            current_a=self.source * 1e-3 if self.role == "smu_bias" else 1e-9,
+            voltage_v=(
+                self.source
+                if self.hardware_config.source_mode is SourceMode.VOLTAGE
+                else 0.0
+            ),
+            current_a=(
+                self.source
+                if self.hardware_config.source_mode is SourceMode.CURRENT
+                else self.source * 1e-3 if self.role == "smu_bias" else 1e-9
+            ),
             status="0,No error",
             status_query_consumed=True,
         )
@@ -134,11 +165,20 @@ class FakeAdapter:
             raise KeyboardInterrupt()
         if self.fail_on_read is not None and self.read_count >= self.fail_on_read:
             raise OSError(f"injected {self.role} communication failure")
-        current = self.source * 1e-3 if self.role == "smu_bias" else 1e-9
+        if self.hardware_config.source_mode is SourceMode.VOLTAGE:
+            voltage = self.source
+            current = self.source * 1e-3 if self.role == "smu_bias" else 1e-9
+        else:
+            voltage = 0.0
+            current = self.source
         if self.leak_on_read == self.read_count:
             current = 2e-6
+        if self.voltage_override is not None:
+            voltage = self.voltage_override
+        if self.current_override is not None:
+            current = self.current_override
         return KeithleyReading(
-            voltage_v=self.source,
+            voltage_v=voltage,
             current_a=current,
             source_setpoint=self.source + self.readback_offset,
             output_enabled=self.output,
@@ -161,11 +201,12 @@ def factory_set(
     log: list[tuple] = []
     adapters: dict[str, FakeAdapter] = {}
 
-    def factory(role: str, _config: SmuHardwareConfig) -> FakeAdapter:
+    def factory(role: str, config: SmuHardwareConfig) -> FakeAdapter:
         identity = "SAME" if duplicate_identity else None
         adapter = FakeAdapter(
             role,
             log,
+            config,
             identity=identity,
             active_output=role == active_role,
         )
@@ -261,6 +302,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
             self.assertEqual(len(samples), 1)
             self.assertIsNotNone(run_dir)
             metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
+            self.assertEqual(metadata["schema_version"], 3)
             self.assertEqual(metadata["status"], "completed")
             self.assertTrue(metadata["accepted"])
             self.assertIn("code_version", metadata)
@@ -278,6 +320,52 @@ class ThreeSmuSessionTests(unittest.TestCase):
         ]
         self.assertEqual(cleanup_off[-3:], ["smu_bias", "gate_top", "gate_bottom"])
         self.assertTrue(all(not adapter.output for adapter in adapters.values()))
+
+    def test_current_source_gate_uses_current_unit_ramp_and_readback(self) -> None:
+        adapters, _log, factory = factory_set()
+        with tempfile.TemporaryDirectory() as directory:
+            with ThreeSmuSession.open(
+                current_source_gate_hardware(),
+                fixed_plan(top=5e-4),
+                authorize_writes=True,
+                authorize_status_consumption=True,
+                adapter_factory=factory,
+                sleep=lambda _: None,
+            ) as session:
+                samples = list(session.run(output_dir=directory))
+        self.assertEqual(len(samples), 1)
+        self.assertEqual(samples[0].readings["gate_top"].reading.current_a, 5e-4)
+        self.assertFalse(adapters["gate_top"].output)
+
+    def test_bias_current_absolute_limit_rejects_readback(self) -> None:
+        adapters, _log, factory = factory_set()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ThreeSmuSafetyError, "max_abs_current_a"):
+                with ThreeSmuSession.open(
+                    hardware(),
+                    fixed_plan(),
+                    authorize_writes=True,
+                    authorize_status_consumption=True,
+                    adapter_factory=factory,
+                    sleep=lambda _: None,
+                ) as session:
+                    adapters["smu_bias"].current_override = 2e-3
+                    list(session.run(output_dir=directory))
+
+    def test_current_source_gate_voltage_absolute_limit_rejects_readback(self) -> None:
+        adapters, _log, factory = factory_set()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ThreeSmuSafetyError, "max_abs_voltage_v"):
+                with ThreeSmuSession.open(
+                    current_source_gate_hardware(),
+                    fixed_plan(top=5e-4),
+                    authorize_writes=True,
+                    authorize_status_consumption=True,
+                    adapter_factory=factory,
+                    sleep=lambda _: None,
+                ) as session:
+                    adapters["gate_top"].voltage_override = 11.0
+                    list(session.run(output_dir=directory))
 
     def test_gate_leakage_failure_is_rejected_and_cleaned_up(self) -> None:
         adapters, _log, factory = factory_set()

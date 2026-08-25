@@ -49,10 +49,16 @@ address = "CHANGE_ME_BIAS_SMU_VISA_ADDRESS"
 source_mode = "voltage"       # 或 "current"
 compliance_current_a = "CHANGE_ME"
 compliance_voltage_v = "CHANGE_ME"
-source_min = "CHANGE_ME"
-source_max = "CHANGE_ME"
-ramp_step = "CHANGE_ME"
-readback_tolerance = "CHANGE_ME"
+max_abs_voltage_v = "CHANGE_ME"
+max_abs_current_a = "CHANGE_ME"
+source_min_v = "CHANGE_ME"
+source_max_v = "CHANGE_ME"
+ramp_step_v = "CHANGE_ME"
+readback_tolerance_v = "CHANGE_ME"
+source_min_a = "CHANGE_ME"
+source_max_a = "CHANGE_ME"
+ramp_step_a = "CHANGE_ME"
+readback_tolerance_a = "CHANGE_ME"
 settle_s = "CHANGE_ME"
 timeout_ms = "CHANGE_ME"
 nplc = "CHANGE_ME"
@@ -63,11 +69,20 @@ four_wire = false
 [gate_top]                     # gate_bottom 相同
 model = "Keithley2400"
 address = "CHANGE_ME_TOP_GATE_VISA_ADDRESS"
-compliance_a = "CHANGE_ME"
+source_mode = "voltage"       # 或 "current"；两个 gate 分开选择
+compliance_a = "CHANGE_ME"    # voltage source 的 current compliance
+compliance_voltage_v = "CHANGE_ME"
 leakage_limit_a = "CHANGE_ME"
 max_abs_voltage_v = "CHANGE_ME"
+max_abs_current_a = "CHANGE_ME"
+source_min_v = "CHANGE_ME"
+source_max_v = "CHANGE_ME"
 ramp_step_v = "CHANGE_ME"
 readback_tolerance_v = "CHANGE_ME"
+source_min_a = "CHANGE_ME"
+source_max_a = "CHANGE_ME"
+ramp_step_a = "CHANGE_ME"
+readback_tolerance_a = "CHANGE_ME"
 settle_s = "CHANGE_ME"
 
 [gate_top.smu]
@@ -78,14 +93,35 @@ measure_auto_range = true
 four_wire = false
 ```
 
-`[smu_bias]` 的 `source_min/source_max/ramp_step/readback_tolerance` 单位由
-`source_mode` 决定：voltage 时为 V，current 时为 A。电压源必须给
-`compliance_current_a`，电流源必须给 `compliance_voltage_v`。`gate_top` 和
-`gate_bottom` 固定为电压源，单位均为 V，且 `leakage_limit_a <= compliance_a`。
-范围必须包含零，三台地址必须不同。
+三台设备分别设置，不能用一个 gate 的值替代另一个。每台都必须填写
+`max_abs_voltage_v` 和 `max_abs_current_a`；无论选择哪种 source mode，程序都会持续检查
+实际 V/I 读回，任一绝对值越界即拒绝 run。`source_min_v/source_max_v` 与
+`source_min_a/source_max_a` 是允许请求的 source 范围，不是仪器量程，且必须包含零并位于对应
+`max_abs_*` 边界内。
+
+`source_mode = "voltage"` 时使用 `*_v` 的 source/ramp/readback 字段，Keithley 使用
+current compliance（bias 表叫 `compliance_current_a`，gate 父表为兼容通用 gate 配置仍叫
+`compliance_a`）。`source_mode = "current"` 时使用 `*_a` 字段并设置
+`compliance_voltage_v`。两个 compliance 与两个 `max_abs_*` 都必须明确填写，并满足：
+
+```text
+compliance_current_a <= max_abs_current_a
+compliance_voltage_v <= max_abs_voltage_v
+```
+
+`leakage_limit_a` 是 voltage-source gate 的更早停止阈值，必须满足
+`leakage_limit_a <= compliance_a <= max_abs_current_a`。current-source gate 的电流是主动施加量，
+不能称为 leakage，因此该模式不执行 leakage 判据，仍执行电压/电流绝对边界与 voltage
+compliance。`smu_bias` 不使用 gate leakage 判据。三台地址必须不同。
 
 `[gate_*.smu]` 只保存 2400 专属的 timeout、NPLC、量程和四线制设置；它不拥有
-voltage、leakage、compliance、ramp 或 settle 限值。这些共享 gate 限值仍只在父表中。
+source、leakage、compliance、ramp 或 settle 限值。每个 gate 自己的父表分别是它唯一的
+安全参数来源。
+
+旧 Three-SMU 本地文件若仍使用无单位的 `source_min/source_max/ramp_step/readback_tolerance`，
+新版 loader 会拒绝而不会猜测。把当前 source mode 对应的值迁移到 `_v` 或 `_a` 字段，并由
+操作者另行确认两个 `max_abs_*`、两个 compliance 和另一 source mode 的参数；不要从旧 source
+范围自动推断器件的 V/I 绝对安全边界。既有 run 数据不需要改写。
 
 扫描和记录参数在同一个文件的 `[three_smu_run]`：
 
@@ -120,7 +156,8 @@ step = 0.02
 ```
 
 每个角色都有 `role = "off" | "fixed" | "sweep"`，以及 `fixed/start/stop/step`。
-`step` 始终填正数；实际扫向由 start/stop 决定。`multi_smu_map` 可以扫描 1–3 个角色，
+这些数值的单位跟随该角色的 `source_mode`：voltage 为 V，current 为 A。`step` 始终填正数；
+实际扫向由 start/stop 决定。`multi_smu_map` 可以扫描 1–3 个角色，
 因此支持“固定 bias、扫描两个 gate”。例如上例中再令
 `[three_smu_run.gate_bottom] role = "sweep"`，即可形成双 gate map；bias 保持 `fixed`。
 
@@ -151,10 +188,11 @@ python -m attodry_control.three_smu_cli run `
 错误队列查询会消费队列项目，程序不会把这种有副作用的状态读取伪装成普通只读查询。若使用
 `finish_action = "hold"`，还必须另给 `--authorize-hold`。
 
-获授权的程序仍会先验证：身份唯一、source mode 正确、output 已关闭、source setpoint 和
-gate 电压读回在零附近、已查询的状态干净。任一项失败时不配置或接管仪器。之后才可配置
-compliance/NPLC/range/four-wire、从零开启输出、按受限步长 ramp，并在每步记录 V/I、setpoint、
-output、trip、near-compliance、leakage 和状态。
+获授权的程序仍会先验证：身份唯一、source mode 正确、output 已关闭、source setpoint 与当前
+source mode 对应的实际读回在零附近、实际 V/I 均未越过各自绝对边界、已查询的状态干净。
+voltage-source gate 还复用通用 gate 的零电压/leakage 预检。任一项失败时不配置或接管仪器。
+之后才可配置 compliance/NPLC/range/four-wire、从零开启输出、按当前单位的受限步长 ramp，
+并在每步记录和检查 V/I、setpoint、output、trip、near-compliance、适用时的 leakage 和状态。
 
 异常、Ctrl+C 与正常的 `zero_disable` 都走同一 cleanup：先 `smu_bias`，再 top/bottom gate，
 逐步回零并关闭输出。通信失败绝不表示仪器已归零；记录保留最后确认读回，并要求人工查看面板。
@@ -175,7 +213,7 @@ AUTHORIZE_STATUS_CONSUMPTION = False
 
 | 文件 | 内容 |
 |---|---|
-| `metadata.json` | schema v2、requested 配置/计划、实际 preflight、run name/note、Git/import/config provenance、结束状态和 cleanup 错误。 |
+| `metadata.json` | schema v3、requested 的单位明确 V/I 配置与计划、实际 preflight、run name/note、Git/import/config provenance、结束状态和 cleanup 错误。 |
 | `raw.jsonl` | start/preflight/configure/ramp/sample/error/cleanup 原始审计事件。 |
 | `data.csv` | 每点 requested source、实际 V/I/R、setpoint、状态和质量标记。 |
 
@@ -195,8 +233,10 @@ bias slice，例如 `fixed_coordinates={'smu_bias': 0.001}`；若 bias 固定，
 
 - `CHANGE_ME` / 缺字段：仍在用模板或配置不完整；修 TOML，再运行 `describe`。
 - address / identity 重复：停止，核对 VISA、序列号和线缆标签，不要交换软件角色规避。
-- target outside source range：检查单位和计划；未经新的器件安全确认不要扩大范围。
+- target outside source range：检查 `source_mode`、对应的 `_v`/`_a` 字段和计划；未经新的器件
+  安全确认不要扩大范围或 `max_abs_*`。
 - output already enabled、non-zero preflight 或状态不干净：不自动接管；人工检查前面板和样品。
-- leakage、trip、near-compliance、readback mismatch：保留审计记录并停止；不要通过提高阈值继续。
+- voltage/current absolute limit、leakage、trip、near-compliance、readback mismatch：保留审计
+  记录并停止；不要通过提高阈值继续。
 
 相关设计与阶段边界见 [`modules/THREE_SMU.md`](modules/THREE_SMU.md)。

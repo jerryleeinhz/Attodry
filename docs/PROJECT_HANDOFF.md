@@ -217,7 +217,9 @@ follow-up:
   auditable data, accepted-only analysis, and fail-closed cleanup. No real SMU
   connection or setting write was performed. The 2026-08-25 update reconciles
   the module with the generic SMU plan without removing `smu_bias`, and makes
-  the existing gate limits the single source of truth in one local TOML.
+  each gate parent table the single source of truth for that gate in one local
+  TOML. The latest safety refinement allows every role to select voltage/current
+  source independently while always enforcing its own absolute V/I boundaries.
 - `THREE_SMU_DAILY_OPERATION.md` now provides the operator-facing independent
   daily workflow and full parameter reference. It clearly separates the currently
   permitted offline `describe`/analysis path from future, separately authorized
@@ -248,7 +250,7 @@ Completed offline in Stage 5:
 - Added signed Vxx/I and excitation-current helpers that do not guess the sample
   path impedance, plus explicit linear paired-gate relations.
 - Added a separate `THREE_SMU.md` QCoDeS work package with one bias SMU and two
-  voltage-source gate SMUs. Its S0 implementation now
+  independently configured gate SMUs. Its S0 implementation now
   provides one shared CLI/Jupyter session and deliberately excludes Lock-in
   recording.
 - Added `THREE_SMU_DAILY_OPERATION.md` as the Stage 5 operator guide for local
@@ -262,8 +264,17 @@ Completed offline in Stage 5:
 - The 2026-08-25 Three-SMU refinement adds one-file operation loading, shared
   gate preflight validation, explicit Keithley status-queue-consumption consent,
   nonzero/mode/status fail-closed checks before settings writes, metadata schema
-  v2 provenance/cleanup errors, and remote-directory analysis with bias slices
-  for a two-gate map. The legacy two-file loader remains compatibility-only.
+  v3 unit-explicit requested V/I configuration plus provenance/cleanup errors, and remote-directory analysis with bias slices
+  for a two-gate map. The legacy two-file entry remains workflow-compatibility-only.
+- A further 2026-08-25 safety refinement gives `smu_bias`, `gate_top`, and
+  `gate_bottom` independent voltage/current source modes and mandatory per-role
+  absolute voltage/current software boundaries. Explicit `_v`/`_a` source,
+  ramp, and readback fields remove unit ambiguity; both measured V/I values are
+  checked at preflight and throughout a run. Instrument compliance must remain
+  inside the corresponding software boundary, and leakage remains a stricter
+  voltage-source-gate-only trip. Existing local hardware TOML requires explicit
+  field migration because the loader will not infer new V/I limits from old
+  unit-ambiguous source ranges; recorded run data remains unchanged.
 - Each formal point records sequential per-role timestamps, source setpoint,
   V/I/R, output, compliance, gate leakage, status, scan coordinates, and cleanup
   results in `metadata.json`, `raw.jsonl`, and `data.csv`. Raw rejected,
@@ -271,10 +282,11 @@ Completed offline in Stage 5:
   and Notebook default to completed/accepted/clean formal rows.
 - Fake instruments validate authorization-before-driver-import, query-only
   preflight, duplicate address/identity and active-output refusal, ramp bounds,
-  compliance, leakage, readback mismatch, communication failure, Ctrl+C, and
+  both source modes, independent V/I bounds, compliance, leakage, readback
+  mismatch, communication failure, Ctrl+C, and
   ordered zero-disable cleanup. Cleanup uncertainty rejects otherwise clean data
   and preserves last-confirmed state for manual verification.
-- The focused Three-SMU/gate/config/adapter/Notebook suite now has 58 passing
+- The focused Three-SMU/gate/config/adapter/Notebook suite now has 63 passing
   offline tests. No real SMU connection, status query, or write was performed.
 - Added audited simulation execution across SQLite start/raw/complete events,
   retry, resume, checkpoints, normal hold/zero cleanup, and failure cleanup.
@@ -314,7 +326,7 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The complete hardware-free suite contains 180 tests and passes in the current
+- The complete hardware-free suite contains 185 tests and passes in the current
   minimal environment with two optional matplotlib rendering tests skipped. Source compilation
   passes. The plotting path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.

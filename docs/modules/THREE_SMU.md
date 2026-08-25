@@ -10,8 +10,8 @@ Notebook。所有验证均为离线 fake-instrument 测试；真实 SMU 连接�
 要求，并保留已建立的三角色范围：
 
 - `smu_bias`：source-drain bias；可选 voltage 或 current source；
-- `gate_top`：top gate；固定 voltage source、测量 leakage；
-- `gate_bottom`：bottom gate；固定 voltage source、测量 leakage。
+- `gate_top`：top gate；独立选择 voltage/current source；voltage 模式检查 leakage；
+- `gate_bottom`：bottom gate；独立选择 voltage/current source；voltage 模式检查 leakage。
 
 通用 `docs/modules/SMU.md` 中的两-gate 规划不能删除或替换这个 `smu_bias` 角色。本模块
 不接入 Lock-in、冷台、磁场或主 acquisition。
@@ -22,8 +22,8 @@ Notebook。所有验证均为离线 fake-instrument 测试；真实 SMU 连接�
 
 ```text
 hardware.local.toml
-  ├─ [smu_bias]                 bias 安全与 2400 参数
-  ├─ [gate_top]/[gate_bottom]   共享 gate 安全限值（唯一来源）
+  ├─ [smu_bias]                 bias 独立 V/I 安全边界与 2400 参数
+  ├─ [gate_top]/[gate_bottom]   各自独立的 source/V/I/leakage 安全限值
   │    └─ [.smu]                仅 timeout/NPLC/range/four-wire 等 2400 参数
   └─ [three_smu_run]            run name/note/输出目录/扫描计划
        └─ [smu_bias|gate_top|gate_bottom]  off/fixed/sweep
@@ -37,8 +37,10 @@ metadata.json + raw.jsonl + data.csv       accepted-only analysis Notebook
 模块 loader 只解析本模块相关表，因此别的未完成模块表不会阻塞 Three-SMU 的独立 `describe`。
 现有 `config.py` 也允许这些表共存，但不重复解释 SMU 细节。
 
-Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` loader 仍保留，避免
-破坏旧离线资料；新的日常 CLI 和 Notebook 一律使用单一 `hardware.local.toml`。
+Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` 双文件入口仍保留；新的
+日常 CLI 和 Notebook 一律使用单一 `hardware.local.toml`。安全 schema 不兼容旧的无单位
+`source_min/source_max/ramp_step/readback_tolerance`：操作者必须迁移为明确 `_v`/`_a` 字段并
+补齐独立 V/I 边界，loader 不会从旧范围猜测安全限值。既有 run 数据保持只读，不需迁移。
 
 ## 已实现的安全行为
 
@@ -47,13 +49,19 @@ Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` loader 
 3. 读取 Keithley error queue 会消费状态项目，故还需单独的
    `--authorize-status-consumption`。它不是普通离线或无副作用查询。
 4. 授权连接后的 query-only preflight 记录 identity、source mode/setpoint、output、V/I、
-   compliance/range、remote-sense 和状态。身份重复、output 已开、mode 不符、非零 source、
-   gate 非零电压读回或脏状态都会在设置写入前拒绝。
+   compliance/range、remote-sense 和状态。身份重复、output 已开、mode 不符、当前 source
+   变量非零、任一 V/I 绝对边界越界或脏状态都会在设置写入前拒绝；voltage-source
+   gate 另执行通用 gate 的零电压/leakage 预检。
 5. `GateBackend`/`SafeGateController` 现在也要求以真实 `GatePreflightState` 确认安全状态，
-   不能把内存中的初始“零/off”当成仪器读回。Three-SMU 两个 gate 使用相同的预检规则。
-6. 配置与每个 setpoint 从零开始；输出只在零 setpoint 和读回确认后开启。所有 target 以
-   明确最大步长 ramp，每步检查 source/output/V/I、trip、near-compliance 和 gate leakage。
-7. 正常、异常、`Ctrl+C` 和 generator 提前关闭共享 cleanup：`smu_bias`、`gate_top`、
+   不能把内存中的初始“零/off”当成仪器读回。Three-SMU 的 voltage-source gate 复用该预检。
+6. 每个角色都有独立的 `max_abs_voltage_v` 与 `max_abs_current_a` 软件硬边界，且两者始终
+   检查。voltage source 使用 `_v` source/ramp/tolerance 与 current compliance；current
+   source 使用 `_a` 字段与 voltage compliance。compliance 不得高于对应绝对边界，source
+   范围也必须位于边界内；voltage-source gate 的 leakage 阈值须低于 current compliance。
+7. 配置与每个 setpoint 从零开始；输出只在零 setpoint 和读回确认后开启。所有 target 以
+   当前 source 单位的明确最大步长 ramp，每步检查 source/output/V/I、trip、near-compliance，
+   并仅对 voltage-source gate 检查 leakage。
+8. 正常、异常、`Ctrl+C` 和 generator 提前关闭共享 cleanup：`smu_bias`、`gate_top`、
    `gate_bottom` 依次回零/关 output。无法确认时 run 被拒绝，保留最后确认状态和 cleanup 错误，
    要求人工检查；通信失败从不被记成零或 output-off。
 
@@ -64,7 +72,7 @@ Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` loader 
 
 每次 run 的独立目录包含：
 
-- `metadata.json`（schema v2）：请求的硬件/计划、实际 preflight、run name/note、配置路径、
+- `metadata.json`（schema v3）：请求的单位明确 V/I 硬件配置/计划、实际 preflight、run name/note、配置路径、
   import 路径、Git commit/dirty、主错误、cleanup 结果和清理错误；
 - `raw.jsonl`：保留 start/preflight/configure/ramp/sample/error/cleanup 原始事件；
 - `data.csv`：requested coordinate/source 与实际 readback V/I/R、output、trip/status 并列。
@@ -113,8 +121,8 @@ tests/test_three_smu*.py                    配置、fake run、CLI/Notebook、�
 tests/test_keithley2400.py / test_gates.py  adapter 与共享 gate 核心
 ```
 
-本阶段执行的 focused fake-instrument 回归为 **58 项通过**（Three-SMU、Keithley 2400、
-gate safety 和共享 config），随后完整离线套件 **180 项通过（2 项可选绘图跳过）**。没有执行
+本阶段执行的 focused fake-instrument 回归为 **63 项通过**（Three-SMU、Keithley 2400、
+gate safety 和共享 config），随后完整离线套件 **185 项通过（2 项可选绘图跳过）**。没有执行
 VISA discovery、QCoDeS 连接或真实仪器写入。
 
 ## 下一阶段：S1 target offline
@@ -123,6 +131,7 @@ VISA discovery、QCoDeS 连接或真实仪器写入。
 QCoDeS，运行测试，执行 `describe`，记录 Python/QCoDeS/PyVISA 版本。之后仍须另外授权实机
 query-only preflight，再另外授权小范围/单向写入扫描。
 
-第一次实机前操作者必须填写并复核：三台地址与可区分 identity、实际确切型号/手册适配、bias
-source mode、所有 source/compliance/leakage/ramp/settle/readback/NPLC/range/four-wire 值、
+第一次实机前操作者必须填写并复核：三台地址与可区分 identity、实际确切型号/手册适配、每台
+source mode、各自 V/I 绝对边界、对应单位的 source 范围/ramp/readback、两种 compliance、
+适用的 gate leakage、settle/NPLC/range/four-wire 值、
 样品接线，以及最小可接受扫描计划。不得以模板示例或 fake 测试值替代这些确认。

@@ -448,11 +448,27 @@ def _parse_gate(
         "readback_tolerance_v",
         "settle_s",
     }
+    three_smu_keys = {
+        "source_mode",
+        "compliance_voltage_v",
+        "max_abs_current_a",
+        "source_min_v",
+        "source_max_v",
+        "source_min_a",
+        "source_max_a",
+        "ramp_step_a",
+        "readback_tolerance_a",
+    }
     mode_keys = {"backend"} if mode is RunMode.SIMULATION else {"model", "address"}
     if mode is RunMode.HARDWARE and "smu" in table and not isinstance(table["smu"], dict):
         raise ConfigError(f"{name}.smu must be a table.")
     optional_smu = {"smu"} if mode is RunMode.HARDWARE and "smu" in table else set()
-    _strict_keys(table, name, common_keys | mode_keys | optional_smu)
+    optional_three_smu = three_smu_keys.intersection(table)
+    _strict_keys(
+        table,
+        name,
+        common_keys | mode_keys | optional_smu | optional_three_smu,
+    )
     parser = _positive_number if mode is RunMode.SIMULATION else _hardware_number
     compliance = parser(table["compliance_a"], f"{name}.compliance_a")
     leakage = parser(table["leakage_limit_a"], f"{name}.leakage_limit_a")

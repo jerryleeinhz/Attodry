@@ -219,8 +219,9 @@ remain pending explicit authorization and operator-filled limits.
   two gates, document every run parameter, and retain a no-hardware daily path.
 - Added independent `smu_bias`, `gate_top`, and `gate_bottom` Keithley 2400
   configuration and QCoDeS adapter modules. All placeholders, duplicate
-  addresses/identities, non-voltage gate modes, invalid source ranges, and
-  leakage limits above current compliance fail before production writes.
+  addresses/identities, incomplete active-mode fields, invalid source ranges,
+  compliance above the corresponding absolute limit, and leakage above current
+  compliance fail before production writes.
 - Added one shared scan generator/session for time trace, bias I-V, top/bottom
   transfer, paired gates, one-to-three-channel serpentine maps, and software
   pulses. CLI and live Notebook consume that same generator; the first version
@@ -233,17 +234,27 @@ remain pending explicit authorization and operator-filled limits.
   requires manual front-panel verification.
 - Added per-run `metadata.json`, `raw.jsonl`, and `data.csv` audit artifacts,
   plus a read-only loader and Notebook that default to completed/accepted/clean
-  formal samples and require explicit rejected/problem audit opt-in. Schema v2
-  additionally stores requested-versus-actual preflight, run name/note, config,
+  formal samples and require explicit rejected/problem audit opt-in. Schema v3
+  stores unit-explicit requested V/I configuration plus requested-versus-actual preflight, run name/note, config,
   import, Git/dirty provenance, and structured cleanup errors.
 - The daily loader now reuses `[gate_top]`/`[gate_bottom]` safety limits and
   reads module-only settings from `[gate_*.smu]`; the scan plan is in the same
-  TOML. Legacy two-file loaders remain only for compatibility.
+  TOML. Legacy two-file loaders remain only for workflow compatibility; their
+  local hardware values still require the explicit safety-schema migration below.
+- The 2026-08-25 safety refinement gives all three roles independent voltage/current
+  source selection and independent `max_abs_voltage_v`/`max_abs_current_a`
+  software boundaries. Both actual readbacks are checked during preflight and
+  every run read regardless of source mode. Unit-explicit `_v`/`_a` source,
+  ramp, and tolerance fields replace ambiguous unit-by-mode names; voltage-source
+  gates retain their earlier leakage trip, while current-source roles use voltage
+  compliance without mislabelling sourced current as leakage.
+  Old local hardware TOML must be explicitly migrated; the loader deliberately
+  does not infer independent V/I safety bounds from an ambiguous source range.
 - Added explicit status-queue-consumption authorization, non-zero/mode/status
   preflight rejection, and common `GatePreflightState` validation. The remote
   analysis notebook enumerates a data directory rather than opening a desktop
   chooser, and a bias slice can be selected for a two-gate map.
-- 58 focused fake-instrument/config/adapter/CLI/Notebook/analysis/gate tests
+- 63 focused fake-instrument/config/adapter/CLI/Notebook/analysis/gate tests
   pass. No real VISA resource was opened and no real setting command was sent.
 
 ## Stage 6 - analysis and notebook migration
@@ -287,7 +298,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The full offline suite covers 180 tests and passes in the current minimal
+- The full offline suite covers 185 tests and passes in the current minimal
   environment with two optional matplotlib rendering tests skipped; source compilation passes without
   hardware. The plotting code is unchanged from its prior rendered validation.
 - Built and import-checked the local project wheel without downloading

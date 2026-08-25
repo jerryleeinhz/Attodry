@@ -12,7 +12,8 @@
 - SR830 #1：内部参考、SINE OUT 交流激励、测量 Vxx。
 - SR830 #2：从 #1 TTL OUT 获取外参考、测量 Vxy、SINE OUT 物理断开。
 - 三台 Keithley 2400 的独立模块使用 `smu_bias`、`gate_top`、
-  `gate_bottom` 语义角色；双栅漏电流与 compliance 保护已离线实现。
+  `gate_bottom` 语义角色；每台可独立选择 voltage/current source，并始终检查各自的
+  V/I 绝对边界；voltage-source gate 的 leakage 与 compliance 保护已离线实现。
 - 无旋转台；场方向由 Bx/Bz 计算。
 
 ## 安全不变量
