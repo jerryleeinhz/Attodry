@@ -167,8 +167,10 @@ are descriptive cross-validation errors, not additional safety gates.
 
 The optional export records the exact `SCALING_RULES` values and every fit
 result in `selection_manifest.json`, alongside one PNG/PDF fit figure per
-available channel. This makes results produced with different judgment rules
-reproducible and distinguishable.
+available channel. Each fit figure includes a formula panel with the numerical
+coefficients, exponent, AICc, and relative RMSE for every log/scalar/complex
+model; the plotted curves are identified in the legend. This makes results
+produced with different judgment rules reproducible and distinguishable.
 
 The daily source of truth for the variable path values is the ignored
 `config/hardware.local.toml` `[lockin_sweep]` table:

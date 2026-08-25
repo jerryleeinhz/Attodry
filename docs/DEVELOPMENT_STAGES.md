@@ -844,3 +844,8 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   background-aware complex fits, while the summary displays all three verdicts.
   Synthetic phase-rotation tests and notebook compilation pass; no hardware
   resource was opened or written.
+- Updated harmonic-scaling figures (2026-08-25): each exported fit plot now
+  includes a formula panel listing every log/scalar/complex model with fitted
+  coefficients, exponent, AICc, and relative RMSE; overlaid curves use matching
+  formula labels. This is read-only presentation logic and introduces no
+  hardware path.
