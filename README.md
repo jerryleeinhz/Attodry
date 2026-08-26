@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、模型无关的栅极安全、端到端仿真执行、accepted-only 出版级分析和实验室 commissioning 清单。日常温控使用统一 `hardware.local.toml` 和无额外授权参数的专用命令；其它 attoDRY 设置写入、SMU 和端到端硬件路径仍需分阶段确认，具体 SMU 命令等待确认型号。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 SMU 连接/写入、Three-SMU 主 acquisition 集成、其它 attoDRY 设置写入和端到端硬件路径仍需分阶段显式授权。
 
 ## 已确认硬件
 
@@ -11,7 +11,9 @@
 - 硬件额定值：X 轴 3 T，Z 轴 9 T；本项目所有实验命令额外限制合成场不超过 3 T。
 - SR830 #1：内部参考、SINE OUT 交流激励、测量 Vxx。
 - SR830 #2：从 #1 TTL OUT 获取外参考、测量 Vxy、SINE OUT 物理断开。
-- 两台栅极 SMU、漏电流与 compliance 保护沿用原输运项目的目标。
+- 三台 Keithley 2400 的独立模块使用 `smu_bias`、`gate_top`、
+  `gate_bottom` 语义角色；每台可独立选择 voltage/current source，并始终检查各自的
+  V/I 绝对边界；voltage-source gate 的 leakage 与 compliance 保护已离线实现。
 - 无旋转台；场方向由 Bx/Bz 计算。
 
 ## 安全不变量
@@ -55,7 +57,10 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
   已完成实验的经验规则；
 - [`Temperature`](docs/modules/TEMPERATURE.md)：attoDRY 温度读回、控制和稳定；
 - [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：X/Z 矢量场、3 T 限制和归零；
-- [`Integration`](docs/modules/INTEGRATION.md)：前三个模块分别验收后的组合流程。
+- [`Three-SMU`](docs/modules/THREE_SMU.md)：三台 Keithley、双栅极与 bias 的
+  QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
+  [`THREE_SMU_DAILY_OPERATION.md`](docs/THREE_SMU_DAILY_OPERATION.md)；
+- [`Integration`](docs/modules/INTEGRATION.md)：各设备模块分别验收后的组合流程。
 
 每个工作包都包含当前真实验收边界、目标、非目标、分阶段验收条件、预计文件
 所有权和可复制的新 Chat 启动提示。多个 Chat 并行修改时应使用独立 branch 和
@@ -183,6 +188,9 @@ python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo
 python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --resume
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --csv analysis_output/run.csv
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --publication-dir analysis_output/RUN_ID --format png --format pdf
+python -m attodry_control.three_smu_cli describe
+python -m attodry_control.three_smu_cli monitor-live --help
+python -m attodry_control.three_smu_cli run --help
 ```
 
 这些命令中的状态、仿真、监视和分析路径都不会连接真实仪器。绘图需要安装

@@ -322,6 +322,12 @@ def load_config(
             "gate_top",
             "gate_bottom",
         }
+        # These optional tables are parsed by the independent Three-SMU module.
+        # Keeping them admissible here permits one daily hardware.local.toml
+        # without making an unrelated controller validate SMU-only details.
+        expected_tables.update(
+            {"smu_bias", "three_smu_run"}.intersection(document)
+        )
         if project.mode is RunMode.HARDWARE:
             expected_tables.add("visa")
         _strict_keys_with_optional(
@@ -678,6 +684,11 @@ def load_temperature_operation_config(
         "lockin_sweep",
         "gate_top",
         "gate_bottom",
+        # Parsed only by the independent Three-SMU loader. Daily temperature
+        # operation accepts these tables in the shared hardware.local.toml but
+        # deliberately does not interpret or validate their hardware fields.
+        "smu_bias",
+        "three_smu_run",
     }
     _strict_keys_with_optional(
         document,
@@ -1418,8 +1429,27 @@ def _parse_gate(
         "readback_tolerance_v",
         "settle_s",
     }
+    three_smu_keys = {
+        "source_mode",
+        "compliance_voltage_v",
+        "max_abs_current_a",
+        "source_min_v",
+        "source_max_v",
+        "source_min_a",
+        "source_max_a",
+        "ramp_step_a",
+        "readback_tolerance_a",
+    }
     mode_keys = {"backend"} if mode is RunMode.SIMULATION else {"model", "address"}
-    _strict_keys(table, name, common_keys | mode_keys)
+    if mode is RunMode.HARDWARE and "smu" in table and not isinstance(table["smu"], dict):
+        raise ConfigError(f"{name}.smu must be a table.")
+    optional_smu = {"smu"} if mode is RunMode.HARDWARE and "smu" in table else set()
+    optional_three_smu = three_smu_keys.intersection(table)
+    _strict_keys(
+        table,
+        name,
+        common_keys | mode_keys | optional_smu | optional_three_smu,
+    )
     parser = _positive_number if mode is RunMode.SIMULATION else _hardware_number
     compliance = parser(table["compliance_a"], f"{name}.compliance_a")
     leakage = parser(table["leakage_limit_a"], f"{name}.leakage_limit_a")

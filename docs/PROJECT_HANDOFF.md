@@ -645,15 +645,18 @@ Completed offline in Stage 4:
   removed after its absolute cleanup path was verified.
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
-harmonic validation, and the attoDRY read-only connection are complete. The first
+harmonic validation, the independent Three-SMU QCoDeS S0 module plus query-only
+monitor, and the attoDRY read-only connection are complete. The first
 attoDRY temperature setpoint/control actions, control-first ordering, actual sensor
 recording, and heater-driven warming are operator-accepted for this experiment.
 The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; that
 fact remains diagnostic rather than being rewritten as stability. The commissioned
 0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Daily
 temperature operation uses the unified hardware TOML and dedicated command without
-additional authorization flags. SMUs and real end-to-end acquisition still require
-staged authorization.
+additional authorization flags. Three-SMU target-computer validation, all real SMU
+connections/writes, integration of the independent SMU module into the main
+acquisition, other attoDRY setting writes, and real end-to-end acquisition still
+require staged authorization.
 
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
@@ -702,8 +705,28 @@ follow-up:
 - `TEMPERATURE.md` and `MAGNETIC_FIELD.md` separate their offline, target-offline,
   real read-only, and future write-commissioning stages without overstating the
   completed 10-second attoDRY read-only connection.
+- `THREE_SMU.md` now records the three-Keithley QCoDeS S0 module as offline
+  complete: semantic bias/top-gate/bottom-gate roles, one shared CLI/Notebook
+  generator, retained scan modes, strict operator-filled safety configuration,
+  auditable data, accepted-only analysis, and fail-closed cleanup. No real SMU
+  connection or setting write was performed. The 2026-08-25 update reconciles
+  the module with the generic SMU plan without removing `smu_bias`, and makes
+  each gate parent table the single source of truth for that gate in one local
+  TOML. The latest safety refinement allows every role to select voltage/current
+  source independently while always enforcing its own absolute V/I boundaries.
+  The 2026-08-26 update adds a raw-VISA query-only three-SMU terminal monitor and
+  converts daily scan consent to exact, per-run terminal confirmations before any
+  QCoDeS/VISA resource is opened.
+- `THREE_SMU_DAILY_OPERATION.md` now provides the operator-facing independent
+  daily workflow and full parameter reference. It clearly separates the currently
+  permitted offline `describe`/analysis path from future, separately authorized
+  connection and write steps; its current version documents one local config,
+  dual-gate maps at fixed bias, status-queue authorization, and SSH-friendly
+  accepted-only analysis. `THREE_SMU_LIVE_MONITOR.md` records the no-write,
+  non-concurrent monitor boundary and opt-in error-queue consumption. Adding the
+  guides did not perform hardware actions.
 - `INTEGRATION.md` requires commit IDs, tests, hardware-action reports, and known
-  limitations from the three device modules before combination.
+  limitations from the four device modules before combination.
 - `docs/modules/README.md` defines shared permissions, `lyr` use, branch/worktree
   isolation, status terminology, and the completion-report format for each Chat.
 
@@ -712,7 +735,8 @@ connections, status-latch consumption, or setting writes, and no such action was
 performed while creating them.
 
 Stage 5 - gate safety and integrated acquisition: model-independent offline core
-complete; vendor SMU adapters remain pending exact models and safety parameters.
+and independent Three-SMU QCoDeS S0 module complete; target/real commissioning
+and main-acquisition integration remain pending.
 
 Completed offline in Stage 5:
 
@@ -724,6 +748,56 @@ Completed offline in Stage 5:
   before any hardware driver can be constructed.
 - Added signed Vxx/I and excitation-current helpers that do not guess the sample
   path impedance, plus explicit linear paired-gate relations.
+- Added a separate `THREE_SMU.md` QCoDeS work package with one bias SMU and two
+  independently configured gate SMUs. Its S0 implementation now
+  provides one shared CLI/Jupyter session and deliberately excludes Lock-in
+  recording.
+- Added `THREE_SMU_DAILY_OPERATION.md` as the Stage 5 operator guide for local
+  templates, strict parameter review, scan modes, CLI/Notebook use, accepted-only
+  analysis, cleanup interpretation, and manual-verification failures.
+- Added strict independent Three-SMU hardware/scan TOML, a narrow exception-
+  transparent QCoDeS Keithley 2400 adapter, offline `describe`, write-gated
+  `run`, and a shared safety/session generator. Supported plans cover time,
+  bias I-V, separate or paired gates, one-to-three-channel maps, and software
+  pulses with directional/serpentine options and repeated samples.
+- The 2026-08-25 Three-SMU refinement adds one-file operation loading, shared
+  gate preflight validation, explicit Keithley status-queue-consumption consent,
+  nonzero/mode/status fail-closed checks before settings writes, metadata schema
+  v3 unit-explicit requested V/I configuration plus provenance/cleanup errors, and remote-directory analysis with bias slices
+  for a two-gate map. The legacy two-file entry remains workflow-compatibility-only.
+- A further 2026-08-25 safety refinement gives `smu_bias`, `gate_top`, and
+  `gate_bottom` independent voltage/current source modes and mandatory per-role
+  absolute voltage/current software boundaries. Explicit `_v`/`_a` source,
+  ramp, and readback fields remove unit ambiguity; both measured V/I values are
+  checked at preflight and throughout a run. Instrument compliance must remain
+  inside the corresponding software boundary, and leakage remains a stricter
+  voltage-source-gate-only trip. Existing local hardware TOML requires explicit
+  field migration because the loader will not infer new V/I limits from old
+  unit-ambiguous source ranges; recorded run data remains unchanged.
+- The 2026-08-26 daily-operation refinement defaults `describe`, `monitor-live`,
+  and `run` to the ignored local TOML. A scan displays the complete validated plan
+  and requires exact `RUN THREE SMU` before opening QCoDeS/VISA; a hold run also
+  requires `HOLD OUTPUTS`. This retains deliberate human consent while removing
+  routine authorization flags from the command line.
+- Added an independent raw-VISA query-only Three-SMU monitor that displays all
+  three roles' plan state, source/output, V/I/R, compliance/trip/ranges/sense,
+  identity and safety warnings without configure/ramp/output/cleanup methods.
+  Default monitoring leaves the consumptive Keithley error queues untouched;
+  `--consume-status-queue` is explicit and monitoring is prohibited during scans.
+- Each formal point records sequential per-role timestamps, source setpoint,
+  V/I/R, output, compliance, gate leakage, status, scan coordinates, and cleanup
+  results in `metadata.json`, `raw.jsonl`, and `data.csv`. Raw rejected,
+  interrupted, partial, and cleanup events are retained; the new analysis loader
+  and Notebook default to completed/accepted/clean formal rows.
+- Fake instruments validate authorization-before-driver-import, query-only
+  preflight, duplicate address/identity and active-output refusal, ramp bounds,
+  both source modes, independent V/I bounds, compliance, leakage, readback
+  mismatch, communication failure, Ctrl+C, and
+  ordered zero-disable cleanup. Cleanup uncertainty rejects otherwise clean data
+  and preserves last-confirmed state for manual verification.
+- The focused Three-SMU/gate/config/adapter/Notebook suite now has 71 passing
+  offline tests, including live monitor/error-queue and exact-confirmation paths.
+  No real SMU connection, status query, or write was performed.
 - Added audited simulation execution across SQLite start/raw/complete events,
   retry, resume, checkpoints, normal hold/zero cleanup, and failure cleanup.
 
@@ -762,10 +836,10 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The merged main/Lock-in/Temperature hardware-free suite contains 218 passing
-  tests in the minimal environment, with three matplotlib rendering tests skipped
-  because matplotlib is unavailable. Source compilation passes. The plotting path is
-  unchanged from its prior rendered validation;
+- The merged main/Lock-in/Temperature/Three-SMU hardware-free suite passes all
+  385 tests in the minimal environment, with five optional matplotlib rendering
+  tests skipped. Source compilation passes. The plotting path is unchanged from
+  its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
 - The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
   without downloading dependencies, inspected, and isolated-import checked after
@@ -1052,7 +1126,10 @@ error code zero, and a clean DLL disconnect. PID and heater settings were not wr
 1. Integrate `measurement_temperature_k` into the downstream measurement coordinator
    and hardware-test the interruption/resume path separately; do not infer or alter
    PID values automatically.
-2. Add the two vendor SMU adapters only after exact models, limits, and command
-   references are supplied.
-3. Freeze and verify the complete hardware wheelhouse on the offline control
+2. Perform staged attoDRY small-movement commissioning only after a new explicit
+   write authorization and operator-selected smallest practical targets.
+3. Run Three-SMU S1 target-offline validation in `LK_setup` `lyr`, then fill
+   the ignored local addresses and safety values. Any real connection or setting
+   write still requires a separate plan-specific authorization.
+4. Freeze and verify the complete hardware wheelhouse on the offline control
    computer after its Python/VISA environment is known.

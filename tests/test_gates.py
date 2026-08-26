@@ -2,6 +2,8 @@ import unittest
 
 from attodry_control.gates import (
     GateLeakageTrip,
+    GatePreflightRejected,
+    GatePreflightState,
     GateReadbackMismatch,
     GateSafetyError,
     GateSafetyLimits,
@@ -24,6 +26,16 @@ class FakeGateBackend:
 
     def set_current_compliance(self, current_a: float) -> None:
         self.compliance = current_a
+
+    def preflight(self) -> GatePreflightState:
+        return GatePreflightState(
+            identity="FAKE,GATE,1",
+            output_enabled=self.output,
+            source_setpoint_v=self.voltage,
+            voltage_read_v=self.voltage + self.readback_offset,
+            current_read_a=self.current,
+            status="0,No error",
+        )
 
     def set_output(self, enabled: bool) -> None:
         self.output = enabled
@@ -83,6 +95,13 @@ class GateTests(unittest.TestCase):
         self.assertEqual(backend.voltage, 0.6)
         self.assertTrue(all(abs(value) <= 0.6 for value in backend.voltage_commands))
         self.assertEqual(gate.last_confirmed_state.voltage_read_v, 0.6)
+
+    def test_enabled_or_nonzero_preflight_is_rejected_without_writing(self) -> None:
+        backend = FakeGateBackend()
+        backend.output = True
+        with self.assertRaises(GatePreflightRejected):
+            controller(backend).enable_output()
+        self.assertEqual(backend.voltage_commands, [])
 
     def test_target_above_explicit_limit_is_rejected_before_write(self) -> None:
         backend = FakeGateBackend()

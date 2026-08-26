@@ -195,19 +195,120 @@ output_directory = "../run_data/commissioning"
 [gate_top]
 model = "CHANGE_ME"
 address = "CHANGE_ME_TOP_GATE_VISA_ADDRESS"
+source_mode = "voltage"
 compliance_a = "CHANGE_ME"
+compliance_voltage_v = "CHANGE_ME"
 leakage_limit_a = "CHANGE_ME"
 max_abs_voltage_v = "CHANGE_ME"
+max_abs_current_a = "CHANGE_ME"
+source_min_v = "CHANGE_ME"
+source_max_v = "CHANGE_ME"
 ramp_step_v = "CHANGE_ME"
 readback_tolerance_v = "CHANGE_ME"
+source_min_a = "CHANGE_ME"
+source_max_a = "CHANGE_ME"
+ramp_step_a = "CHANGE_ME"
+readback_tolerance_a = "CHANGE_ME"
 settle_s = "CHANGE_ME"
 
 [gate_bottom]
 model = "CHANGE_ME"
 address = "CHANGE_ME_BOTTOM_GATE_VISA_ADDRESS"
+source_mode = "voltage"
 compliance_a = "CHANGE_ME"
+compliance_voltage_v = "CHANGE_ME"
 leakage_limit_a = "CHANGE_ME"
 max_abs_voltage_v = "CHANGE_ME"
+max_abs_current_a = "CHANGE_ME"
+source_min_v = "CHANGE_ME"
+source_max_v = "CHANGE_ME"
 ramp_step_v = "CHANGE_ME"
 readback_tolerance_v = "CHANGE_ME"
+source_min_a = "CHANGE_ME"
+source_max_a = "CHANGE_ME"
+ramp_step_a = "CHANGE_ME"
+readback_tolerance_a = "CHANGE_ME"
 settle_s = "CHANGE_ME"
+
+# Three-SMU module additions.  Copy this entire file to hardware.local.toml.
+# The two gate tables above remain the only source of their independent safety
+# limits.  Every role always enforces both max_abs_voltage_v and
+# max_abs_current_a.  Only the selected source mode's source/ramp/tolerance
+# fields are used; keep the inactive-mode fields explicit for later review.
+
+[smu_bias]
+model = "Keithley2400"
+address = "CHANGE_ME_BIAS_SMU_VISA_ADDRESS"
+timeout_ms = "CHANGE_ME"
+# "voltage" selects the *_v source/ramp/tolerance fields and current
+# compliance.  "current" selects the *_a fields and voltage compliance.
+source_mode = "voltage"
+compliance_current_a = "CHANGE_ME"
+compliance_voltage_v = "CHANGE_ME"
+max_abs_voltage_v = "CHANGE_ME"
+max_abs_current_a = "CHANGE_ME"
+source_min_v = "CHANGE_ME"
+source_max_v = "CHANGE_ME"
+ramp_step_v = "CHANGE_ME"
+readback_tolerance_v = "CHANGE_ME"
+source_min_a = "CHANGE_ME"
+source_max_a = "CHANGE_ME"
+ramp_step_a = "CHANGE_ME"
+readback_tolerance_a = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_top.smu]
+# Keithley-2400-specific fields only; shared safety limits stay in [gate_top].
+timeout_ms = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_bottom.smu]
+# Keithley-2400-specific fields only; shared safety limits stay in [gate_bottom].
+timeout_ms = "CHANGE_ME"
+nplc = "CHANGE_ME"
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[three_smu_run]
+# A relative output_directory is relative to this TOML file.
+output_directory = "../data/three_smu"
+run_name = "CHANGE_ME_RUN_NAME"
+note = ""
+mode = "bias_iv"
+samples_per_point = 1
+delay_s = 0.1
+bidirectional = false
+serpentine = false
+finish_action = "zero_disable"
+point_count = 1
+pulse_high_s = 0.0
+pulse_period_s = 0.0
+
+[three_smu_run.smu_bias]
+role = "sweep"
+fixed = 0.0
+start = "CHANGE_ME"
+stop = "CHANGE_ME"
+step = "CHANGE_ME"
+
+[three_smu_run.gate_top]
+role = "off"
+fixed = 0.0
+start = 0.0
+stop = 0.0
+step = 1.0
+
+[three_smu_run.gate_bottom]
+role = "off"
+fixed = 0.0
+start = 0.0
+stop = 0.0
+step = 1.0

@@ -654,8 +654,9 @@ writes remain uncommissioned and require separate explicit authorization.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 
-Status: model-independent offline core complete (2026-08-20); real SMU adapters
-require the user's exact models, limits, and command sets.
+Status: model-independent offline core and the independent Three-SMU QCoDeS S0
+module are complete (updated 2026-08-26); target-computer and real-SMU commissioning
+remain pending explicit authorization and operator-filled limits.
 
 - Added an explicitly write-authorized, model-independent gate controller with
   configured absolute-voltage limit, current compliance, stepped ramps, voltage
@@ -668,6 +669,60 @@ require the user's exact models, limits, and command sets.
   hold/zero, Ctrl+C, and exception cleanup orchestration against SQLite.
 - Added a hardware-readiness gate that rejects unresolved VISA/DLL/SMU addresses
   and all six per-gate safety values before any hardware driver can be built.
+- Updated `docs/modules/THREE_SMU.md` and `docs/THREE_SMU_DAILY_OPERATION.md`
+  (2026-08-25) to use one `hardware.local.toml`, preserve the bias role beside
+  two gates, document every run parameter, and retain a no-hardware daily path.
+- Added independent `smu_bias`, `gate_top`, and `gate_bottom` Keithley 2400
+  configuration and QCoDeS adapter modules. All placeholders, duplicate
+  addresses/identities, incomplete active-mode fields, invalid source ranges,
+  compliance above the corresponding absolute limit, and leakage above current
+  compliance fail before production writes.
+- Added one shared scan generator/session for time trace, bias I-V, top/bottom
+  transfer, paired gates, one-to-three-channel serpentine maps, and software
+  pulses. CLI and live Notebook consume that same generator; the first version
+  neither connects nor records Lock-in data.
+- Added explicit write authorization, query-only three-device preflight,
+  unknown-active-output refusal, residual-zero verification, compliance/NPLC/
+  autorange/four-wire configuration, step-bounded ramps, sequential timestamped
+  V/I/R reads, compliance/leakage/readback checks, and ordered bias/top/bottom
+  zero-disable cleanup. A cleanup communication failure rejects the run and
+  requires manual front-panel verification.
+- Added per-run `metadata.json`, `raw.jsonl`, and `data.csv` audit artifacts,
+  plus a read-only loader and Notebook that default to completed/accepted/clean
+  formal samples and require explicit rejected/problem audit opt-in. Schema v3
+  stores unit-explicit requested V/I configuration plus requested-versus-actual preflight, run name/note, config,
+  import, Git/dirty provenance, and structured cleanup errors.
+- The daily loader now reuses `[gate_top]`/`[gate_bottom]` safety limits and
+  reads module-only settings from `[gate_*.smu]`; the scan plan is in the same
+  TOML. Legacy two-file loaders remain only for workflow compatibility; their
+  local hardware values still require the explicit safety-schema migration below.
+- The 2026-08-25 safety refinement gives all three roles independent voltage/current
+  source selection and independent `max_abs_voltage_v`/`max_abs_current_a`
+  software boundaries. Both actual readbacks are checked during preflight and
+  every run read regardless of source mode. Unit-explicit `_v`/`_a` source,
+  ramp, and tolerance fields replace ambiguous unit-by-mode names; voltage-source
+  gates retain their earlier leakage trip, while current-source roles use voltage
+  compliance without mislabelling sourced current as leakage.
+  Old local hardware TOML must be explicitly migrated; the loader deliberately
+  does not infer independent V/I safety bounds from an ambiguous source range.
+- Added explicit status-queue-consumption authorization, non-zero/mode/status
+  preflight rejection, and common `GatePreflightState` validation. The remote
+  analysis notebook enumerates a data directory rather than opening a desktop
+  chooser, and a bias slice can be selected for a two-gate map.
+- Added `three_smu_cli monitor-live`: an independent raw-VISA, query-only terminal
+  monitor for the three configured semantic roles. It reports plan role, actual
+  V/I/R, source/output, compliance/trip/ranges/sense/identity and non-corrective
+  safety warnings; it has no configure/ramp/output/cleanup path. Its default does
+  not consume `:SYST:ERR?`; `--consume-status-queue` remains explicit, and the
+  monitor may not run concurrently with a scan.
+- The daily `describe`, `monitor-live`, and `run` commands now default to the
+  ignored `config/hardware.local.toml`. Before any scan driver/VISA resource is
+  opened, `run` prints the validated plan and requires exact `RUN THREE SMU`;
+  `finish_action = "hold"` separately requires `HOLD OUTPUTS`. This replaces
+  repetitive CLI flags without making writes or error-queue consumption automatic.
+- 71 focused fake-instrument/config/adapter/CLI/Notebook/analysis/gate tests
+  pass, including query-only monitor/error-queue and exact-confirmation coverage.
+  No real VISA resource was opened and no real setting command was sent.
 
 ## Stage 6 - analysis and notebook migration
 
@@ -710,9 +765,9 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The merged main/Lock-in/Temperature offline suite contains 218 passing tests
-  in the minimal environment, with three matplotlib rendering tests skipped
-  because matplotlib is unavailable; source compilation passes without hardware.
+- The merged main/Lock-in/Temperature/Three-SMU offline suite passes all 385
+  tests in the minimal environment, with five optional matplotlib rendering
+  tests skipped; source compilation passes. All merge validation was hardware-free.
 - Built and import-checked the local project wheel without downloading
   dependencies; the final filename and SHA-256 are recorded in
   `PROJECT_HANDOFF.md`.
@@ -724,8 +779,10 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   wiring, phase preservation, settling, sensitivity transitions, latch handling,
   frequency tolerance, sequential pair reads, and cleanup. This is a planning
   and handoff deliverable only; it does not commission any new hardware writes.
-- Pending: exact SMU adapters, real-instrument checks, frozen hardware wheelhouse,
-  and offline-control-computer installation verification.
+- Pending: Three-SMU target-`lyr` offline checks, operator-filled local safety
+  configuration, separately authorized real-SMU commissioning, integration into
+  the main acquisition, frozen hardware wheelhouse, and offline-control-computer
+  installation verification.
 
 ## Stage 7 follow-up - Lock-in safety policy and sweep readback robustness
 

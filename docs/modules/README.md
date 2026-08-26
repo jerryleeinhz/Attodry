@@ -1,6 +1,6 @@
 # Module work packages
 
-本目录把后续工作拆成四个可以由独立 Chat 跟进的工作包。这里定义的是
+本目录把后续工作拆成五个可以由独立 Chat 跟进的工作包。这里定义的是
 目标、阶段、文件边界和验收条件，不代表尚未授权的硬件工作已经完成。
 
 ## 依赖顺序
@@ -8,15 +8,17 @@
 ```text
 Lock-in ───────┐
 Temperature ───┼──> Integration
-Magnetic field ┘
+Magnetic field ┤
+Three-SMU ─────┘
 ```
 
 - [`LOCKIN.md`](LOCKIN.md)：双 SR830 配置契约、相位、量程和自动量程。
 - [`TEMPERATURE.md`](TEMPERATURE.md)：attoDRY 温度读回、控制和稳定判据。
 - [`MAGNETIC_FIELD.md`](MAGNETIC_FIELD.md)：X/Z 矢量磁场、安全路径和归零。
-- [`INTEGRATION.md`](INTEGRATION.md)：只在前三个模块分别验收后进行组合。
+- [`THREE_SMU.md`](THREE_SMU.md)：三台 Keithley、双栅极、bias、CLI/Notebook。
+- [`INTEGRATION.md`](INTEGRATION.md)：只在四个设备模块分别验收后进行组合。
 
-前三个模块可以独立审核和测试。Integration 不重新发明各模块的安全逻辑，
+四个设备模块可以独立审核和测试。Integration 不重新发明各模块的安全逻辑，
 只组合已经通过测试并带有明确提交号的接口。
 
 ## 所有 Chat 的共同规则
@@ -50,6 +52,7 @@ Magnetic field ┘
 module/lockin
 module/temperature
 module/magnetic-field
+module/three-smu
 module/integration
 ```
 

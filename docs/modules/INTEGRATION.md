@@ -6,8 +6,8 @@
 双 SR830 真实独立验收和 attoDRY 真实只读连接。真实 attoDRY 设置写入、vendor
 SMU 和端到端硬件 acquisition 尚未验收。
 
-Integration 只能组合 Lock-in、Temperature 和 Magnetic-field 模块已经通过的
-接口与提交，不能代替它们各自的实验室 commissioning。
+Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU 模块
+已经通过的接口与提交，不能代替它们各自的实验室 commissioning。
 
 ## 前置输入
 
@@ -43,7 +43,7 @@ Integration 只能组合 Lock-in、Temperature 和 Magnetic-field 模块已经�
 
 ### I0 - merge and contract verification（planned）
 
-- 在独立 Integration branch 合并 L/T/M 的已验收提交。
+- 在独立 Integration branch 合并 L/T/M/SMU 的已验收提交。
 - 解决共享文件冲突后逐项核对接口，不做无关格式化或大规模重构。
 - 完成条件：工作树只包含可追溯修改，相关模块测试和完整测试通过。
 
@@ -109,10 +109,10 @@ Integration 可以对共享适配层做最小修改，但不应把已分离的�
 
 ```text
 请负责 Integration 模块。先按 AGENTS.md 顺序完整阅读四份必读文档，再阅读
-docs/modules/README.md、LOCKIN.md、TEMPERATURE.md、MAGNETIC_FIELD.md 和
-INTEGRATION.md。先收集三个模块的提交号、完成阶段、测试和硬件动作报告；缺失时
-只做离线审查，不猜测完成状态。从 I0 开始，先完整 simulation，再做 target lyr
-离线验证。任何真实连接、清锁存或写命令必须等我另行明确授权。结束时按模块交付
-格式报告合并提交、测试、冲突和剩余边界。
+docs/modules/README.md、LOCKIN.md、TEMPERATURE.md、MAGNETIC_FIELD.md、
+THREE_SMU.md 和 INTEGRATION.md。先收集四个设备模块的提交号、完成阶段、测试和
+硬件动作报告；缺失时只做离线审查，不猜测完成状态。从 I0 开始，先完整
+simulation，再做 target lyr 离线验证。任何真实连接、清锁存或写命令必须等我
+另行明确授权。结束时按模块交付格式报告合并提交、测试、冲突和剩余边界。
 ```
 

@@ -15,6 +15,8 @@ analysis_output/
 config/hardware.local.toml
 config/gate_calibration.local.toml
 config/temperature_commissioning.local.toml
+config/three_smu_hardware.local.toml
+config/three_smu_scan.local.toml
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
