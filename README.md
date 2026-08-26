@@ -4,6 +4,11 @@
 
 当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 SMU 连接/写入、Three-SMU 主 acquisition 集成、其它 attoDRY 设置写入和端到端硬件路径仍需分阶段显式授权。
 
+温度—激励组合扫描现有离线编排：升序扫温后，在每个稳定温度点完成一次完整的双 SR830
+激励幅值扫描，并为每个正式锁相样本保存实际测量窗口的带时间权重温度。该功能不是已完成
+的真实联合实验；任何 DLL/VISA 连接、温控写入、SR830 写入或锁存位消费仍需未来一次
+专门、范围明确的真实硬件授权。
+
 ## 已确认硬件
 
 - attoDRY2100XL，USB 虚拟串口加 `attoDRYxyz64bit.dll` 接口。
@@ -107,6 +112,23 @@ python -m attodry_control.lockin_test --help
 `[temperature_run]` 的安全/中断参数。新命令当前只完成离线验证，真实多点写入仍需
 单独确认并带 `--authorize-temperature-scan`；操作、实时 JSONL 和断点恢复说明见
 [`docs/TEMPERATURE_SCAN_GUIDE.md`](docs/TEMPERATURE_SCAN_GUIDE.md)。
+
+温度—激励扫描以同一张表中的温度网格为外层、`[lockin_sweep]` 的 excitation 幅值/
+谐波为内层；`[temperature_excitation_scan]` 只记录该组合运行的名称、备注和输出目录。
+它会区分开始激励前的**稳定窗口温度均值**和正式锁相测量期间的**实际、带时间权重温度
+平均值**，后者才是 formal sample 的温度坐标。该集成流程仍未获真实硬件联合验收，因而
+现在不要执行真实仪器命令。未来在获得专门授权后，`LK_setup` 上必须在 `lyr` 环境中运行：
+
+```powershell
+python -m attodry_control.temperature_excitation_scan `
+  --config config/hardware.local.toml `
+  --authorize-temperature-excitation-scan
+```
+
+其进度 JSONL 保留 rejected/interrupted/partial 原始样本；summary 和默认 formal CSV
+只接受完整结束的 temperature condition。恢复只能跳过连续完成的温度点，绝不从某个
+幅值或谐波中间续跑。完整合同、未来授权边界和分析约定见
+[`docs/TEMPERATURE_EXCITATION_SCAN_GUIDE.md`](docs/TEMPERATURE_EXCITATION_SCAN_GUIDE.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
 `config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别

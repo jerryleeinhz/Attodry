@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 ## Current stage
 
@@ -1121,10 +1121,51 @@ completed all 11 points from 1.7 K through 3.7 K in 0.2 K steps. The final confi
 state had a 3.7 K user setpoint, 3.569 K sample readback, temperature control enabled,
 error code zero, and a clean DLL disconnect. PID and heater settings were not written.
 
+## Current temperature–excitation integration update (2026-08-26)
+
+The Integration worktree now contains the offline-complete temperature–excitation
+coordinator. It traverses the existing temperature grid in ascending order. At each
+condition, the existing stable-readback gate completes first; only then does the
+coordinator execute the entire configured dual-SR830 excitation sweep, perform the
+Lock-in cleanup/post-temperature check, and advance to the next temperature point.
+
+The record deliberately preserves two non-interchangeable temperature quantities:
+
+- the stable-window sample-temperature mean that established readiness before the
+  excitation sweep; and
+- the actual sample-temperature average over each formal Lock-in measurement window.
+  The latter is constructed from synchronous attoDRY state reads immediately before
+  and after the sequential XX/XY formal pair, with timestamp-based time weighting;
+  it is the formal sample's temperature coordinate.
+
+Incremental JSONL retains temperature states, Lock-in transition/formal/cleanup
+records, partial data and every failure. Summary/default formal data only promote a
+temperature condition after its full inner sweep, verified Lock-in cleanup and
+temperature post-check complete. Resume verifies the archived configuration and skips
+only contiguous completed temperature conditions; an incomplete condition never
+continues from a partial amplitude or harmonic.
+
+The dedicated fake-DLL/fake-VISA coverage verifies authorization before DLL/VISA/output
+creation, the actual XX→XY temperature-callback bracket, stable-window versus
+formal-window means, formal-window-only time weighting, parent JSONL/CSV contents,
+inner-sweep failure cleanup, and condition-boundary resume. The complete offline suite
+passed with 396 tests and 5 optional matplotlib-dependent skips. No real DLL or VISA
+resource was opened and no hardware command was sent for this feature.
+
+This is an offline integration implementation, **not** a report of a real combined
+temperature/SR830 experiment. No real DLL/VISA combined run has been performed for
+this feature. The future command
+`python -m attodry_control.temperature_excitation_scan --config ... --authorize-temperature-excitation-scan`
+is intentionally gated and still needs a separate explicit real-hardware authorization
+that names the temperature writes, SR830 writes, latch consumption, physical wiring,
+limits and cleanup scope. Use `lyr` on `LK_setup` for any future target validation or
+authorized run. The detailed contract is in
+[`TEMPERATURE_EXCITATION_SCAN_GUIDE.md`](TEMPERATURE_EXCITATION_SCAN_GUIDE.md).
+
 ## Immediate next implementation tasks
 
-1. Integrate `measurement_temperature_k` into the downstream measurement coordinator
-   and hardware-test the interruption/resume path separately; do not infer or alter
+1. Obtain a distinct, limited real-hardware authorization before any combined DLL/VISA
+   operation. Hardware-test interruption/resume separately; do not infer or alter
    PID values automatically.
 2. Perform staged attoDRY small-movement commissioning only after a new explicit
    write authorization and operator-selected smallest practical targets.

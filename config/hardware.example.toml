@@ -191,6 +191,14 @@ external_50_ohm_termination = false
 # repository's existing default discovery directory for the analysis notebooks.
 output_directory = "../run_data/commissioning"
 
+# Temperature-excitation integration reuses the temperature grid above and the
+# excitation grid above. Keep only the combined run metadata here so those
+# physical settings have one source of truth.
+[temperature_excitation_scan]
+run_name = "temperature_excitation"
+note = "Step temperature, then sweep Lock-in excitation at each stable point."
+output_directory = "../run_data/temperature_excitation_commissioning"
+
 
 [gate_top]
 model = "CHANGE_ME"

@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
-from typing import Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from .config import (
     ControlConfig,
@@ -1653,264 +1653,311 @@ def _run_excitation_sweep(
     record_directory = _prepare_sweep_record_directory(args, settings)
     points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        result, failure = _execute_excitation_sweep_on_open_pair(
+            lockin_xx,
+            lockin_xy,
+            args=args,
+            settings=settings,
+            points=points,
+            safety=safety,
+        )
+        _emit_sweep_result(record_directory, result)
+        if failure is not None:
+            raise failure
+        cleanup = result["cleanup"]
+        if not isinstance(cleanup, dict) or cleanup.get("verified") is not True:
+            raise Sr830Error("Excitation sweep cleanup could not be verified.")
+    return 0
+
+
+def prepare_configured_excitation_sweep(
+    config_path: str | Path, config: object
+) -> tuple[argparse.Namespace, dict[str, object], tuple[float, ...], dict[str, float]]:
+    """Resolve one configured excitation cycle without loading or opening VISA.
+
+    The combined temperature/Lock-in runner supplies its narrow configuration view
+    directly, so unrelated gate/SMU tables are never a prerequisite for this
+    preparation step.
+    """
+
+    resolved_path = Path(config_path).resolve()
+    args = build_parser().parse_args(
+        ["sweep-excitation", "--config", str(resolved_path)]
+    )
+    lockin_config = _require_lockin_sweep_config(config)
+    visa = lockin_config.visa
+    if visa is None:
+        raise ValueError("Temperature/excitation scans require a VISA configuration.")
+    settings: dict[str, object] = {
+        "config": lockin_config,
+        "config_path": resolved_path,
+        "safety_config_path": resolved_path.with_name("lockin_safety.toml"),
+        "xx_address": lockin_config.lockin_xx.address,
+        "xy_address": lockin_config.lockin_xy.address,
+        "timeout_ms": visa.timeout_ms,
+        "frequency_hz": lockin_config.lockin_xx.frequency_hz,
+    }
+    for role, address in (
+        ("lockin_xx", lockin_config.lockin_xx.address),
+        ("lockin_xy", lockin_config.lockin_xy.address),
+    ):
+        if not address.strip() or "CHANGE_ME" in address:
+            raise ValueError(
+                f"{role} requires a station-local VISA address before a sweep can run."
+            )
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    _resolve_sweep_settings(args, settings, scan="excitation")
+    points = _validate_increasing_points(args.points_v, "excitation")
+    safety = _validate_excitation_safety(args, points)
+    _sweep_baseline_source_voltage(settings)
+    return args, settings, points, safety
+
+
+def _execute_excitation_sweep_on_open_pair(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    args: argparse.Namespace,
+    settings: dict[str, object],
+    points: tuple[float, ...],
+    safety: dict[str, float],
+    measurement_context: Callable[[str, int, int], Mapping[str, object] | None]
+    | None = None,
+    on_formal_sample_recorded: Callable[[Mapping[str, object]], None] | None = None,
+) -> tuple[dict[str, object], BaseException | None]:
+    """Run one configured excitation cycle without owning the VISA resources.
+
+    The standalone CLI and temperature/excitation coordinator share this executor.
+    It retains the established preflight, range, status, harmonic, and cleanup
+    behavior; the caller alone decides resource lifetime and final record storage.
+    """
+
+    config = _require_lockin_sweep_config(settings["config"])
     harmonics_by_role = _requested_sweep_harmonics_by_role(args)
     harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
     baseline_source_v = _sweep_baseline_source_voltage(settings)
     source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
-    config = settings["config"]
-    if not isinstance(config, ControlConfig):
-        raise ValueError("A validated hardware config is required for sweeps.")
     records: list[dict[str, object]] = []
-    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
-        controller = DualSr830Controller(lockin_xx, lockin_xy)
-        preflight_xx = None
-        preflight_xy = None
-        sensitivity_setup: dict[str, object] | None = None
-        reserve_setup: dict[str, object] | None = None
-        writes_started = False
-        failure: BaseException | None = None
-        interface_clear: dict[str, object] = {
-            "at_start": None,
-            "before_cleanup": None,
-        }
-        try:
-            interface_clear["at_start"] = _clear_pair_interfaces(
-                lockin_xx, lockin_xy
+    controller = DualSr830Controller(lockin_xx, lockin_xy)
+    preflight_xx = None
+    preflight_xy = None
+    sensitivity_setup: dict[str, object] | None = None
+    reserve_setup: dict[str, object] | None = None
+    writes_started = False
+    failure: BaseException | None = None
+    interface_clear: dict[str, object] = {
+        "at_start": None,
+        "before_cleanup": None,
+    }
+    try:
+        interface_clear["at_start"] = _clear_pair_interfaces(lockin_xx, lockin_xy)
+        preflight_xx, preflight_xy = controller.verify_existing_configuration(
+            frequency_hz=baseline_hz,
+            check_frequency=False,
+            ignore_output_overload=True,
+            transient_overload_recheck_s=args.settle_s,
+        )
+        writes_started = True
+        reserve_setup = _new_sweep_reserve_setup(
+            config.lockin_xx,
+            config.lockin_xy,
+            original_xx_reserve_mode=preflight_xx.reserve_mode,
+            original_xy_reserve_mode=preflight_xy.reserve_mode,
+        )
+        _configure_sweep_reserve_modes(
+            lockin_xx,
+            lockin_xy,
+            reserve_setup=reserve_setup,
+            settle_s=args.settle_s,
+        )
+        sensitivity_setup = _new_sweep_sensitivity_setup(
+            lockin_xx_config=config.lockin_xx,
+            lockin_xy_config=config.lockin_xy,
+            original_xx_sensitivity=preflight_xx.sensitivity,
+            original_xy_sensitivity=preflight_xy.sensitivity,
+            initial_full_scale_overrides=_initial_sweep_range_overrides(args.point_specs),
+        )
+        _configure_sweep_sensitivities(
+            lockin_xx,
+            lockin_xy,
+            sensitivity_setup=sensitivity_setup,
+            settle_s=args.settle_s,
+        )
+        autorange_policies, autorange_states = _new_sweep_autorange_controls(
+            config.lockin_xx,
+            config.lockin_xy,
+            sensitivity_setup=sensitivity_setup,
+        )
+        for point_index, source_v in enumerate(points):
+            point_spec = args.point_specs[point_index]
+            wrote_setting = not math.isclose(
+                source_v, baseline_source_v, rel_tol=0.0, abs_tol=1e-12
             )
-            preflight_xx, preflight_xy = controller.verify_existing_configuration(
-                frequency_hz=baseline_hz,
-                check_frequency=False,
-                ignore_output_overload=True,
-                transient_overload_recheck_s=args.settle_s,
+            requested_nominal_current_a = (
+                source_v / safety["nominal_total_resistance_ohm"]
             )
-            writes_started = True
-            reserve_setup = _new_sweep_reserve_setup(
-                config.lockin_xx,
-                config.lockin_xy,
-                original_xx_reserve_mode=preflight_xx.reserve_mode,
-                original_xy_reserve_mode=preflight_xy.reserve_mode,
+            point_record: dict[str, object] = {
+                "point_index": point_index,
+                "target_frequency_hz": baseline_hz,
+                "requested_frequency_hz": baseline_hz,
+                "actual_frequency_hz": None,
+                "frequency_readback_hz": None,
+                "source_v_rms": source_v,
+                "source_readback_v_rms": None,
+                "source_readback_safety": None,
+                "source_step_settle_s": source_step_settle_s if wrote_setting else 0.0,
+                "requested_nominal_current_a_rms": requested_nominal_current_a,
+                "nominal_current_a_rms": None,
+                "range_segment_index": point_spec.segment_index,
+                "requested_full_scale_v": _point_range_full_scales(point_spec),
+                "write_performed": wrote_setting,
+                "harmonic_transition_status": [],
+                "samples": [],
+            }
+            records.append(point_record)
+            if wrote_setting:
+                lockin_xx.set_sine_output(source_v)
+                time.sleep(source_step_settle_s)
+            else:
+                time.sleep(args.settle_s)
+            output_readback = lockin_xx.read_sine_output()
+            point_record["source_readback_v_rms"] = output_readback
+            source_readback_safety = _validate_excitation_safety(args, (output_readback,))
+            point_record["source_readback_safety"] = source_readback_safety
+            point_record["nominal_current_a_rms"] = output_readback / float(
+                source_readback_safety["nominal_total_resistance_ohm"]
             )
-            _configure_sweep_reserve_modes(
+            xx_frequency_readback = lockin_xx.read_reference_frequency()
+            xy_frequency_readback = lockin_xy.read_reference_frequency()
+            _validate_frequency_observations(
+                baseline_hz, xx_frequency_readback, xy_frequency_readback
+            )
+            point_record["frequency_readback_hz"] = {
+                "lockin_xx": xx_frequency_readback,
+                "lockin_xy": xy_frequency_readback,
+            }
+            point_record["actual_frequency_hz"] = xx_frequency_readback
+            point_harmonics, skipped_harmonics = _harmonics_for_frequency(
+                max(baseline_hz, xx_frequency_readback, xy_frequency_readback),
+                harmonics,
+                skip_unsupported=args.skip_unsupported_harmonics,
+            )
+            point_record["skipped_harmonics"] = skipped_harmonics
+            _apply_sweep_segment_ranges(
                 lockin_xx,
                 lockin_xy,
-                reserve_setup=reserve_setup,
-                settle_s=args.settle_s,
-            )
-            sensitivity_setup = _new_sweep_sensitivity_setup(
+                sensitivity_setup=sensitivity_setup,
+                point_spec=point_spec,
                 lockin_xx_config=config.lockin_xx,
                 lockin_xy_config=config.lockin_xy,
-                original_xx_sensitivity=preflight_xx.sensitivity,
-                original_xy_sensitivity=preflight_xy.sensitivity,
-                initial_full_scale_overrides=_initial_sweep_range_overrides(
-                    args.point_specs
-                ),
+                settle_s=args.settle_s,
+                record=point_record,
             )
-            _configure_sweep_sensitivities(
+            _apply_sweep_autorange(
                 lockin_xx,
                 lockin_xy,
                 sensitivity_setup=sensitivity_setup,
+                policies=autorange_policies,
+                states=autorange_states,
+                target_frequency_hz=xx_frequency_readback,
+                frequency_rel_tolerance=1e-5,
                 settle_s=args.settle_s,
+                record=point_record,
             )
-            autorange_policies, autorange_states = _new_sweep_autorange_controls(
-                config.lockin_xx,
-                config.lockin_xy,
-                sensitivity_setup=sensitivity_setup,
-            )
-            for point_index, source_v in enumerate(points):
-                point_spec = args.point_specs[point_index]
-                wrote_setting = not math.isclose(
-                    source_v, baseline_source_v, rel_tol=0.0, abs_tol=1e-12
-                )
-                requested_nominal_current_a = (
-                    source_v / safety["nominal_total_resistance_ohm"]
-                )
-                point_record = {
-                    "point_index": point_index,
-                    "target_frequency_hz": baseline_hz,
-                    "requested_frequency_hz": baseline_hz,
-                    "actual_frequency_hz": None,
-                    "frequency_readback_hz": None,
-                    "source_v_rms": source_v,
-                    "source_readback_v_rms": None,
-                    "source_readback_safety": None,
-                    "source_step_settle_s": (
-                        source_step_settle_s if wrote_setting else 0.0
-                    ),
-                    "requested_nominal_current_a_rms": requested_nominal_current_a,
-                    "nominal_current_a_rms": None,
-                    "range_segment_index": point_spec.segment_index,
-                    "requested_full_scale_v": _point_range_full_scales(point_spec),
-                    "write_performed": wrote_setting,
-                    "harmonic_transition_status": [],
-                    "samples": [],
-                }
-                records.append(point_record)
-                if wrote_setting:
-                    lockin_xx.set_sine_output(source_v)
-                    time.sleep(source_step_settle_s)
-                else:
-                    time.sleep(args.settle_s)
-                output_readback = lockin_xx.read_sine_output()
-                point_record["source_readback_v_rms"] = output_readback
-                source_readback_safety = _validate_excitation_safety(
-                    args, (output_readback,)
-                )
-                point_record["source_readback_safety"] = source_readback_safety
-                point_record["nominal_current_a_rms"] = output_readback / float(
-                    source_readback_safety["nominal_total_resistance_ohm"]
-                )
-                xx_frequency_readback = lockin_xx.read_reference_frequency()
-                xy_frequency_readback = lockin_xy.read_reference_frequency()
-                _validate_frequency_observations(
-                    baseline_hz, xx_frequency_readback, xy_frequency_readback
-                )
-                point_record["frequency_readback_hz"] = {
-                    "lockin_xx": xx_frequency_readback,
-                    "lockin_xy": xy_frequency_readback,
-                }
-                point_record["actual_frequency_hz"] = xx_frequency_readback
-                point_harmonics, skipped_harmonics = _harmonics_for_frequency(
-                    max(
-                        baseline_hz,
-                        xx_frequency_readback,
-                        xy_frequency_readback,
-                    ),
-                    harmonics,
-                    skip_unsupported=args.skip_unsupported_harmonics,
-                )
-                point_record["skipped_harmonics"] = skipped_harmonics
-                _apply_sweep_segment_ranges(
-                    lockin_xx,
-                    lockin_xy,
-                    sensitivity_setup=sensitivity_setup,
-                    point_spec=point_spec,
-                    lockin_xx_config=config.lockin_xx,
-                    lockin_xy_config=config.lockin_xy,
-                    settle_s=args.settle_s,
-                    record=point_record,
-                )
-                _apply_sweep_autorange(
-                    lockin_xx,
-                    lockin_xy,
-                    sensitivity_setup=sensitivity_setup,
-                    policies=autorange_policies,
-                    states=autorange_states,
-                    target_frequency_hz=xx_frequency_readback,
-                    frequency_rel_tolerance=1e-5,
-                    settle_s=args.settle_s,
-                    record=point_record,
-                )
-                _capture_sweep_point(
-                    lockin_xx,
-                    lockin_xy,
-                    target_frequency_hz=xx_frequency_readback,
-                    harmonics=point_harmonics,
-                    selected_roles_by_harmonic=_roles_by_harmonic(
-                        point_harmonics, harmonics_by_role
-                    ),
-                    harmonic_settle_s=args.settle_s,
-                    samples=args.samples_per_point,
-                    sample_interval_s=args.sample_interval_s,
-                    record=point_record,
-                    frequency_rel_tolerance=1e-5,
-                )
-        except BaseException as exc:
-            failure = exc
-            interface_clear["before_cleanup"] = _clear_pair_interfaces(
-                lockin_xx, lockin_xy, suppress_errors=True
-            )
-        cleanup = (
-            _restore_scan_state(
+            _capture_sweep_point(
                 lockin_xx,
                 lockin_xy,
-                baseline_hz=baseline_hz,
-                original_xx_sensitivity=preflight_xx.sensitivity,
-                original_xy_sensitivity=preflight_xy.sensitivity,
-                restore_sensitivity=_range_write_attempted(
-                    sensitivity_setup, "lockin_xx"
+                target_frequency_hz=xx_frequency_readback,
+                harmonics=point_harmonics,
+                selected_roles_by_harmonic=_roles_by_harmonic(
+                    point_harmonics, harmonics_by_role
                 ),
-                restore_xy_sensitivity=_range_write_attempted(
-                    sensitivity_setup, "lockin_xy"
-                ),
-                original_xx_reserve_mode=preflight_xx.reserve_mode,
-                original_xy_reserve_mode=preflight_xy.reserve_mode,
-                restore_xx_reserve=_reserve_write_attempted(
-                    reserve_setup, "lockin_xx"
-                ),
-                restore_xy_reserve=_reserve_write_attempted(
-                    reserve_setup, "lockin_xy"
-                ),
-                restore_frequency=False,
-                settle_s=args.settle_s,
-                writes_started=writes_started,
-                verify_frequency_match=False,
-                ignore_output_overload=True,
+                harmonic_settle_s=args.settle_s,
+                samples=args.samples_per_point,
+                sample_interval_s=args.sample_interval_s,
+                record=point_record,
+                frequency_rel_tolerance=1e-5,
+                measurement_context=measurement_context,
+                on_formal_sample_recorded=on_formal_sample_recorded,
             )
-            if preflight_xx is not None
-            else {"attempted": False, "verified": True, "errors": []}
+    except BaseException as exc:
+        failure = exc
+        interface_clear["before_cleanup"] = _clear_pair_interfaces(
+            lockin_xx, lockin_xy, suppress_errors=True
         )
-        result = {
-            "scan": "excitation",
-            "completed": failure is None and cleanup["verified"],
-            "outcome": _sweep_outcome(failure, cleanup),
-            "captured_unix_s": time.time(),
-            "captured_at_utc": datetime.now(timezone.utc).isoformat(),
-            "status_latches_consumed": True,
-            "run_metadata": _sweep_run_metadata(settings),
-            "measurement_config": _measurement_config_snapshot(
-                settings,
-                args,
-                scan="excitation",
-                excitation_path={
-                    **safety,
-                    "external_50_ohm_termination": False,
-                },
+    cleanup = (
+        _restore_scan_state(
+            lockin_xx,
+            lockin_xy,
+            baseline_hz=baseline_hz,
+            original_xx_sensitivity=preflight_xx.sensitivity,
+            original_xy_sensitivity=preflight_xy.sensitivity,
+            restore_sensitivity=_range_write_attempted(sensitivity_setup, "lockin_xx"),
+            restore_xy_sensitivity=_range_write_attempted(
+                sensitivity_setup, "lockin_xy"
             ),
-            "preflight": {
-                "lockin_xx": None if preflight_xx is None else asdict(preflight_xx),
-                "lockin_xy": None if preflight_xy is None else asdict(preflight_xy),
-            },
-            "requested_points_v_rms": points,
-            "range_segments": _sweep_range_segments(args, scan="excitation"),
-            "requested_harmonics": harmonics,
-            "requested_harmonics_by_role": harmonics_by_role,
-            "sensitivity_modes": {
-                "lockin_xx": config.lockin_xx.sensitivity_mode.value,
-                "lockin_xy": config.lockin_xy.sensitivity_mode.value,
-            },
-            "sensitivity_setup": sensitivity_setup,
-            "reserve_setup": reserve_setup,
-            "settle_time_constants": config.lockin_sweep.settle_time_constants,
-            "slowest_time_constant_s": args.slowest_time_constant_s,
-            "settle_interval_s": args.settle_s,
-            "post_setting_settle_s": (
-                EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
-            ),
-            "source_step_settle_s": source_step_settle_s,
-            "samples_per_point": args.samples_per_point,
-            "sample_interval_time_constants": (
-                config.lockin_sweep.sample_interval_time_constants
-            ),
-            "sample_interval_s": args.sample_interval_s,
-            "safety": safety,
-            "points": records,
-            "cleanup": cleanup,
-            "interface_clear": interface_clear,
-            "error": None if failure is None else str(failure),
-        }
-        _emit_sweep_result(record_directory, result)
-        if failure is not None:
-            raise failure
-        if not cleanup["verified"]:
-            raise Sr830Error("Excitation sweep cleanup could not be verified.")
-    return 0
+            original_xx_reserve_mode=preflight_xx.reserve_mode,
+            original_xy_reserve_mode=preflight_xy.reserve_mode,
+            restore_xx_reserve=_reserve_write_attempted(reserve_setup, "lockin_xx"),
+            restore_xy_reserve=_reserve_write_attempted(reserve_setup, "lockin_xy"),
+            restore_frequency=False,
+            settle_s=args.settle_s,
+            writes_started=writes_started,
+            verify_frequency_match=False,
+            ignore_output_overload=True,
+        )
+        if preflight_xx is not None
+        else {"attempted": False, "verified": True, "errors": []}
+    )
+    result = {
+        "scan": "excitation",
+        "completed": failure is None and cleanup["verified"],
+        "outcome": _sweep_outcome(failure, cleanup),
+        "captured_unix_s": time.time(),
+        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status_latches_consumed": True,
+        "run_metadata": _sweep_run_metadata(settings),
+        "measurement_config": _measurement_config_snapshot(
+            settings,
+            args,
+            scan="excitation",
+            excitation_path={**safety, "external_50_ohm_termination": False},
+        ),
+        "preflight": {
+            "lockin_xx": None if preflight_xx is None else asdict(preflight_xx),
+            "lockin_xy": None if preflight_xy is None else asdict(preflight_xy),
+        },
+        "requested_points_v_rms": points,
+        "range_segments": _sweep_range_segments(args, scan="excitation"),
+        "requested_harmonics": harmonics,
+        "requested_harmonics_by_role": harmonics_by_role,
+        "sensitivity_modes": {
+            "lockin_xx": config.lockin_xx.sensitivity_mode.value,
+            "lockin_xy": config.lockin_xy.sensitivity_mode.value,
+        },
+        "sensitivity_setup": sensitivity_setup,
+        "reserve_setup": reserve_setup,
+        "settle_time_constants": config.lockin_sweep.settle_time_constants,
+        "slowest_time_constant_s": args.slowest_time_constant_s,
+        "settle_interval_s": args.settle_s,
+        "post_setting_settle_s": EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s,
+        "source_step_settle_s": source_step_settle_s,
+        "samples_per_point": args.samples_per_point,
+        "sample_interval_time_constants": config.lockin_sweep.sample_interval_time_constants,
+        "sample_interval_s": args.sample_interval_s,
+        "safety": safety,
+        "points": records,
+        "cleanup": cleanup,
+        "interface_clear": interface_clear,
+        "error": None if failure is None else str(failure),
+    }
+    return result, failure
 
 
 def _resolved_excitation_path(settings: dict[str, object]) -> dict[str, float | bool]:
-    config = settings["config"]
-    if not isinstance(config, ControlConfig):
-        raise ValueError("A validated hardware config is required for sweep records.")
+    config = _require_lockin_sweep_config(settings["config"])
     sweep = config.lockin_sweep
     nominal_total = (
         sweep.external_series_resistance_ohm
@@ -1938,9 +1985,7 @@ def _measurement_config_snapshot(
     scan: str,
     excitation_path: dict[str, object],
 ) -> dict[str, object]:
-    config = settings["config"]
-    if not isinstance(config, ControlConfig):
-        raise ValueError("A validated hardware config is required for sweep records.")
+    config = _require_lockin_sweep_config(settings["config"])
 
     def lockin_snapshot(lockin: LockinConfig) -> dict[str, object]:
         snapshot = asdict(lockin)
@@ -2090,9 +2135,7 @@ def _lockin_safety_sha256(settings: dict[str, object]) -> str:
 
 
 def _sweep_run_metadata(settings: dict[str, object]) -> dict[str, str]:
-    config = settings["config"]
-    if not isinstance(config, ControlConfig):
-        raise ValueError("A validated hardware config is required for sweep records.")
+    config = _require_lockin_sweep_config(settings["config"])
     return {"name": config.lockin_sweep.run_name, "note": config.lockin_sweep.note}
 
 
@@ -2192,9 +2235,7 @@ def _prepare_sweep_record_directory(
 
 
 def _sweep_baseline_source_voltage(settings: dict[str, object]) -> float:
-    config = settings["config"]
-    if not isinstance(config, ControlConfig):
-        raise ValueError("A validated hardware config is required for sweeps.")
+    config = _require_lockin_sweep_config(settings["config"])
     for role, lockin in (("xx", config.lockin_xx), ("xy", config.lockin_xy)):
         if not math.isclose(
             lockin.source_voltage_v,
@@ -3033,15 +3074,30 @@ def _range_write_attempted(
     return isinstance(range_record, dict) and range_record.get("write_attempted") is True
 
 
+def _require_lockin_sweep_config(config: object) -> Any:
+    """Accept the narrow Lock-in view used by standalone and integrated scans."""
+
+    required = (
+        "lockin_xx",
+        "lockin_xy",
+        "lockin_safety",
+        "lockin_sweep",
+        "visa",
+    )
+    missing = [name for name in required if not hasattr(config, name)]
+    if missing:
+        raise ValueError(
+            "Sweep commands require a validated Lock-in configuration with "
+            + ", ".join(missing)
+            + "."
+        )
+    return config
+
+
 def _resolve_sweep_settings(
     args: argparse.Namespace, settings: dict[str, object], *, scan: str
 ) -> None:
-    config = settings["config"]
-    if not isinstance(config, ControlConfig):
-        raise ValueError(
-            "Sweep commands require --config so wiring and safety limits come from "
-            "the validated hardware TOML."
-        )
+    config = _require_lockin_sweep_config(settings["config"])
     sweep = config.lockin_sweep
     if scan == "frequency":
         args.configured_harmonics_by_role = {
@@ -3502,6 +3558,9 @@ def _capture_sweep_point(
     sample_interval_s: float,
     record: dict[str, object],
     frequency_rel_tolerance: float,
+    measurement_context: Callable[[str, int, int], Mapping[str, object] | None]
+    | None = None,
+    on_formal_sample_recorded: Callable[[Mapping[str, object]], None] | None = None,
 ) -> None:
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
@@ -3533,8 +3592,18 @@ def _capture_sweep_point(
         for sample_index in range(samples):
             if sample_index:
                 time.sleep(sample_interval_s)
+            context_before = (
+                None
+                if measurement_context is None
+                else measurement_context("before", harmonic, sample_index)
+            )
             xx = lockin_xx.read_harmonic_sample(harmonic)
             xy = lockin_xy.read_harmonic_sample(harmonic)
+            context_after = (
+                None
+                if measurement_context is None
+                else measurement_context("after", harmonic, sample_index)
+            )
             problems = _autorange_probe_problems(
                 xx,
                 xy,
@@ -3542,6 +3611,7 @@ def _capture_sweep_point(
                 frequency_rel_tolerance=frequency_rel_tolerance,
             )
             sample_payload = {
+                "harmonic": harmonic,
                 "sample_index": sample_index,
                 "captured_unix_s": time.time(),
                 "selected_roles": list(selected_roles),
@@ -3549,10 +3619,29 @@ def _capture_sweep_point(
                 "lockin_xy": _audited_harmonic_sample_record(xy),
                 "problems": problems,
             }
+            if context_before is not None or context_after is not None:
+                sample_payload["measurement_context"] = {
+                    "before": context_before,
+                    "after": context_after,
+                }
             if _sweep_overload_recheck_eligible(xx, xy, problems):
                 time.sleep(harmonic_settle_s)
+                verification_context_before = (
+                    None
+                    if measurement_context is None
+                    else measurement_context(
+                        "before_status_recheck", harmonic, sample_index
+                    )
+                )
                 verification_xx = lockin_xx.read_harmonic_sample(harmonic)
                 verification_xy = lockin_xy.read_harmonic_sample(harmonic)
+                verification_context_after = (
+                    None
+                    if measurement_context is None
+                    else measurement_context(
+                        "after_status_recheck", harmonic, sample_index
+                    )
+                )
                 verification_problems = _autorange_probe_problems(
                     verification_xx,
                     verification_xy,
@@ -3572,7 +3661,16 @@ def _capture_sweep_point(
                 sample_payload["lockin_xx"] = _audited_harmonic_sample_record(xx)
                 sample_payload["lockin_xy"] = _audited_harmonic_sample_record(xy)
                 sample_payload["problems"] = problems
+                if verification_context_before is not None or verification_context_after is not None:
+                    initial_context = sample_payload.get("measurement_context")
+                    sample_payload["measurement_context"] = {
+                        "before": verification_context_before,
+                        "after": verification_context_after,
+                        "initial": initial_context,
+                    }
             raw_samples.append(sample_payload)
+            if on_formal_sample_recorded is not None:
+                on_formal_sample_recorded(sample_payload)
             if problems:
                 raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
     if harmonics[-1] != 1:

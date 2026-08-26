@@ -9,6 +9,22 @@ SMU 和端到端硬件 acquisition 尚未验收。
 Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU 模块
 已经通过的接口与提交，不能代替它们各自的实验室 commissioning。
 
+### 温度—激励组合切片（offline，真实联合运行未验收）
+
+本 Integration branch 新增的温度—激励编排只组合两个已经存在的窄接口：外层为
+升序 temperature condition，内层为完整双 SR830 excitation sweep。一个温度点只有在
+稳定判据通过、整条内层扫描完成、SR830 cleanup 已验证且温度后检查通过后，才算
+`completed` 并可前往下一点。
+
+该实现还没有执行任何真实联合 run。它不把单独的 temperature write acceptance 或
+Lock-in device-only commissioning 解释为组合硬件验收；未来的 DLL/VISA 连接、温度
+写入、SR830 写入和状态锁存消费仍需要一次单独、范围明确的真实硬件授权。
+
+组合记录刻意保存两种温度：开始 excitation 前的稳定窗口样品温度均值用于说明测量
+准备度；每个 formal paired Lock-in sample 前后都顺序读取 attoDRY 状态，利用时间戳
+做带时间权重的实际测量窗口温度平均。后者才是 formal sample 的温度坐标，前者不能
+悄悄替代它。
+
 ## 前置输入
 
 开始合并前，每个模块必须提供：
@@ -29,6 +45,8 @@ Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU �
 3. 确保每个 condition 只接受一个安全 attempt，失败原始数据仍保留。
 4. 发生异常时按已确认顺序处理电气输出、gate、磁场和最终状态记录。
 5. 确保分析默认只加载 accepted/clean 数据，并完整保留相位和状态元数据。
+6. 对温度—激励扫描，保持“稳定窗口均值”和“正式测量窗口的实际带时间权重温度”
+   两个不同的审计字段，并保留每个正式样本的时间上下文。
 
 ## 不能在 Integration 中越过的边界
 
@@ -53,6 +71,20 @@ Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU �
   gate leakage、Ctrl+C 和 cleanup 顺序。
 - 检查 station snapshot、raw samples、accepted promotion 和 checkpoint。
 - 完成条件：所有注入故障都有确定的 rejected/audit 结果，无静默继续。
+
+### I1a - temperature × excitation orchestration（offline implementation）
+
+- 以 temperature scan 的升序网格作为外层；每个稳定温度点内运行完整的
+  `sweep-excitation` 核心路径，而不是只读取一个锁相样本。
+- 为每个正式成对样本同步记录 pre/post attoDRY state，并计算测量窗口的带时间权重
+  样品温度；稳定窗口均值仍独立保留。
+- 进度 JSONL 立即保存温度状态、Lock-in formal/transition/cleanup 样本和部分失败数据；
+  summary/默认 formal CSV 仅把完整 temperature condition 作为可分析结果。
+- `--resume-progress` 只跳过连续完成的 temperature condition；从未完整结束的温度点
+  重新开始，不从幅值或 harmonic 中间续跑。
+- 完成条件：配置、fake DLL/fake VISA、故障 cleanup、温度均值、JSONL/summary/CSV 和
+  condition-boundary resume 测试通过；随后才可申请 I2 target-offline 检查。此阶段不
+  包含真实硬件连接或写入。
 
 ### I2 - target offline release
 
@@ -86,6 +118,8 @@ Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU �
 - Lock-in X/Y/R/phase/harmonic/frequency 及设置上下文完整保存。
 - 两台 SR830 顺序读取事实未丢失，转换样本不进入 accepted 曲线。
 - 温度/磁场稳定均要求控制状态、error、窗口、容差和 timeout。
+- 温度—激励的 formal 数据应带同步的实际测量窗口温度；稳定窗口均值只作为 readiness
+  证据，不能被当作扫描期间每个样本的实际温度。
 - 清理顺序为：降低 XX 激励、gate 归零/关闭、请求磁场归零、监视读回、记录
   最终状态、最后断开。
 - 任一通信失败都保留最后确认状态并要求人工检查。
@@ -100,6 +134,9 @@ Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU �
 - `src/attodry_control/storage.py`
 - `src/attodry_control/simulation.py`
 - `src/attodry_control/simulate.py`
+- `src/attodry_control/temperature_excitation_scan.py`
+- `src/attodry_control/lockin_test.py`（仅复用已验收的 excitation executor）
+- `src/attodry_control/config.py` 与相应温度—激励配置/测试
 - 相应 acquisition/storage/simulation/cleanup 测试。
 
 Integration 可以对共享适配层做最小修改，但不应把已分离的设备安全逻辑复制到

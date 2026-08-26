@@ -10,6 +10,7 @@ from attodry_control.config import (
     TemperatureInterruptPolicy,
     TemperatureStabilityMode,
     load_config,
+    load_temperature_excitation_operation_config,
     load_temperature_operation_config,
 )
 from attodry_control.models import LockinRole
@@ -53,6 +54,31 @@ class ConfigurationTests(unittest.TestCase):
             side_effect=load_document_side_effect,
         ):
             return load_config("test.toml")
+
+    def load_temperature_excitation_text(
+        self, text: str, safety_text: str | None = None
+    ):
+        safety_document = tomllib.loads(
+            (
+                LOCKIN_SAFETY_CONFIG.read_text(encoding="utf-8")
+                if safety_text is None
+                else safety_text
+            )
+        )
+
+        def load_document_side_effect(path):
+            if Path(path).name == "lockin_safety.toml":
+                return safety_document
+            try:
+                return tomllib.loads(text)
+            except tomllib.TOMLDecodeError as exc:
+                raise ConfigError(f"Invalid TOML in {path}: {exc}") from exc
+
+        with patch(
+            "attodry_control.config._load_document",
+            side_effect=load_document_side_effect,
+        ):
+            return load_temperature_excitation_operation_config("test.toml")
 
     def test_loads_complete_simulation_configuration(self) -> None:
         config = load_config(SIMULATION_CONFIG)
@@ -687,6 +713,99 @@ class ConfigurationTests(unittest.TestCase):
                 mock_open(read_data=text.encode("utf-8")),
             ):
                 load_temperature_operation_config("test.toml")
+
+    def test_temperature_excitation_loader_requires_no_gate_or_smu_tables(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").split(
+            "[gate_top]", 1
+        )[0]
+
+        config = self.load_temperature_excitation_text(text)
+
+        self.assertEqual(
+            config.temperature_scan.start_k,
+            1.7,
+        )
+        self.assertEqual(
+            config.lockin_sweep.excitation_points_v_rms[0],
+            0.004,
+        )
+        self.assertEqual(config.visa.timeout_ms, 5000)
+        self.assertEqual(
+            config.temperature_excitation_scan.run_name,
+            "temperature_excitation",
+        )
+        self.assertEqual(
+            config.temperature_excitation_scan.note,
+            "Step temperature, then sweep Lock-in excitation at each stable point.",
+        )
+        self.assertEqual(
+            config.temperature_excitation_scan.output_directory,
+            Path("../run_data/temperature_excitation_commissioning"),
+        )
+
+    def test_temperature_excitation_loader_strictly_validates_its_metadata(self) -> None:
+        base = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").split(
+            "[gate_top]", 1
+        )[0]
+        cases = (
+            (
+                base.replace(
+                    'run_name = "temperature_excitation"',
+                    'run_name = "temperature_excitation"\nunknown_option = true',
+                ),
+                r"temperature_excitation_scan.*unknown_option",
+            ),
+            (
+                base.replace(
+                    'note = "Step temperature, then sweep Lock-in excitation at each stable point."\n',
+                    "",
+                ),
+                r"temperature_excitation_scan.*note",
+            ),
+        )
+        for text, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ConfigError, message):
+                    self.load_temperature_excitation_text(text)
+
+    def test_temperature_excitation_loader_requires_its_metadata_table(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            "# Temperature-excitation integration reuses the temperature grid above and the\n"
+            "# excitation grid above. Keep only the combined run metadata here so those\n"
+            "# physical settings have one source of truth.\n"
+            "[temperature_excitation_scan]\n"
+            'run_name = "temperature_excitation"\n'
+            'note = "Step temperature, then sweep Lock-in excitation at each stable point."\n'
+            'output_directory = "../run_data/temperature_excitation_commissioning"\n\n',
+            "",
+        ).split("[gate_top]", 1)[0]
+
+        with self.assertRaisesRegex(
+            ConfigError, r"top level.*temperature_excitation_scan"
+        ):
+            self.load_temperature_excitation_text(text)
+
+    def test_independent_loaders_accept_unrelated_temperature_excitation_table(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            'run_name = "temperature_excitation"',
+            'unrelated_future_field = true',
+        ).replace(
+            'note = "Step temperature, then sweep Lock-in excitation at each stable point."\n',
+            "",
+        ).replace(
+            'output_directory = "../run_data/temperature_excitation_commissioning"\n',
+            "",
+        )
+
+        with patch(
+            "attodry_control.config.Path.open",
+            mock_open(read_data=text.encode("utf-8")),
+        ):
+            temperature_config = load_temperature_operation_config("test.toml")
+        lockin_config = self.load_text(text)
+
+        self.assertEqual(temperature_config.temperature_run.target_k, 1.8)
+        self.assertEqual(lockin_config.lockin_sweep.run_name, "test145degree")
 
     def test_malformed_toml_is_reported_as_configuration_error(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Invalid TOML"):

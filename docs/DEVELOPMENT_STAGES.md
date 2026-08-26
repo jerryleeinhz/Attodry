@@ -1004,3 +1004,39 @@ Status: real hardware commissioned on `LK_setup` (2026-08-26).
   3.7 K user setpoint with a 3.569 K sample readback, temperature control enabled,
   error code zero, and a clean DLL disconnect. Every point archived its stable-window
   measurement and timing; PID and heater settings were not written.
+
+## Stage 7 follow-up - temperature–excitation orchestration
+
+Status: offline implementation complete (2026-08-26); no real combined
+temperature/SR830 run has occurred and real integration remains uncommissioned.
+
+- Added the temperature–excitation orchestration contract: temperature points are
+  ascending on the outside; after one point has passed the existing stability
+  predicate, its entire configured dual-SR830 excitation sweep runs on the inside
+  before the next temperature point may start.
+- The outer temperature preparation continues to archive the stable-window sample
+  temperature mean, standard deviation, range and sample count. That readiness
+  value remains distinct from each formal Lock-in sample's actual measurement-window
+  temperature: attoDRY state is read before and after the paired formal sample and
+  its sample temperature is reduced with timestamp-based, time-weighted averaging.
+- Incremental progress JSONL preserves state/transition/formal/cleanup evidence and
+  partial raw data. The final summary and default formal-sample CSV promote only
+  a temperature condition whose full excitation path, Lock-in cleanup and
+  post-excitation temperature check completed; rejected/interrupted raw data is
+  intentionally excluded from default analysis but retained for audit.
+- Resume validates the archived resolved configuration and only skips contiguous
+  completed temperature conditions. It never resumes in the middle of an amplitude
+  or harmonic: the first incomplete condition repeats from temperature stabilization.
+- The future command is
+  `python -m attodry_control.temperature_excitation_scan --config ... --authorize-temperature-excitation-scan`.
+  That flag is an explicit combined-operation gate, not evidence that real DLL/VISA
+  operations have been authorized or run. A distinct future authorization must state
+  the allowed temperature and SR830 actions, latch consumption, physical wiring and
+  cleanup expectations.
+- Offline validation passed: the dedicated fake-DLL/fake-VISA tests cover
+  authorization before DLL/VISA/output creation, the actual XX→XY callback bracket,
+  stable-window versus formal-window temperatures, formal-window-only averaging,
+  parent JSONL/CSV records, inner-sweep failure cleanup, and condition-boundary resume.
+  The complete offline suite passed with 396 tests and 5 optional
+  matplotlib-dependent skips. No real DLL or
+  real VISA resource was opened, and no hardware command was sent for this feature.

@@ -107,6 +107,15 @@ class TemperatureScanConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TemperatureExcitationScanConfig:
+    """Integration-only metadata for an outer temperature/inner excitation scan."""
+
+    run_name: str
+    note: str
+    output_directory: Path
+
+
+@dataclass(frozen=True, slots=True)
 class TemperatureOperationConfig:
     cryostat: CryostatConfig
     magnet: MagnetConfig
@@ -131,6 +140,23 @@ class CleanupConfig:
 class VisaConfig:
     backend: str
     timeout_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class TemperatureExcitationOperationConfig:
+    """Strictly parsed temperature and dual-SR830 inputs for their integration."""
+
+    cryostat: CryostatConfig
+    magnet: MagnetConfig
+    temperature_stability: StabilityConfig
+    temperature_run: TemperatureRunConfig
+    temperature_scan: TemperatureScanConfig
+    temperature_excitation_scan: TemperatureExcitationScanConfig
+    visa: VisaConfig
+    lockin_xx: LockinConfig
+    lockin_xy: LockinConfig
+    lockin_safety: LockinSafetyConfig
+    lockin_sweep: LockinSweepConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,7 +361,11 @@ def load_config(
             "top level",
             expected_tables,
             (
-                {"temperature_run", "temperature_scan"}
+                {
+                    "temperature_run",
+                    "temperature_scan",
+                    "temperature_excitation_scan",
+                }
                 if project.mode is RunMode.HARDWARE
                 else set()
             ),
@@ -661,6 +691,20 @@ def _parse_temperature_scan(
     )
 
 
+def _parse_temperature_excitation_scan(
+    table: Mapping[str, Any],
+) -> TemperatureExcitationScanConfig:
+    name = "temperature_excitation_scan"
+    _strict_keys(table, name, {"run_name", "note", "output_directory"})
+    return TemperatureExcitationScanConfig(
+        run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
+        note=_sweep_note(table["note"], f"{name}.note"),
+        output_directory=_relative_directory(
+            table["output_directory"], f"{name}.output_directory"
+        ),
+    )
+
+
 def load_temperature_operation_config(
     path: str | Path,
 ) -> TemperatureOperationConfig:
@@ -677,6 +721,7 @@ def load_temperature_operation_config(
         "temperature_stability",
         "temperature_run",
         "temperature_scan",
+        "temperature_excitation_scan",
         "cleanup",
         "visa",
         "lockin_xx",
@@ -725,6 +770,108 @@ def load_temperature_operation_config(
         temperature_stability=temperature_stability,
         temperature_run=temperature_run,
         temperature_scan=temperature_scan,
+    )
+
+
+def load_temperature_excitation_operation_config(
+    path: str | Path, *, safety_path: str | Path | None = None
+) -> TemperatureExcitationOperationConfig:
+    """Load only the strict attoDRY and dual-SR830 tables needed for integration."""
+
+    config_path = Path(path)
+    document = _load_document(config_path)
+    resolved_safety_path = (
+        Path(safety_path)
+        if safety_path is not None
+        else config_path.with_name("lockin_safety.toml")
+    )
+    safety = _parse_lockin_safety(_load_document(resolved_safety_path))
+    project = _parse_project(_table(document, "project"))
+    if project.mode is not RunMode.HARDWARE:
+        raise ConfigError(
+            "Temperature-excitation operation requires hardware mode."
+        )
+
+    required_tables = {
+        "project",
+        "cryostat",
+        "magnet",
+        "temperature_stability",
+        "temperature_run",
+        "temperature_scan",
+        "temperature_excitation_scan",
+        "visa",
+        "lockin_xx",
+        "lockin_xy",
+        "lockin_sweep",
+    }
+    known_tables = required_tables | {
+        "cleanup",
+        "gate_top",
+        "gate_bottom",
+        "smu_bias",
+        "three_smu_run",
+    }
+    _strict_keys_with_optional(
+        document,
+        "top level",
+        required_tables,
+        known_tables - required_tables,
+    )
+
+    try:
+        cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
+        magnet = _parse_magnet(_table(document, "magnet"))
+        temperature_stability = _parse_stability(
+            _table(document, "temperature_stability"),
+            "temperature_stability",
+            value_prefix="",
+        )
+        temperature_run = _parse_temperature_run(
+            _table(document, "temperature_run"), cryostat
+        )
+        temperature_scan = _parse_temperature_scan(
+            _table(document, "temperature_scan"), cryostat, temperature_run
+        )
+        temperature_excitation_scan = _parse_temperature_excitation_scan(
+            _table(document, "temperature_excitation_scan")
+        )
+        visa = _parse_visa(_table(document, "visa"))
+        lockin_xx = _parse_lockin(
+            _table(document, "lockin_xx"),
+            LockinRole.XX,
+            "lockin_xx",
+            safety.lockin_xx,
+            safety,
+        )
+        lockin_xy = _parse_lockin(
+            _table(document, "lockin_xy"),
+            LockinRole.XY,
+            "lockin_xy",
+            safety.lockin_xy,
+            safety,
+        )
+        _validate_lockin_pair(lockin_xx, lockin_xy)
+        lockin_sweep = _parse_lockin_sweep(
+            _table(document, "lockin_sweep"), safety, lockin_xx, lockin_xy
+        )
+    except ConfigError:
+        raise
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+
+    return TemperatureExcitationOperationConfig(
+        cryostat=cryostat,
+        magnet=magnet,
+        temperature_stability=temperature_stability,
+        temperature_run=temperature_run,
+        temperature_scan=temperature_scan,
+        temperature_excitation_scan=temperature_excitation_scan,
+        visa=visa,
+        lockin_xx=lockin_xx,
+        lockin_xy=lockin_xy,
+        lockin_safety=safety,
+        lockin_sweep=lockin_sweep,
     )
 
 
