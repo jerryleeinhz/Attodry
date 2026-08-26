@@ -24,8 +24,8 @@ python -m attodry_control.three_smu_cli monitor-live --samples 10 --interval-s 2
 - TOML 中的 scan 角色（off/fixed/sweep）和实际 source mode/setpoint；
 - 实际 voltage、current、计算的 resistance、output 与 compliance trip；
 - active compliance、source/measurement range、2/4-wire sense、`*IDN?`；
-- 适用的安全 warning：source mode/range、实际 V/I 绝对边界、compliance、voltage-source gate
-  leakage、trip、output 已开启，以及 identity 重复。
+- 适用的安全 warning：source mode、实际 V/I 绝对边界、compliance 高于对应
+  `max_abs_*`、trip、output 已开启，以及 identity 重复。
 
 这是一帧内依次读取的快照，不是三台 SMU 的同步触发测量。显示的电阻仅为该帧 `V/I`；电流为零时
 显示为不可定义。
@@ -59,6 +59,6 @@ python -m attodry_control.three_smu_cli monitor-live --consume-status-queue
 不要与 `three_smu_cli run` 或 live Notebook 同时监控同一台 SMU：额外测量查询和可选的 status
 queue 消耗会扰乱扫描时序/审计。监控不是扫描 preflight 的替代品，也不授权后续写入。
 
-若面板显示 output ON、trip、越界、gate leakage、mode/range 不符、身份重复或错误队列 warning：
+若面板显示 output ON、trip、V/I 或 compliance 越界、mode 不符、身份重复或错误队列 warning：
 停止后续动作，保留终端输出，并按实验室步骤人工检查三台前面板、接线与器件状态。不要通过提高
 TOML 限值来消除 warning。

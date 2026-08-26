@@ -10,6 +10,11 @@ from typing import Any, Mapping
 
 
 SEMANTIC_ROLES = ("smu_bias", "gate_top", "gate_bottom")
+KEITHLEY_2400_MAX_VOLTAGE_V = 210.0
+KEITHLEY_2400_MAX_CURRENT_A = 1.05
+KEITHLEY_2400_MAX_POWER_W = 22.05
+KEITHLEY_2400_MIN_CURRENT_COMPLIANCE_A = 1e-9
+KEITHLEY_2400_MIN_VOLTAGE_COMPLIANCE_V = 200e-6
 
 
 class ThreeSmuConfigError(ValueError):
@@ -49,24 +54,12 @@ class SmuHardwareConfig:
     address: str
     timeout_ms: int | None
     source_mode: SourceMode
-    compliance_current_a: float | None
-    compliance_voltage_v: float | None
     max_abs_voltage_v: float | None
     max_abs_current_a: float | None
-    source_min_v: float | None
-    source_max_v: float | None
-    ramp_step_v: float | None
-    readback_tolerance_v: float | None
-    source_min_a: float | None
-    source_max_a: float | None
-    ramp_step_a: float | None
-    readback_tolerance_a: float | None
-    settle_s: float | None
     nplc: float | None
     source_auto_range: bool
     measure_auto_range: bool
     four_wire: bool
-    leakage_limit_a: float | None = None
 
     def __post_init__(self) -> None:
         if self.role not in SEMANTIC_ROLES:
@@ -74,14 +67,8 @@ class SmuHardwareConfig:
         if self.timeout_ms is not None and self.timeout_ms < 1:
             raise ThreeSmuConfigError(f"{self.role}.timeout_ms must be positive")
         for field_name in (
-            "compliance_current_a",
-            "compliance_voltage_v",
             "max_abs_voltage_v",
             "max_abs_current_a",
-            "ramp_step_v",
-            "readback_tolerance_v",
-            "ramp_step_a",
-            "readback_tolerance_a",
             "nplc",
         ):
             value = getattr(self, field_name)
@@ -89,105 +76,54 @@ class SmuHardwareConfig:
                 raise ThreeSmuConfigError(
                     f"{self.role}.{field_name} must be finite and positive"
                 )
-        if self.settle_s is not None and (
-            not math.isfinite(self.settle_s) or self.settle_s < 0
-        ):
-            raise ThreeSmuConfigError(
-                f"{self.role}.settle_s must be finite and non-negative"
-            )
-        self._validate_source_range("v", self.max_abs_voltage_v)
-        self._validate_source_range("a", self.max_abs_current_a)
+        if self.nplc is not None and not 0.01 <= self.nplc <= 10.0:
+            raise ThreeSmuConfigError(f"{self.role}.nplc must be between 0.01 and 10")
         if (
-            self.compliance_current_a is not None
-            and self.max_abs_current_a is not None
-            and self.compliance_current_a > self.max_abs_current_a
+            self.max_abs_voltage_v is not None
+            and self.max_abs_voltage_v > KEITHLEY_2400_MAX_VOLTAGE_V
         ):
             raise ThreeSmuConfigError(
-                f"{self.role}.compliance_current_a cannot exceed max_abs_current_a"
+                f"{self.role}.max_abs_voltage_v exceeds Keithley 2400 capability"
             )
         if (
-            self.compliance_voltage_v is not None
-            and self.max_abs_voltage_v is not None
-            and self.compliance_voltage_v > self.max_abs_voltage_v
+            self.max_abs_current_a is not None
+            and self.max_abs_current_a > KEITHLEY_2400_MAX_CURRENT_A
         ):
             raise ThreeSmuConfigError(
-                f"{self.role}.compliance_voltage_v cannot exceed max_abs_voltage_v"
+                f"{self.role}.max_abs_current_a exceeds Keithley 2400 capability"
             )
-        if self.leakage_limit_a is not None:
-            if not math.isfinite(self.leakage_limit_a) or self.leakage_limit_a <= 0:
-                raise ThreeSmuConfigError(
-                    f"{self.role}.leakage_limit_a must be finite and positive"
-                )
-            if (
-                self.compliance_current_a is not None
-                and self.leakage_limit_a > self.compliance_current_a
+        if self.max_abs_voltage_v is not None and self.max_abs_current_a is not None:
+            if self.max_abs_voltage_v * self.max_abs_current_a > (
+                KEITHLEY_2400_MAX_POWER_W * (1.0 + 1e-12)
             ):
                 raise ThreeSmuConfigError(
-                    f"{self.role}.leakage_limit_a cannot exceed compliance_current_a"
+                    f"{self.role} max_abs_voltage_v * max_abs_current_a exceeds "
+                    "the Keithley 2400 operating envelope"
                 )
-            if (
-                self.max_abs_current_a is not None
-                and self.leakage_limit_a > self.max_abs_current_a
-            ):
-                raise ThreeSmuConfigError(
-                    f"{self.role}.leakage_limit_a cannot exceed max_abs_current_a"
-                )
-
-    @property
-    def source_min(self) -> float | None:
-        return (
-            self.source_min_v
+        compliance = (
+            self.max_abs_current_a
             if self.source_mode is SourceMode.VOLTAGE
-            else self.source_min_a
+            else self.max_abs_voltage_v
         )
-
-    @property
-    def source_max(self) -> float | None:
-        return (
-            self.source_max_v
+        minimum = (
+            KEITHLEY_2400_MIN_CURRENT_COMPLIANCE_A
             if self.source_mode is SourceMode.VOLTAGE
-            else self.source_max_a
+            else KEITHLEY_2400_MIN_VOLTAGE_COMPLIANCE_V
         )
-
-    @property
-    def ramp_step(self) -> float | None:
-        return (
-            self.ramp_step_v
-            if self.source_mode is SourceMode.VOLTAGE
-            else self.ramp_step_a
-        )
-
-    @property
-    def readback_tolerance(self) -> float | None:
-        return (
-            self.readback_tolerance_v
-            if self.source_mode is SourceMode.VOLTAGE
-            else self.readback_tolerance_a
-        )
-
-    def _validate_source_range(self, unit: str, absolute_limit: float | None) -> None:
-        minimum = getattr(self, f"source_min_{unit}")
-        maximum = getattr(self, f"source_max_{unit}")
-        if minimum is None or maximum is None:
-            return
-        if not (
-            math.isfinite(minimum)
-            and math.isfinite(maximum)
-            and minimum < maximum
-        ):
-            raise ThreeSmuConfigError(
-                f"{self.role}.source_min_{unit} must be below source_max_{unit}"
+        if compliance is not None and compliance < minimum:
+            unit_field = (
+                "max_abs_current_a"
+                if self.source_mode is SourceMode.VOLTAGE
+                else "max_abs_voltage_v"
             )
-        if not minimum <= 0 <= maximum:
             raise ThreeSmuConfigError(
-                f"{self.role} {unit.upper()} source range must include zero"
+                f"{self.role}.{unit_field} is below the Keithley 2400 minimum "
+                "programmable compliance"
             )
-        if absolute_limit is not None and (
-            abs(minimum) > absolute_limit or abs(maximum) > absolute_limit
-        ):
+        if not self.source_auto_range or not self.measure_auto_range:
             raise ThreeSmuConfigError(
-                f"{self.role} {unit.upper()} source range exceeds max_abs_"
-                f"{'voltage_v' if unit == 'v' else 'current_a'}"
+                f"{self.role} requires source_auto_range=true and "
+                "measure_auto_range=true; fixed ranges are not configured"
             )
 
 
@@ -212,30 +148,12 @@ class ThreeSmuHardwareConfig:
                 configured_addresses.append(config.address)
             for field_name in (
                 "timeout_ms",
-                "compliance_current_a",
-                "compliance_voltage_v",
                 "max_abs_voltage_v",
                 "max_abs_current_a",
-                "settle_s",
                 "nplc",
             ):
                 if getattr(config, field_name) is None:
                     errors.append(f"{role}.{field_name} is not configured")
-            suffix = "v" if config.source_mode is SourceMode.VOLTAGE else "a"
-            for field_name in (
-                f"source_min_{suffix}",
-                f"source_max_{suffix}",
-                f"ramp_step_{suffix}",
-                f"readback_tolerance_{suffix}",
-            ):
-                if getattr(config, field_name) is None:
-                    errors.append(f"{role}.{field_name} is not configured")
-            if (
-                role != "smu_bias"
-                and config.source_mode is SourceMode.VOLTAGE
-                and config.leakage_limit_a is None
-            ):
-                errors.append(f"{role}.leakage_limit_a is not configured")
         if len(set(configured_addresses)) != len(configured_addresses):
             errors.append("all three SMU addresses must be distinct")
         return tuple(errors)
@@ -251,17 +169,47 @@ class ThreeSmuHardwareConfig:
 @dataclass(frozen=True, slots=True)
 class ChannelPlan:
     role: ChannelRole
-    fixed: float
-    start: float
-    stop: float
-    step: float
+    bidirectional: bool
+    fixed: float | None = None
+    start: float | None = None
+    stop: float | None = None
+    step: float | None = None
+    points: tuple[float, ...] | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("fixed", "start", "stop", "step"):
             value = getattr(self, field_name)
-            if not math.isfinite(value):
+            if value is not None and not math.isfinite(value):
                 raise ThreeSmuConfigError(f"channel {field_name} must be finite")
-        if self.step <= 0:
+        if self.points is not None:
+            if not self.points or not all(math.isfinite(value) for value in self.points):
+                raise ThreeSmuConfigError("channel points must be non-empty and finite")
+        if self.role is ChannelRole.OFF:
+            if self.bidirectional or any(
+                value is not None
+                for value in (self.fixed, self.start, self.stop, self.step, self.points)
+            ):
+                raise ThreeSmuConfigError(
+                    "off channel allows only role='off' and bidirectional=false"
+                )
+            return
+        if self.role is ChannelRole.FIXED:
+            if self.bidirectional or self.fixed is None or any(
+                value is not None for value in (self.start, self.stop, self.step, self.points)
+            ):
+                raise ThreeSmuConfigError(
+                    "fixed channel requires only fixed and bidirectional=false"
+                )
+            return
+        range_values = (self.start, self.stop, self.step)
+        has_range = all(value is not None for value in range_values)
+        if any(value is not None for value in range_values) and not has_range:
+            raise ThreeSmuConfigError("sweep range requires start, stop, and step")
+        if (self.points is None) == (not has_range):
+            raise ThreeSmuConfigError(
+                "sweep channel requires exactly one of points or start/stop/step"
+            )
+        if self.step is not None and self.step <= 0:
             raise ThreeSmuConfigError("channel step must be positive")
 
 
@@ -270,7 +218,6 @@ class ThreeSmuScanPlan:
     mode: ScanMode
     samples_per_point: int
     delay_s: float
-    bidirectional: bool
     serpentine: bool
     finish_action: FinishAction
     point_count: int
@@ -318,70 +265,8 @@ class ScanPoint:
     post_delay_s: float = 0.0
 
 
-def load_three_smu_hardware(path: str | Path) -> ThreeSmuHardwareConfig:
-    document = _load_toml(path)
-    _strict_keys(document, "top level", set(SEMANTIC_ROLES))
-    configs = {
-        role: _parse_hardware_role(_table(document, role), role)
-        for role in SEMANTIC_ROLES
-    }
-    hardware = ThreeSmuHardwareConfig(**configs)
-    addresses = [
-        config.address
-        for config in configs.values()
-        if not _is_placeholder(config.address)
-    ]
-    if len(set(addresses)) != len(addresses):
-        raise ThreeSmuConfigError("all three SMU addresses must be distinct")
-    return hardware
-
-
-def load_three_smu_scan(path: str | Path) -> ThreeSmuScanPlan:
-    document = _load_toml(path)
-    _strict_keys(document, "top level", {"scan", *SEMANTIC_ROLES})
-    scan = _table(document, "scan")
-    _strict_keys(
-        scan,
-        "scan",
-        {
-            "mode",
-            "samples_per_point",
-            "delay_s",
-            "bidirectional",
-            "serpentine",
-            "finish_action",
-            "point_count",
-            "pulse_high_s",
-            "pulse_period_s",
-        },
-    )
-    channels = {
-        role: _parse_channel(_table(document, role), role)
-        for role in SEMANTIC_ROLES
-    }
-    plan = ThreeSmuScanPlan(
-        mode=_enum(ScanMode, scan["mode"], "scan.mode"),
-        samples_per_point=_integer(scan["samples_per_point"], "scan.samples_per_point", 1),
-        delay_s=_nonnegative(scan["delay_s"], "scan.delay_s"),
-        bidirectional=_boolean(scan["bidirectional"], "scan.bidirectional"),
-        serpentine=_boolean(scan["serpentine"], "scan.serpentine"),
-        finish_action=_enum(FinishAction, scan["finish_action"], "scan.finish_action"),
-        point_count=_integer(scan["point_count"], "scan.point_count", 1),
-        pulse_high_s=_nonnegative(scan["pulse_high_s"], "scan.pulse_high_s"),
-        pulse_period_s=_nonnegative(scan["pulse_period_s"], "scan.pulse_period_s"),
-        **channels,
-    )
-    return plan
-
-
 def load_three_smu_operation_config(path: str | Path) -> ThreeSmuOperationConfig:
-    """Load the Three-SMU portion of the ordinary ``hardware.local.toml``.
-
-    ``gate_top`` and ``gate_bottom`` retain the shared gate-safety fields used by
-    the rest of the project.  Their nested ``[gate_*.smu]`` tables contain only
-    2400-specific settings, so voltage and leakage limits have one source of
-    truth.
-    """
+    """Load only the Three-SMU portion of ``hardware.local.toml``."""
 
     config_path = Path(path).resolve()
     document = _load_toml(config_path)
@@ -397,7 +282,6 @@ def load_three_smu_operation_config(path: str | Path) -> ThreeSmuOperationConfig
         "mode",
         "samples_per_point",
         "delay_s",
-        "bidirectional",
         "serpentine",
         "finish_action",
         "point_count",
@@ -415,7 +299,6 @@ def load_three_smu_operation_config(path: str | Path) -> ThreeSmuOperationConfig
             run["samples_per_point"], "three_smu_run.samples_per_point", 1
         ),
         delay_s=_nonnegative(run["delay_s"], "three_smu_run.delay_s"),
-        bidirectional=_boolean(run["bidirectional"], "three_smu_run.bidirectional"),
         serpentine=_boolean(run["serpentine"], "three_smu_run.serpentine"),
         finish_action=_enum(
             FinishAction, run["finish_action"], "three_smu_run.finish_action"
@@ -456,11 +339,16 @@ def validate_plan_targets(
     for point in points:
         for role, target in point.coordinates.items():
             config = hardware.by_role()[role]
-            assert config.source_min is not None and config.source_max is not None
-            if not config.source_min <= target <= config.source_max:
+            limit = (
+                config.max_abs_voltage_v
+                if config.source_mode is SourceMode.VOLTAGE
+                else config.max_abs_current_a
+            )
+            assert limit is not None
+            if abs(target) > limit:
                 raise ThreeSmuConfigError(
-                    f"{role} target {target:g} is outside configured source range "
-                    f"[{config.source_min:g}, {config.source_max:g}]"
+                    f"{role} target {target:g} exceeds its source-mode absolute "
+                    f"limit {limit:g}"
                 )
     return points
 
@@ -468,7 +356,7 @@ def validate_plan_targets(
 def generate_scan_points(plan: ThreeSmuScanPlan) -> tuple[ScanPoint, ...]:
     channels = plan.by_role()
     base = {
-        role: channel.fixed
+        role: float(channel.fixed)
         for role, channel in channels.items()
         if channel.role is ChannelRole.FIXED
     }
@@ -479,14 +367,19 @@ def generate_scan_points(plan: ThreeSmuScanPlan) -> tuple[ScanPoint, ...]:
     elif plan.mode is ScanMode.SOFTWARE_PULSE:
         sweep_role = _sweep_roles(plan)[0]
         channel = channels[sweep_role]
+        pulse_values = _sweep_values(channel)
+        if len(pulse_values) != 2:
+            raise ThreeSmuConfigError(
+                "software_pulse sweep must resolve to exactly two values"
+            )
         for _ in range(plan.point_count):
             high = dict(base)
-            high[sweep_role] = channel.stop
+            high[sweep_role] = pulse_values[1]
             points.append(
                 ("pulse_high", high, max(plan.pulse_high_s - plan.delay_s, 0.0))
             )
             low = dict(base)
-            low[sweep_role] = channel.start
+            low[sweep_role] = pulse_values[0]
             points.append(
                 (
                     "pulse_low",
@@ -495,22 +388,27 @@ def generate_scan_points(plan: ThreeSmuScanPlan) -> tuple[ScanPoint, ...]:
                 )
             )
     elif plan.mode is ScanMode.PAIRED_GATE:
-        top = _sweep_values(channels["gate_top"])
-        bottom = _sweep_values(channels["gate_bottom"])
+        top = _expanded_sweep_values(channels["gate_top"])
+        bottom = _expanded_sweep_values(channels["gate_bottom"])
         paired = [
             ("forward", {**base, "gate_top": top_value, "gate_bottom": bottom_value}, 0.0)
             for top_value, bottom_value in zip(top, bottom, strict=True)
         ]
-        points = _with_reverse(paired) if plan.bidirectional else paired
+        points = paired
     elif plan.mode is ScanMode.MULTI_SMU_MAP:
         points = _multi_map_points(plan, base)
     else:
         sweep_role = _sweep_roles(plan)[0]
-        forward = [
-            ("forward", {**base, sweep_role: value}, 0.0)
-            for value in _sweep_values(channels[sweep_role])
+        values = _sweep_values(channels[sweep_role])
+        expanded = _expanded_sweep_values(channels[sweep_role])
+        points = [
+            (
+                "reverse" if index >= len(values) else "forward",
+                {**base, sweep_role: value},
+                0.0,
+            )
+            for index, value in enumerate(expanded)
         ]
-        points = _with_reverse(forward) if plan.bidirectional else forward
 
     return tuple(
         ScanPoint(index=index, segment=segment, coordinates=coordinates, post_delay_s=post)
@@ -524,7 +422,7 @@ def _multi_map_points(
 ) -> list[tuple[str, dict[str, float], float]]:
     channels = plan.by_role()
     roles = _sweep_roles(plan)
-    values = [_sweep_values(channels[role]) for role in roles]
+    values = [_expanded_sweep_values(channels[role]) for role in roles]
     rows: list[tuple[str, dict[str, float], float]] = []
     if len(roles) == 1:
         rows = [("forward", {**base, roles[0]: value}, 0.0) for value in values[0]]
@@ -539,22 +437,15 @@ def _multi_map_points(
                 coordinates.update(dict(zip(roles[:-1], outer_values, strict=True)))
                 coordinates[roles[-1]] = inner_value
                 rows.append(("serpentine" if plan.serpentine else "forward", coordinates, 0.0))
-    return _with_reverse(rows) if plan.bidirectional else rows
-
-
-def _with_reverse(
-    rows: list[tuple[str, dict[str, float], float]],
-) -> list[tuple[str, dict[str, float], float]]:
-    if len(rows) < 2:
-        return rows
-    reverse = [
-        ("reverse", dict(coordinates), post)
-        for _segment, coordinates, post in reversed(rows[:-1])
-    ]
-    return rows + reverse
+    return rows
 
 
 def _sweep_values(channel: ChannelPlan) -> tuple[float, ...]:
+    if channel.points is not None:
+        return channel.points
+    assert channel.start is not None
+    assert channel.stop is not None
+    assert channel.step is not None
     direction = 1.0 if channel.stop >= channel.start else -1.0
     step = abs(channel.step) * direction
     values = [channel.start]
@@ -564,6 +455,13 @@ def _sweep_values(channel: ChannelPlan) -> tuple[float, ...]:
     if not math.isclose(values[-1], channel.stop, rel_tol=0.0, abs_tol=tolerance):
         values.append(channel.stop)
     return tuple(float(value) for value in values)
+
+
+def _expanded_sweep_values(channel: ChannelPlan) -> tuple[float, ...]:
+    values = _sweep_values(channel)
+    if not channel.bidirectional or len(values) < 2:
+        return values
+    return values + tuple(reversed(values[:-1]))
 
 
 def _validate_scan_shape(plan: ThreeSmuScanPlan) -> None:
@@ -589,13 +487,21 @@ def _validate_scan_shape(plan: ThreeSmuScanPlan) -> None:
             raise ThreeSmuConfigError(
                 "software_pulse requires pulse_high_s > 0 and pulse_period_s >= pulse_high_s"
             )
+        if plan.by_role()[sweeps[0]].bidirectional:
+            raise ThreeSmuConfigError(
+                "software_pulse does not allow bidirectional sweep channels"
+            )
+        if len(_sweep_values(plan.by_role()[sweeps[0]])) != 2:
+            raise ThreeSmuConfigError(
+                "software_pulse sweep must resolve to exactly two values"
+            )
     elif plan.pulse_high_s != 0 or plan.pulse_period_s != 0:
         raise ThreeSmuConfigError(
             "pulse timing values must be zero outside software_pulse mode"
         )
     if plan.mode is ScanMode.PAIRED_GATE:
-        top = _sweep_values(plan.gate_top)
-        bottom = _sweep_values(plan.gate_bottom)
+        top = _expanded_sweep_values(plan.gate_top)
+        bottom = _expanded_sweep_values(plan.gate_bottom)
         if len(top) != len(bottom):
             raise ThreeSmuConfigError(
                 "paired_gate top and bottom sweeps must have the same point count"
@@ -619,26 +525,14 @@ def _parse_hardware_role(
         "address",
         "timeout_ms",
         "source_mode",
-        "compliance_current_a",
-        "compliance_voltage_v",
         "max_abs_voltage_v",
         "max_abs_current_a",
-        "source_min_v",
-        "source_max_v",
-        "ramp_step_v",
-        "readback_tolerance_v",
-        "source_min_a",
-        "source_max_a",
-        "ramp_step_a",
-        "readback_tolerance_a",
-        "settle_s",
         "nplc",
         "source_auto_range",
         "measure_auto_range",
         "four_wire",
     }
-    expected = common | ({"leakage_limit_a"} if role != "smu_bias" else set())
-    _strict_keys(table, role, expected)
+    _strict_keys(table, role, common)
     source_mode = _enum(SourceMode, table["source_mode"], f"{role}.source_mode")
     config = SmuHardwareConfig(
         role=role,
@@ -646,31 +540,12 @@ def _parse_hardware_role(
         address=_string(table["address"], f"{role}.address"),
         timeout_ms=_placeholder_integer(table["timeout_ms"], f"{role}.timeout_ms"),
         source_mode=source_mode,
-        compliance_current_a=_placeholder_positive(
-            table["compliance_current_a"], f"{role}.compliance_current_a"
-        ),
-        compliance_voltage_v=_placeholder_positive(
-            table["compliance_voltage_v"], f"{role}.compliance_voltage_v"
-        ),
         max_abs_voltage_v=_placeholder_positive(
             table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v"
         ),
         max_abs_current_a=_placeholder_positive(
             table["max_abs_current_a"], f"{role}.max_abs_current_a"
         ),
-        source_min_v=_placeholder_number(table["source_min_v"], f"{role}.source_min_v"),
-        source_max_v=_placeholder_number(table["source_max_v"], f"{role}.source_max_v"),
-        ramp_step_v=_placeholder_positive(table["ramp_step_v"], f"{role}.ramp_step_v"),
-        readback_tolerance_v=_placeholder_positive(
-            table["readback_tolerance_v"], f"{role}.readback_tolerance_v"
-        ),
-        source_min_a=_placeholder_number(table["source_min_a"], f"{role}.source_min_a"),
-        source_max_a=_placeholder_number(table["source_max_a"], f"{role}.source_max_a"),
-        ramp_step_a=_placeholder_positive(table["ramp_step_a"], f"{role}.ramp_step_a"),
-        readback_tolerance_a=_placeholder_positive(
-            table["readback_tolerance_a"], f"{role}.readback_tolerance_a"
-        ),
-        settle_s=_placeholder_nonnegative(table["settle_s"], f"{role}.settle_s"),
         nplc=_placeholder_positive(table["nplc"], f"{role}.nplc"),
         source_auto_range=_boolean(
             table["source_auto_range"], f"{role}.source_auto_range"
@@ -679,13 +554,6 @@ def _parse_hardware_role(
             table["measure_auto_range"], f"{role}.measure_auto_range"
         ),
         four_wire=_boolean(table["four_wire"], f"{role}.four_wire"),
-        leakage_limit_a=(
-            None
-            if role == "smu_bias"
-            else _placeholder_positive(
-                table["leakage_limit_a"], f"{role}.leakage_limit_a"
-            )
-        ),
     )
     return config
 
@@ -695,20 +563,8 @@ def _parse_operation_gate(table: Mapping[str, Any], role: str) -> SmuHardwareCon
         "model",
         "address",
         "source_mode",
-        "compliance_a",
-        "compliance_voltage_v",
-        "leakage_limit_a",
         "max_abs_voltage_v",
         "max_abs_current_a",
-        "source_min_v",
-        "source_max_v",
-        "ramp_step_v",
-        "readback_tolerance_v",
-        "source_min_a",
-        "source_max_a",
-        "ramp_step_a",
-        "readback_tolerance_a",
-        "settle_s",
         "smu",
     }
     _strict_keys(table, role, expected)
@@ -730,31 +586,12 @@ def _parse_operation_gate(table: Mapping[str, Any], role: str) -> SmuHardwareCon
         address=_string(table["address"], f"{role}.address"),
         timeout_ms=_placeholder_integer(smu["timeout_ms"], f"{role}.smu.timeout_ms"),
         source_mode=_enum(SourceMode, table["source_mode"], f"{role}.source_mode"),
-        compliance_current_a=_placeholder_positive(
-            table["compliance_a"], f"{role}.compliance_a"
-        ),
-        compliance_voltage_v=_placeholder_positive(
-            table["compliance_voltage_v"], f"{role}.compliance_voltage_v"
-        ),
         max_abs_voltage_v=_placeholder_positive(
             table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v"
         ),
         max_abs_current_a=_placeholder_positive(
             table["max_abs_current_a"], f"{role}.max_abs_current_a"
         ),
-        source_min_v=_placeholder_number(table["source_min_v"], f"{role}.source_min_v"),
-        source_max_v=_placeholder_number(table["source_max_v"], f"{role}.source_max_v"),
-        ramp_step_v=_placeholder_positive(table["ramp_step_v"], f"{role}.ramp_step_v"),
-        readback_tolerance_v=_placeholder_positive(
-            table["readback_tolerance_v"], f"{role}.readback_tolerance_v"
-        ),
-        source_min_a=_placeholder_number(table["source_min_a"], f"{role}.source_min_a"),
-        source_max_a=_placeholder_number(table["source_max_a"], f"{role}.source_max_a"),
-        ramp_step_a=_placeholder_positive(table["ramp_step_a"], f"{role}.ramp_step_a"),
-        readback_tolerance_a=_placeholder_positive(
-            table["readback_tolerance_a"], f"{role}.readback_tolerance_a"
-        ),
-        settle_s=_placeholder_nonnegative(table["settle_s"], f"{role}.settle_s"),
         nplc=_placeholder_positive(smu["nplc"], f"{role}.smu.nplc"),
         source_auto_range=_boolean(
             smu["source_auto_range"], f"{role}.smu.source_auto_range"
@@ -763,20 +600,44 @@ def _parse_operation_gate(table: Mapping[str, Any], role: str) -> SmuHardwareCon
             smu["measure_auto_range"], f"{role}.smu.measure_auto_range"
         ),
         four_wire=_boolean(smu["four_wire"], f"{role}.smu.four_wire"),
-        leakage_limit_a=_placeholder_positive(
-            table["leakage_limit_a"], f"{role}.leakage_limit_a"
-        ),
     )
 
 
 def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
-    _strict_keys(table, role, {"role", "fixed", "start", "stop", "step"})
+    channel_role = _enum(ChannelRole, table.get("role"), f"{role}.role")
+    base = {"role", "bidirectional"}
+    if channel_role is ChannelRole.OFF:
+        expected = base
+    elif channel_role is ChannelRole.FIXED:
+        expected = base | {"fixed"}
+    else:
+        has_points = "points" in table
+        expected = base | ({"points"} if has_points else {"start", "stop", "step"})
+    _strict_keys(table, role, expected)
     return ChannelPlan(
-        role=_enum(ChannelRole, table["role"], f"{role}.role"),
-        fixed=_number(table["fixed"], f"{role}.fixed"),
-        start=_number(table["start"], f"{role}.start"),
-        stop=_number(table["stop"], f"{role}.stop"),
-        step=_positive(table["step"], f"{role}.step"),
+        role=channel_role,
+        bidirectional=_boolean(table["bidirectional"], f"{role}.bidirectional"),
+        fixed=(
+            _number(table["fixed"], f"{role}.fixed")
+            if channel_role is ChannelRole.FIXED
+            else None
+        ),
+        start=(
+            _number(table["start"], f"{role}.start")
+            if "start" in table
+            else None
+        ),
+        stop=(
+            _number(table["stop"], f"{role}.stop") if "stop" in table else None
+        ),
+        step=(
+            _positive(table["step"], f"{role}.step") if "step" in table else None
+        ),
+        points=(
+            _number_vector(table["points"], f"{role}.points")
+            if "points" in table
+            else None
+        ),
     )
 
 
@@ -835,6 +696,12 @@ def _number(value: Any, name: str) -> float:
     return result
 
 
+def _number_vector(value: Any, name: str) -> tuple[float, ...]:
+    if not isinstance(value, list) or not value:
+        raise ThreeSmuConfigError(f"{name} must be a non-empty array of numbers")
+    return tuple(_number(item, f"{name}[{index}]") for index, item in enumerate(value))
+
+
 def _positive(value: Any, name: str) -> float:
     result = _number(value, name)
     if result <= 0:
@@ -855,16 +722,8 @@ def _integer(value: Any, name: str, minimum: int) -> int:
     return value
 
 
-def _placeholder_number(value: Any, name: str) -> float | None:
-    return None if value == "CHANGE_ME" else _number(value, name)
-
-
 def _placeholder_positive(value: Any, name: str) -> float | None:
     return None if value == "CHANGE_ME" else _positive(value, name)
-
-
-def _placeholder_nonnegative(value: Any, name: str) -> float | None:
-    return None if value == "CHANGE_ME" else _nonnegative(value, name)
 
 
 def _placeholder_integer(value: Any, name: str) -> int | None:

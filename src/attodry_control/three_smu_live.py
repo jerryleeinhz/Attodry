@@ -73,18 +73,6 @@ def monitor_problems(
             f"{role} current {reading.current_a:g} A exceeds max_abs_current_a "
             f"{config.max_abs_current_a:g} A"
         )
-    source_min = config.source_min
-    source_max = config.source_max
-    if (
-        source_min is not None
-        and source_max is not None
-        and not source_min <= reading.source_setpoint <= source_max
-    ):
-        unit = "V" if reading.source_mode is SourceMode.VOLTAGE else "A"
-        problems.append(
-            f"{role} source setpoint {reading.source_setpoint:g} {unit} is outside "
-            f"configured range [{source_min:g}, {source_max:g}] {unit}"
-        )
     active_max = (
         config.max_abs_current_a
         if reading.source_mode is SourceMode.VOLTAGE
@@ -99,16 +87,6 @@ def monitor_problems(
         )
     if reading.compliance_trip:
         problems.append(f"{role} compliance trip is active")
-    if (
-        role != "smu_bias"
-        and reading.source_mode is SourceMode.VOLTAGE
-        and config.leakage_limit_a is not None
-        and abs(reading.current_a) > config.leakage_limit_a
-    ):
-        problems.append(
-            f"{role} leakage {reading.current_a:g} A exceeds leakage_limit_a "
-            f"{config.leakage_limit_a:g} A"
-        )
     if reading.status_queue_consumed and not _status_is_clean(reading.status):
         problems.append(f"{role} error queue reports {reading.status}")
     if reading.output_enabled:

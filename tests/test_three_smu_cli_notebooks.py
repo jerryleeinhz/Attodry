@@ -9,31 +9,19 @@ from unittest.mock import patch
 
 from attodry_control import three_smu_cli
 from attodry_control.three_smu_cli import run
-from attodry_control.three_smu_config import ThreeSmuOperationConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-HARDWARE_TEXT = """
+OPERATION_TEXT = """
 [smu_bias]
 model = "Keithley2400"
 address = "FAKE::1"
 timeout_ms = 1000
 source_mode = "voltage"
-compliance_current_a = 0.001
-compliance_voltage_v = 10.0
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
-source_min_v = -1.0
-source_max_v = 1.0
-ramp_step_v = 0.1
-readback_tolerance_v = 0.000001
-source_min_a = -0.001
-source_max_a = 0.001
-ramp_step_a = 0.0001
-readback_tolerance_a = 0.000000001
-settle_s = 0.0
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
@@ -42,85 +30,56 @@ four_wire = false
 [gate_top]
 model = "Keithley2400"
 address = "FAKE::2"
-timeout_ms = 1000
 source_mode = "voltage"
-compliance_current_a = 0.001
-compliance_voltage_v = 10.0
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
-source_min_v = -1.0
-source_max_v = 1.0
-ramp_step_v = 0.1
-readback_tolerance_v = 0.000001
-source_min_a = -0.001
-source_max_a = 0.001
-ramp_step_a = 0.0001
-readback_tolerance_a = 0.000000001
-settle_s = 0.0
+
+[gate_top.smu]
+timeout_ms = 1000
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
 four_wire = false
-leakage_limit_a = 0.000001
 
 [gate_bottom]
 model = "Keithley2400"
 address = "FAKE::3"
-timeout_ms = 1000
 source_mode = "voltage"
-compliance_current_a = 0.001
-compliance_voltage_v = 10.0
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
-source_min_v = -1.0
-source_max_v = 1.0
-ramp_step_v = 0.1
-readback_tolerance_v = 0.000001
-source_min_a = -0.001
-source_max_a = 0.001
-ramp_step_a = 0.0001
-readback_tolerance_a = 0.000000001
-settle_s = 0.0
+
+[gate_bottom.smu]
+timeout_ms = 1000
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
 four_wire = false
-leakage_limit_a = 0.000001
-"""
 
-
-SCAN_TEXT = """
-[scan]
+[three_smu_run]
+output_directory = "runs"
+run_name = "fake"
+note = "offline test"
 mode = "time_trace"
 samples_per_point = 1
 delay_s = 0.0
-bidirectional = false
 serpentine = false
 finish_action = "zero_disable"
 point_count = 2
 pulse_high_s = 0.0
 pulse_period_s = 0.0
 
-[smu_bias]
+[three_smu_run.smu_bias]
 role = "fixed"
+bidirectional = false
 fixed = 0.1
-start = 0.0
-stop = 0.0
-step = 1.0
 
-[gate_top]
+[three_smu_run.gate_top]
 role = "off"
-fixed = 0.0
-start = 0.0
-stop = 0.0
-step = 1.0
+bidirectional = false
 
-[gate_bottom]
+[three_smu_run.gate_bottom]
 role = "off"
-fixed = 0.0
-start = 0.0
-stop = 0.0
-step = 1.0
+bidirectional = false
 """
 
 
@@ -166,17 +125,19 @@ class FakeMonitorManager:
 
 
 class ThreeSmuCliNotebookTests(unittest.TestCase):
+    def test_legacy_split_toml_arguments_are_not_accepted(self) -> None:
+        with self.assertRaises(SystemExit):
+            three_smu_cli.build_parser().parse_args(
+                ["describe", "--hardware", "hardware.toml"]
+            )
+
     def test_describe_is_fully_offline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            hardware = Path(directory) / "hardware.toml"
-            scan = Path(directory) / "scan.toml"
-            hardware.write_text(HARDWARE_TEXT, encoding="utf-8")
-            scan.write_text(SCAN_TEXT, encoding="utf-8")
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(OPERATION_TEXT, encoding="utf-8")
             output = io.StringIO()
             with redirect_stdout(output):
-                result = run([
-                    "describe", "--hardware", str(hardware), "--plan", str(scan)
-                ])
+                result = run(["describe", "--config", str(config)])
             self.assertEqual(result, 0)
             document = json.loads(output.getvalue())
             self.assertFalse(document["hardware_opened"])
@@ -184,48 +145,32 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
 
     def test_run_without_exact_confirmation_stops_before_driver_import(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            hardware = Path(directory) / "hardware.toml"
-            scan = Path(directory) / "scan.toml"
-            hardware.write_text(HARDWARE_TEXT, encoding="utf-8")
-            scan.write_text(SCAN_TEXT, encoding="utf-8")
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(OPERATION_TEXT, encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, "was not authorized"):
-                run([
-                    "run", "--hardware", str(hardware), "--plan", str(scan),
-                    "--output-dir", str(Path(directory) / "runs"),
-                ], input_fn=lambda _prompt: "")
+                run(["run", "--config", str(config)], input_fn=lambda _prompt: "")
 
     def test_hold_requires_a_second_exact_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            hardware = Path(directory) / "hardware.toml"
-            scan = Path(directory) / "scan.toml"
-            hardware.write_text(HARDWARE_TEXT, encoding="utf-8")
-            scan.write_text(
-                SCAN_TEXT.replace(
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(
+                OPERATION_TEXT.replace(
                     'finish_action = "zero_disable"', 'finish_action = "hold"'
                 ),
                 encoding="utf-8",
             )
             responses = iter(("RUN THREE SMU", "not holding"))
             with self.assertRaisesRegex(SystemExit, "Hold was not authorized"):
-                run([
-                    "run", "--hardware", str(hardware), "--plan", str(scan),
-                    "--output-dir", str(Path(directory) / "runs"),
-                ], input_fn=lambda _prompt: next(responses))
+                run(
+                    ["run", "--config", str(config)],
+                    input_fn=lambda _prompt: next(responses),
+                )
 
     def test_default_config_path_is_used_for_describe(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            hardware_path = Path(directory) / "hardware.toml"
-            scan_path = Path(directory) / "scan.toml"
-            hardware_path.write_text(HARDWARE_TEXT, encoding="utf-8")
-            scan_path.write_text(SCAN_TEXT, encoding="utf-8")
-            operation = ThreeSmuOperationConfig(
-                hardware=three_smu_cli.load_three_smu_hardware(hardware_path),
-                plan=three_smu_cli.load_three_smu_scan(scan_path),
-                output_directory=Path(directory) / "runs",
-                run_name="fake",
-                note="offline test",
-                config_path=Path(directory) / "hardware.local.toml",
-            )
+            config_path = Path(directory) / "hardware.local.toml"
+            config_path.write_text(OPERATION_TEXT, encoding="utf-8")
+            operation = three_smu_cli.load_three_smu_operation_config(config_path)
             output = io.StringIO()
             with patch(
                 "attodry_control.three_smu_cli.load_three_smu_operation_config",
@@ -250,10 +195,8 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                 return ()
 
         with tempfile.TemporaryDirectory() as directory:
-            hardware = Path(directory) / "hardware.toml"
-            scan = Path(directory) / "scan.toml"
-            hardware.write_text(HARDWARE_TEXT, encoding="utf-8")
-            scan.write_text(SCAN_TEXT, encoding="utf-8")
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(OPERATION_TEXT, encoding="utf-8")
             opened = {}
 
             def fake_session_open(*args, **kwargs):
@@ -261,10 +204,11 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                 opened["kwargs"] = kwargs
                 return FakeSession()
 
-            result = run([
-                "run", "--hardware", str(hardware), "--plan", str(scan),
-                "--output-dir", str(Path(directory) / "runs"),
-            ], input_fn=lambda _prompt: "RUN THREE SMU", session_open=fake_session_open)
+            result = run(
+                ["run", "--config", str(config)],
+                input_fn=lambda _prompt: "RUN THREE SMU",
+                session_open=fake_session_open,
+            )
             self.assertEqual(result, 0)
             self.assertEqual(
                 opened["kwargs"],
@@ -273,18 +217,9 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
 
     def test_monitor_live_uses_only_queries_and_skips_error_queue_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            hardware_path = Path(directory) / "hardware.toml"
-            scan_path = Path(directory) / "scan.toml"
-            hardware_path.write_text(HARDWARE_TEXT, encoding="utf-8")
-            scan_path.write_text(SCAN_TEXT, encoding="utf-8")
-            operation = ThreeSmuOperationConfig(
-                hardware=three_smu_cli.load_three_smu_hardware(hardware_path),
-                plan=three_smu_cli.load_three_smu_scan(scan_path),
-                output_directory=Path(directory) / "runs",
-                run_name="fake",
-                note="offline test",
-                config_path=Path(directory) / "hardware.local.toml",
-            )
+            config_path = Path(directory) / "hardware.local.toml"
+            config_path.write_text(OPERATION_TEXT, encoding="utf-8")
+            operation = three_smu_cli.load_three_smu_operation_config(config_path)
             resources = {
                 "FAKE::1": FakeMonitorResource("KEITHLEY,2400,bias,1"),
                 "FAKE::2": FakeMonitorResource("KEITHLEY,2400,top,1"),

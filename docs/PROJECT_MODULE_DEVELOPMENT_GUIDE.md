@@ -226,7 +226,7 @@ time constant 乘 `settle_time_constants` 和 `sample_interval_time_constants` �
 - analysis coordinate：通常使用实际 readback。
 
 合理的仪器分辨率/量化差异通常只作审计，不应单独丢弃数据。但不能把这一规则推广为
-忽略安全读回：SMU 电压不符、过流/漏电、compliance、输出状态未知，以及磁场/温度的
+忽略安全读回：SMU 实际 V/I 越界、compliance trip、输出状态未知，以及磁场/温度的
 安全边界仍必须 fail closed。
 
 ### 6.2 通信失败
@@ -461,27 +461,24 @@ main + 本地改动”。交付时分别报告 HEAD、`origin/main`、目标电�
 
 ## 13. SMU 模块怎样套用本文
 
-SMU 的当前具体工作包见 [`modules/SMU.md`](modules/SMU.md)。可直接复用的现有资产：
+当前具体工作包见 [`modules/THREE_SMU.md`](modules/THREE_SMU.md)。active hardware path 是
+三台 Keithley 2400 的 `ThreeSmuSession`，角色为 `smu_bias`、`gate_top`、`gate_bottom`。
+配置、CLI 和 Notebook 必须调用同一 strict loader、point generator、adapter 与 cleanup。
 
-- `GateBackend`：厂商 primitive 的最小 Protocol；
-- `GateSafetyLimits`：最大绝对门压、compliance、漏电 trip、步进、读回容差和 settling；
-- `SafeGateController`：授权、先 compliance、0 V enable、逐步 ramp、每步读回/
-  leakage、失败时 best-effort 回零并 disable；
-- `GateController`/`GateState`：Integration 的语义接口和状态；
-- `[gate_top]`/`[gate_bottom]` strict config；
-- `tests/test_gates.py` 的 fake backend 和故障路径；
-- integrated station samples、cleanup 顺序和 accepted/rejected 记录原则。
+本项目确认的 Three-SMU 单一安全事实来源是每台独立的 `max_abs_voltage_v` 与
+`max_abs_current_a`。Keithley compliance 从相反物理量的 absolute limit 推导并读回验证；
+autorange 是量程选择，不能替代 compliance。hardware TOML 不再保存独立 compliance、
+leakage、source min/max、ramp、readback tolerance 或 settle 字段。legacy simulation gate
+controller 的这些字段不进入真实 Three-SMU 日常配置。
 
-真实 SMU 开发主要应实现经确认型号的 vendor `GateBackend`，不要另造一套平行 gate
-安全控制器。但当前 Protocol 没有查询真实 output enabled、source setpoint、compliance
-readback、status/error queue 的能力，而 `SafeGateController` 构造时的软件初值为
-0 V/disabled。这个软件初值不能用来证明刚连接的真实 SMU 已经为 0/off。因此 S0/S1
-首先要补全“只读 preflight 怎样取得真实可接管状态”的契约，之后才允许任何实机写入。
+正式 target 只写一次，不插入软件 ramp；共享 `delay_s` 后读取并记录实际 source/V/I/R/
+output/trip/status。requested/readback 差异保留审计，不单独 rejection；实际 V/I 越界、trip、
+非有限值、output/status 异常仍 fail closed。cleanup 直接请求零、等待同一 delay、读回记录、
+关闭输出；通信失败要求人工确认。
 
-不要预先填猜测的 SMU 电压、compliance、漏电或扫描范围。用户需要先提供：确切品牌/
-型号、编程手册、VISA 地址、top/bottom 接线、source/measure 模式、2/4-wire、
-guard/ground/common、器件最大门压、compliance、leakage trip、最大步长、settling、
-readback 容差、output-off/zero 语义、interlock 和容性负载限制。
+不要预先填猜测的 SMU 边界。用户需要先提供：确切型号/手册、VISA 地址、三角色接线、
+source mode、2/4-wire、guard/ground/common、每台最大绝对 V/I、output-off/zero 语义、
+interlock 和容性负载限制。
 固件若事先未知，可在 S4 的真实只读 identity 查询中确认；不阻止离线 adapter 开发，
 但发现不兼容固件时必须在任何写入前停止。
 

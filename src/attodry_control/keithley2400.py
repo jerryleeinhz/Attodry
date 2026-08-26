@@ -37,7 +37,6 @@ class KeithleyReading:
     source_setpoint: float
     output_enabled: bool
     compliance_trip: bool
-    near_compliance: bool
     status: str | None
     status_query_consumed: bool = False
 
@@ -71,6 +70,13 @@ class KeithleyMonitorReading:
         if self.current_a == 0:
             return None
         return self.voltage_v / self.current_a
+
+
+@dataclass(frozen=True, slots=True)
+class KeithleyConfigurationReadback:
+    compliance_limit: float
+    source_range: float
+    measure_range: float
 
 
 def open_keithley2400(
@@ -186,16 +192,16 @@ class QcodesKeithley2400:
         else:
             self.instrument.curr(0.0)
 
-    def configure(self, config: SmuHardwareConfig) -> None:
+    def configure(self, config: SmuHardwareConfig) -> KeithleyConfigurationReadback:
         self.config = config
         mode = "VOLT" if config.source_mode is SourceMode.VOLTAGE else "CURR"
         self.instrument.mode(mode)
         if config.source_mode is SourceMode.VOLTAGE:
-            assert config.compliance_current_a is not None
-            self.instrument.compliancei(config.compliance_current_a)
+            assert config.max_abs_current_a is not None
+            self.instrument.compliancei(config.max_abs_current_a)
         else:
-            assert config.compliance_voltage_v is not None
-            self.instrument.compliancev(config.compliance_voltage_v)
+            assert config.max_abs_voltage_v is not None
+            self.instrument.compliancev(config.max_abs_voltage_v)
         assert config.nplc is not None
         self.instrument.nplci(config.nplc)
         self.instrument.nplcv(config.nplc)
@@ -210,13 +216,56 @@ class QcodesKeithley2400:
             f"{'ON' if config.measure_auto_range else 'OFF'}"
         )
         self.write(f":SYST:RSEN {'ON' if config.four_wire else 'OFF'}")
+        compliance = self._query_float(
+            f":SENS:{measure_function}:PROT?", f"{self.role} compliance"
+        )
+        source_range = self._query_float(
+            f":SOUR:{source_function}:RANG?", f"{self.role} source range"
+        )
+        measure_range = self._query_float(
+            f":SENS:{measure_function}:RANG?", f"{self.role} measure range"
+        )
+        requested_compliance = (
+            config.max_abs_current_a
+            if config.source_mode is SourceMode.VOLTAGE
+            else config.max_abs_voltage_v
+        )
+        assert requested_compliance is not None
+        if compliance <= 0 or compliance > requested_compliance * (1.0 + 1e-9):
+            unit = "A" if config.source_mode is SourceMode.VOLTAGE else "V"
+            raise Keithley2400Error(
+                f"{self.role} compliance readback {compliance:g} {unit} exceeds "
+                f"max_abs limit {requested_compliance:g} {unit}"
+            )
+        if source_range <= 0 or measure_range <= 0:
+            raise Keithley2400Error(
+                f"{self.role} returned a non-positive source or measurement range"
+            )
+        return KeithleyConfigurationReadback(
+            compliance_limit=compliance,
+            source_range=source_range,
+            measure_range=measure_range,
+        )
 
     def set_source(self, value: float) -> None:
         config = self._require_configured()
+        value = float(value)
+        if not math.isfinite(value):
+            raise Keithley2400Error(f"{self.role} source target must be finite")
+        limit = (
+            config.max_abs_voltage_v
+            if config.source_mode is SourceMode.VOLTAGE
+            else config.max_abs_current_a
+        )
+        assert limit is not None
+        if abs(value) > limit:
+            raise Keithley2400Error(
+                f"{self.role} source target {value:g} exceeds max_abs limit {limit:g}"
+            )
         if config.source_mode is SourceMode.VOLTAGE:
-            self.instrument.volt(float(value))
+            self.instrument.volt(value)
         else:
-            self.instrument.curr(float(value))
+            self.instrument.curr(value)
 
     def set_output(self, enabled: bool) -> None:
         self.instrument.output("on" if enabled else "off")
@@ -243,18 +292,12 @@ class QcodesKeithley2400:
         if self._status_consumption_authorized:
             error = self.ask(":SYST:ERR?").strip()
             status = error or "0,No error"
-        near = (
-            abs(current) >= 0.98 * float(config.compliance_current_a)
-            if config.source_mode is SourceMode.VOLTAGE
-            else abs(voltage) >= 0.98 * float(config.compliance_voltage_v)
-        )
         return KeithleyReading(
             voltage_v=voltage,
             current_a=current,
             source_setpoint=source,
             output_enabled=output,
             compliance_trip=trip,
-            near_compliance=near,
             status=status,
             status_query_consumed=self._status_consumption_authorized,
         )

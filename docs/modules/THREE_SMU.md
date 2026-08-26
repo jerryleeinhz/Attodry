@@ -1,152 +1,98 @@
 # Three-SMU / dual-gate 模块
 
-## 当前阶段
+## 状态与范围
 
-状态：`S0 offline complete`（2026-08-26）。本分支实现了三台 Keithley 2400 的独立
-QCoDeS 扫描模块、无 GUI CLI、调用同一 generator 的实时 Notebook、accepted-only 分析
-Notebook，以及独立的 query-only 终端实时监控。所有验证均为离线 fake-instrument 测试；
-真实 SMU 连接、查询和写命令数均为 **0**。
+状态：`S0 offline complete`（2026-08-26）。模块控制三台 Keithley 2400，语义角色为
+`smu_bias`、`gate_top`、`gate_bottom`。它提供统一 TOML、无 GUI CLI、调用同一
+`ThreeSmuSession` generator 的实时 Notebook、query-only 终端监控和 accepted-only 分析。
 
-本包落实 `PROJECT_MODULE_DEVELOPMENT_GUIDE.md` 的单配置、fail-closed、审计和 SSH 分析
-要求，并保留已建立的三角色范围：
+第一版不连接、不读取、不记录 Lock-in，也不控制冷台或磁场。所有验收仍是离线和 fake
+instrument；真实 VISA 查询、状态队列消费和写入都未执行、未授权。
 
-- `smu_bias`：source-drain bias；可选 voltage 或 current source；
-- `gate_top`：top gate；独立选择 voltage/current source；voltage 模式检查 leakage；
-- `gate_bottom`：bottom gate；独立选择 voltage/current source；voltage 模式检查 leakage。
+## 单一配置契约
 
-通用 `docs/modules/SMU.md` 中的两-gate 规划不能删除或替换这个 `smu_bias` 角色。本模块
-不接入 Lock-in、冷台、磁场或主 acquisition。
+日常唯一入口是 ignored 的 `config/hardware.local.toml`，模板为
+`config/hardware.example.toml`。旧的 `three_smu_hardware.example.toml`、
+`three_smu_scan.example.toml` 及 CLI `--hardware/--plan/--output-dir` 已删除。
 
-日常使用与全部参数见 [`../THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)。
+每台 SMU 只保留两条用户确认的安全边界：
 
-## 架构与配置
+- `max_abs_voltage_v`
+- `max_abs_current_a`
 
-```text
-hardware.local.toml
-  ├─ [smu_bias]                 bias 独立 V/I 安全边界与 2400 参数
-  ├─ [gate_top]/[gate_bottom]   各自独立的 source/V/I/leakage 安全限值
-  │    └─ [.smu]                仅 timeout/NPLC/range/four-wire 等 2400 参数
-  └─ [three_smu_run]            run name/note/输出目录/扫描计划
-       └─ [smu_bias|gate_top|gate_bottom]  off/fixed/sweep
-             ↓
-three_smu_config → ThreeSmuSession/generator → CLI 或 live Notebook
-             ↓                                      ↓
-metadata.json + raw.jsonl + data.csv       accepted-only analysis Notebook
-```
+程序在任何 source 写入前用当前 `source_mode` 对照对应边界，并对每次实际 V/I 读回同时
+检查两条边界。已删除独立 source min/max、软件 ramp、readback tolerance、settle、leakage
+limit 和用户填写的 compliance 字段。
 
-日常只复制 `config/hardware.example.toml` 为 ignored 的 `config/hardware.local.toml`。
-模块 loader 只解析本模块相关表，因此别的未完成模块表不会阻塞 Three-SMU 的独立 `describe`。
-现有 `config.py` 也允许这些表共存，但不重复解释 SMU 细节。
+Keithley 2400 的 compliance 是真实硬件保护，不等于量程：voltage-source 自动把
+`max_abs_current_a` 写为 current compliance；current-source 自动把
+`max_abs_voltage_v` 写为 voltage compliance。配置后查询 compliance、source range 和
+measurement range；compliance 读回高于对应 `max_abs_*` 时 fail closed。source 和
+measurement autorange 当前必须为 `true`，避免未配置的固定档位成为隐藏状态。配置还检查
+标准 2400 的 210 V、1.05 A、约 22.05 W 工作包络及最小可编程 compliance。
 
-Legacy 的 `three_smu_hardware.local.toml` / `three_smu_scan.local.toml` 双文件入口仍保留；新的
-日常 CLI 和 Notebook 一律使用单一 `hardware.local.toml`。安全 schema 不兼容旧的无单位
-`source_min/source_max/ramp_step/readback_tolerance`：操作者必须迁移为明确 `_v`/`_a` 字段并
-补齐独立 V/I 边界，loader 不会从旧范围猜测安全限值。既有 run 数据保持只读，不需迁移。
+`nplc` 保留并默认 `1.0`。芬兰电网 50 Hz，因此 1 PLC 对应 20 ms；NPLC 是周期数，不写成
+`0.020`。
 
-## 已实现的安全行为
+## 扫描计划
 
-1. 静态 TOML、地址唯一性、角色/扫描形状和全点范围验证在 driver import 或连接前完成。
-2. `run` 默认读取 `config/hardware.local.toml`，但在 QCoDeS/VISA import 或连接前显示完整
-   扫描摘要，并要求每次终端精确输入 `RUN THREE SMU`。拒绝/EOF 均不会打开资源；该确认明确涵盖
-   设置写入与 run 所需的 error-queue 消耗。
-3. `finish_action = "hold"` 还要求第二个 `HOLD OUTPUTS` 确认。它不会成为日常默认，也不会因
-   配置文件中已有 hold 而自动保留输出。
-4. 授权连接后的 query-only preflight 记录 identity、source mode/setpoint、output、V/I、
-   compliance/range、remote-sense 和状态。身份重复、output 已开、mode 不符、当前 source
-   变量非零、任一 V/I 绝对边界越界或脏状态都会在设置写入前拒绝；voltage-source
-   gate 另执行通用 gate 的零电压/leakage 预检。
-5. `GateBackend`/`SafeGateController` 现在也要求以真实 `GatePreflightState` 确认安全状态，
-   不能把内存中的初始“零/off”当成仪器读回。Three-SMU 的 voltage-source gate 复用该预检。
-6. 每个角色都有独立的 `max_abs_voltage_v` 与 `max_abs_current_a` 软件硬边界，且两者始终
-   检查。voltage source 使用 `_v` source/ramp/tolerance 与 current compliance；current
-   source 使用 `_a` 字段与 voltage compliance。compliance 不得高于对应绝对边界，source
-   范围也必须位于边界内；voltage-source gate 的 leakage 阈值须低于 current compliance。
-7. 配置与每个 setpoint 从零开始；输出只在零 setpoint 和读回确认后开启。所有 target 以
-   当前 source 单位的明确最大步长 ramp，每步检查 source/output/V/I、trip、near-compliance，
-   并仅对 voltage-source gate 检查 leakage。
-8. 正常、异常、`Ctrl+C` 和 generator 提前关闭共享 cleanup：`smu_bias`、`gate_top`、
-   `gate_bottom` 依次回零/关 output。无法确认时 run 被拒绝，保留最后确认状态和 cleanup 错误，
-   要求人工检查；通信失败从不被记成零或 output-off。
-9. `monitor-live` 使用没有 configure/set-source/set-output/cleanup 方法的独立 raw-VISA
-   query adapter。它显示三台的 V/I/R、source/output、compliance/trip、range/sense、identity
-   和安全 warning；只关闭本地 handle，绝不改变 SMU 状态。默认不读 `:SYST:ERR?`，只有显式
-   `--consume-status-queue` 才会消费 error queue。它不得与 scan 并发，也不替代 preflight。
+每个角色独立选择：
 
-未完成的硬件信息（型号/固件差异、实际地址、器件限值与接线）不能由代码猜测。任何实机
-步骤均需要该次计划的明确用户授权。
+- `role = "off"`：只允许 `bidirectional = false`；
+- `role = "fixed"`：填写 `fixed`，且 `bidirectional = false`；
+- `role = "sweep"`：填写 `points = [...]`，或完整的 `start/stop/step` 三元组，二选一。
 
-## 数据与分析
+`points` 非空、有限，保留任意顺序、重复值和非单调序列。`bidirectional = true` 位于每台
+SMU 的 run 子表；例如 `[1, 3, 7, 2]` 展开为 `[1, 3, 7, 2, 7, 3, 1]`，转折点不重复。
 
-每次 run 的独立目录包含：
+- 一维扫描只展开该角色；
+- `paired_gate` 分别展开两个 gate，最终长度不同则配置错误；
+- `multi_smu_map` 分别展开各 sweep 角色，再做笛卡尔积；
+- `software_pulse` 要求恰好两个 sweep 值并拒绝 bidirectional；
+- `time_trace` 不允许 sweep。
 
-- `metadata.json`（schema v3）：请求的单位明确 V/I 硬件配置/计划、实际 preflight、run name/note、配置路径、
-  import 路径、Git commit/dirty、主错误、cleanup 结果和清理错误；
-- `raw.jsonl`：保留 start/preflight/configure/ramp/sample/error/cleanup 原始事件；
-- `data.csv`：requested coordinate/source 与实际 readback V/I/R、output、trip/status 并列。
+支持七种模式：`time_trace`、`bias_iv`、`top_gate_transfer`、
+`bottom_gate_transfer`、`paired_gate`、`multi_smu_map`、`software_pulse`。
 
-所有 rejected、partial、interrupted 记录保留。`load_three_smu_rows()` 和分析 Notebook 默认
-只返回 `completed + accepted + clean` 正式样本，需显式 opt-in 才会审计 rejected/problem。
+## 写入、读回与清理
 
-分析 notebook 通过 `DATA_DIRECTORY` 枚举本地、SSH 挂载或网络目录；不使用 Tk 文件选择器，
-跳过不完整 run。`multi_smu_map` 支持 bias/top/bottom 任意 1–3 个扫描轴。绘制 top-vs-bottom
-map 时，若 bias 也在扫描，`build_map(..., fixed_coordinates={'smu_bias': value})` 必须选择一个
-bias slice；固定 bias 的常见双 gate map 不需额外选择。
+获得真实运行授权后，顺序为：离线验证全部点 → 打开三台资源 → query-only preflight →
+直接设零/配置 → output enable → 每个正式点对每台 active SMU 只写一次目标 → 全局
+`delay_s` → 读取并记录 source setpoint、V、I、R、output、trip 和 status。软件不插入 ramp
+中间点，也不因 requested/readback 数值差异本身拒绝数据；实际 V/I 越界、compliance trip、
+output 状态错误、非有限值或错误队列异常仍会拒绝。
 
-## 接口
+正常、异常、Ctrl+C 与 generator 提前关闭共享 cleanup：每台直接写 0，等待 `delay_s`，读取并
+记录，再关闭 output 并读回。通信失败不证明零或 output-off；保留最后确认状态并要求人工检查。
 
-离线配置检查：
+`finish_action = "hold"` 仍需要独立的 `HOLD OUTPUTS` 终端确认。
+
+## 接口与记录
 
 ```powershell
 python -m attodry_control.three_smu_cli describe
-```
-
-将来（当前未授权）的 query-only 状态接口：
-
-```powershell
 python -m attodry_control.three_smu_cli monitor-live
-python -m attodry_control.three_smu_cli monitor-live --consume-status-queue
-```
-
-将来（当前未授权）的真实扫描接口：
-
-```powershell
 python -m attodry_control.three_smu_cli run
 ```
 
-`run` 会显示计划并要求精确的 `RUN THREE SMU`；`finish_action = "hold"` 再要求
-`HOLD OUTPUTS`。Notebook 的两个授权 flag 默认均为 `False`，且调用同一 `ThreeSmuSession`，
-不允许直接建立 QCoDeS driver 或使用另一套 ramp。实时监控的完整操作边界见
-[`../THREE_SMU_LIVE_MONITOR.md`](../THREE_SMU_LIVE_MONITOR.md)。
+`describe` 完全离线。`monitor-live` 只有获得真实查询授权后才能使用；默认不消费
+`:SYST:ERR?`，`--consume-status-queue` 仍需单独授权。`run` 无需长授权参数，但会在打开硬件前
+要求精确输入 `RUN THREE SMU`。
 
-## 代码与测试所有权
+每个 run 保存 schema v4 `metadata.json`、`raw.jsonl` 和 `data.csv`。schema v4 删除
+`near_compliance` 列，配置快照只含两条绝对边界，并新增 configure 后的 compliance/range
+读回事件。requested source 与实际 setpoint/V/I 分开保存。默认分析只加载
+`completed + accepted + clean` formal samples；rejected/problem 需要显式 opt-in。
 
-```text
-config/hardware.example.toml               单一日常本地模板
-src/attodry_control/three_smu_config.py    严格模块 loader / 扫描点生成
-src/attodry_control/keithley2400.py        窄 QCoDeS 2400 adapter
-src/attodry_control/gates.py               共享 gate 预检/安全控制器
-src/attodry_control/three_smu.py            session、审计、cleanup、generator
-src/attodry_control/three_smu_live.py       query-only 实时监控的警告/终端面板
-src/attodry_control/three_smu_cli.py        无 GUI describe/monitor-live/run
-src/attodry_control/three_smu_analysis.py   accepted-only 加载、发现和绘图
-notebooks/three_smu_live.ipynb              同 generator 的实时绘图
-notebooks/three_smu_analysis.ipynb          SSH-friendly read-only 分析
-tests/test_three_smu*.py                    配置、fake run、CLI/Notebook、分析
-tests/test_keithley2400.py / test_gates.py  adapter 与共享 gate 核心
-```
+本次验证通过 104 项 focused fake/config 测试和完整 389 项离线测试（5 项可选绘图跳过），
+`src/tests` compileall 通过。真实硬件动作数为 0。
 
-本阶段执行的 focused fake-instrument 回归为 **71 项通过**（Three-SMU、Keithley 2400、
-gate safety 和共享 config，含 live-monitor/error-queue 与确认流程），随后完整离线套件
-**193 项通过（2 项可选绘图跳过）**。没有执行
-VISA discovery、QCoDeS 连接或真实仪器写入。
+完整操作者说明见 [`../THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)，实时
+监控边界见 [`../THREE_SMU_LIVE_MONITOR.md`](../THREE_SMU_LIVE_MONITOR.md)。
 
-## 下一阶段：S1 target offline
+## 下一阶段
 
-只有用户授权 S1 后，才能在 `LK_setup` 的 `lyr` 环境做下列 **不连接 VISA** 的工作：安装/导入
-QCoDeS，运行测试，执行 `describe`，记录 Python/QCoDeS/PyVISA 版本。之后仍须另外授权实机
-query-only preflight，再另外授权小范围/单向写入扫描。
-
-第一次实机前操作者必须填写并复核：三台地址与可区分 identity、实际确切型号/手册适配、每台
-source mode、各自 V/I 绝对边界、对应单位的 source 范围/ramp/readback、两种 compliance、
-适用的 gate leakage、settle/NPLC/range/four-wire 值、
-样品接线，以及最小可接受扫描计划。不得以模板示例或 fake 测试值替代这些确认。
+下一步是 `S1 target offline`：仅在 `LK_setup` 的 `lyr` 环境安装/导入依赖、运行离线测试和
+`describe`，仍不打开 VISA。之后真实 read-only、状态队列消费和最小写入分别需要新授权。
+第一次实机前仍须人工确认三台实际地址/identity、接线、2/4-wire、guard/ground/common、
+每台 source mode、两条绝对边界、容性负载/互锁和 output-off 语义。

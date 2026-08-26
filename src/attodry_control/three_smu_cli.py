@@ -18,9 +18,7 @@ from .three_smu_config import (
     ThreeSmuHardwareConfig,
     ThreeSmuOperationConfig,
     ThreeSmuScanPlan,
-    load_three_smu_hardware,
     load_three_smu_operation_config,
-    load_three_smu_scan,
     validate_plan_targets,
 )
 from .three_smu_live import (
@@ -48,10 +46,6 @@ def build_parser() -> argparse.ArgumentParser:
                 "The default local file is never committed."
             ),
         )
-        child.add_argument("--hardware", type=Path, help=argparse.SUPPRESS)
-        child.add_argument("--plan", type=Path, help=argparse.SUPPRESS)
-        if command == "run":
-            child.add_argument("--output-dir", type=Path, help=argparse.SUPPRESS)
         if command == "monitor-live":
             child.add_argument(
                 "--samples",
@@ -137,22 +131,7 @@ def _load_command_configuration(
     ThreeSmuScanPlan,
     Path,
 ]:
-    legacy_requested = args.hardware is not None or args.plan is not None
-    if legacy_requested:
-        if args.config is not None:
-            raise SystemExit("--config cannot be combined with legacy --hardware/--plan")
-        if args.hardware is None or args.plan is None:
-            raise SystemExit("Legacy mode requires both --hardware and --plan")
-        hardware = load_three_smu_hardware(args.hardware)
-        plan = load_three_smu_scan(args.plan)
-        output_dir = getattr(args, "output_dir", None)
-        if args.command == "run" and output_dir is None:
-            raise SystemExit("Legacy run requires --output-dir")
-        return None, hardware, plan, Path(".") if output_dir is None else output_dir
-
     config_path = DEFAULT_CONFIG_PATH if args.config is None else args.config
-    if getattr(args, "output_dir", None) is not None:
-        raise SystemExit("--output-dir is only available with legacy --hardware/--plan")
     operation = load_three_smu_operation_config(config_path)
     return operation, operation.hardware, operation.plan, operation.output_directory
 
@@ -195,16 +174,14 @@ def _confirm_scan_run(
     """Require exact, per-run human consent before QCoDeS/VISA is opened."""
 
     print_fn("Three-SMU scan plan (no instrument has been opened):")
-    print_fn(f"  config: {operation.config_path if operation else 'legacy split TOML'}")
+    print_fn(f"  config: {operation.config_path if operation else 'unknown'}")
     print_fn(f"  mode: {plan.mode.value}; points: {len(points)}; samples: {len(points) * plan.samples_per_point}")
     print_fn(f"  finish: {plan.finish_action.value}; output directory: {output_dir}")
     for role in SEMANTIC_ROLES:
         config = hardware.by_role()[role]
         channel = plan.by_role()[role]
-        source_unit = "V" if config.source_mode.value == "voltage" else "A"
         print_fn(
             f"  {role}: {channel.role.value}; source={config.source_mode.value}; "
-            f"range=[{config.source_min:g}, {config.source_max:g}] {source_unit}; "
             f"max |V|={config.max_abs_voltage_v:g} V; "
             f"max |I|={config.max_abs_current_a:g} A"
         )

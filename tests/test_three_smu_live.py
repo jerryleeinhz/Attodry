@@ -21,24 +21,12 @@ def smu(role: str) -> SmuHardwareConfig:
         address=f"FAKE::{role}",
         timeout_ms=1000,
         source_mode=SourceMode.VOLTAGE,
-        compliance_current_a=1e-3,
-        compliance_voltage_v=5.0,
         max_abs_voltage_v=5.0,
         max_abs_current_a=1e-3,
-        source_min_v=-1.0,
-        source_max_v=1.0,
-        ramp_step_v=0.1,
-        readback_tolerance_v=1e-6,
-        source_min_a=-1e-3,
-        source_max_a=1e-3,
-        ramp_step_a=1e-4,
-        readback_tolerance_a=1e-9,
-        settle_s=0.0,
         nplc=1.0,
         source_auto_range=True,
         measure_auto_range=True,
         four_wire=False,
-        leakage_limit_a=None if role == "smu_bias" else 1e-6,
     )
 
 
@@ -83,11 +71,11 @@ class ThreeSmuLiveTests(unittest.TestCase):
         self.assertIn("output", panel)
         self.assertIn("error queues were not queried", panel)
 
-    def test_gate_leakage_is_reported_without_changing_instrument_state(self) -> None:
+    def test_gate_current_limit_is_reported_without_changing_instrument_state(self) -> None:
         problems = monitor_problems(
-            "gate_top", smu("gate_top"), reading("gate_top", current_a=2e-6)
+            "gate_top", smu("gate_top"), reading("gate_top", current_a=2e-3)
         )
-        self.assertTrue(any("leakage" in problem for problem in problems))
+        self.assertTrue(any("max_abs_current_a" in problem for problem in problems))
 
 
 if __name__ == "__main__":

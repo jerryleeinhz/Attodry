@@ -16,22 +16,11 @@ def config() -> SmuHardwareConfig:
         address="FAKE::1",
         timeout_ms=5000,
         source_mode=SourceMode.VOLTAGE,
-        compliance_current_a=1e-3,
-        compliance_voltage_v=10.0,
         max_abs_voltage_v=10.0,
         max_abs_current_a=1e-3,
-        source_min_v=-1.0,
-        source_max_v=1.0,
-        ramp_step_v=0.1,
-        readback_tolerance_v=1e-6,
-        source_min_a=-1e-3,
-        source_max_a=1e-3,
-        ramp_step_a=1e-4,
-        readback_tolerance_a=1e-9,
-        settle_s=0.0,
         nplc=1.0,
         source_auto_range=True,
-        measure_auto_range=False,
+        measure_auto_range=True,
         four_wire=True,
     )
 
@@ -66,6 +55,9 @@ class FakeQcodesInstrument:
             ":SENS:CURR:PROT?": "0.001",
             ":SOUR:VOLT:RANG?": "1.0",
             ":SENS:CURR:RANG?": "0.001",
+            ":SENS:VOLT:PROT?": "10.0",
+            ":SOUR:CURR:RANG?": "0.001",
+            ":SENS:VOLT:RANG?": "10.0",
             ":SYST:RSEN?": "0",
             "SENS:CURR:PROT:TRIP?": "0",
             ":SYST:ERR?": "0,No error",
@@ -151,12 +143,12 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertIn(("nplci", 1.0), instrument.calls)
         self.assertIn(("nplcv", 1.0), instrument.calls)
         self.assertIn(("write", ":SOUR:VOLT:RANG:AUTO ON"), instrument.calls)
-        self.assertIn(("write", ":SENS:CURR:RANG:AUTO OFF"), instrument.calls)
+        self.assertIn(("write", ":SENS:CURR:RANG:AUTO ON"), instrument.calls)
         self.assertIn(("write", ":SYST:RSEN ON"), instrument.calls)
 
     def test_command_error_is_not_swallowed(self) -> None:
         instrument = FakeQcodesInstrument()
-        instrument.fail_write = ":SENS:CURR:RANG:AUTO OFF"
+        instrument.fail_write = ":SENS:CURR:RANG:AUTO ON"
         adapter = QcodesKeithley2400("smu_bias", instrument)
         with self.assertRaises(OSError):
             adapter.configure(config())
@@ -168,7 +160,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertIn(("mode", "CURR"), instrument.calls)
         self.assertIn(("compliancev", 10.0), instrument.calls)
         self.assertIn(("write", ":SOUR:CURR:RANG:AUTO ON"), instrument.calls)
-        self.assertIn(("write", ":SENS:VOLT:RANG:AUTO OFF"), instrument.calls)
+        self.assertIn(("write", ":SENS:VOLT:RANG:AUTO ON"), instrument.calls)
 
     def test_read_includes_trip_output_source_and_status(self) -> None:
         instrument = FakeQcodesInstrument()
@@ -180,9 +172,24 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertEqual(reading.current_a, 0.0005)
         self.assertTrue(reading.output_enabled)
         self.assertFalse(reading.compliance_trip)
-        self.assertFalse(reading.near_compliance)
         self.assertEqual(reading.resistance_ohm, 250.0)
         self.assertTrue(reading.status_query_consumed)
+
+    def test_configuration_rejects_compliance_readback_above_max_abs_limit(self) -> None:
+        instrument = FakeQcodesInstrument()
+        instrument.responses[":SENS:CURR:PROT?"] = "0.002"
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        with self.assertRaisesRegex(Exception, "compliance readback"):
+            adapter.configure(config())
+
+    def test_set_source_checks_absolute_limit_before_driver_write(self) -> None:
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.configure(config())
+        before = list(instrument.calls)
+        with self.assertRaisesRegex(Exception, "max_abs"):
+            adapter.set_source(11.0)
+        self.assertEqual(instrument.calls, before)
 
     def test_live_monitor_queries_state_without_consuming_error_queue_by_default(self) -> None:
         resource = FakeVisaResource()

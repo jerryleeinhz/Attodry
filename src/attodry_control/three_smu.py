@@ -13,11 +13,11 @@ from typing import Any, Callable, Generator, Protocol
 from uuid import uuid4
 
 from .keithley2400 import (
+    KeithleyConfigurationReadback,
     KeithleyPreflight,
     KeithleyReading,
     open_keithley2400,
 )
-from .gates import GatePreflightState, GateSafetyLimits, validate_gate_preflight
 from .three_smu_config import (
     ChannelRole,
     FinishAction,
@@ -55,7 +55,7 @@ class SmuAdapter(Protocol):
 
     def zero_residual(self, mode: Any) -> None: ...
 
-    def configure(self, config: SmuHardwareConfig) -> None: ...
+    def configure(self, config: SmuHardwareConfig) -> KeithleyConfigurationReadback: ...
 
     def set_source(self, value: float) -> None: ...
 
@@ -161,7 +161,6 @@ class ThreeSmuSession:
             preflight_errors: list[str] = []
             for role, state in preflight.items():
                 config = hardware.by_role()[role]
-                assert config.readback_tolerance is not None
                 assert config.max_abs_voltage_v is not None
                 assert config.max_abs_current_a is not None
                 if state.source_mode is not config.source_mode:
@@ -169,11 +168,8 @@ class ThreeSmuSession:
                         f"{role} source mode is {state.source_mode.value}, expected "
                         f"{config.source_mode.value}"
                     )
-                if abs(state.source_setpoint) > config.readback_tolerance:
-                    preflight_errors.append(
-                        f"{role} source setpoint {state.source_setpoint:g} is not "
-                        "confirmed at zero"
-                    )
+                if not math.isfinite(state.source_setpoint):
+                    preflight_errors.append(f"{role} source setpoint is not finite")
                 if not state.status_query_consumed:
                     preflight_errors.append(
                         f"{role} status queue was not explicitly queried"
@@ -194,51 +190,6 @@ class ThreeSmuSession:
                         f"{role} current readback {state.current_a:g} A exceeds "
                         f"max_abs_current_a {config.max_abs_current_a:g} A"
                     )
-                measured_source = (
-                    state.voltage_v
-                    if config.source_mode is SourceMode.VOLTAGE
-                    else state.current_a
-                )
-                if (
-                    measured_source is not None
-                    and math.isfinite(measured_source)
-                    and abs(measured_source) > config.readback_tolerance
-                ):
-                    preflight_errors.append(
-                        f"{role} measured {config.source_mode.value} is not "
-                        "confirmed at zero"
-                    )
-                if role != "smu_bias" and config.source_mode is SourceMode.VOLTAGE:
-                    assert config.compliance_current_a is not None
-                    assert config.leakage_limit_a is not None
-                    try:
-                        validate_gate_preflight(
-                            role,
-                            GatePreflightState(
-                                identity=state.identity,
-                                output_enabled=state.output_enabled,
-                                source_setpoint_v=state.source_setpoint,
-                                voltage_read_v=float(state.voltage_v),
-                                current_read_a=float(state.current_a),
-                                status=state.status,
-                            ),
-                            GateSafetyLimits(
-                                max_abs_voltage_v=config.max_abs_voltage_v,
-                                compliance_a=config.compliance_current_a,
-                                leakage_limit_a=config.leakage_limit_a,
-                                ramp_step_v=float(config.ramp_step),
-                                readback_tolerance_v=config.readback_tolerance,
-                                settle_s=float(config.settle_s),
-                            ),
-                        )
-                    except (TypeError, ValueError) as exc:
-                        preflight_errors.append(
-                            f"{role} preflight readback is incomplete: {exc}"
-                        )
-                    except ThreeSmuError:
-                        raise
-                    except Exception as exc:
-                        preflight_errors.append(f"{role} gate preflight: {exc}")
             if preflight_errors:
                 raise ThreeSmuSafetyError(
                     "Preflight rejected unsafe or unexpected instrument state; no "
@@ -385,35 +336,52 @@ class ThreeSmuSession:
             self._configured.add(role)
             adapter.zero_residual(self.preflight[role].source_mode)
             zero_state = adapter.preflight()
-            assert config.readback_tolerance is not None
-            if zero_state.output_enabled or abs(zero_state.source_setpoint) > (
-                config.readback_tolerance
+            zero_problems: list[str] = []
+            if zero_state.output_enabled:
+                zero_problems.append("output became enabled")
+            if zero_state.voltage_v is None or not math.isfinite(zero_state.voltage_v):
+                zero_problems.append("voltage readback is unavailable")
+            elif abs(zero_state.voltage_v) > float(config.max_abs_voltage_v):
+                zero_problems.append("voltage readback exceeds max_abs_voltage_v")
+            if zero_state.current_a is None or not math.isfinite(zero_state.current_a):
+                zero_problems.append("current readback is unavailable")
+            elif abs(zero_state.current_a) > float(config.max_abs_current_a):
+                zero_problems.append("current readback exceeds max_abs_current_a")
+            if not zero_state.status_query_consumed or not _status_is_clean(
+                zero_state.status
             ):
+                zero_problems.append("instrument status is unavailable or not clean")
+            if zero_problems:
                 recorder.event(
                     "preconfigure_zero_rejected",
-                    {"role": role, "state": _jsonable(asdict(zero_state))},
+                    {
+                        "role": role,
+                        "state": _jsonable(asdict(zero_state)),
+                        "problems": zero_problems,
+                    },
                 )
                 raise ThreeSmuSafetyError(
-                    f"{role} residual source setpoint could not be confirmed at zero"
+                    f"{role} residual-zero readback rejected: "
+                    + "; ".join(zero_problems)
                 )
             recorder.event(
                 "preconfigure_zero",
                 {"role": role, "state": _jsonable(asdict(zero_state))},
             )
-            adapter.configure(config)
+            configuration = adapter.configure(config)
             adapter.set_source(0.0)
             self.last_commanded[role] = 0.0
             reading = self._read_one(role)
             problems = self._reading_problems(
                 role,
                 reading.reading,
-                expected_source=0.0,
                 expected_output=False,
             )
             recorder.event(
                 "configure",
                 {
                     "role": role,
+                    "configuration_readback": _jsonable(asdict(configuration)),
                     "reading": _timed_reading_dict(reading),
                     "problems": problems,
                 },
@@ -430,7 +398,6 @@ class ThreeSmuSession:
             problems = self._reading_problems(
                 role,
                 reading.reading,
-                expected_source=0.0,
                 expected_output=True,
             )
             recorder.event(
@@ -448,55 +415,11 @@ class ThreeSmuSession:
         for role in SEMANTIC_ROLES:
             if role not in point.coordinates:
                 continue
-            self._ramp(role, point.coordinates[role], recorder, event_type="ramp")
-
-    def _ramp(
-        self,
-        role: str,
-        target: float,
-        recorder: "_RunRecorder",
-        *,
-        event_type: str,
-        best_effort: bool = False,
-    ) -> bool:
-        config = self.hardware.by_role()[role]
-        start = self.last_commanded.get(role, 0.0)
-        assert config.ramp_step is not None
-        success = True
-        for value in ramp_values(start, target, config.ramp_step):
-            try:
-                self.adapters[role].set_source(value)
-                self.last_commanded[role] = value
-                if config.settle_s:
-                    self.sleep(config.settle_s)
-                reading = self._read_one(role)
-                problems = self._reading_problems(
-                    role,
-                    reading.reading,
-                    expected_source=value,
-                    expected_output=self.output_enabled[role],
-                )
-                recorder.event(
-                    event_type,
-                    {
-                        "role": role,
-                        "target": value,
-                        "reading": _timed_reading_dict(reading),
-                        "problems": problems,
-                    },
-                )
-                if problems:
-                    raise ThreeSmuSafetyError("; ".join(problems))
-            except Exception as exc:
-                success = False
-                recorder.event(
-                    f"{event_type}_error",
-                    {"role": role, "target": value, "error": f"{type(exc).__name__}: {exc}"},
-                )
-                if not best_effort:
-                    raise
-                break
-        return success
+            target = point.coordinates[role]
+            self._validate_source_target(role, target)
+            self.adapters[role].set_source(target)
+            self.last_commanded[role] = target
+            recorder.event("source_set", {"role": role, "target": target})
 
     def _formal_sample(
         self,
@@ -511,14 +434,10 @@ class ThreeSmuSession:
             try:
                 timed = self._read_one(role)
                 readings[role] = timed
-                expected_source = (
-                    point.coordinates[role] if role in point.coordinates else 0.0
-                )
                 problems.extend(
                     self._reading_problems(
                         role,
                         timed.reading,
-                        expected_source=expected_source,
                         expected_output=role in self._active_roles,
                     )
                 )
@@ -559,34 +478,18 @@ class ThreeSmuSession:
         role: str,
         reading: KeithleyReading,
         *,
-        expected_source: float,
         expected_output: bool,
     ) -> list[str]:
         config = self.hardware.by_role()[role]
         problems: list[str] = []
-        assert config.readback_tolerance is not None
         assert config.max_abs_voltage_v is not None
         assert config.max_abs_current_a is not None
-        if abs(reading.source_setpoint - expected_source) > config.readback_tolerance:
-            problems.append(
-                f"{role} source readback mismatch: {reading.source_setpoint:g} "
-                f"vs {expected_source:g}"
-            )
         if reading.output_enabled != expected_output:
             problems.append(
                 f"{role} output readback is {reading.output_enabled}, expected {expected_output}"
             )
-        measured_source = (
-            reading.voltage_v
-            if config.source_mode is SourceMode.VOLTAGE
-            else reading.current_a
-        )
-        if abs(measured_source - expected_source) > config.readback_tolerance:
-            unit = "V" if config.source_mode is SourceMode.VOLTAGE else "A"
-            problems.append(
-                f"{role} measured source mismatch: {measured_source:g} {unit} "
-                f"vs {expected_source:g} {unit}"
-            )
+        if not math.isfinite(reading.source_setpoint):
+            problems.append(f"{role} source setpoint readback is not finite")
         if abs(reading.voltage_v) > config.max_abs_voltage_v:
             problems.append(
                 f"{role} voltage {reading.voltage_v:g} V exceeds "
@@ -599,24 +502,26 @@ class ThreeSmuSession:
             )
         if reading.compliance_trip:
             problems.append(f"{role} compliance trip")
-        if reading.near_compliance:
-            problems.append(f"{role} near compliance limit")
         if not reading.status_query_consumed:
             problems.append(f"{role} status queue was not explicitly queried")
         elif not _status_is_clean(reading.status):
             problems.append(f"{role} instrument error: {reading.status}")
-        if (
-            role != "smu_bias"
-            and config.source_mode is SourceMode.VOLTAGE
-            and expected_output
-        ):
-            assert config.leakage_limit_a is not None
-            if abs(reading.current_a) > config.leakage_limit_a:
-                problems.append(
-                    f"{role} leakage {reading.current_a:g} A exceeds "
-                    f"{config.leakage_limit_a:g} A"
-                )
         return problems
+
+    def _validate_source_target(self, role: str, target: float) -> None:
+        if not math.isfinite(target):
+            raise ThreeSmuSafetyError(f"{role} source target must be finite")
+        config = self.hardware.by_role()[role]
+        limit = (
+            config.max_abs_voltage_v
+            if config.source_mode is SourceMode.VOLTAGE
+            else config.max_abs_current_a
+        )
+        assert limit is not None
+        if abs(target) > limit:
+            raise ThreeSmuSafetyError(
+                f"{role} source target {target:g} exceeds max_abs limit {limit:g}"
+            )
 
     def _cleanup(self, recorder: "_RunRecorder", *, reason: str) -> dict[str, Any]:
         actions: list[dict[str, Any]] = []
@@ -625,17 +530,38 @@ class ThreeSmuSession:
         for role in SEMANTIC_ROLES:
             if role not in self._configured:
                 continue
-            zero_confirmed = self._ramp(
-                role,
-                0.0,
-                recorder,
-                event_type="cleanup_ramp",
-                best_effort=True,
-            )
-            if not zero_confirmed:
+            zero_readback_recorded = False
+            try:
+                self.adapters[role].set_source(0.0)
+                self.last_commanded[role] = 0.0
+                if self.plan.delay_s:
+                    self.sleep(self.plan.delay_s)
+                timed = self._read_one(role)
+                problems = self._reading_problems(
+                    role,
+                    timed.reading,
+                    expected_output=self.output_enabled[role],
+                )
+                zero_readback_recorded = not problems
+                recorder.event(
+                    "cleanup_zero",
+                    {
+                        "role": role,
+                        "target": 0.0,
+                        "reading": _timed_reading_dict(timed),
+                        "problems": problems,
+                    },
+                )
+                if problems:
+                    raise ThreeSmuSafetyError("; ".join(problems))
+            except Exception as exc:
                 manual = True
                 cleanup_errors.append(
-                    {"role": role, "stage": "zero", "error": "zero ramp unconfirmed"}
+                    {
+                        "role": role,
+                        "stage": "zero",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
                 )
             output_off_confirmed = False
             try:
@@ -645,7 +571,6 @@ class ThreeSmuSession:
                 problems = self._reading_problems(
                     role,
                     timed.reading,
-                    expected_source=0.0,
                     expected_output=False,
                 )
                 output_off_confirmed = not problems
@@ -682,7 +607,7 @@ class ThreeSmuSession:
             actions.append(
                 {
                     "role": role,
-                    "zero_confirmed": zero_confirmed,
+                    "zero_readback_recorded": zero_readback_recorded,
                     "output_off_confirmed": output_off_confirmed,
                 }
             )
@@ -739,7 +664,7 @@ class _RunRecorder:
         self._writer.writeheader()
         self._closed = False
         self.metadata: dict[str, Any] = {
-            "schema_version": 3,
+            "schema_version": 4,
             "code_version": _code_version(),
             "status": "running",
             "accepted": False,
@@ -812,7 +737,6 @@ class _RunRecorder:
                     f"{role}_resistance_ohm": reading.resistance_ohm,
                     f"{role}_output_enabled": reading.output_enabled,
                     f"{role}_compliance_trip": reading.compliance_trip,
-                    f"{role}_near_compliance": reading.near_compliance,
                     f"{role}_status": reading.status,
                 }
             )
@@ -851,18 +775,6 @@ class _RunRecorder:
         )
 
 
-def ramp_values(start: float, stop: float, max_step: float) -> tuple[float, ...]:
-    if any(not math.isfinite(value) for value in (start, stop, max_step)):
-        raise ValueError("Ramp values must be finite")
-    if max_step <= 0:
-        raise ValueError("max_step must be positive")
-    delta = stop - start
-    if delta == 0:
-        return ()
-    count = math.ceil(abs(delta) / max_step)
-    return tuple(start + delta * index / count for index in range(1, count + 1))
-
-
 def _status_is_clean(status: str | None) -> bool:
     if status is None:
         return False
@@ -894,7 +806,6 @@ def _csv_fields() -> list[str]:
                 f"{role}_resistance_ohm",
                 f"{role}_output_enabled",
                 f"{role}_compliance_trip",
-                f"{role}_near_compliance",
                 f"{role}_status",
             ]
         )

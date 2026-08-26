@@ -36,7 +36,7 @@ def make_run(
             f"{role}_source_setpoint", f"{role}_voltage_v",
             f"{role}_current_a", f"{role}_resistance_ohm",
             f"{role}_output_enabled", f"{role}_compliance_trip",
-            f"{role}_near_compliance", f"{role}_status",
+            f"{role}_status",
         ])
     with (run_dir / "data.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
@@ -68,7 +68,6 @@ def make_run(
                             f"{role}_resistance_ohm": 1000.0,
                             f"{role}_output_enabled": role != "gate_bottom",
                             f"{role}_compliance_trip": False,
-                            f"{role}_near_compliance": False,
                             f"{role}_status": "0,No error",
                         })
                     writer.writerow(row)

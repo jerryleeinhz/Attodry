@@ -14,27 +14,26 @@ from attodry_control.three_smu_config import (
     ThreeSmuHardwareConfig,
     ThreeSmuScanPlan,
     generate_scan_points,
-    load_three_smu_hardware,
     load_three_smu_operation_config,
-    load_three_smu_scan,
     validate_plan_targets,
 )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-HARDWARE_EXAMPLE = PROJECT_ROOT / "config" / "three_smu_hardware.example.toml"
-SCAN_EXAMPLE = PROJECT_ROOT / "config" / "three_smu_scan.example.toml"
+HARDWARE_EXAMPLE = PROJECT_ROOT / "config" / "hardware.example.toml"
 
 
 def channel(
     role: ChannelRole,
     *,
-    fixed: float = 0.0,
-    start: float = 0.0,
-    stop: float = 0.0,
-    step: float = 1.0,
+    bidirectional: bool = False,
+    fixed: float | None = None,
+    start: float | None = None,
+    stop: float | None = None,
+    step: float | None = None,
+    points: tuple[float, ...] | None = None,
 ) -> ChannelPlan:
-    return ChannelPlan(role, fixed, start, stop, step)
+    return ChannelPlan(role, bidirectional, fixed, start, stop, step, points)
 
 
 def plan(mode: ScanMode, **changes) -> ThreeSmuScanPlan:
@@ -42,7 +41,6 @@ def plan(mode: ScanMode, **changes) -> ThreeSmuScanPlan:
         mode=mode,
         samples_per_point=1,
         delay_s=0.0,
-        bidirectional=False,
         serpentine=False,
         finish_action=FinishAction.ZERO_DISABLE,
         point_count=1,
@@ -63,24 +61,12 @@ def smu(role: str, address: str) -> SmuHardwareConfig:
         address=address,
         timeout_ms=5000,
         source_mode=SourceMode.VOLTAGE,
-        compliance_current_a=1e-3,
-        compliance_voltage_v=10.0,
         max_abs_voltage_v=10.0,
         max_abs_current_a=1e-3,
-        source_min_v=-2.0,
-        source_max_v=2.0,
-        ramp_step_v=0.25,
-        readback_tolerance_v=1e-6,
-        source_min_a=-1e-3,
-        source_max_a=1e-3,
-        ramp_step_a=1e-4,
-        readback_tolerance_a=1e-9,
-        settle_s=0.0,
         nplc=1.0,
         source_auto_range=True,
         measure_auto_range=True,
         four_wire=False,
-        leakage_limit_a=None if role == "smu_bias" else 1e-6,
     )
 
 
@@ -92,27 +78,14 @@ def hardware() -> ThreeSmuHardwareConfig:
     )
 
 
-class ThreeSmuConfigTests(unittest.TestCase):
-    def test_single_daily_operation_config_reuses_gate_safety_limits(self) -> None:
-        text = """
+OPERATION_TEXT = """
 [smu_bias]
 model = "Keithley2400"
 address = "FAKE::1"
 timeout_ms = 1000
 source_mode = "voltage"
-compliance_current_a = 0.001
-compliance_voltage_v = 10.0
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
-source_min_v = -1.0
-source_max_v = 1.0
-ramp_step_v = 0.1
-readback_tolerance_v = 0.000001
-source_min_a = -0.001
-source_max_a = 0.001
-ramp_step_a = 0.0001
-readback_tolerance_a = 0.000000001
-settle_s = 0.0
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
@@ -122,20 +95,8 @@ four_wire = false
 model = "Keithley2400"
 address = "FAKE::2"
 source_mode = "voltage"
-compliance_a = 0.001
-compliance_voltage_v = 3.0
-leakage_limit_a = 0.000001
 max_abs_voltage_v = 3.0
 max_abs_current_a = 0.001
-source_min_v = -2.0
-source_max_v = 2.0
-ramp_step_v = 0.1
-readback_tolerance_v = 0.000001
-source_min_a = -0.001
-source_max_a = 0.001
-ramp_step_a = 0.0001
-readback_tolerance_a = 0.000000001
-settle_s = 0.0
 
 [gate_top.smu]
 timeout_ms = 1000
@@ -148,20 +109,8 @@ four_wire = false
 model = "Keithley2400"
 address = "FAKE::3"
 source_mode = "voltage"
-compliance_a = 0.0005
-compliance_voltage_v = 4.0
-leakage_limit_a = 0.000001
 max_abs_voltage_v = 4.0
 max_abs_current_a = 0.0005
-source_min_v = -2.0
-source_max_v = 2.0
-ramp_step_v = 0.1
-readback_tolerance_v = 0.000001
-source_min_a = -0.0005
-source_max_a = 0.0005
-ramp_step_a = 0.0001
-readback_tolerance_a = 0.000000001
-settle_s = 0.0
 
 [gate_bottom.smu]
 timeout_ms = 1000
@@ -177,7 +126,6 @@ note = "offline only"
 mode = "multi_smu_map"
 samples_per_point = 1
 delay_s = 0.0
-bidirectional = false
 serpentine = true
 finish_action = "zero_disable"
 point_count = 1
@@ -186,106 +134,125 @@ pulse_period_s = 0.0
 
 [three_smu_run.smu_bias]
 role = "fixed"
+bidirectional = false
 fixed = 0.001
-start = 0.0
-stop = 0.0
-step = 1.0
 
 [three_smu_run.gate_top]
 role = "sweep"
-fixed = 0.0
-start = -1.0
-stop = 1.0
-step = 1.0
+bidirectional = false
+points = [-1.0, 0.0, 1.0]
 
 [three_smu_run.gate_bottom]
 role = "sweep"
-fixed = 0.0
+bidirectional = false
 start = -1.0
 stop = 1.0
 step = 1.0
 """
+
+
+class ThreeSmuConfigTests(unittest.TestCase):
+    def test_single_daily_operation_config_loads_minimal_safety_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "hardware.local.toml"
-            path.write_text(text, encoding="utf-8")
+            path.write_text(OPERATION_TEXT, encoding="utf-8")
             operation = load_three_smu_operation_config(path)
-            self.assertEqual(operation.output_directory, Path(directory) / "runs")
-            self.assertEqual(operation.hardware.gate_top.source_max, 2.0)
-            self.assertEqual(operation.hardware.gate_top.max_abs_voltage_v, 3.0)
-            self.assertEqual(operation.hardware.gate_bottom.max_abs_voltage_v, 4.0)
-            self.assertEqual(operation.hardware.gate_bottom.max_abs_current_a, 0.0005)
-            self.assertEqual(operation.plan.gate_bottom.role, ChannelRole.SWEEP)
-            self.assertEqual(len(validate_plan_targets(operation.hardware, operation.plan)), 9)
+        self.assertEqual(operation.hardware.gate_top.max_abs_voltage_v, 3.0)
+        self.assertEqual(operation.hardware.gate_bottom.max_abs_current_a, 0.0005)
+        self.assertEqual(operation.hardware.smu_bias.nplc, 1.0)
+        self.assertEqual(len(validate_plan_targets(operation.hardware, operation.plan)), 9)
 
-    def test_checked_in_hardware_template_is_intentionally_not_ready(self) -> None:
-        config = load_three_smu_hardware(HARDWARE_EXAMPLE)
+    def test_checked_in_unified_template_is_intentionally_not_ready(self) -> None:
+        operation = load_three_smu_operation_config(HARDWARE_EXAMPLE)
         with self.assertRaisesRegex(ThreeSmuConfigError, "not ready"):
-            config.require_ready()
+            operation.hardware.require_ready()
+        self.assertEqual(operation.hardware.smu_bias.nplc, 1.0)
 
-    def test_checked_in_scan_example_loads_offline(self) -> None:
-        loaded = load_three_smu_scan(SCAN_EXAMPLE)
-        self.assertEqual(loaded.mode, ScanMode.BIAS_IV)
-        self.assertEqual(loaded.smu_bias.role, ChannelRole.SWEEP)
+    def test_unified_template_has_no_legacy_safety_or_split_templates(self) -> None:
+        text = HARDWARE_EXAMPLE.read_text(encoding="utf-8")
+        for removed in (
+            "compliance_current_a",
+            "compliance_voltage_v",
+            "leakage_limit_a",
+            "source_min_v",
+            "source_max_v",
+            "ramp_step_v",
+            "readback_tolerance_v",
+            "settle_s",
+        ):
+            self.assertNotIn(removed, text)
+        self.assertFalse((PROJECT_ROOT / "config" / "three_smu_hardware.example.toml").exists())
+        self.assertFalse((PROJECT_ROOT / "config" / "three_smu_scan.example.toml").exists())
 
-    def test_unknown_hardware_field_is_rejected(self) -> None:
-        text = HARDWARE_EXAMPLE.read_text(encoding="utf-8").replace(
-            'model = "Keithley2400"',
-            'model = "Keithley2400"\nunknown = true',
+    def test_removed_hardware_field_is_rejected(self) -> None:
+        text = OPERATION_TEXT.replace(
+            'max_abs_voltage_v = 10.0',
+            'max_abs_voltage_v = 10.0\nsettle_s = 0.1',
             1,
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "hardware.toml"
             path.write_text(text, encoding="utf-8")
             with self.assertRaisesRegex(ThreeSmuConfigError, "unknown"):
-                load_three_smu_hardware(path)
+                load_three_smu_operation_config(path)
 
-    def test_gate_can_be_current_source_with_current_unit_limits(self) -> None:
-        top = replace(
-            smu("gate_top", "FAKE::2"),
-            source_mode=SourceMode.CURRENT,
-            leakage_limit_a=None,
-        )
+    def test_current_source_uses_current_target_limit(self) -> None:
+        top = replace(smu("gate_top", "FAKE::2"), source_mode=SourceMode.CURRENT)
         configured = ThreeSmuHardwareConfig(
-            smu("smu_bias", "FAKE::1"),
-            top,
-            smu("gate_bottom", "FAKE::3"),
+            smu("smu_bias", "FAKE::1"), top, smu("gate_bottom", "FAKE::3")
         )
-        configured.require_ready()
-        self.assertEqual(configured.gate_top.source_min, -1e-3)
-        self.assertEqual(configured.gate_top.ramp_step, 1e-4)
+        target_plan = plan(
+            ScanMode.MULTI_SMU_MAP,
+            gate_top=channel(ChannelRole.SWEEP, points=(0.0, 5e-4)),
+        )
+        self.assertEqual(len(validate_plan_targets(configured, target_plan)), 2)
 
-    def test_compliance_cannot_exceed_matching_absolute_limit(self) -> None:
-        with self.assertRaisesRegex(
-            ThreeSmuConfigError, "compliance_current_a cannot exceed"
-        ):
+    def test_keithley_capability_and_compliance_floor_are_validated(self) -> None:
+        with self.assertRaisesRegex(ThreeSmuConfigError, "capability"):
+            replace(smu("smu_bias", "FAKE::1"), max_abs_voltage_v=211.0)
+        with self.assertRaisesRegex(ThreeSmuConfigError, "minimum programmable"):
+            replace(smu("smu_bias", "FAKE::1"), max_abs_current_a=0.5e-9)
+        with self.assertRaisesRegex(ThreeSmuConfigError, "operating envelope"):
             replace(
-                smu("gate_top", "FAKE::2"),
-                compliance_current_a=2e-3,
+                smu("smu_bias", "FAKE::1"),
+                max_abs_voltage_v=210.0,
+                max_abs_current_a=1.0,
             )
 
-    def test_source_range_cannot_exceed_matching_absolute_limit(self) -> None:
-        with self.assertRaisesRegex(ThreeSmuConfigError, "source range exceeds"):
-            replace(
-                smu("gate_top", "FAKE::2"),
-                source_max_a=2e-3,
-            )
+    def test_fixed_range_without_explicit_range_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ThreeSmuConfigError, "range=true"):
+            replace(smu("smu_bias", "FAKE::1"), measure_auto_range=False)
 
     def test_duplicate_configured_address_is_rejected(self) -> None:
-        top = smu("gate_top", "FAKE::1")
         with self.assertRaisesRegex(ThreeSmuConfigError, "distinct"):
             ThreeSmuHardwareConfig(
                 smu("smu_bias", "FAKE::1"),
-                top,
+                smu("gate_top", "FAKE::1"),
                 smu("gate_bottom", "FAKE::3"),
             ).require_ready()
 
-    def test_bidirectional_bias_scan_has_single_turnaround_point(self) -> None:
+    def test_explicit_points_preserve_arbitrary_order_and_duplicates(self) -> None:
         points = generate_scan_points(
             plan(
                 ScanMode.BIAS_IV,
-                bidirectional=True,
                 smu_bias=channel(
-                    ChannelRole.SWEEP, start=-1.0, stop=1.0, step=1.0
+                    ChannelRole.SWEEP, points=(1.0, 3.0, 7.0, 2.0, 2.0)
+                ),
+            )
+        )
+        self.assertEqual(
+            [point.coordinates["smu_bias"] for point in points],
+            [1.0, 3.0, 7.0, 2.0, 2.0],
+        )
+
+    def test_per_smu_bidirectional_has_single_turnaround_point(self) -> None:
+        points = generate_scan_points(
+            plan(
+                ScanMode.BIAS_IV,
+                smu_bias=channel(
+                    ChannelRole.SWEEP,
+                    bidirectional=True,
+                    points=(-1.0, 0.0, 1.0),
                 ),
             )
         )
@@ -295,59 +262,48 @@ step = 1.0
         )
         self.assertEqual(points[-1].segment, "reverse")
 
-    def test_serpentine_map_reverses_inner_axis(self) -> None:
+    def test_multi_map_expands_each_role_before_cartesian_product(self) -> None:
         points = generate_scan_points(
             plan(
                 ScanMode.MULTI_SMU_MAP,
-                serpentine=True,
                 smu_bias=channel(
-                    ChannelRole.SWEEP, start=0.0, stop=1.0, step=1.0
+                    ChannelRole.SWEEP, bidirectional=True, points=(0.0, 1.0)
                 ),
-                gate_top=channel(
-                    ChannelRole.SWEEP, start=10.0, stop=20.0, step=10.0
-                ),
+                gate_top=channel(ChannelRole.SWEEP, points=(10.0, 20.0)),
             )
         )
-        self.assertEqual(
-            [
-                (point.coordinates["smu_bias"], point.coordinates["gate_top"])
-                for point in points
-            ],
-            [(0.0, 10.0), (0.0, 20.0), (1.0, 20.0), (1.0, 10.0)],
-        )
+        self.assertEqual(len(points), 6)
 
-    def test_software_pulse_generates_high_and_low_per_cycle(self) -> None:
-        points = generate_scan_points(
+    def test_paired_gate_validates_lengths_after_independent_expansion(self) -> None:
+        with self.assertRaisesRegex(ThreeSmuConfigError, "same point count"):
+            plan(
+                ScanMode.PAIRED_GATE,
+                gate_top=channel(
+                    ChannelRole.SWEEP, bidirectional=True, points=(0.0, 1.0)
+                ),
+                gate_bottom=channel(ChannelRole.SWEEP, points=(0.0, 1.0)),
+            )
+
+    def test_software_pulse_rejects_bidirectional(self) -> None:
+        with self.assertRaisesRegex(ThreeSmuConfigError, "does not allow bidirectional"):
             plan(
                 ScanMode.SOFTWARE_PULSE,
                 point_count=2,
                 pulse_high_s=0.1,
                 pulse_period_s=0.4,
                 smu_bias=channel(
-                    ChannelRole.SWEEP, start=0.0, stop=0.5, step=1.0
+                    ChannelRole.SWEEP,
+                    bidirectional=True,
+                    points=(0.0, 0.5),
                 ),
             )
-        )
-        self.assertEqual([point.segment for point in points], [
-            "pulse_high", "pulse_low", "pulse_high", "pulse_low"
-        ])
-        self.assertEqual(points[0].coordinates["smu_bias"], 0.5)
-        self.assertEqual(points[1].coordinates["smu_bias"], 0.0)
 
-    def test_paired_gate_requires_matching_point_counts(self) -> None:
-        with self.assertRaisesRegex(ThreeSmuConfigError, "same point count"):
-            plan(
-                ScanMode.PAIRED_GATE,
-                gate_top=channel(ChannelRole.SWEEP, start=0, stop=1, step=1),
-                gate_bottom=channel(ChannelRole.SWEEP, start=0, stop=2, step=1),
-            )
-
-    def test_target_range_is_checked_before_any_driver_factory(self) -> None:
+    def test_target_absolute_limit_is_checked_before_driver_factory(self) -> None:
         outside = plan(
             ScanMode.BIAS_IV,
-            smu_bias=channel(ChannelRole.SWEEP, start=0.0, stop=3.0, step=1.0),
+            smu_bias=channel(ChannelRole.SWEEP, points=(0.0, 11.0)),
         )
-        with self.assertRaisesRegex(ThreeSmuConfigError, "outside configured"):
+        with self.assertRaisesRegex(ThreeSmuConfigError, "absolute limit"):
             validate_plan_targets(hardware(), outside)
 
 

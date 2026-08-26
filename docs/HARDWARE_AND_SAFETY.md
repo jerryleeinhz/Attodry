@@ -84,20 +84,30 @@ APS100 hardware power-fail, quench, and shutdown-input behavior remains an indep
 
 ## Gate SMUs
 
-The model-independent controller requires every safety value explicitly: absolute
-voltage limit, current compliance, leakage trip, maximum ramp step, settle time,
-and voltage-readback tolerance. It sets compliance before enabling an output,
-enables only at 0 V, verifies every ramp step, and attempts a stepped return to
-zero followed by output disable after any write, readback, or leakage failure.
+The active Three-SMU hardware contract targets three Keithley 2400 units and gives
+`smu_bias`, `gate_top`, and `gate_bottom` independent `max_abs_voltage_v` and
+`max_abs_current_a` boundaries. Every requested source value is checked before a
+write, and every actual voltage/current readback is checked against both limits.
 
-No vendor command adapter is active until the exact top/bottom SMU models and
-manuals are confirmed. A communication failure does not prove 0 V or output-off;
-the last confirmed state is retained and the instrument must be checked manually.
+Keithley compliance remains an instrument protection setting, but it is not a
+second user-entered boundary. Voltage-source roles derive current compliance from
+`max_abs_current_a`; current-source roles derive voltage compliance from
+`max_abs_voltage_v`. The adapter queries compliance and source/measurement ranges
+after configuration and fails closed if the compliance readback exceeds the
+approved absolute limit. Source and measurement autorange are required because
+the current schema has no fixed-range fields.
 
-The checked-in hardware template deliberately leaves VISA/DLL/COM values and all
-six per-gate limits as `CHANGE_ME`. `require_hardware_ready()` rejects these
-placeholders before a hardware driver is constructed; replacing them requires
-operator-confirmed station values, not copied example limits.
+The Three-SMU path intentionally has no software ramp, source min/max, readback
+tolerance, separate leakage threshold, or per-device settle time. A formal point
+uses one direct target write per active role, the shared `delay_s`, then records
+the actual readback. Cleanup directly requests zero, waits `delay_s`, records the
+readback, and disables output. A communication failure never proves 0 V or
+output-off; the last confirmed state is retained and the instrument must be
+checked manually.
+
+The legacy model-independent simulation gate controller retains its own ramp and
+leakage test fixtures; those fields are not part of the real Three-SMU daily
+hardware TOML.
 
 Signed resistance is `Vxx_X / I_rms`. The software never infers `I_rms` from the
 SR830 amplitude unless the operator explicitly supplies the complete excitation

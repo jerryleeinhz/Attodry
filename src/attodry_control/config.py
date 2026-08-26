@@ -230,12 +230,13 @@ class LockinSweepConfig:
 @dataclass(frozen=True, slots=True)
 class GateConfig:
     role: str
-    compliance_a: float | None
-    leakage_limit_a: float | None
     max_abs_voltage_v: float | None
-    ramp_step_v: float | None
-    readback_tolerance_v: float | None
-    settle_s: float | None
+    max_abs_current_a: float | None = None
+    compliance_a: float | None = None
+    leakage_limit_a: float | None = None
+    ramp_step_v: float | None = None
+    readback_tolerance_v: float | None = None
+    settle_s: float | None = None
     backend: str | None = None
     model: str | None = None
     address: str | None = None
@@ -276,14 +277,7 @@ class ControlConfig:
             ("gate_top", self.gate_top),
             ("gate_bottom", self.gate_bottom),
         ):
-            for field_name in (
-                "compliance_a",
-                "leakage_limit_a",
-                "max_abs_voltage_v",
-                "ramp_step_v",
-                "readback_tolerance_v",
-                "settle_s",
-            ):
+            for field_name in ("max_abs_voltage_v", "max_abs_current_a"):
                 if getattr(gate, field_name) is None:
                     errors.append(f"{table_name}.{field_name} is not configured")
         return tuple(errors)
@@ -1421,7 +1415,7 @@ def _parse_lockin_sweep(
 def _parse_gate(
     table: Mapping[str, Any], role: str, mode: RunMode, name: str
 ) -> GateConfig:
-    common_keys = {
+    simulation_keys = {
         "compliance_a",
         "leakage_limit_a",
         "max_abs_voltage_v",
@@ -1429,28 +1423,32 @@ def _parse_gate(
         "readback_tolerance_v",
         "settle_s",
     }
-    three_smu_keys = {
+    hardware_keys = {
+        "model",
+        "address",
         "source_mode",
-        "compliance_voltage_v",
+        "max_abs_voltage_v",
         "max_abs_current_a",
-        "source_min_v",
-        "source_max_v",
-        "source_min_a",
-        "source_max_a",
-        "ramp_step_a",
-        "readback_tolerance_a",
+        "smu",
     }
-    mode_keys = {"backend"} if mode is RunMode.SIMULATION else {"model", "address"}
-    if mode is RunMode.HARDWARE and "smu" in table and not isinstance(table["smu"], dict):
+    if mode is RunMode.HARDWARE and not isinstance(table.get("smu"), dict):
         raise ConfigError(f"{name}.smu must be a table.")
-    optional_smu = {"smu"} if mode is RunMode.HARDWARE and "smu" in table else set()
-    optional_three_smu = three_smu_keys.intersection(table)
-    _strict_keys(
-        table,
-        name,
-        common_keys | mode_keys | optional_smu | optional_three_smu,
-    )
-    parser = _positive_number if mode is RunMode.SIMULATION else _hardware_number
+    if mode is RunMode.HARDWARE:
+        _strict_keys(table, name, hardware_keys)
+        return GateConfig(
+            role=role,
+            max_abs_voltage_v=_hardware_number(
+                table["max_abs_voltage_v"], f"{name}.max_abs_voltage_v"
+            ),
+            max_abs_current_a=_hardware_number(
+                table["max_abs_current_a"], f"{name}.max_abs_current_a"
+            ),
+            model=_string(table["model"], f"{name}.model"),
+            address=_string(table["address"], f"{name}.address"),
+        )
+
+    _strict_keys(table, name, simulation_keys | {"backend"})
+    parser = _positive_number
     compliance = parser(table["compliance_a"], f"{name}.compliance_a")
     leakage = parser(table["leakage_limit_a"], f"{name}.leakage_limit_a")
     max_abs_voltage = parser(
@@ -1474,26 +1472,16 @@ def _parse_gate(
         if backend != "simulation":
             raise ConfigError(f"{name}.backend must be 'simulation'.")
         return GateConfig(
-            role,
-            compliance,
-            leakage,
-            max_abs_voltage,
-            ramp_step,
-            readback_tolerance,
-            settle,
+            role=role,
+            max_abs_voltage_v=max_abs_voltage,
+            compliance_a=compliance,
+            leakage_limit_a=leakage,
+            ramp_step_v=ramp_step,
+            readback_tolerance_v=readback_tolerance,
+            settle_s=settle,
             backend=backend,
         )
-    return GateConfig(
-        role,
-        compliance,
-        leakage,
-        max_abs_voltage,
-        ramp_step,
-        readback_tolerance,
-        settle,
-        model=_string(table["model"], f"{name}.model"),
-        address=_string(table["address"], f"{name}.address"),
-    )
+    raise AssertionError("unreachable")
 
 
 def _table(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:

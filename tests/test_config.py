@@ -238,15 +238,10 @@ class ConfigurationTests(unittest.TestCase):
             "C:/CHANGE_ME/attoDRYxyz64bit.dll": "C:/vendor/attoDRYxyz64bit.dll",
             "CHANGE_ME_SR830_XX_VISA_ADDRESS": "GPIB0::8::INSTR",
             "CHANGE_ME_SR830_XY_VISA_ADDRESS": "GPIB0::9::INSTR",
-            'model = "CHANGE_ME"': 'model = "TEST_SMU"',
             "CHANGE_ME_TOP_GATE_VISA_ADDRESS": "GPIB0::10::INSTR",
             "CHANGE_ME_BOTTOM_GATE_VISA_ADDRESS": "GPIB0::11::INSTR",
-            'compliance_a = "CHANGE_ME"': "compliance_a = 1e-8",
-            'leakage_limit_a = "CHANGE_ME"': "leakage_limit_a = 5e-9",
             'max_abs_voltage_v = "CHANGE_ME"': "max_abs_voltage_v = 1.0",
-            'ramp_step_v = "CHANGE_ME"': "ramp_step_v = 0.05",
-            'readback_tolerance_v = "CHANGE_ME"': "readback_tolerance_v = 0.001",
-            'settle_s = "CHANGE_ME"': "settle_s = 0.1",
+            'max_abs_current_a = "CHANGE_ME"': "max_abs_current_a = 1e-3",
         }
         for old, new in replacements.items():
             text = text.replace(old, new)

@@ -4,7 +4,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from attodry_control.keithley2400 import KeithleyPreflight, KeithleyReading
+from attodry_control.keithley2400 import (
+    KeithleyConfigurationReadback,
+    KeithleyPreflight,
+    KeithleyReading,
+)
 from attodry_control.three_smu import (
     ThreeSmuSafetyError,
     ThreeSmuSession,
@@ -31,24 +35,12 @@ def hardware() -> ThreeSmuHardwareConfig:
             address=address,
             timeout_ms=1000,
             source_mode=SourceMode.VOLTAGE,
-            compliance_current_a=1e-3,
-            compliance_voltage_v=10.0,
             max_abs_voltage_v=10.0,
             max_abs_current_a=1e-3,
-            source_min_v=-2.0,
-            source_max_v=2.0,
-            ramp_step_v=0.25,
-            readback_tolerance_v=1e-6,
-            source_min_a=-1e-3,
-            source_max_a=1e-3,
-            ramp_step_a=1e-4,
-            readback_tolerance_a=1e-9,
-            settle_s=0.0,
             nplc=1.0,
             source_auto_range=True,
             measure_auto_range=True,
             four_wire=False,
-            leakage_limit_a=None if role == "smu_bias" else 1e-6,
         )
     return ThreeSmuHardwareConfig(
         item("smu_bias", "FAKE::1"),
@@ -64,7 +56,6 @@ def current_source_gate_hardware() -> ThreeSmuHardwareConfig:
         gate_top=replace(
             configured.gate_top,
             source_mode=SourceMode.CURRENT,
-            leakage_limit_a=None,
         ),
     )
 
@@ -75,22 +66,21 @@ def fixed_plan(
     top: float | None = None,
     finish: FinishAction = FinishAction.ZERO_DISABLE,
 ) -> ThreeSmuScanPlan:
-    off = ChannelPlan(ChannelRole.OFF, 0.0, 0.0, 0.0, 1.0)
+    off = ChannelPlan(ChannelRole.OFF, False)
     return ThreeSmuScanPlan(
         mode=ScanMode.TIME_TRACE,
         samples_per_point=1,
         delay_s=0.0,
-        bidirectional=False,
         serpentine=False,
         finish_action=finish,
         point_count=1,
         pulse_high_s=0.0,
         pulse_period_s=0.0,
-        smu_bias=ChannelPlan(ChannelRole.FIXED, bias, 0.0, 0.0, 1.0),
+        smu_bias=ChannelPlan(ChannelRole.FIXED, False, fixed=bias),
         gate_top=(
             off
             if top is None
-            else ChannelPlan(ChannelRole.FIXED, top, 0.0, 0.0, 1.0)
+            else ChannelPlan(ChannelRole.FIXED, False, fixed=top)
         ),
         gate_bottom=off,
     )
@@ -147,9 +137,18 @@ class FakeAdapter:
         self.log.append(("zero_residual", self.role, mode.value))
         self.source = 0.0
 
-    def configure(self, config: SmuHardwareConfig) -> None:
+    def configure(self, config: SmuHardwareConfig) -> KeithleyConfigurationReadback:
         self.log.append(("configure", self.role))
         self.config = config
+        return KeithleyConfigurationReadback(
+            compliance_limit=(
+                float(config.max_abs_current_a)
+                if config.source_mode is SourceMode.VOLTAGE
+                else float(config.max_abs_voltage_v)
+            ),
+            source_range=1.0,
+            measure_range=1.0,
+        )
 
     def set_source(self, value: float) -> None:
         self.log.append(("source", self.role, value))
@@ -183,7 +182,6 @@ class FakeAdapter:
             source_setpoint=self.source + self.readback_offset,
             output_enabled=self.output,
             compliance_trip=self.trip_on_read == self.read_count,
-            near_compliance=False,
             status="0,No error",
             status_query_consumed=True,
         )
@@ -246,16 +244,16 @@ class ThreeSmuSessionTests(unittest.TestCase):
             )
         self.assertFalse(any(item[0] in {"source", "output", "configure", "zero_residual"} for item in log))
 
-    def test_nonzero_preflight_setpoint_stops_without_any_setting_write(self) -> None:
+    def test_nonzero_output_off_preflight_is_taken_over_by_direct_zero(self) -> None:
         _adapters, log, factory = factory_set(initial_source=0.1)
-        with self.assertRaisesRegex(ThreeSmuSafetyError, "not confirmed at zero"):
-            ThreeSmuSession.open(
-                hardware(),
-                fixed_plan(),
-                authorize_writes=True,
-                authorize_status_consumption=True,
-                adapter_factory=factory,
-            )
+        session = ThreeSmuSession.open(
+            hardware(),
+            fixed_plan(),
+            authorize_writes=True,
+            authorize_status_consumption=True,
+            adapter_factory=factory,
+        )
+        session.close()
         self.assertFalse(any(item[0] in {"source", "output", "configure", "zero_residual"} for item in log))
 
     def test_status_consumption_authorization_is_checked_before_factory(self) -> None:
@@ -302,7 +300,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
             self.assertEqual(len(samples), 1)
             self.assertIsNotNone(run_dir)
             metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["schema_version"], 3)
+            self.assertEqual(metadata["schema_version"], 4)
             self.assertEqual(metadata["status"], "completed")
             self.assertTrue(metadata["accepted"])
             self.assertIn("code_version", metadata)
@@ -310,6 +308,10 @@ class ThreeSmuSessionTests(unittest.TestCase):
             self.assertTrue((run_dir / "raw.jsonl").is_file())
             self.assertIn(
                 '"event": "preflight"',
+                (run_dir / "raw.jsonl").read_text(encoding="utf-8"),
+            )
+            self.assertIn(
+                '"configuration_readback"',
                 (run_dir / "raw.jsonl").read_text(encoding="utf-8"),
             )
             self.assertEqual(len((run_dir / "data.csv").read_text(encoding="utf-8").splitlines()), 2)
@@ -320,6 +322,10 @@ class ThreeSmuSessionTests(unittest.TestCase):
         ]
         self.assertEqual(cleanup_off[-3:], ["smu_bias", "gate_top", "gate_bottom"])
         self.assertTrue(all(not adapter.output for adapter in adapters.values()))
+        self.assertEqual(
+            [item[2] for item in log if item[:2] == ("source", "smu_bias")].count(0.5),
+            1,
+        )
 
     def test_current_source_gate_uses_current_unit_ramp_and_readback(self) -> None:
         adapters, _log, factory = factory_set()
@@ -367,25 +373,24 @@ class ThreeSmuSessionTests(unittest.TestCase):
                     adapters["gate_top"].voltage_override = 11.0
                     list(session.run(output_dir=directory))
 
-    def test_gate_leakage_failure_is_rejected_and_cleaned_up(self) -> None:
+    def test_gate_current_below_max_abs_is_recorded_without_separate_leakage_limit(self) -> None:
         adapters, _log, factory = factory_set()
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ThreeSmuSafetyError, "leakage"):
-                with ThreeSmuSession.open(
-                    hardware(),
-                    fixed_plan(top=0.5),
+            with ThreeSmuSession.open(
+                hardware(),
+                fixed_plan(top=0.5),
                 authorize_writes=True,
                 authorize_status_consumption=True,
-                    adapter_factory=factory,
-                    sleep=lambda _: None,
-                ) as session:
-                    adapters["gate_top"].leak_on_read = 4
-                    list(session.run(output_dir=directory))
+                adapter_factory=factory,
+                sleep=lambda _: None,
+            ) as session:
+                adapters["gate_top"].current_override = 2e-6
+                list(session.run(output_dir=directory))
             metadata = json.loads(
                 (session.last_run_dir / "metadata.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(metadata["status"], "rejected")
-            self.assertFalse(metadata["accepted"])
+            self.assertEqual(metadata["status"], "completed")
+            self.assertTrue(metadata["accepted"])
             self.assertFalse(adapters["gate_top"].output)
 
     def test_compliance_trip_formal_sample_is_retained_as_problem(self) -> None:
@@ -405,20 +410,23 @@ class ThreeSmuSessionTests(unittest.TestCase):
             csv_text = (session.last_run_dir / "data.csv").read_text(encoding="utf-8")
             self.assertIn("smu_bias compliance trip", csv_text)
 
-    def test_readback_mismatch_fails_closed(self) -> None:
+    def test_source_readback_difference_is_recorded_without_tolerance_rejection(self) -> None:
         adapters, _log, factory = factory_set()
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ThreeSmuSafetyError, "readback mismatch"):
-                with ThreeSmuSession.open(
-                    hardware(),
-                    fixed_plan(),
+            with ThreeSmuSession.open(
+                hardware(),
+                fixed_plan(),
                 authorize_writes=True,
                 authorize_status_consumption=True,
-                    adapter_factory=factory,
-                    sleep=lambda _: None,
-                ) as session:
-                    adapters["smu_bias"].readback_offset = 0.1
-                    list(session.run(output_dir=directory))
+                adapter_factory=factory,
+                sleep=lambda _: None,
+            ) as session:
+                adapters["smu_bias"].readback_offset = 0.1
+                samples = list(session.run(output_dir=directory))
+            self.assertEqual(
+                samples[0].readings["smu_bias"].reading.source_setpoint,
+                0.1,
+            )
             self.assertFalse(adapters["smu_bias"].output)
 
     def test_communication_failure_preserves_last_confirmed_and_requires_manual_check(self) -> None:

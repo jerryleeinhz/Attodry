@@ -658,6 +658,28 @@ connections/writes, integration of the independent SMU module into the main
 acquisition, other attoDRY setting writes, and real end-to-end acquisition still
 require staged authorization.
 
+Three-SMU direct-points follow-up (2026-08-26): the unified hardware TOML is now
+the only Three-SMU configuration entry. Each role keeps only independent
+`max_abs_voltage_v` and `max_abs_current_a`; user-entered compliance, source
+min/max, ramp, readback tolerance, leakage and per-device settle fields were
+removed. Keithley compliance is still programmed as a hardware protection value,
+derived from the opposite absolute limit and queried with source/measurement
+ranges after configuration. Both autoranges are required and `nplc=1.0` records
+the Finland 50 Hz/20 ms default.
+
+Scan roles now accept either an arbitrary `points` vector or `start/stop/step`;
+`bidirectional` is per role. Paired-gate and map modes independently expand each
+role, while software pulse rejects bidirectional. Formal targets and cleanup use
+one direct write, shared `delay_s`, then recorded readback; no software ramp or
+tolerance rejection remains. Schema v4 drops `near_compliance` while retaining
+requested target and actual source/V/I. The two split example TOMLs and hidden
+legacy CLI arguments were deleted. This work used only fake adapters and offline
+tests: 104 focused tests and the full 389-test suite passed (five optional plotting
+tests skipped), and source/test compilation passed. No real VISA resource, query,
+status consumption, or setting write occurred. The ignored local TOML in this
+checkout was schema-migrated without changing existing Lock-in values; all unknown
+SMU addresses/timeouts/absolute limits remain `CHANGE_ME` and must be operator-filled.
+
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
 `resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state

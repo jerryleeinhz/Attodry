@@ -655,8 +655,9 @@ writes remain uncommissioned and require separate explicit authorization.
 ## Stage 5 - gate SMUs and integrated acquisition
 
 Status: model-independent offline core and the independent Three-SMU QCoDeS S0
-module are complete (updated 2026-08-26); target-computer and real-SMU commissioning
-remain pending explicit authorization and operator-filled limits.
+module are complete (updated 2026-08-26, direct-points safety contract follow-up);
+target-computer and real-SMU commissioning remain pending explicit authorization
+and operator-filled limits.
 
 - Added an explicitly write-authorized, model-independent gate controller with
   configured absolute-voltage limit, current compliance, stepped ramps, voltage
@@ -723,6 +724,24 @@ remain pending explicit authorization and operator-filled limits.
 - 71 focused fake-instrument/config/adapter/CLI/Notebook/analysis/gate tests
   pass, including query-only monitor/error-queue and exact-confirmation coverage.
   No real VISA resource was opened and no real setting command was sent.
+- Direct-points safety-contract follow-up (2026-08-26): removed Three-SMU
+  source min/max, software ramp, readback tolerance, per-device settle, leakage
+  threshold, and user-entered compliance fields. Each role now has only independent
+  `max_abs_voltage_v`/`max_abs_current_a`; the Keithley adapter derives hardware
+  compliance from the opposite physical limit, queries compliance/ranges after
+  configuration, and requires source/measurement autorange. `nplc=1.0` is the
+  tracked 50 Hz/20 ms default. Formal points and cleanup use direct single writes,
+  shared `delay_s`, and recorded actual readbacks.
+- The same follow-up adds non-empty arbitrary `points` vectors as an alternative
+  to `start/stop/step`, moves `bidirectional` into each role, expands paired/map
+  roles independently, and rejects bidirectional software pulses. It deletes the
+  duplicate split TOML templates and hidden legacy CLI path; unified
+  `hardware.local.toml` is now the only operation source. Audit schema v4 removes
+  `near_compliance` and records configuration compliance/range readback.
+- Verification for this follow-up: 104 focused Three-SMU/Keithley/config tests
+  passed; the full hardware-free suite passed all 389 tests with five optional
+  plotting tests skipped, and `compileall` passed for `src` and `tests`. No real
+  instrument library/resource was opened.
 
 ## Stage 6 - analysis and notebook migration
 

@@ -28,7 +28,6 @@ class ThreeSmuAnalysisRow:
     resistance_ohm: float | None
     output_enabled: bool
     compliance_trip: bool
-    near_compliance: bool
     status: str
     problems: str
 
@@ -145,7 +144,6 @@ def load_three_smu_rows(
                         resistance_ohm=None if resistance == "" else float(resistance),
                         output_enabled=_bool(record[f"{selected_role}_output_enabled"]),
                         compliance_trip=_bool(record[f"{selected_role}_compliance_trip"]),
-                        near_compliance=_bool(record[f"{selected_role}_near_compliance"]),
                         status=record[f"{selected_role}_status"],
                         problems=record["problems"],
                     )
