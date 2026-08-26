@@ -52,7 +52,6 @@ class SmuHardwareConfig:
     role: str
     model: str
     address: str
-    timeout_ms: int | None
     source_mode: SourceMode
     max_abs_voltage_v: float | None
     max_abs_current_a: float | None
@@ -64,8 +63,6 @@ class SmuHardwareConfig:
     def __post_init__(self) -> None:
         if self.role not in SEMANTIC_ROLES:
             raise ThreeSmuConfigError(f"Unknown semantic SMU role {self.role!r}")
-        if self.timeout_ms is not None and self.timeout_ms < 1:
-            raise ThreeSmuConfigError(f"{self.role}.timeout_ms must be positive")
         for field_name in (
             "max_abs_voltage_v",
             "max_abs_current_a",
@@ -129,37 +126,47 @@ class SmuHardwareConfig:
 
 @dataclass(frozen=True, slots=True)
 class ThreeSmuHardwareConfig:
-    smu_bias: SmuHardwareConfig
-    gate_top: SmuHardwareConfig
-    gate_bottom: SmuHardwareConfig
+    smu_bias: SmuHardwareConfig | None = None
+    gate_top: SmuHardwareConfig | None = None
+    gate_bottom: SmuHardwareConfig | None = None
 
     def by_role(self) -> dict[str, SmuHardwareConfig]:
-        return {role: getattr(self, role) for role in SEMANTIC_ROLES}
+        return {
+            role: config
+            for role in SEMANTIC_ROLES
+            if (config := getattr(self, role)) is not None
+        }
 
-    def readiness_errors(self) -> tuple[str, ...]:
+    def require_role(self, role: str) -> SmuHardwareConfig:
+        config = self.by_role().get(role)
+        if config is None:
+            raise ThreeSmuConfigError(f"active role {role} has no [{role}] hardware table")
+        return config
+
+    def readiness_errors(self, roles: tuple[str, ...] | None = None) -> tuple[str, ...]:
         errors: list[str] = []
         configured_addresses: list[str] = []
-        for role, config in self.by_role().items():
+        checked_roles = tuple(self.by_role()) if roles is None else roles
+        for role in checked_roles:
+            config = self.by_role().get(role)
+            if config is None:
+                errors.append(f"active role {role} has no [{role}] hardware table")
+                continue
             if config.model != "Keithley2400":
                 errors.append(f"{role}.model must be 'Keithley2400'")
             if _is_placeholder(config.address):
                 errors.append(f"{role}.address is not configured")
             else:
                 configured_addresses.append(config.address)
-            for field_name in (
-                "timeout_ms",
-                "max_abs_voltage_v",
-                "max_abs_current_a",
-                "nplc",
-            ):
+            for field_name in ("max_abs_voltage_v", "max_abs_current_a", "nplc"):
                 if getattr(config, field_name) is None:
                     errors.append(f"{role}.{field_name} is not configured")
         if len(set(configured_addresses)) != len(configured_addresses):
-            errors.append("all three SMU addresses must be distinct")
+            errors.append("all active SMU addresses must be distinct")
         return tuple(errors)
 
-    def require_ready(self) -> None:
-        errors = self.readiness_errors()
+    def require_ready(self, roles: tuple[str, ...] | None = None) -> None:
+        errors = self.readiness_errors(roles)
         if errors:
             raise ThreeSmuConfigError(
                 "Three-SMU hardware configuration is not ready: " + "; ".join(errors)
@@ -270,13 +277,6 @@ def load_three_smu_operation_config(path: str | Path) -> ThreeSmuOperationConfig
 
     config_path = Path(path).resolve()
     document = _load_toml(config_path)
-    hardware = ThreeSmuHardwareConfig(
-        smu_bias=_parse_hardware_role(_table(document, "smu_bias"), "smu_bias"),
-        gate_top=_parse_operation_gate(_table(document, "gate_top"), "gate_top"),
-        gate_bottom=_parse_operation_gate(
-            _table(document, "gate_bottom"), "gate_bottom"
-        ),
-    )
     run = _table(document, "three_smu_run")
     expected = {
         "mode",
@@ -315,6 +315,14 @@ def load_three_smu_operation_config(path: str | Path) -> ThreeSmuOperationConfig
             for role in SEMANTIC_ROLES
         },
     )
+    active_roles = active_smu_roles(plan)
+    parsed_hardware = {
+        role: _parse_hardware_role(_table(document, role), role)
+        for role in active_roles
+    }
+    hardware = ThreeSmuHardwareConfig(
+        **{role: parsed_hardware.get(role) for role in SEMANTIC_ROLES}
+    )
     output_directory = Path(
         _string(run["output_directory"], "three_smu_run.output_directory")
     )
@@ -334,11 +342,12 @@ def validate_plan_targets(
     hardware: ThreeSmuHardwareConfig,
     plan: ThreeSmuScanPlan,
 ) -> tuple[ScanPoint, ...]:
-    hardware.require_ready()
+    active_roles = active_smu_roles(plan)
+    hardware.require_ready(active_roles)
     points = generate_scan_points(plan)
     for point in points:
         for role, target in point.coordinates.items():
-            config = hardware.by_role()[role]
+            config = hardware.require_role(role)
             limit = (
                 config.max_abs_voltage_v
                 if config.source_mode is SourceMode.VOLTAGE
@@ -351,6 +360,14 @@ def validate_plan_targets(
                     f"limit {limit:g}"
                 )
     return points
+
+
+def active_smu_roles(plan: ThreeSmuScanPlan) -> tuple[str, ...]:
+    return tuple(
+        role
+        for role, channel in plan.by_role().items()
+        if channel.role is not ChannelRole.OFF
+    )
 
 
 def generate_scan_points(plan: ThreeSmuScanPlan) -> tuple[ScanPoint, ...]:
@@ -523,7 +540,6 @@ def _parse_hardware_role(
     common = {
         "model",
         "address",
-        "timeout_ms",
         "source_mode",
         "max_abs_voltage_v",
         "max_abs_current_a",
@@ -538,7 +554,6 @@ def _parse_hardware_role(
         role=role,
         model=_string(table["model"], f"{role}.model"),
         address=_string(table["address"], f"{role}.address"),
-        timeout_ms=_placeholder_integer(table["timeout_ms"], f"{role}.timeout_ms"),
         source_mode=source_mode,
         max_abs_voltage_v=_placeholder_positive(
             table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v"
@@ -556,51 +571,6 @@ def _parse_hardware_role(
         four_wire=_boolean(table["four_wire"], f"{role}.four_wire"),
     )
     return config
-
-
-def _parse_operation_gate(table: Mapping[str, Any], role: str) -> SmuHardwareConfig:
-    expected = {
-        "model",
-        "address",
-        "source_mode",
-        "max_abs_voltage_v",
-        "max_abs_current_a",
-        "smu",
-    }
-    _strict_keys(table, role, expected)
-    smu = _table(table, "smu")
-    _strict_keys(
-        smu,
-        f"{role}.smu",
-        {
-            "timeout_ms",
-            "nplc",
-            "source_auto_range",
-            "measure_auto_range",
-            "four_wire",
-        },
-    )
-    return SmuHardwareConfig(
-        role=role,
-        model=_string(table["model"], f"{role}.model"),
-        address=_string(table["address"], f"{role}.address"),
-        timeout_ms=_placeholder_integer(smu["timeout_ms"], f"{role}.smu.timeout_ms"),
-        source_mode=_enum(SourceMode, table["source_mode"], f"{role}.source_mode"),
-        max_abs_voltage_v=_placeholder_positive(
-            table["max_abs_voltage_v"], f"{role}.max_abs_voltage_v"
-        ),
-        max_abs_current_a=_placeholder_positive(
-            table["max_abs_current_a"], f"{role}.max_abs_current_a"
-        ),
-        nplc=_placeholder_positive(smu["nplc"], f"{role}.smu.nplc"),
-        source_auto_range=_boolean(
-            smu["source_auto_range"], f"{role}.smu.source_auto_range"
-        ),
-        measure_auto_range=_boolean(
-            smu["measure_auto_range"], f"{role}.smu.measure_auto_range"
-        ),
-        four_wire=_boolean(smu["four_wire"], f"{role}.smu.four_wire"),
-    )
 
 
 def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
@@ -724,10 +694,6 @@ def _integer(value: Any, name: str, minimum: int) -> int:
 
 def _placeholder_positive(value: Any, name: str) -> float | None:
     return None if value == "CHANGE_ME" else _positive(value, name)
-
-
-def _placeholder_integer(value: Any, name: str) -> int | None:
-    return None if value == "CHANGE_ME" else _integer(value, name, 1)
 
 
 def _is_placeholder(value: str) -> bool:

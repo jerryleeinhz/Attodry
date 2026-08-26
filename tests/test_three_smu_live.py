@@ -19,7 +19,6 @@ def smu(role: str) -> SmuHardwareConfig:
         role=role,
         model="Keithley2400",
         address=f"FAKE::{role}",
-        timeout_ms=1000,
         source_mode=SourceMode.VOLTAGE,
         max_abs_voltage_v=5.0,
         max_abs_current_a=1e-3,
@@ -52,7 +51,7 @@ def reading(role: str, **changes) -> KeithleyMonitorReading:
 
 class ThreeSmuLiveTests(unittest.TestCase):
     def test_terminal_panel_shows_three_roles_and_unqueried_status(self) -> None:
-        readings = {role: reading(role) for role in ("smu_bias", "gate_top", "gate_bottom")}
+        readings = {role: reading(role) for role in ("smu_bias", "gate_top")}
         snapshot = ThreeSmuLiveSnapshot(
             sample_index=0,
             captured_at_utc=datetime(2026, 8, 26, tzinfo=timezone.utc),
@@ -68,6 +67,7 @@ class ThreeSmuLiveTests(unittest.TestCase):
         self.assertIn("smu_bias", panel)
         self.assertIn("gate_top", panel)
         self.assertIn("gate_bottom", panel)
+        self.assertIn("physical state is unknown", panel)
         self.assertIn("output", panel)
         self.assertIn("error queues were not queried", panel)
 

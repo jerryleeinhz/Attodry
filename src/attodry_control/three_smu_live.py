@@ -22,7 +22,7 @@ from .three_smu_config import (
 
 @dataclass(frozen=True, slots=True)
 class ThreeSmuLiveSnapshot:
-    """One sequential, query-only snapshot of the three semantic SMU roles."""
+    """One sequential, query-only snapshot of the active semantic SMU roles."""
 
     sample_index: int
     captured_at_utc: datetime
@@ -41,9 +41,15 @@ class ThreeSmuLiveSnapshot:
             raise ValueError("captured_at_utc must be timezone-aware")
         if self.captured_at_utc.utcoffset().total_seconds() != 0:
             raise ValueError("captured_at_utc must be UTC")
-        for role in SEMANTIC_ROLES:
-            if role not in self.plan_roles or role not in self.readings:
-                raise ValueError(f"live snapshot is missing {role}")
+        if set(self.plan_roles) != set(SEMANTIC_ROLES):
+            raise ValueError("live snapshot plan_roles must contain all semantic roles")
+        active_roles = {
+            role
+            for role, channel_role in self.plan_roles.items()
+            if channel_role is not ChannelRole.OFF
+        }
+        if set(self.readings) != active_roles:
+            raise ValueError("live snapshot readings must contain exactly the active roles")
 
 
 def monitor_problems(
@@ -107,6 +113,11 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
         "role         plan   source        setpoint          V read          I read          R=V/I       output  trip   sense",
     ]
     for role in SEMANTIC_ROLES:
+        if snapshot.plan_roles[role] is ChannelRole.OFF:
+            lines.append(
+                f"{role:<12} off    not connected; physical state is unknown"
+            )
+            continue
         reading = snapshot.readings[role]
         source_unit = "V" if reading.source_mode is SourceMode.VOLTAGE else "A"
         resistance = _format_resistance(reading.resistance_ohm)

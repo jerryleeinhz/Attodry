@@ -11,8 +11,9 @@
 - 硬件额定值：X 轴 3 T，Z 轴 9 T；本项目所有实验命令额外限制合成场不超过 3 T。
 - SR830 #1：内部参考、SINE OUT 交流激励、测量 Vxx。
 - SR830 #2：从 #1 TTL OUT 获取外参考、测量 Vxy、SINE OUT 物理断开。
-- 三台 Keithley 2400 的独立模块使用 `smu_bias`、`gate_top`、
-  `gate_bottom` 语义角色；每台可独立选择 voltage/current source，并始终检查各自的
+- 最多三台 Keithley 2400 的独立模块使用 `smu_bias`、`gate_top`、
+  `gate_bottom` 语义角色；`off` 角色无需硬件配置且完全不连接，每台 active
+  SMU 可独立选择 voltage/current source，并始终检查各自的
   V/I 绝对边界；voltage-source gate 的 leakage 与 compliance 保护已离线实现。
 - 无旋转台；场方向由 Bx/Bz 计算。
 
@@ -61,7 +62,8 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
   QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
   [`THREE_SMU_DAILY_OPERATION.md`](docs/THREE_SMU_DAILY_OPERATION.md)。当前单一 TOML
   只保留每台独立的最大绝对 V/I 边界，支持任意 `points` 向量和逐台
-  `bidirectional`，compliance 由对应边界自动下发并读回验证；
+  `bidirectional`，compliance 由对应边界自动下发并读回验证。三角色使用
+  统一单表，Three-SMU timeout 固定为 5000 ms；
 - [`Integration`](docs/modules/INTEGRATION.md)：各设备模块分别验收后的组合流程。
 
 每个工作包都包含当前真实验收边界、目标、非目标、分阶段验收条件、预计文件

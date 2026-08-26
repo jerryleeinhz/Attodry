@@ -198,6 +198,11 @@ address = "CHANGE_ME_TOP_GATE_VISA_ADDRESS"
 source_mode = "voltage"
 max_abs_voltage_v = "CHANGE_ME"
 max_abs_current_a = "CHANGE_ME"
+# Finland is 50 Hz: nplc=1.0 integrates for one 20 ms mains cycle.
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
 
 [gate_bottom]
 model = "Keithley2400"
@@ -205,6 +210,10 @@ address = "CHANGE_ME_BOTTOM_GATE_VISA_ADDRESS"
 source_mode = "voltage"
 max_abs_voltage_v = "CHANGE_ME"
 max_abs_current_a = "CHANGE_ME"
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
 
 # Three-SMU module additions.  Copy this entire file to hardware.local.toml.
 # Every role independently enforces max_abs_voltage_v and max_abs_current_a.
@@ -215,7 +224,6 @@ max_abs_current_a = "CHANGE_ME"
 [smu_bias]
 model = "Keithley2400"
 address = "CHANGE_ME_BIAS_SMU_VISA_ADDRESS"
-timeout_ms = "CHANGE_ME"
 # "voltage" uses max_abs_voltage_v for source targets and max_abs_current_a
 # for current compliance; "current" uses the opposite pairing.
 source_mode = "voltage"
@@ -227,21 +235,8 @@ source_auto_range = true
 measure_auto_range = true
 four_wire = false
 
-[gate_top.smu]
-# Keithley-2400-specific fields only; safety limits stay in [gate_top].
-timeout_ms = "CHANGE_ME"
-nplc = 1.0
-source_auto_range = true
-measure_auto_range = true
-four_wire = false
-
-[gate_bottom.smu]
-# Keithley-2400-specific fields only; shared safety limits stay in [gate_bottom].
-timeout_ms = "CHANGE_ME"
-nplc = 1.0
-source_auto_range = true
-measure_auto_range = true
-four_wire = false
+# Three-SMU VISA timeout is fixed in code at 5000 ms for every active role.
+# A role="off" run entry means its hardware table is not parsed or opened.
 
 [three_smu_run]
 # A relative output_directory is relative to this TOML file.

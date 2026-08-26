@@ -59,7 +59,6 @@ def smu(role: str, address: str) -> SmuHardwareConfig:
         role=role,
         model="Keithley2400",
         address=address,
-        timeout_ms=5000,
         source_mode=SourceMode.VOLTAGE,
         max_abs_voltage_v=10.0,
         max_abs_current_a=1e-3,
@@ -82,7 +81,6 @@ OPERATION_TEXT = """
 [smu_bias]
 model = "Keithley2400"
 address = "FAKE::1"
-timeout_ms = 1000
 source_mode = "voltage"
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
@@ -97,9 +95,6 @@ address = "FAKE::2"
 source_mode = "voltage"
 max_abs_voltage_v = 3.0
 max_abs_current_a = 0.001
-
-[gate_top.smu]
-timeout_ms = 1000
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
@@ -111,9 +106,6 @@ address = "FAKE::3"
 source_mode = "voltage"
 max_abs_voltage_v = 4.0
 max_abs_current_a = 0.0005
-
-[gate_bottom.smu]
-timeout_ms = 1000
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
@@ -151,7 +143,56 @@ step = 1.0
 """
 
 
+BOTTOM_ONLY_OPERATION_TEXT = """
+[gate_bottom]
+model = "Keithley2400"
+address = "FAKE::3"
+source_mode = "voltage"
+max_abs_voltage_v = 4.0
+max_abs_current_a = 0.0005
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[three_smu_run]
+output_directory = "runs"
+run_name = "bottom-only"
+note = "offline only"
+mode = "bottom_gate_transfer"
+samples_per_point = 1
+delay_s = 0.0
+serpentine = false
+finish_action = "zero_disable"
+point_count = 1
+pulse_high_s = 0.0
+pulse_period_s = 0.0
+
+[three_smu_run.smu_bias]
+role = "off"
+bidirectional = false
+
+[three_smu_run.gate_top]
+role = "off"
+bidirectional = false
+
+[three_smu_run.gate_bottom]
+role = "sweep"
+bidirectional = false
+points = [-1.0, 0.0, 1.0]
+"""
+
+
 class ThreeSmuConfigTests(unittest.TestCase):
+    def test_off_roles_need_no_hardware_table_and_active_gate_uses_one_table(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hardware.local.toml"
+            path.write_text(BOTTOM_ONLY_OPERATION_TEXT, encoding="utf-8")
+            operation = load_three_smu_operation_config(path)
+        self.assertEqual(set(operation.hardware.by_role()), {"gate_bottom"})
+        self.assertEqual(operation.hardware.gate_bottom.max_abs_voltage_v, 4.0)
+        self.assertEqual(len(validate_plan_targets(operation.hardware, operation.plan)), 3)
+
     def test_single_daily_operation_config_loads_minimal_safety_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "hardware.local.toml"
@@ -179,8 +220,12 @@ class ThreeSmuConfigTests(unittest.TestCase):
             "ramp_step_v",
             "readback_tolerance_v",
             "settle_s",
+            "[gate_top.smu]",
+            "[gate_bottom.smu]",
         ):
             self.assertNotIn(removed, text)
+        three_smu_text = text.split("[gate_top]", 1)[1]
+        self.assertNotIn("timeout_ms", three_smu_text)
         self.assertFalse((PROJECT_ROOT / "config" / "three_smu_hardware.example.toml").exists())
         self.assertFalse((PROJECT_ROOT / "config" / "three_smu_scan.example.toml").exists())
 
@@ -195,6 +240,27 @@ class ThreeSmuConfigTests(unittest.TestCase):
             path.write_text(text, encoding="utf-8")
             with self.assertRaisesRegex(ThreeSmuConfigError, "unknown"):
                 load_three_smu_operation_config(path)
+
+    def test_timeout_and_nested_gate_smu_tables_are_rejected_for_active_roles(self) -> None:
+        cases = (
+            OPERATION_TEXT.replace(
+                'address = "FAKE::1"',
+                'address = "FAKE::1"\ntimeout_ms = 5000',
+                1,
+            ),
+            OPERATION_TEXT.replace(
+                'four_wire = false\n\n[gate_bottom]',
+                'four_wire = false\n\n[gate_top.smu]\nnplc = 1.0\n\n[gate_bottom]',
+                1,
+            ),
+        )
+        for text in cases:
+            with self.subTest(text=text):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "hardware.toml"
+                    path.write_text(text, encoding="utf-8")
+                    with self.assertRaisesRegex(ThreeSmuConfigError, "unknown"):
+                        load_three_smu_operation_config(path)
 
     def test_current_source_uses_current_target_limit(self) -> None:
         top = replace(smu("gate_top", "FAKE::2"), source_mode=SourceMode.CURRENT)

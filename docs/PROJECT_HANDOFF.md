@@ -680,6 +680,21 @@ status consumption, or setting write occurred. The ignored local TOML in this
 checkout was schema-migrated without changing existing Lock-in values; all unknown
 SMU addresses/timeouts/absolute limits remain `CHANGE_ME` and must be operator-filled.
 
+Three-SMU active-role follow-up (2026-08-26): `[three_smu_run.<role>].role`
+is the sole activation source. The loader requires a flat same-name hardware
+table only for `fixed`/`sweep` roles and ignores absent or stale hardware
+configuration for `off` roles. Sessions and the live monitor construct, query,
+write, clean up, and record only that active subset; an off instrument remains
+physically unknown, never assumed zero or output-off. Bias/top/bottom now share
+one flat hardware-table schema, `[gate_*.smu]` and per-role `timeout_ms` are
+rejected, and the Keithley adapter plus query monitor use a fixed 5000 ms timeout.
+Schema v5 adds `active_roles`/`off_roles`, filters the hardware snapshot, and
+leaves stable CSV columns blank for off roles. A bottom-only fake run proves that
+bias/top factories and resources are never touched. Focused regression: 109
+tests pass. The complete hardware-free suite passed all 394 tests with five
+optional matplotlib tests skipped, and `compileall` passed for `src` and `tests`.
+No real instrument library/resource was opened and no real query or write ran.
+
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
 `resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state

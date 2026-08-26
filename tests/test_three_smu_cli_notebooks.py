@@ -18,7 +18,6 @@ OPERATION_TEXT = """
 [smu_bias]
 model = "Keithley2400"
 address = "FAKE::1"
-timeout_ms = 1000
 source_mode = "voltage"
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
@@ -33,9 +32,6 @@ address = "FAKE::2"
 source_mode = "voltage"
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
-
-[gate_top.smu]
-timeout_ms = 1000
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
@@ -47,9 +43,6 @@ address = "FAKE::3"
 source_mode = "voltage"
 max_abs_voltage_v = 10.0
 max_abs_current_a = 0.001
-
-[gate_bottom.smu]
-timeout_ms = 1000
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
@@ -116,8 +109,10 @@ class FakeMonitorManager:
     def __init__(self, resources):
         self.resources = resources
         self.closed = False
+        self.opened = []
 
     def open_resource(self, address):
+        self.opened.append(address)
         return self.resources[address]
 
     def close(self):
@@ -142,6 +137,8 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             document = json.loads(output.getvalue())
             self.assertFalse(document["hardware_opened"])
             self.assertEqual(document["generated_points"], 2)
+            self.assertEqual(document["active_roles"], ["smu_bias"])
+            self.assertEqual(document["off_roles"], ["gate_top", "gate_bottom"])
 
     def test_run_without_exact_confirmation_stops_before_driver_import(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -238,7 +235,10 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertIn("Three-SMU live status", output.getvalue())
             self.assertTrue(manager.closed)
-            self.assertTrue(all(resource.closed for resource in resources.values()))
+            self.assertEqual(manager.opened, ["FAKE::1"])
+            self.assertTrue(resources["FAKE::1"].closed)
+            self.assertFalse(resources["FAKE::2"].closed)
+            self.assertFalse(resources["FAKE::3"].closed)
             self.assertTrue(
                 all(":SYST:ERR?" not in resource.queries for resource in resources.values())
             )
@@ -262,11 +262,10 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                 )
             self.assertEqual(result, 0)
             self.assertTrue(
-                all(
-                    ":SYST:ERR?" in resource.queries
-                    for resource in consuming_resources.values()
-                )
+                ":SYST:ERR?" in consuming_resources["FAKE::1"].queries
             )
+            self.assertEqual(consuming_resources["FAKE::2"].queries, [])
+            self.assertEqual(consuming_resources["FAKE::3"].queries, [])
 
     def test_notebooks_are_clean_syntax_valid_and_obey_import_boundaries(self) -> None:
         live = PROJECT_ROOT / "notebooks" / "three_smu_live.ipynb"

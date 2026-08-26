@@ -18,6 +18,7 @@ from .three_smu_config import (
     ThreeSmuHardwareConfig,
     ThreeSmuOperationConfig,
     ThreeSmuScanPlan,
+    active_smu_roles,
     load_three_smu_operation_config,
     validate_plan_targets,
 )
@@ -149,6 +150,10 @@ def _print_description(
                 "hardware": {
                     role: asdict(config) for role, config in hardware.by_role().items()
                 },
+                "active_roles": list(active_smu_roles(plan)),
+                "off_roles": [
+                    role for role in SEMANTIC_ROLES if role not in active_smu_roles(plan)
+                ],
                 "scan": asdict(plan),
                 "generated_points": len(points),
                 "formal_samples": len(points) * plan.samples_per_point,
@@ -178,15 +183,18 @@ def _confirm_scan_run(
     print_fn(f"  mode: {plan.mode.value}; points: {len(points)}; samples: {len(points) * plan.samples_per_point}")
     print_fn(f"  finish: {plan.finish_action.value}; output directory: {output_dir}")
     for role in SEMANTIC_ROLES:
-        config = hardware.by_role()[role]
         channel = plan.by_role()[role]
+        if channel.role.value == "off":
+            print_fn(f"  {role}: off; not connected; physical state remains unknown")
+            continue
+        config = hardware.require_role(role)
         print_fn(
             f"  {role}: {channel.role.value}; source={config.source_mode.value}; "
             f"max |V|={config.max_abs_voltage_v:g} V; "
             f"max |I|={config.max_abs_current_a:g} A"
         )
     print_fn(
-        "This will connect all three SMUs, send setting writes, and consume their "
+        "This will connect the active SMUs, send setting writes, and consume their "
         ":SYST:ERR? error queues."
     )
     confirmation = _read_confirmation(input_fn, "Type RUN THREE SMU to continue: ")
@@ -230,14 +238,17 @@ def _run_monitor_live(
         if monitor_resource_manager_factory is None
         else monitor_resource_manager_factory
     )
+    active_roles = active_smu_roles(plan)
+    if not active_roles:
+        raise SystemExit("monitor-live requires at least one fixed or sweep SMU role")
     manager = manager_factory()
     had_problem = False
     try:
         with ExitStack() as stack:
             monitors: dict[str, Any] = {}
-            for role in SEMANTIC_ROLES:
+            for role in active_roles:
                 monitor = open_keithley2400_monitor(
-                    role, hardware.by_role()[role], manager
+                    role, hardware.require_role(role), manager
                 )
                 stack.callback(monitor.close)
                 monitors[role] = monitor
@@ -247,13 +258,13 @@ def _run_monitor_live(
                     role: monitors[role].read_monitor(
                         consume_status_queue=args.consume_status_queue
                     )
-                    for role in SEMANTIC_ROLES
+                    for role in active_roles
                 }
                 problems = [
                     problem
-                    for role in SEMANTIC_ROLES
+                    for role in active_roles
                     for problem in monitor_problems(
-                        role, hardware.by_role()[role], readings[role]
+                        role, hardware.require_role(role), readings[role]
                     )
                 ]
                 problems.extend(_duplicate_identity_problems(readings))

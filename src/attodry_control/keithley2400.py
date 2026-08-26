@@ -10,6 +10,9 @@ from typing import Any
 from .three_smu_config import SmuHardwareConfig, SourceMode
 
 
+KEITHLEY_2400_TIMEOUT_MS = 5000
+
+
 class Keithley2400Error(RuntimeError):
     pass
 
@@ -109,7 +112,7 @@ def open_keithley2400(
     instrument = driver(unique_name, config.address)
     try:
         adapter = QcodesKeithley2400(role, instrument)
-        adapter.set_timeout(config.timeout_ms)
+        adapter.set_timeout(KEITHLEY_2400_TIMEOUT_MS)
         return adapter
     except Exception:
         instrument.close()
@@ -125,9 +128,7 @@ class QcodesKeithley2400:
         self.config: SmuHardwareConfig | None = None
         self._status_consumption_authorized = False
 
-    def set_timeout(self, timeout_ms: int | None) -> None:
-        if timeout_ms is None:
-            raise Keithley2400Error(f"{self.role} timeout is not configured")
+    def set_timeout(self, timeout_ms: int) -> None:
         timeout_parameter = getattr(self.instrument, "timeout", None)
         if callable(timeout_parameter):
             timeout_parameter(timeout_ms / 1000.0)
@@ -436,11 +437,9 @@ def open_keithley2400_monitor(
     helper intentionally never imports QCoDeS or sends a SCPI setting command.
     """
 
-    if config.timeout_ms is None:
-        raise Keithley2400Error(f"{role} timeout is not configured")
     resource = resource_manager.open_resource(config.address)
     try:
-        resource.timeout = config.timeout_ms
+        resource.timeout = KEITHLEY_2400_TIMEOUT_MS
         return VisaKeithley2400Monitor(role, resource)
     except Exception:
         resource.close()

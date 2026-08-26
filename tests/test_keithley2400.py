@@ -2,6 +2,7 @@ from dataclasses import replace
 import unittest
 
 from attodry_control.keithley2400 import (
+    KEITHLEY_2400_TIMEOUT_MS,
     QcodesKeithley2400,
     VisaKeithley2400Monitor,
     open_keithley2400_monitor,
@@ -14,7 +15,6 @@ def config() -> SmuHardwareConfig:
         role="smu_bias",
         model="Keithley2400",
         address="FAKE::1",
-        timeout_ms=5000,
         source_mode=SourceMode.VOLTAGE,
         max_abs_voltage_v=10.0,
         max_abs_current_a=1e-3,
@@ -123,6 +123,13 @@ class FakeVisaManager:
 
 
 class Keithley2400AdapterTests(unittest.TestCase):
+    def test_fixed_timeout_is_five_seconds(self) -> None:
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.set_timeout(KEITHLEY_2400_TIMEOUT_MS)
+        self.assertEqual(KEITHLEY_2400_TIMEOUT_MS, 5000)
+        self.assertIn(("timeout", 5.0), instrument.calls)
+
     def test_preflight_is_query_only(self) -> None:
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)

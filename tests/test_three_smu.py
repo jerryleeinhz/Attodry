@@ -33,7 +33,6 @@ def hardware() -> ThreeSmuHardwareConfig:
             role=role,
             model="Keithley2400",
             address=address,
-            timeout_ms=1000,
             source_mode=SourceMode.VOLTAGE,
             max_abs_voltage_v=10.0,
             max_abs_current_a=1e-3,
@@ -237,7 +236,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
         with self.assertRaises(UnknownActiveOutput):
             ThreeSmuSession.open(
                 hardware(),
-                fixed_plan(),
+                fixed_plan(top=0.0),
                 authorize_writes=True,
                 authorize_status_consumption=True,
                 adapter_factory=factory,
@@ -277,7 +276,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
         with self.assertRaisesRegex(ThreeSmuSafetyError, "not distinct"):
             ThreeSmuSession.open(
                 hardware(),
-                fixed_plan(),
+                fixed_plan(top=0.0),
                 authorize_writes=True,
                 authorize_status_consumption=True,
                 adapter_factory=factory,
@@ -300,7 +299,9 @@ class ThreeSmuSessionTests(unittest.TestCase):
             self.assertEqual(len(samples), 1)
             self.assertIsNotNone(run_dir)
             metadata = json.loads((run_dir / "metadata.json").read_text(encoding="utf-8"))
-            self.assertEqual(metadata["schema_version"], 4)
+            self.assertEqual(metadata["schema_version"], 5)
+            self.assertEqual(metadata["active_roles"], ["smu_bias", "gate_top"])
+            self.assertEqual(metadata["off_roles"], ["gate_bottom"])
             self.assertEqual(metadata["status"], "completed")
             self.assertTrue(metadata["accepted"])
             self.assertIn("code_version", metadata)
@@ -320,12 +321,56 @@ class ThreeSmuSessionTests(unittest.TestCase):
             for item in log
             if len(item) == 3 and item[0] == "output" and item[2] is False
         ]
-        self.assertEqual(cleanup_off[-3:], ["smu_bias", "gate_top", "gate_bottom"])
+        self.assertEqual(cleanup_off[-2:], ["smu_bias", "gate_top"])
+        self.assertNotIn("gate_bottom", adapters)
         self.assertTrue(all(not adapter.output for adapter in adapters.values()))
         self.assertEqual(
             [item[2] for item in log if item[:2] == ("source", "smu_bias")].count(0.5),
             1,
         )
+
+    def test_bottom_only_run_never_constructs_or_calls_off_roles(self) -> None:
+        configured = hardware()
+        bottom_only_hardware = ThreeSmuHardwareConfig(
+            gate_bottom=configured.gate_bottom
+        )
+        bottom_only_plan = ThreeSmuScanPlan(
+            mode=ScanMode.BOTTOM_GATE_TRANSFER,
+            samples_per_point=1,
+            delay_s=0.0,
+            serpentine=False,
+            finish_action=FinishAction.ZERO_DISABLE,
+            point_count=1,
+            pulse_high_s=0.0,
+            pulse_period_s=0.0,
+            smu_bias=ChannelPlan(ChannelRole.OFF, False),
+            gate_top=ChannelPlan(ChannelRole.OFF, False),
+            gate_bottom=ChannelPlan(
+                ChannelRole.SWEEP, False, points=(-1.0, 0.0, 1.0)
+            ),
+        )
+        adapters, log, factory = factory_set()
+        with tempfile.TemporaryDirectory() as directory:
+            with ThreeSmuSession.open(
+                bottom_only_hardware,
+                bottom_only_plan,
+                authorize_writes=True,
+                authorize_status_consumption=True,
+                adapter_factory=factory,
+                sleep=lambda _: None,
+            ) as session:
+                samples = list(session.run(output_dir=directory))
+                metadata = json.loads(
+                    (session.last_run_dir / "metadata.json").read_text(encoding="utf-8")
+                )
+        self.assertEqual(set(adapters), {"gate_bottom"})
+        self.assertEqual({item[1] for item in log if len(item) > 1}, {"gate_bottom"})
+        self.assertEqual(len(samples), 3)
+        self.assertTrue(
+            all(set(sample.readings) == {"gate_bottom"} for sample in samples)
+        )
+        self.assertEqual(metadata["active_roles"], ["gate_bottom"])
+        self.assertEqual(metadata["off_roles"], ["smu_bias", "gate_top"])
 
     def test_current_source_gate_uses_current_unit_ramp_and_readback(self) -> None:
         adapters, _log, factory = factory_set()

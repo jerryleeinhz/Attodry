@@ -84,10 +84,17 @@ APS100 hardware power-fail, quench, and shutdown-input behavior remains an indep
 
 ## Gate SMUs
 
-The active Three-SMU hardware contract targets three Keithley 2400 units and gives
+The Three-SMU hardware contract defines up to three Keithley 2400 semantic roles and gives
 `smu_bias`, `gate_top`, and `gate_bottom` independent `max_abs_voltage_v` and
 `max_abs_current_a` boundaries. Every requested source value is checked before a
 write, and every actual voltage/current readback is checked against both limits.
+
+The scan-plan `role` is the only enable state. A `fixed` or `sweep` role requires
+its complete same-name hardware table. An `off` role may omit that table and is
+not parsed, opened, queried, written, cleaned up, or recorded. Its physical
+source/output state is therefore unknown, never inferred to be zero or off. The
+three hardware roles use one flat table shape; the Three-SMU VISA timeout is a
+fixed 5000 ms and is not an operator-configurable safety value.
 
 Keithley compliance remains an instrument protection setting, but it is not a
 second user-entered boundary. Voltage-source roles derive current compliance from

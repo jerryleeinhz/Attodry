@@ -742,6 +742,18 @@ and operator-filled limits.
   passed; the full hardware-free suite passed all 389 tests with five optional
   plotting tests skipped, and `compileall` passed for `src` and `tests`. No real
   instrument library/resource was opened.
+- Active-role configuration follow-up (2026-08-26): the run-plan `role` is now
+  the sole enable state. Only `fixed`/`sweep` roles require and parse a same-name
+  hardware table; `off` roles may omit it and are never opened, queried, written,
+  cleaned up, or recorded. Monitor output explicitly marks them not connected
+  with unknown physical state. Hardware parameters for bias/top/bottom now use
+  the same flat table, legacy `[gate_*.smu]` and per-role `timeout_ms` are rejected,
+  and adapter/monitor timeout is fixed at 5000 ms. Audit schema v5 records
+  `active_roles`/`off_roles`, stores only active hardware snapshots, and leaves
+  stable CSV columns blank for off roles. Focused fake/config regression: 109
+  tests passed. The complete hardware-free suite passed all 394 tests with five
+  optional matplotlib tests skipped, and `compileall` passed for `src` and `tests`.
+  No real instrument library/resource was opened.
 
 ## Stage 6 - analysis and notebook migration
 

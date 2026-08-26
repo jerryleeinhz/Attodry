@@ -2,12 +2,17 @@
 
 ## 状态与范围
 
-状态：`S0 offline complete`（2026-08-26）。模块控制三台 Keithley 2400，语义角色为
+状态：`S0 offline complete`（2026-08-26）。模块最多控制三台 Keithley 2400，语义角色为
 `smu_bias`、`gate_top`、`gate_bottom`。它提供统一 TOML、无 GUI CLI、调用同一
 `ThreeSmuSession` generator 的实时 Notebook、query-only 终端监控和 accepted-only 分析。
 
 第一版不连接、不读取、不记录 Lock-in，也不控制冷台或磁场。所有验收仍是离线和 fake
 instrument；真实 VISA 查询、状态队列消费和写入都未执行、未授权。
+
+`[three_smu_run.<role>].role` 是启用角色的唯一事实来源。`fixed`/`sweep` 角色
+必须有完整的同名硬件表，并且只有这些 active 角色会被验证、打开、读写、
+监控、cleanup 和记录。`off` 角色的硬件表可缺省且完全不触碰；其物理状态始终
+为未知，不能推断已归零或 output-off。
 
 ## 单一配置契约
 
@@ -34,6 +39,10 @@ measurement autorange 当前必须为 `true`，避免未配置的固定档位成
 `nplc` 保留并默认 `1.0`。芬兰电网 50 Hz，因此 1 PLC 对应 20 ms；NPLC 是周期数，不写成
 `0.020`。
 
+`smu_bias`、`gate_top`、`gate_bottom` 硬件参数均直接写在同名单表中，不再使用
+`[gate_top.smu]`/`[gate_bottom.smu]`。Three-SMU VISA timeout 在代码中固定为
+`5000 ms`，TOML 中的 `timeout_ms` 会被 strict loader 拒绝。
+
 ## 扫描计划
 
 每个角色独立选择：
@@ -56,13 +65,13 @@ SMU 的 run 子表；例如 `[1, 3, 7, 2]` 展开为 `[1, 3, 7, 2, 7, 3, 1]`，�
 
 ## 写入、读回与清理
 
-获得真实运行授权后，顺序为：离线验证全部点 → 打开三台资源 → query-only preflight →
+获得真实运行授权后，顺序为：离线验证全部点 → 仅打开 active 资源 → query-only preflight →
 直接设零/配置 → output enable → 每个正式点对每台 active SMU 只写一次目标 → 全局
 `delay_s` → 读取并记录 source setpoint、V、I、R、output、trip 和 status。软件不插入 ramp
 中间点，也不因 requested/readback 数值差异本身拒绝数据；实际 V/I 越界、compliance trip、
 output 状态错误、非有限值或错误队列异常仍会拒绝。
 
-正常、异常、Ctrl+C 与 generator 提前关闭共享 cleanup：每台直接写 0，等待 `delay_s`，读取并
+正常、异常、Ctrl+C 与 generator 提前关闭共享 cleanup：每台 active SMU 直接写 0，等待 `delay_s`，读取并
 记录，再关闭 output 并读回。通信失败不证明零或 output-off；保留最后确认状态并要求人工检查。
 
 `finish_action = "hold"` 仍需要独立的 `HOLD OUTPUTS` 终端确认。
@@ -79,13 +88,15 @@ python -m attodry_control.three_smu_cli run
 `:SYST:ERR?`，`--consume-status-queue` 仍需单独授权。`run` 无需长授权参数，但会在打开硬件前
 要求精确输入 `RUN THREE SMU`。
 
-每个 run 保存 schema v4 `metadata.json`、`raw.jsonl` 和 `data.csv`。schema v4 删除
-`near_compliance` 列，配置快照只含两条绝对边界，并新增 configure 后的 compliance/range
+每个 run 保存 schema v5 `metadata.json`、`raw.jsonl` 和 `data.csv`。schema v5 保留 v4
+的 direct-point 契约，并新增 `active_roles`/`off_roles`；硬件快照只包含 active 角色。
+CSV 保留稳定列，off 角色字段为空。配置快照只含两条绝对边界，并记录 configure 后的 compliance/range
 读回事件。requested source 与实际 setpoint/V/I 分开保存。默认分析只加载
 `completed + accepted + clean` formal samples；rejected/problem 需要显式 opt-in。
 
-本次验证通过 104 项 focused fake/config 测试和完整 389 项离线测试（5 项可选绘图跳过），
-`src/tests` compileall 通过。真实硬件动作数为 0。
+本次 active-only 改动的 focused fake/config 回归 109 项通过；完整离线回归
+394 项通过（5 项可选 matplotlib 绘图跳过），`src/tests` compileall 通过。
+真实硬件动作数为 0。
 
 完整操作者说明见 [`../THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)，实时
 监控边界见 [`../THREE_SMU_LIVE_MONITOR.md`](../THREE_SMU_LIVE_MONITOR.md)。
@@ -94,5 +105,5 @@ python -m attodry_control.three_smu_cli run
 
 下一步是 `S1 target offline`：仅在 `LK_setup` 的 `lyr` 环境安装/导入依赖、运行离线测试和
 `describe`，仍不打开 VISA。之后真实 read-only、状态队列消费和最小写入分别需要新授权。
-第一次实机前仍须人工确认三台实际地址/identity、接线、2/4-wire、guard/ground/common、
+第一次实机前仍须人工确认本次 active SMU 的实际地址/identity、接线、2/4-wire、guard/ground/common、
 每台 source mode、两条绝对边界、容性负载/互锁和 output-off 语义。

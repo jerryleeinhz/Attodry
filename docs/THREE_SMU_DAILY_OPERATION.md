@@ -30,13 +30,13 @@ python -m attodry_control.three_smu_cli describe
 
 ## 每台 SMU 的参数
 
-`smu_bias` 直接包含 Keithley 参数；两个 gate 的 Keithley 参数放在各自 `.smu` 子表：
+三台语义角色使用完全相同的单表格式；不再有 `[gate_top.smu]` 或
+`[gate_bottom.smu]` 子表：
 
 ```toml
 [smu_bias]
 model = "Keithley2400"
 address = "CHANGE_ME_BIAS_SMU_VISA_ADDRESS"
-timeout_ms = "CHANGE_ME"
 source_mode = "voltage"       # "voltage" 或 "current"
 max_abs_voltage_v = "CHANGE_ME"
 max_abs_current_a = "CHANGE_ME"
@@ -51,14 +51,19 @@ address = "CHANGE_ME_TOP_GATE_VISA_ADDRESS"
 source_mode = "voltage"
 max_abs_voltage_v = "CHANGE_ME"
 max_abs_current_a = "CHANGE_ME"
-
-[gate_top.smu]
-timeout_ms = "CHANGE_ME"
 nplc = 1.0
 source_auto_range = true
 measure_auto_range = true
 four_wire = false
 ```
+
+VISA timeout 由程序固定为 `5000 ms`，TOML 不再接受 `timeout_ms`。这是通信命令
+最多等待 5 s，不是每个扫描点的等待时间。
+
+`[three_smu_run.<role>]` 的 `role` 是启用状态的唯一事实来源。若某角色为
+`role = "off"`，它的硬件表可以整段省略；loader 不解析它、不打开它的
+VISA resource、不读取或记录它。这不能证明该仪器已关闭或已归零；其物理
+状态必须视为未知。任一 `fixed` 或 `sweep` 角色都必须有完整的同名硬件表。
 
 两个 `max_abs_*` 是每台设备独立的硬边界：任何请求 source 值先与 source-mode 对应边界比较，
 每次实际 V/I 读回再同时与两条边界比较。不得用 top gate 的值代替 bottom gate，也不得用模板
@@ -85,6 +90,7 @@ compliance 上限可到所选 range 的约 1.05 倍，且 compliance 不能低�
 
 已删除且 loader 会拒绝的旧字段包括：独立 compliance、`leakage_limit_a`、所有
 `source_min_*`/`source_max_*`、`ramp_step_*`、`readback_tolerance_*` 和 `settle_s`。
+`timeout_ms` 也已从 Three-SMU 角色配置删除并会被 strict loader 拒绝。
 
 ## 扫描向量
 
@@ -129,6 +135,33 @@ step = 0.05
 `points` 与 `start/stop/step` 二选一。显式向量保持输入顺序、重复和非单调点；上述 top gate
 双向展开为 `[1,3,7,2,7,3,1]`。range 的 `step` 必须为正，方向由 start/stop 决定。
 `off` 表只写 `role` 和 `bidirectional=false`；`fixed` 表只额外写 `fixed`。
+例如只扫 bottom gate 时，可完全删除 `[smu_bias]` 和 `[gate_top]` 硬件表：
+
+```toml
+[gate_bottom]
+model = "Keithley2400"
+address = "CHANGE_ME_BOTTOM_GATE_VISA_ADDRESS"
+source_mode = "voltage"
+max_abs_voltage_v = "CHANGE_ME"
+max_abs_current_a = "CHANGE_ME"
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[three_smu_run.smu_bias]
+role = "off"
+bidirectional = false
+
+[three_smu_run.gate_top]
+role = "off"
+bidirectional = false
+
+[three_smu_run.gate_bottom]
+role = "sweep"
+bidirectional = false
+points = [-1.0, -0.3, 0.0, 0.8]
+```
 
 七种 `mode`：
 
@@ -152,7 +185,8 @@ step = 0.05
 python -m attodry_control.three_smu_cli monitor-live
 ```
 
-它显示三台的 identity、source mode/setpoint、V/I/R、input/output 状态、compliance/trip、
+它只连接并显示 `fixed`/`sweep` 角色的 identity、source mode/setpoint、V/I/R、
+input/output 状态、compliance/trip、
 source/measurement range 和 2/4-wire。默认不消费 error queue；只有单独授权后才用：
 
 ```powershell
@@ -172,12 +206,15 @@ python -m attodry_control.three_smu_cli run
 `zero_disable`。
 
 正式点执行“每台直接写一次目标 → 等 `delay_s` → 读回并记录”，没有软件 ramp 和独立
-settle。cleanup 执行“直接写 0 → 等 `delay_s` → 读回记录 → output off → 再读回”。通信失败
-时不能声称已经归零或关闭，必须查看三台前面板。
+settle。cleanup 只对本次 active 角色执行“直接写 0 → 等 `delay_s` → 读回记录 →
+output off → 再读回”。通信失败时不能声称已经归零或关闭；本次 active
+仪器必须查看前面板，off 角色始终保持“未连接/物理状态未知”。
 
 ## 数据与分析
 
-每个 run 目录保存 schema v4 `metadata.json`、`raw.jsonl`、`data.csv`。requested target 与实际
+每个 run 目录保存 schema v5 `metadata.json`、`raw.jsonl`、`data.csv`。metadata 明确记录
+`active_roles` 与 `off_roles`，硬件快照仅含 active 角色；CSV 保留稳定的三角色列，off
+角色的列留空。requested target 与实际
 source setpoint/V/I 分开记录；实际数值差异本身不触发 tolerance rejection，但 V/I 绝对越界、
 trip、output 状态或错误队列问题仍会拒绝。
 

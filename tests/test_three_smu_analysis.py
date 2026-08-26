@@ -19,11 +19,18 @@ def make_run(
     status: str = "completed",
     clean: bool = True,
     bias_values: tuple[float, ...] = (0.1,),
+    active_roles: tuple[str, ...] = SEMANTIC_ROLES,
 ) -> Path:
     run_dir = root / "run"
     run_dir.mkdir()
     (run_dir / "metadata.json").write_text(
-        json.dumps({"status": status, "accepted": status == "completed"}),
+        json.dumps(
+            {
+                "status": status,
+                "accepted": status == "completed",
+                "active_roles": list(active_roles),
+            }
+        ),
         encoding="utf-8",
     )
     fields = [
@@ -59,6 +66,8 @@ def make_run(
                         "gate_bottom": bottom,
                     }
                     for role in SEMANTIC_ROLES:
+                        if role not in active_roles:
+                            continue
                         row.update({
                             f"{role}_coordinate": coordinates[role],
                             f"{role}_timestamp": f"2026-01-01T00:00:0{index}Z",
@@ -112,6 +121,14 @@ class ThreeSmuAnalysisTests(unittest.TestCase):
             self.assertEqual(
                 load_three_smu_rows(run_dir, segment="missing"), ()
             )
+
+    def test_schema_five_bottom_only_rows_skip_off_role_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = make_run(Path(directory), active_roles=("gate_bottom",))
+            rows = load_three_smu_rows(run_dir)
+            self.assertEqual(len(rows), 4)
+            self.assertTrue(all(row.role == "gate_bottom" for row in rows))
+            self.assertEqual(load_three_smu_rows(run_dir, role="smu_bias"), ())
 
     def test_rectangular_two_gate_map_uses_bias_measurement_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

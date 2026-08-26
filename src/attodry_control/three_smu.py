@@ -19,7 +19,6 @@ from .keithley2400 import (
     open_keithley2400,
 )
 from .three_smu_config import (
-    ChannelRole,
     FinishAction,
     SEMANTIC_ROLES,
     ScanPoint,
@@ -27,6 +26,7 @@ from .three_smu_config import (
     SourceMode,
     ThreeSmuHardwareConfig,
     ThreeSmuScanPlan,
+    active_smu_roles,
     generate_scan_points,
     validate_plan_targets,
 )
@@ -105,10 +105,12 @@ class ThreeSmuSession:
         self.monotonic = monotonic
         self.last_confirmed: dict[str, TimedReading] = {}
         self.last_commanded: dict[str, float] = {}
-        self.output_enabled: dict[str, bool] = {role: False for role in SEMANTIC_ROLES}
+        self._active_roles = set(active_smu_roles(plan))
+        self.output_enabled: dict[str, bool] = {
+            role: False for role in self._active_roles
+        }
         self.last_run_dir: Path | None = None
         self._configured: set[str] = set()
-        self._active_roles: set[str] = set()
         self._run_active = False
         self._recorder: _RunRecorder | None = None
         self._closed = False
@@ -136,14 +138,15 @@ class ThreeSmuSession:
                 "the Keithley error-queue query consumes status entries"
             )
         adapters: dict[str, SmuAdapter] = {}
+        active_roles = active_smu_roles(plan)
         try:
-            for role in SEMANTIC_ROLES:
-                adapters[role] = adapter_factory(role, hardware.by_role()[role])
+            for role in active_roles:
+                adapters[role] = adapter_factory(role, hardware.require_role(role))
             for adapter in adapters.values():
                 authorize_status = getattr(adapter, "authorize_status_consumption", None)
                 if callable(authorize_status):
                     authorize_status()
-            preflight = {role: adapters[role].preflight() for role in SEMANTIC_ROLES}
+            preflight = {role: adapters[role].preflight() for role in active_roles}
             active = [
                 role for role, state in preflight.items() if state.output_enabled
             ]
@@ -151,7 +154,7 @@ class ThreeSmuSession:
                 raise UnknownActiveOutput(
                     "Preflight found output already enabled on "
                     + ", ".join(active)
-                    + "; no setting write was sent. Check all three front panels manually."
+                    + "; no setting write was sent. Check those active SMUs manually."
                 )
             identities = [state.identity.strip() for state in preflight.values()]
             if len(set(identities)) != len(identities):
@@ -160,7 +163,7 @@ class ThreeSmuSession:
                 )
             preflight_errors: list[str] = []
             for role, state in preflight.items():
-                config = hardware.by_role()[role]
+                config = hardware.require_role(role)
                 assert config.max_abs_voltage_v is not None
                 assert config.max_abs_current_a is not None
                 if state.source_mode is not config.source_mode:
@@ -277,7 +280,7 @@ class ThreeSmuSession:
                 if cleanup["manual_verification_required"]:
                     message = (
                         "Normal-end cleanup could not confirm zero/output-off on "
-                        "all three SMUs; check front panels manually"
+                        "all active SMUs; check their front panels manually"
                     )
                     recorder.finalize("rejected", cleanup=cleanup, error=message)
                     self._run_active = False
@@ -311,10 +314,7 @@ class ThreeSmuSession:
         if self._closed:
             return
         errors: list[str] = []
-        for role in SEMANTIC_ROLES:
-            adapter = self.adapters.get(role)
-            if adapter is None:
-                continue
+        for role, adapter in self.adapters.items():
             try:
                 adapter.close()
             except Exception as exc:
@@ -324,15 +324,9 @@ class ThreeSmuSession:
             raise ThreeSmuError("Could not close all SMUs: " + "; ".join(errors))
 
     def _configure(self, recorder: "_RunRecorder") -> None:
-        plan_by_role = self.plan.by_role()
-        self._active_roles = {
-            role
-            for role, channel in plan_by_role.items()
-            if channel.role is not ChannelRole.OFF
-        }
-        for role in SEMANTIC_ROLES:
+        for role in active_smu_roles(self.plan):
             adapter = self.adapters[role]
-            config = self.hardware.by_role()[role]
+            config = self.hardware.require_role(role)
             self._configured.add(role)
             adapter.zero_residual(self.preflight[role].source_mode)
             zero_state = adapter.preflight()
@@ -388,9 +382,7 @@ class ThreeSmuSession:
             )
             if problems:
                 raise ThreeSmuSafetyError("; ".join(problems))
-        for role in SEMANTIC_ROLES:
-            if role not in self._active_roles:
-                continue
+        for role in active_smu_roles(self.plan):
             adapter = self.adapters[role]
             adapter.set_output(True)
             self.output_enabled[role] = True
@@ -412,7 +404,7 @@ class ThreeSmuSession:
                 raise ThreeSmuSafetyError("; ".join(problems))
 
     def _apply_point(self, point: ScanPoint, recorder: "_RunRecorder") -> None:
-        for role in SEMANTIC_ROLES:
+        for role in active_smu_roles(self.plan):
             if role not in point.coordinates:
                 continue
             target = point.coordinates[role]
@@ -430,7 +422,7 @@ class ThreeSmuSession:
     ) -> ThreeSmuSample:
         readings: dict[str, TimedReading] = {}
         problems: list[str] = []
-        for role in SEMANTIC_ROLES:
+        for role in active_smu_roles(self.plan):
             try:
                 timed = self._read_one(role)
                 readings[role] = timed
@@ -480,7 +472,7 @@ class ThreeSmuSession:
         *,
         expected_output: bool,
     ) -> list[str]:
-        config = self.hardware.by_role()[role]
+        config = self.hardware.require_role(role)
         problems: list[str] = []
         assert config.max_abs_voltage_v is not None
         assert config.max_abs_current_a is not None
@@ -511,7 +503,7 @@ class ThreeSmuSession:
     def _validate_source_target(self, role: str, target: float) -> None:
         if not math.isfinite(target):
             raise ThreeSmuSafetyError(f"{role} source target must be finite")
-        config = self.hardware.by_role()[role]
+        config = self.hardware.require_role(role)
         limit = (
             config.max_abs_voltage_v
             if config.source_mode is SourceMode.VOLTAGE
@@ -527,7 +519,7 @@ class ThreeSmuSession:
         actions: list[dict[str, Any]] = []
         cleanup_errors: list[dict[str, str]] = []
         manual = False
-        for role in SEMANTIC_ROLES:
+        for role in active_smu_roles(self.plan):
             if role not in self._configured:
                 continue
             zero_readback_recorded = False
@@ -663,24 +655,29 @@ class _RunRecorder:
         self._writer = csv.DictWriter(self._csv, fieldnames=_csv_fields())
         self._writer.writeheader()
         self._closed = False
+        active_roles = active_smu_roles(plan)
         self.metadata: dict[str, Any] = {
-            "schema_version": 4,
+            "schema_version": 5,
             "code_version": _code_version(),
             "status": "running",
             "accepted": False,
             "started_at": _now_iso(),
             "hardware": {
-                role: _jsonable(asdict(config))
-                for role, config in hardware.by_role().items()
+                role: _jsonable(asdict(hardware.require_role(role)))
+                for role in active_roles
             },
+            "active_roles": list(active_roles),
+            "off_roles": [
+                role for role in SEMANTIC_ROLES if role not in active_roles
+            ],
             "plan": _jsonable(asdict(plan)),
             "preflight": {
                 role: _jsonable(asdict(state)) for role, state in preflight.items()
             },
             "requested": {
                 "hardware": {
-                    role: _jsonable(asdict(config))
-                    for role, config in hardware.by_role().items()
+                    role: _jsonable(asdict(hardware.require_role(role)))
+                    for role in active_roles
                 },
                 "plan": _jsonable(asdict(plan)),
             },
@@ -724,9 +721,12 @@ class _RunRecorder:
             "problems": "; ".join(sample.problems),
         }
         for role in SEMANTIC_ROLES:
-            record[f"{role}_coordinate"] = sample.coordinates.get(role, 0.0)
-            record[f"{role}_requested_source"] = sample.coordinates.get(role, 0.0)
-            timed = sample.readings[role]
+            if role in sample.coordinates:
+                record[f"{role}_coordinate"] = sample.coordinates[role]
+                record[f"{role}_requested_source"] = sample.coordinates[role]
+            timed = sample.readings.get(role)
+            if timed is None:
+                continue
             reading = timed.reading
             record.update(
                 {

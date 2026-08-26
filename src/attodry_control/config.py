@@ -1429,12 +1429,20 @@ def _parse_gate(
         "source_mode",
         "max_abs_voltage_v",
         "max_abs_current_a",
-        "smu",
+        "nplc",
+        "source_auto_range",
+        "measure_auto_range",
+        "four_wire",
     }
-    if mode is RunMode.HARDWARE and not isinstance(table.get("smu"), dict):
-        raise ConfigError(f"{name}.smu must be a table.")
     if mode is RunMode.HARDWARE:
         _strict_keys(table, name, hardware_keys)
+        source_mode = _string(table["source_mode"], f"{name}.source_mode")
+        if source_mode not in {"voltage", "current"}:
+            raise ConfigError(f"{name}.source_mode must be 'voltage' or 'current'.")
+        _hardware_number(table["nplc"], f"{name}.nplc")
+        _boolean(table["source_auto_range"], f"{name}.source_auto_range")
+        _boolean(table["measure_auto_range"], f"{name}.measure_auto_range")
+        _boolean(table["four_wire"], f"{name}.four_wire")
         return GateConfig(
             role=role,
             max_abs_voltage_v=_hardware_number(

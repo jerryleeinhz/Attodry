@@ -461,8 +461,10 @@ main + 本地改动”。交付时分别报告 HEAD、`origin/main`、目标电�
 
 ## 13. SMU 模块怎样套用本文
 
-当前具体工作包见 [`modules/THREE_SMU.md`](modules/THREE_SMU.md)。active hardware path 是
-三台 Keithley 2400 的 `ThreeSmuSession`，角色为 `smu_bias`、`gate_top`、`gate_bottom`。
+当前具体工作包见 [`modules/THREE_SMU.md`](modules/THREE_SMU.md)。`ThreeSmuSession` 定义
+最多三台 Keithley 2400 角色：`smu_bias`、`gate_top`、`gate_bottom`。每次运行的
+active hardware path 仅包含 scan plan 中的 `fixed`/`sweep` 角色；`off` 角色不要求硬件表，
+也不得被打开、读写、清理或记录。其物理状态仍未知。
 配置、CLI 和 Notebook 必须调用同一 strict loader、point generator、adapter 与 cleanup。
 
 本项目确认的 Three-SMU 单一安全事实来源是每台独立的 `max_abs_voltage_v` 与
@@ -470,6 +472,8 @@ main + 本地改动”。交付时分别报告 HEAD、`origin/main`、目标电�
 autorange 是量程选择，不能替代 compliance。hardware TOML 不再保存独立 compliance、
 leakage、source min/max、ramp、readback tolerance 或 settle 字段。legacy simulation gate
 controller 的这些字段不进入真实 Three-SMU 日常配置。
+三个硬件角色必须使用相同的单表格式，不要为 gate 另建 `.smu` 子表。Three-SMU
+VISA timeout 在 adapter/monitor 代码中固定为 5000 ms，不作为实验参数出现在 TOML。
 
 正式 target 只写一次，不插入软件 ramp；共享 `delay_s` 后读取并记录实际 source/V/I/R/
 output/trip/status。requested/readback 差异保留审计，不单独 rejection；实际 V/I 越界、trip、
