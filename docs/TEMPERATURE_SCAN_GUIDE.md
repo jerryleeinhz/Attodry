@@ -3,8 +3,8 @@
 ## 当前边界
 
 `attodry-temperature-scan` 是独立的 Temperature commissioning 模块，用于按
-设定点逐步升温，并记录每一点从 setpoint 确认到首次进入容差带和最终满足稳定
-窗口所需的时间。
+设定点逐步升温，并在实际样品温度稳定后记录可用于测量的系统读回值。目标 setpoint
+仍会写入并审计，但 `stable-readback` 模式不要求样品精确命中 setpoint。
 
 当前实现状态是 **target offline complete**：配置、fake-DLL、故障清理、中断和进程
 恢复已在本机与 `LK_setup` 的确切 `lyr` 环境验证，但新的多点编排没有连接真实
@@ -33,12 +33,19 @@ output_directory = "../run_data/temperature_commissioning"
 稳定定义不在扫描表中重复，继续使用 `[temperature_stability]`：
 
 ```toml
-tolerance_k = 0.01
-stable_range_k = 0.005
+acceptance_mode = "stable-readback"
+stable_range_k = 0.05
 stable_dwell_s = 30.0
-poll_interval_s = 1.0
-wait_timeout_s = 7200.0
+poll_interval_s = 1.5
+wait_timeout_s = 1800.0
+min_response_k = 0.02
 ```
+
+`stable-readback` 只要求稳定窗口内样品读回的 peak-to-peak 范围满足
+`stable_range_k`；窗口成立后，程序把窗口平均值写入 `measurement_temperature_k`。
+除第一个点外，`min_response_k` 要求实际温度相对该点开始时至少发生一次可见移动，
+避免同一个平台被重复记录成多个扫描点。若使用旧的 `target` 模式，则必须另外提供
+`tolerance_k`，并要求窗口内每个样品读数都落在目标容差内。
 
 安全和中断继续使用 `[temperature_run]` 中已有的 `max_delta_k`、
 `max_overshoot_k`、`interrupt_policy` 和 `resume_recheck_s`。
@@ -85,8 +92,8 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
 ```
 
 程序对每个点执行：读取完整状态，检查样品温度移动，确认 Full Temperature Control
-开启，确认 setpoint，随后从 setpoint 确认时刻开始稳定计时。正常完成后保持 2.7 K
-目标和温控开启，只断开 Python 的 DLL/COM 连接。
+开启，确认 setpoint，随后从 setpoint 确认时刻开始对实际样品读回计时。正常完成后
+保持最后一个目标和温控开启，只断开 Python 的 DLL/COM 连接。
 
 ## 记录内容
 
@@ -96,10 +103,11 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
 - `*_summary.json`：最终 completed/rejected/interrupted 摘要；
 - `*_stable_times.csv`：每个已稳定点一行，便于直接查看耗时。
 
-每点分别记录请求 setpoint、DLL 实际 setpoint 读回、实际样品温度、
-`time_to_first_tolerance_s`、`time_to_stable_s`，以及稳定窗口的 minimum、maximum、
-peak-to-peak 和样本数。记录还包含 resolved 配置、run name/note、Git commit、错误、
-cleanup 和最后确认状态。
+每点分别记录请求 setpoint、DLL 实际 setpoint 读回、最终样品读回、
+`measurement_temperature_k`、`time_to_response_s`、`time_to_stable_s`，以及稳定窗口的
+minimum、maximum、mean、standard deviation、peak-to-peak 和样本数。`target` 模式
+额外记录 `time_to_first_tolerance_s`；稳定读回模式不把 setpoint 误当成测量温度。
+记录还包含 resolved 配置、run name/note、Git commit、错误、cleanup 和最后确认状态。
 
 通信失败不代表温控已关闭。若最终读回或 close 失败，记录只保存最后确认状态并要求
 人工查看 GUI，不会写成安全完成。
@@ -135,5 +143,6 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
 - 当前点超过 `temperature_stability.wait_timeout_s` 仍未稳定；
 - `Ctrl+C` 的有效策略最终选择中止。
 
-真实升温耗时由样品、热接触和控制器决定。脚本不会承诺 1.7 K 到 2.7 K 在固定
-30 分钟内完成，也不会自动修改 PID 或 heater 参数。
+真实升温耗时由样品、热接触和控制器决定。脚本不会自动修改 PID 或 heater 参数；
+heater output 只作为状态/诊断读回。`measurement_temperature_k` 是测量时应使用的
+实际样品温度，不能用请求 setpoint 替代。

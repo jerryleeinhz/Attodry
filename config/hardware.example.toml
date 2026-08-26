@@ -29,11 +29,14 @@ poll_interval_s = 1.0
 wait_timeout_s = 7200.0
 
 [temperature_stability]
-tolerance_k = 0.01
-stable_range_k = 0.005
+acceptance_mode = "stable-readback"
+# In stable-readback mode the requested setpoint is a command, not the
+# analysis temperature. The actual sample readback is used after stabilization.
+stable_range_k = 0.05
 stable_dwell_s = 30.0
-poll_interval_s = 1.0
-wait_timeout_s = 7200.0
+poll_interval_s = 1.5
+wait_timeout_s = 1800.0
+min_response_k = 0.02
 
 # Daily temperature operation. Normally only target_k needs to change.
 [temperature_run]

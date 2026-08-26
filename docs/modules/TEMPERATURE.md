@@ -350,6 +350,28 @@ JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
   本地配置和 DLL 路径。真实执行需另行确认，建议先验收 1.7--1.8 K，再决定完整
   1.7--2.7 K。
 
+## Stable-readback measurement mode (offline implementation)
+
+The scan now supports `temperature_stability.acceptance_mode = "stable-readback"`.
+In this mode the requested setpoint remains a commanded and audited value, while
+measurement readiness is decided from the actual sample-temperature readback:
+
+- `stable_range_k` and `stable_dwell_s` define the continuous plateau;
+- `min_response_k` requires each point after the first to move measurably from its
+  point-start sample temperature;
+- `measurement_temperature_k` is the mean of the stable readback window and is the
+  temperature coordinate for downstream measurement;
+- the requested setpoint is never substituted for the actual sample temperature;
+- PID gains and heater configuration are not written. Heater power remains a
+  diagnostic readback.
+
+The stability evaluator retains one sample before the rolling-window cutoff, so
+normal polling jitter cannot prevent a dwell window from reaching its required
+duration. The legacy `target` mode remains available and requires `tolerance_k`.
+Offline fake-DLL and jitter tests cover both modes. A real run using this mode is
+still a separate hardware test and must retain the existing control, error,
+setpoint, overshoot, logging, and cleanup checks.
+
 ## 预计文件所有权
 
 - `src/attodry_control/attodry.py`

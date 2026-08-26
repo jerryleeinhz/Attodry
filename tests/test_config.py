@@ -8,6 +8,7 @@ from attodry_control.config import (
     RunMode,
     ReserveMode,
     TemperatureInterruptPolicy,
+    TemperatureStabilityMode,
     load_config,
     load_temperature_operation_config,
 )
@@ -586,6 +587,11 @@ class ConfigurationTests(unittest.TestCase):
             TemperatureInterruptPolicy.ABORT,
         )
         self.assertEqual(config.temperature_run.resume_recheck_s, 30.0)
+        self.assertEqual(
+            config.temperature_stability.acceptance_mode,
+            TemperatureStabilityMode.STABLE_READBACK,
+        )
+        self.assertEqual(config.temperature_stability.min_response_k, 0.02)
 
     def test_temperature_run_interrupt_policy_is_configurable(self) -> None:
         base = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8")

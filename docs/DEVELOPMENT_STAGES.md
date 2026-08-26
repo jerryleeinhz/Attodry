@@ -866,3 +866,20 @@ remains pending separate authorization.
 - A real run requires new authorization plus creation/verification of the ignored
   local TOML and DLL path. The recommended first orchestration write is
   1.7--1.8 K before the full 1.7--2.7 K scan.
+
+## Stage 7 follow-up - stable-readback measurement acceptance
+
+Status: offline implementation complete (2026-08-26); real hardware retest pending.
+
+- Added `temperature_stability.acceptance_mode = "stable-readback"`, which uses the
+  actual sample-temperature plateau for measurement readiness and keeps the requested
+  setpoint as an audited command rather than an analysis coordinate.
+- Added `min_response_k` for points after the first and archived
+  `measurement_temperature_k`, response time, stable-window mean, standard deviation,
+  range, and sample count in JSON and CSV.
+- Fixed rolling stability at non-exact polling boundaries by retaining one sample
+  before the dwell cutoff. A 1.501 s polling-jitter regression test now covers the
+  failure seen during the previous real scan.
+- PID gains and heater settings remain read-only; the scan does not write either.
+- Narrow offline tests passed with the existing target mode and the new readback mode.
+  A real scan on `LK_setup` is required to validate the revised acceptance behavior.

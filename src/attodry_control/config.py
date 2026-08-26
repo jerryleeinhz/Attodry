@@ -52,6 +52,13 @@ class TemperatureInterruptPolicy(StrEnum):
     WAIT_CONFIRMATION = "wait-confirmation"
 
 
+class TemperatureStabilityMode(StrEnum):
+    """How a temperature point becomes measurement-ready."""
+
+    TARGET = "target"
+    STABLE_READBACK = "stable-readback"
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectConfig:
     mode: RunMode
@@ -74,6 +81,8 @@ class StabilityConfig:
     criteria: StabilityCriteria
     poll_interval_s: float
     wait_timeout_s: float
+    acceptance_mode: TemperatureStabilityMode = TemperatureStabilityMode.TARGET
+    min_response_k: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -473,18 +482,49 @@ def _parse_stability(
     table: Mapping[str, Any], name: str, value_prefix: str
 ) -> StabilityConfig:
     tolerance_key = f"{value_prefix}tolerance_t" if value_prefix else "tolerance_k"
-    expected = {
-        tolerance_key,
-        "stable_range_t" if value_prefix else "stable_range_k",
-        "stable_dwell_s",
-        "poll_interval_s",
-        "wait_timeout_s",
-    }
-    if name != "magnet":
-        _strict_keys(table, name, expected)
     range_key = "stable_range_t" if value_prefix else "stable_range_k"
+    if value_prefix:
+        if name != "magnet":
+            _strict_keys(
+                table,
+                name,
+                {
+                    tolerance_key,
+                    range_key,
+                    "stable_dwell_s",
+                    "poll_interval_s",
+                    "wait_timeout_s",
+                },
+            )
+        acceptance_mode = TemperatureStabilityMode.TARGET
+        min_response_k = 0.0
+    else:
+        _strict_keys_with_optional(
+            table,
+            name,
+            {range_key, "stable_dwell_s", "poll_interval_s", "wait_timeout_s"},
+            {tolerance_key, "acceptance_mode", "min_response_k"},
+        )
+        try:
+            acceptance_mode = TemperatureStabilityMode(
+                _string(table.get("acceptance_mode", "target"), f"{name}.acceptance_mode")
+            )
+        except ValueError as exc:
+            allowed = ", ".join(mode.value for mode in TemperatureStabilityMode)
+            raise ConfigError(
+                f"{name}.acceptance_mode must be one of: {allowed}."
+            ) from exc
+        min_response_k = _nonnegative_number(
+            table.get("min_response_k", 0.0), f"{name}.min_response_k"
+        )
+        if acceptance_mode is TemperatureStabilityMode.TARGET and tolerance_key not in table:
+            raise ConfigError(f"{name} is missing field(s): {tolerance_key}.")
     criteria = StabilityCriteria(
-        tolerance=_positive_number(table[tolerance_key], f"{name}.{tolerance_key}"),
+        tolerance=(
+            _positive_number(table[tolerance_key], f"{name}.{tolerance_key}")
+            if tolerance_key in table
+            else None
+        ),
         stable_range=_nonnegative_number(table[range_key], f"{name}.{range_key}"),
         dwell_s=_positive_number(table["stable_dwell_s"], f"{name}.stable_dwell_s"),
     )
@@ -496,7 +536,13 @@ def _parse_stability(
     )
     if wait_timeout_s < criteria.dwell_s:
         raise ConfigError(f"{name}.wait_timeout_s must cover stable_dwell_s.")
-    return StabilityConfig(criteria, poll_interval_s, wait_timeout_s)
+    return StabilityConfig(
+        criteria,
+        poll_interval_s,
+        wait_timeout_s,
+        acceptance_mode=acceptance_mode,
+        min_response_k=min_response_k,
+    )
 
 
 def _parse_temperature_run(

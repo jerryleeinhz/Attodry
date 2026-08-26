@@ -966,6 +966,22 @@ Caught acquisition exception or `Ctrl+C`:
 
 A communication failure must not be reported as successful zeroing. A hard process crash cannot be cleaned up by Python and requires manual inspection.
 
+## Current temperature scan implementation update (2026-08-26)
+
+The temperature scan now has an offline-validated `stable-readback` acceptance mode.
+It still writes and verifies each requested setpoint, but measurement readiness is
+based on the actual sample-temperature plateau. The stable-window mean is archived as
+`measurement_temperature_k`; downstream measurement must use that value, not the
+requested setpoint. `min_response_k` prevents later points from silently reusing an
+unchanged plateau.
+
+The rolling-window evaluator now retains one sample before the dwell cutoff, so
+ordinary polling jitter does not make a nominal 30 s dwell impossible. PID gains and
+heater configuration remain untouched; heater power is diagnostic readback only.
+Offline tests cover target mode, stable-readback mode, and jitter. The previous real
+scan remains rejected and must not be reclassified from this code change alone. A new
+authorized `LK_setup` run is required to verify the revised behavior.
+
 ## Immediate next implementation tasks
 
 1. Review the failed 1.8 K trace and decide explicitly whether the slow response

@@ -270,7 +270,7 @@ class AttoDryDriverTests(unittest.TestCase):
             sleeper=sleeps.append,
         )
 
-        self.assertEqual(sleeps, [1.0])
+        self.assertEqual(sleeps, [1.5])
         self.assertTrue(self.driver.last_confirmed_state.temperature_control_enabled)
 
     def test_temperature_control_toggle_readback_timeout_fails_closed(self) -> None:
@@ -389,7 +389,7 @@ class AttoDryDriverTests(unittest.TestCase):
             sleeper=sleeps.append,
         )
 
-        self.assertEqual(sleeps, [1.0])
+        self.assertEqual(sleeps, [1.5])
         self.assertAlmostEqual(
             self.driver.last_confirmed_state.user_temperature_k, 3.0
         )
@@ -447,6 +447,21 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertEqual(state.sample_temperature_k, 2.0)
         self.assertEqual(len(control_states), 0)
+
+    def test_temperature_stable_readback_accepts_offset_from_setpoint(self) -> None:
+        self.connect()
+        self.dll.temperature_control = 1
+        self.dll.sample_temperature_k = 2.05
+        self.dll.user_temperature_k = 2.0
+        times = iter([0.0, 0.0, 10.0, 20.0, 30.0, 40.0])
+
+        state = self.driver.wait_for_temperature(
+            2.0,
+            monotonic=times.__next__,
+            sleeper=lambda _: None,
+        )
+
+        self.assertAlmostEqual(state.sample_temperature_k, 2.05)
 
     def test_temperature_wait_rejects_error_and_timeout(self) -> None:
         self.connect()
@@ -1317,6 +1332,46 @@ failure_policy = "hold-current"
         progress = Path(result["progress_jsonl"]).read_text(encoding="utf-8")
         self.assertIn('"event": "temperature_sample"', progress)
         self.assertEqual(progress.count('"event": "point_completed"'), 3)
+
+    def test_temperature_scan_records_actual_stable_readback_temperature(self) -> None:
+        config_path, _ = self.temperature_scan_config(
+            start_k=1.7, stop_k=1.8, step_k=0.1
+        )
+        self.dll.sample_temperature_k = 1.7
+        self.dll.user_temperature_k = 1.7
+        original_setter = self.dll.AttoDRY_Interface_setUserTemperature
+
+        def offset_setter(value):
+            result = original_setter(value)
+            self.dll.sample_temperature_k = value.value + 0.05
+            return result
+
+        self.dll.AttoDRY_Interface_setUserTemperature = offset_setter
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = run_temperature_scan(
+                [
+                    "--config",
+                    str(config_path),
+                    "--authorize-temperature-scan",
+                ],
+                dll_loader=lambda _: self.dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+                wall_time=lambda: 123.0,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        for point, expected in zip(result["points"], (1.75, 1.85)):
+            self.assertAlmostEqual(point["measurement_temperature_k"], expected, places=5)
+        self.assertTrue(
+            all(point["time_to_first_tolerance_s"] is None for point in result["points"])
+        )
+        self.assertTrue(
+            all("stable_mean_k" in line for line in Path(result["stable_times_csv"]).read_text().splitlines()[:1])
+        )
 
     def test_temperature_scan_failure_disables_control(self) -> None:
         config_path, _ = self.temperature_scan_config(

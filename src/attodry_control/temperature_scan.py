@@ -22,6 +22,7 @@ from .attodry import (
 from .config import (
     TemperatureOperationConfig,
     TemperatureRunConfig,
+    TemperatureStabilityMode,
     load_temperature_operation_config,
 )
 from .models import CryostatState
@@ -285,6 +286,7 @@ def run(
                 point_index=point_index,
                 writer=writer,
                 interruptions=summary["interruptions"],
+                response_reference_k=before_state.sample_temperature_k,
                 monotonic=monotonic,
                 sleeper=sleeper,
                 wall_time=wall_time,
@@ -413,6 +415,7 @@ def _wait_for_stable_point(
     point_index: int,
     writer: _JsonlWriter,
     interruptions: object,
+    response_reference_k: float,
     monotonic: Callable[[], float],
     sleeper: Callable[[float], None],
     wall_time: Callable[[], float],
@@ -425,13 +428,21 @@ def _wait_for_stable_point(
     automatic_recoveries = 0
     attempt_index = 0
     needs_recheck = False
+    stability = driver.temperature_stability
+    stable_readback = (
+        stability.acceptance_mode is TemperatureStabilityMode.STABLE_READBACK
+    )
+    minimum_response_k = (
+        stability.min_response_k if point_index > 0 and stable_readback else 0.0
+    )
+    first_response_s: float | None = None
 
     while True:
         attempt_samples: list[tuple[float, float]] = []
         attempt_offset_s = monotonic() - point_started
 
         def on_sample(state: CryostatState, elapsed_s: float) -> None:
-            nonlocal first_tolerance_s
+            nonlocal first_response_s, first_tolerance_s
             writer.append(
                 {
                     "event": "temperature_sample",
@@ -447,9 +458,18 @@ def _wait_for_stable_point(
             _validate_point_state(state, request.target_k, request)
             attempt_samples.append((elapsed_s, state.sample_temperature_k))
             if (
+                first_response_s is None
+                and minimum_response_k > 0
+                and abs(state.sample_temperature_k - response_reference_k)
+                >= minimum_response_k
+            ):
+                first_response_s = attempt_offset_s + elapsed_s
+            if (
                 first_tolerance_s is None
+                and not stable_readback
+                and stability.criteria.tolerance is not None
                 and abs(state.sample_temperature_k - request.target_k)
-                <= driver.temperature_stability.criteria.tolerance
+                <= stability.criteria.tolerance
             ):
                 first_tolerance_s = attempt_offset_s + elapsed_s
 
@@ -470,6 +490,8 @@ def _wait_for_stable_point(
             final_state = driver.wait_for_temperature(
                 request.target_k,
                 max_overshoot_k=request.max_overshoot_k,
+                minimum_response_k=minimum_response_k,
+                response_reference_k=response_reference_k,
                 monotonic=monotonic,
                 sleeper=sleeper,
                 on_sample=on_sample,
@@ -506,11 +528,19 @@ def _wait_for_stable_point(
         stable_values = [
             value for elapsed, value in attempt_samples if elapsed >= cutoff_s
         ]
+        measurement_temperature_k = sum(stable_values) / len(stable_values)
+        stable_mean_k = measurement_temperature_k
+        stable_std_k = math.sqrt(
+            sum((value - stable_mean_k) ** 2 for value in stable_values)
+            / len(stable_values)
+        )
         return {
             "point_index": point_index,
             "requested_temperature_k": request.target_k,
             "actual_setpoint_k": final_state.user_temperature_k,
             "actual_sample_temperature_k": final_state.sample_temperature_k,
+            "measurement_temperature_k": measurement_temperature_k,
+            "time_to_response_s": first_response_s,
             "time_to_first_tolerance_s": first_tolerance_s,
             "time_to_stable_s": attempt_offset_s + stable_elapsed_s,
             "successful_attempt_index": attempt_index,
@@ -519,6 +549,8 @@ def _wait_for_stable_point(
                 "minimum_k": min(stable_values),
                 "maximum_k": max(stable_values),
                 "peak_to_peak_k": max(stable_values) - min(stable_values),
+                "mean_k": stable_mean_k,
+                "standard_deviation_k": stable_std_k,
                 "required_dwell_s": driver.temperature_stability.criteria.dwell_s,
             },
             "final_state": asdict(final_state),
@@ -578,10 +610,12 @@ def _measurement_config(
             "temperature_max_k": cryostat.temperature_max_k,
         },
         "temperature_stability": {
+            "acceptance_mode": stability.acceptance_mode.value,
             "tolerance_k": stability.criteria.tolerance,
             "stable_range_k": stability.criteria.stable_range,
             "stable_dwell_s": stability.criteria.dwell_s,
             "minimum_samples": stability.criteria.minimum_samples,
+            "min_response_k": stability.min_response_k,
             "poll_interval_s": stability.poll_interval_s,
             "wait_timeout_s": stability.wait_timeout_s,
         },
@@ -679,11 +713,15 @@ def _write_results(
                 "requested_temperature_k",
                 "actual_setpoint_k",
                 "actual_sample_temperature_k",
+                "measurement_temperature_k",
+                "time_to_response_s",
                 "time_to_first_tolerance_s",
                 "time_to_stable_s",
                 "stable_minimum_k",
                 "stable_maximum_k",
                 "stable_peak_to_peak_k",
+                "stable_mean_k",
+                "stable_standard_deviation_k",
                 "stable_sample_count",
             ),
         )
@@ -703,6 +741,8 @@ def _write_results(
                     "actual_sample_temperature_k": point.get(
                         "actual_sample_temperature_k"
                     ),
+                    "measurement_temperature_k": point.get("measurement_temperature_k"),
+                    "time_to_response_s": point.get("time_to_response_s"),
                     "time_to_first_tolerance_s": point.get(
                         "time_to_first_tolerance_s"
                     ),
@@ -710,6 +750,10 @@ def _write_results(
                     "stable_minimum_k": window.get("minimum_k"),
                     "stable_maximum_k": window.get("maximum_k"),
                     "stable_peak_to_peak_k": window.get("peak_to_peak_k"),
+                    "stable_mean_k": window.get("mean_k"),
+                    "stable_standard_deviation_k": window.get(
+                        "standard_deviation_k"
+                    ),
                     "stable_sample_count": window.get("sample_count"),
                 }
             )
