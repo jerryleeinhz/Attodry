@@ -10,7 +10,7 @@ attoDRY legacy DLL 适配器已经完成离线 fake-DLL 实现。目标电脑曾
 T0 contract audit 和 T1 offline behavior tests 已于 2026-08-21 完成。温度公共
 接口收敛为 `read_state()`、`ensure_temperature_control(enabled)`、
 `set_temperature(target_k)` 和 `wait_for_temperature(target_k)`；不包含 PID、
-磁场或扫描组合。fake-DLL 已覆盖温度读失败、控制状态、setpoint 读回、连续
+磁场或跨硬件扫描组合。fake-DLL 已覆盖温度读失败、控制状态、setpoint 读回、连续
 稳定窗口、错误和超时。T4 所需的显式授权 commissioning CLI 已完成 fake-DLL
 验证。首次真实 T4 尝试已发送一次 1.75 K setpoint，但因 DLL 立即读回仍为
 2.0 K 而 fail closed，未开启温控；随后 5 次只读状态均确认 setpoint 已异步更新为
@@ -47,6 +47,28 @@ DLL、连接设备或发送硬件命令。
 有关的表，不要求补写或修改 Lock-in/SMU 参数；未知顶层表仍被拒绝。该提交在
 `LK_setup` 通过 compileall 和全部218项测试（0 skipped），同样没有加载 DLL。
 
+本轮新增了日常温控的中断策略。`interrupt_policy` 缺省为 `abort`，保持原有
+fail-closed 行为；`continue` 在完整状态仍安全时自动恢复一次，随后要求
+`resume_recheck_s`（默认 30 s）的新读回；`wait-confirmation` 保持已确认的目标和
+温控状态并询问操作者。第二次自动中断转为等待确认。过冲、非零错误、通信失败、
+控制或 setpoint 无法确认等硬故障不受这些策略放宽，始终执行安全清理。SQLite
+acquisition 的中断事件现在明确记录 `repeat-interrupted-condition`；恢复会从首个
+未 accepted 的 condition 重测，并保留中断 attempt 的原始 rejected 数据。
+每个 run/target 的 error-free、温控开启资格也会持久化；同一目标的后续模拟 condition
+只执行短读回复查，不重复完整温度等待。真实 Integration 使用该资格前必须重新读取
+attoDRY 并确认目标、控制和错误状态。
+该策略和恢复语义已用 fake-DLL、模拟站和 SQLite 离线测试覆盖，尚未在真实硬件上
+人为触发中断恢复。
+
+新增的单模块 `temperature_scan` commissioning 编排按 `[temperature_scan]` 的
+1.7--2.7 K、0.1 K 升温网格逐点调用同一 attoDRY 安全接口。它复用
+`[temperature_stability]` 的 tolerance/range/dwell/timeout 和
+`[temperature_run]` 的 max-delta、0.2 K overshoot 与中断策略，不复制这些事实。
+每点保存请求值、实际 setpoint、实际样品温度、首次进入容差和完整稳定所需时间；
+JSONL 逐样本持久化，最终另存 summary JSON 与 CSV。中断后当前点的稳定窗口重启，
+进程恢复从第一个未完成点继续。该路径当前只完成 fake-DLL 离线验证，真实多点扫描
+尚未授权或 commissioned。
+
 ## 模块目标
 
 1. 独立验证温度状态读取、设定、控制启停和稳定判据。
@@ -69,8 +91,9 @@ DLL、连接设备或发送硬件命令。
 - 稳定必须同时满足：控制已开、错误码为零、全部窗口样本在容差内、窗口
   peak-to-peak 小于配置阈值、未超时。
 - 通信失败后保留 `last_confirmed_state`；不能报告目标已到达。
-- `Ctrl+C` 或异常的温度策略应在 Integration 中明确，不能由本模块擅自关闭
-  cryostat 控制。
+- 日常入口的 `Ctrl+C` 策略已由 `[temperature_run].interrupt_policy` 明确：默认
+  `abort`，也可选择 `continue` 或 `wait-confirmation`；硬故障仍由本模块
+  fail-closed，Integration 组合时必须保留这一覆盖规则。
 - DLL、COM5 和本地路径只能存在于 ignored 的 `hardware.local.toml`。
 
 ## 阶段和验收条件
@@ -88,7 +111,8 @@ DLL、连接设备或发送硬件命令。
   驱动负责控制标志、错误码、poll interval 和总 timeout。
 - `CryostatController` 通用协议尚未声明稳定等待，而仿真接口当前按
   `max_polls` 驱动。Integration 组合前需统一这一调用契约，不能让调用方猜测。
-- 未增加 PID、升降温速率、异常时擅自关闭温控等未确认功能。
+- 未增加 PID、升降温速率或自动修改控制参数；中断恢复只在完整状态已确认安全时
+  保留目标并重新读回。
 
 ### T1 - offline behavior tests（offline complete：2026-08-21）
 
@@ -303,6 +327,51 @@ JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
 实时终止线。该决定不改写历史数据，也不表示样品达到 setpoint；Integration 必须
 把每次测量的 `sample_temperature_k` 与 setpoint 一起保存。
 
+### T5 - ascending stability-timing scan（target offline complete：2026-08-25）
+
+- 新增严格 `[temperature_scan]` 网格和 `attodry-temperature-scan` CLI；只有显式
+  `--authorize-temperature-scan` 才能加载 DLL 和进入真实写路径。
+- 1.7--2.7 K/0.1 K 的 11 点路径在打开资源前完整展开并验证，只允许升温；降温保护
+  语义尚未确认，因此不接受负步长。
+- 每点保持已验收的 control-before-setpoint 顺序，并用真实 sample sensor 判定
+  tolerance/range/dwell。正常结束保持最终目标与控制；失败尝试关闭并确认温控。
+- 每个 raw sample 和 transition 增量写入 JSONL；summary JSON 和 CSV 记录每点实际
+  setpoint、实际样品温度、首次进入容差和满足稳定窗口的耗时。
+- `continue`/`wait-confirmation` 后重新复查状态并重启当前点稳定窗口；进程退出后的
+  `--resume-progress` 只跳过连续完成点，拒绝配置不一致或已完成记录。
+- fake-DLL、配置、网格、过冲清理、软中断和进程恢复测试通过；未加载真实 DLL，未
+  连接 attoDRY，未发送 setpoint 或 toggle。
+- `LK_setup` target-offline 使用确切的 64 位 Python 3.12.13 `lyr` 和独立 DLL-free
+  快照完成：compileall、315 项测试（0 skipped）、11 点配置展开、CLI help 与无授权
+  pre-DLL 拒绝均通过；快照 SHA-256 为
+  `CB8CAC713B92FB414E6382710878DA8E7DA39CAA5EB26CB765FB90F331BA3DBC`。
+  验证后的目标目录和传输压缩包已逐路径核对、删除并确认不存在。
+- 目标用户目录下没有现存 `hardware.local.toml`，因此真实执行前仍需建立/核对 ignored
+  本地配置和 DLL 路径。真实执行需另行确认，建议先验收 1.7--1.8 K，再决定完整
+  1.7--2.7 K。
+
+## Stable-readback measurement mode (offline implementation)
+
+The scan now supports `temperature_stability.acceptance_mode = "stable-readback"`.
+In this mode the requested setpoint remains a commanded and audited value, while
+measurement readiness is decided from the actual sample-temperature readback:
+
+- `stable_range_k` and `stable_dwell_s` define the continuous plateau;
+- `min_response_k` requires each point after the first to move measurably from its
+  point-start sample temperature;
+- `measurement_temperature_k` is the mean of the stable readback window and is the
+  temperature coordinate for downstream measurement;
+- the requested setpoint is never substituted for the actual sample temperature;
+- PID gains and heater configuration are not written. Heater power remains a
+  diagnostic readback.
+
+The stability evaluator retains one sample before the rolling-window cutoff, so
+normal polling jitter cannot prevent a dwell window from reaching its required
+duration. The legacy `target` mode remains available and requires `tolerance_k`.
+Offline fake-DLL and jitter tests cover both modes. A real run using this mode is
+still a separate hardware test and must retain the existing control, error,
+setpoint, overshoot, logging, and cleanup checks.
+
 ## 预计文件所有权
 
 - `src/attodry_control/attodry.py`
@@ -311,10 +380,12 @@ JSON/stderr 均保留在 `LK_setup` ignored 临时路径。
 - `src/attodry_control/attodry_test.py`（只读验收）
 - `src/attodry_control/temperature_test.py`（写入 commissioning，双重授权）
 - `src/attodry_control/temperature_run.py`（无额外授权参数的日常运行入口）
+- `src/attodry_control/temperature_scan.py`（显式授权的多点 commissioning 入口）
 - `tests/test_attodry.py`
 - `tests/test_config.py`
 - `tests/test_stability.py`
 - `docs/TEMPERATURE_RUN_GUIDE.md`
+- `docs/TEMPERATURE_SCAN_GUIDE.md`
 
 `attodry.py` 同时服务 Magnetic 模块。若两个 Chat 并行，必须使用不同 worktree，
 并由 Integration 重新运行冲突后的完整测试。

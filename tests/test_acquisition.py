@@ -5,7 +5,11 @@ import tempfile
 import unittest
 
 from attodry_control.acquisition import RetryLimitExceeded, SimulationRunEngine
-from attodry_control.config import FieldEndPolicy, load_config
+from attodry_control.config import (
+    FieldEndPolicy,
+    TemperatureInterruptPolicy,
+    load_config,
+)
 from attodry_control.models import VectorField
 from attodry_control.records import ExperimentCondition
 from attodry_control.simulation import SimulationStation
@@ -103,6 +107,11 @@ class AcquisitionTests(unittest.TestCase):
         self.assertEqual(stations[-1].lockin_xx.source_voltage_v, 0.004)
         self.assertFalse(stations[-1].gate_top.output_enabled)
         self.assertFalse(stations[-1].gate_bottom.output_enabled)
+        self.assertIn("cryostat.recheck_temperature", stations[-1].event_log)
+        self.assertNotIn("cryostat.wait_for_temperature", stations[-1].event_log)
+        self.assertTrue(
+            self.store.has_temperature_qualification("run-e2e", condition().temperature_k)
+        )
         event_payloads = [
             json.loads(row["payload_json"])
             for row in self.store.connection.execute(
@@ -187,6 +196,18 @@ class AcquisitionTests(unittest.TestCase):
             "SELECT status FROM attempts ORDER BY attempt_index"
         ).fetchall()
         self.assertEqual([row["status"] for row in attempts], ["rejected", "accepted"])
+        resume_payload = json.loads(
+            self.store.connection.execute(
+                "SELECT payload_json FROM events "
+                "WHERE run_id = ? AND event_type = 'run_resumed'",
+                ("run-resume",),
+            ).fetchone()["payload_json"]
+        )
+        self.assertEqual(
+            resume_payload["resume_strategy"],
+            "repeat-first-pending-condition",
+        )
+        self.assertEqual(resume_payload["resume_condition_id"], item.condition_id)
 
     def test_interrupt_persists_partial_raw_and_last_confirmed_cleanup_state(self) -> None:
         def factory() -> SimulationStation:
@@ -229,6 +250,50 @@ class AcquisitionTests(unittest.TestCase):
         self.assertTrue(payload["cleanup_succeeded"])
         self.assertTrue(payload["field_zero_confirmed"])
         self.assertEqual(payload["last_confirmed_cryostat_state"]["bx_t"], 0.0)
+        self.assertEqual(
+            payload["resume_strategy"], "repeat-interrupted-condition"
+        )
+        self.assertEqual(payload["resume_condition_id"], "condition-0001")
+        self.assertEqual(payload["resume_attempt_index"], 0)
+
+    def test_continue_policy_repeats_interrupted_condition_once(self) -> None:
+        created = 0
+
+        def factory() -> SimulationStation:
+            nonlocal created
+            station = SimulationStation.from_config(self.config)
+            if created == 0:
+                def interrupt(_: int) -> None:
+                    raise KeyboardInterrupt
+
+                station.lockin_xy.read_harmonic = interrupt
+            created += 1
+            return station
+
+        engine = SimulationRunEngine(
+            store=self.store,
+            run_id="run-continue",
+            station_factory=factory,
+            interrupt_policy=TemperatureInterruptPolicy.CONTINUE,
+            now=lambda: NOW,
+        )
+        result = engine.start_new(
+            (condition(),), config_snapshot={"mode": "simulation"}
+        )
+
+        self.assertEqual(result.accepted_conditions, 1)
+        self.assertEqual(result.rejected_attempts, 1)
+        actions = [
+            json.loads(row["payload_json"])["action"]
+            for row in self.store.connection.execute(
+                "SELECT payload_json FROM events "
+                "WHERE run_id = ? AND event_type = 'run_interrupted'",
+                ("run-continue",),
+            ).fetchall()
+        ]
+        self.assertEqual(actions, ["continue"])
+        with RunMonitor(self.path) as monitor:
+            self.assertEqual(monitor.summary("run-continue").status, "complete")
 
 
 if __name__ == "__main__":

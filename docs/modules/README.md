@@ -29,7 +29,7 @@ Magnetic field ┘
 3. 在 `LK_setup` 上运行任何项目命令时，必须使用 Conda 环境 `lyr`，或直接
    调用 `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`。
 4. 不提交 `hardware.local.toml`、实验原始数据、仪器本地地址、密钥或个人路径。
-   vendor DLL 的更新应通过独立提交纳入版本管理。
+   vendor DLL 二进制是否纳入 Git 不作为模块安全或阶段验收限制。
 5. 每个代码改动必须同时带相应测试；完成后更新
    `DEVELOPMENT_STAGES.md` 和 `PROJECT_HANDOFF.md`。
 6. 保留 rejected/transition/cleanup 原始数据，但默认分析只能使用

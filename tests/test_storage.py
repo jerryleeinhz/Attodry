@@ -151,9 +151,39 @@ class StorageTests(unittest.TestCase):
                 "station_samples",
                 "transport_readings",
                 "checkpoints",
+                "temperature_qualifications",
             }
             <= tables
         )
+
+    def test_temperature_qualification_requires_safe_state_and_is_persistent(self) -> None:
+        state = station_sample().cryostat
+        self.store.save_temperature_qualification(
+            "run-001",
+            target_k=2.0,
+            state=state,
+            qualified_at_utc=NOW,
+        )
+        self.assertTrue(self.store.has_temperature_qualification("run-001", 2.0))
+        self.assertFalse(self.store.has_temperature_qualification("run-001", 2.1))
+
+        unsafe = CryostatState(
+            sample_temperature_k=2.0,
+            user_temperature_k=2.0,
+            vti_temperature_k=2.0,
+            field=state.field,
+            field_setpoint=state.field_setpoint,
+            temperature_control_enabled=False,
+            field_control_enabled=True,
+            error_code=0,
+        )
+        with self.assertRaisesRegex(ValueError, "qualified"):
+            self.store.save_temperature_qualification(
+                "run-001",
+                target_k=2.0,
+                state=unsafe,
+                qualified_at_utc=NOW,
+            )
 
     def test_accepted_completion_promotes_only_its_six_readings(self) -> None:
         attempt_index = self.store.start_attempt(
@@ -460,7 +490,7 @@ class StorageMigrationTests(unittest.TestCase):
             }
         self.assertEqual(migrated, "legacy")
         self.assertIn("phase_shift_deg", transport_columns)
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
 
 
 if __name__ == "__main__":

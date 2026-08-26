@@ -82,16 +82,26 @@ python -m attodry_control.lockin_test sweep-excitation --help
 python -m attodry_control.attodry_test --help
 python -m attodry_control.temperature_test --help
 python -m attodry_control.temperature_run --help
+python -m attodry_control.temperature_scan --help
 python -m attodry_control.lockin_test --help
 ```
 
 日常温控参数统一写在已忽略的 `config/hardware.local.toml` 的
 `[temperature_run]` 表中，通常只修改 `target_k`。运行
 `attodry-temperature-run` 不需要额外授权参数；该命令会先开启温控、再设置目标，
-监测30分钟并记录实际样品温度。详细步骤见
+监测30分钟并记录实际样品温度。中断策略也在同一表中配置：
+`interrupt_policy = "abort"`（默认）、`"continue"` 或
+`"wait-confirmation"`，并用 `resume_recheck_s = 30.0` 指定继续前的重新确认窗口。
+详细步骤见
 [`docs/TEMPERATURE_RUN_GUIDE.md`](docs/TEMPERATURE_RUN_GUIDE.md)。原
 `temperature_commissioning.local.toml` 和 `attodry-temperature-test` 仅保留给
 严格稳定性诊断。
+
+逐点温度稳定性计时使用同一个 `hardware.local.toml` 中的
+`[temperature_scan]` 网格，并复用 `[temperature_stability]` 和
+`[temperature_run]` 的安全/中断参数。新命令当前只完成离线验证，真实多点写入仍需
+单独确认并带 `--authorize-temperature-scan`；操作、实时 JSONL 和断点恢复说明见
+[`docs/TEMPERATURE_SCAN_GUIDE.md`](docs/TEMPERATURE_SCAN_GUIDE.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
 `config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别
@@ -170,6 +180,7 @@ python -m unittest discover -s tests -v
 python -m attodry_control
 python -m attodry_control.monitor --database PATH --run-id RUN_ID
 python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --inject-first-unlock
+python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --resume
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --csv analysis_output/run.csv
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --publication-dir analysis_output/RUN_ID --format png --format pdf
 ```

@@ -8,10 +8,19 @@ from pathlib import Path
 import time
 from typing import Callable
 
-from .config import ControlConfig, RunMode, StabilityConfig
+from .config import (
+    ControlConfig,
+    RunMode,
+    StabilityConfig,
+    TemperatureStabilityMode,
+)
 from .models import CryostatState, VectorField
 from .safety import MagnetLimits, validate_vector_field
-from .stability import TimedValue, evaluate_stability
+from .stability import (
+    TimedValue,
+    evaluate_readback_stability,
+    evaluate_stability,
+)
 
 
 TEMPERATURE_COMMAND_ACK_TIMEOUT_S = 30.0
@@ -424,6 +433,8 @@ class AttoDryDriver:
         target_k: float,
         *,
         max_overshoot_k: float | None = None,
+        minimum_response_k: float = 0.0,
+        response_reference_k: float | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: Callable[[CryostatState, float], None] | None = None,
@@ -436,15 +447,33 @@ class AttoDryDriver:
             not math.isfinite(max_overshoot_k) or max_overshoot_k <= 0
         ):
             raise ValueError("max_overshoot_k must be finite and positive.")
+        if not math.isfinite(minimum_response_k) or minimum_response_k < 0:
+            raise ValueError("minimum_response_k must be finite and non-negative.")
+        if response_reference_k is not None and not math.isfinite(response_reference_k):
+            raise ValueError("response_reference_k must be finite when provided.")
+        if minimum_response_k > 0 and response_reference_k is None:
+            raise ValueError(
+                "response_reference_k is required when minimum_response_k is positive."
+            )
         if (
             max_overshoot_k is not None
             and target_k + max_overshoot_k > self.temperature_max_k
         ):
             raise ValueError("Temperature overshoot limit is outside configured limits.")
 
+        response_seen = minimum_response_k <= 0
+
         def record_and_check(state: CryostatState, elapsed_s: float) -> None:
+            nonlocal response_seen
             if on_sample is not None:
                 on_sample(state, elapsed_s)
+            if (
+                not response_seen
+                and response_reference_k is not None
+                and abs(state.sample_temperature_k - response_reference_k)
+                >= minimum_response_k
+            ):
+                response_seen = True
             if state.error_code:
                 return
             if (
@@ -462,6 +491,11 @@ class AttoDryDriver:
             config=self.temperature_stability,
             value=lambda state: state.sample_temperature_k,
             control=lambda state: state.temperature_control_enabled,
+            qualify=lambda _: response_seen,
+            require_target=(
+                self.temperature_stability.acceptance_mode
+                is TemperatureStabilityMode.TARGET
+            ),
             label="temperature",
             monotonic=monotonic,
             sleeper=sleeper,
@@ -575,6 +609,8 @@ class AttoDryDriver:
         config: StabilityConfig,
         value: Callable[[CryostatState], float],
         control: Callable[[CryostatState], bool],
+        qualify: Callable[[CryostatState], bool] | None = None,
+        require_target: bool = True,
         label: str,
         monotonic: Callable[[], float],
         sleeper: Callable[[float], None],
@@ -594,9 +630,17 @@ class AttoDryDriver:
             if control(state):
                 samples.append(TimedValue(elapsed, value(state)))
                 cutoff = elapsed - config.criteria.dwell_s
-                while samples and samples[0].elapsed_s < cutoff:
+                # Keep one sample before the cutoff so a jittered poll still
+                # proves the full dwell coverage without requiring an exact
+                # timestamp match at the boundary.
+                while len(samples) > 1 and samples[1].elapsed_s < cutoff:
                     samples.popleft()
-                if evaluate_stability(tuple(samples), target, config.criteria):
+                stable = (
+                    evaluate_stability(tuple(samples), target, config.criteria)
+                    if require_target
+                    else evaluate_readback_stability(tuple(samples), config.criteria)
+                )
+                if (qualify is None or qualify(state)) and stable:
                     return state
             else:
                 samples.clear()

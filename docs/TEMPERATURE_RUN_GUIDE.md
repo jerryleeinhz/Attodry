@@ -21,11 +21,14 @@ attoDRY、开启 Full Temperature Control，并写入配置的样品温度目标
 | --- | --- | --- |
 | `config/hardware.local.toml` | 硬件地址和所有日常温控参数 | 是，通常只改 `target_k` |
 | `src/attodry_control/temperature_run.py` | 日常温控运行入口 | 否 |
+| `src/attodry_control/temperature_scan.py` | 多点稳定性计时扫描；当前仅离线完成 | 否 |
 | `src/attodry_control/attodry.py` | attoDRY DLL 驱动和读回检查 | 否 |
 | `src/attodry_control/temperature_test.py` | commissioning/严格稳定性诊断 | 否 |
 | `src/attodry_control/acquisition.py`、`storage.py` | 测量时保存实际温度 | 否 |
 
 `temperature_test.py` 的许多直接参数是开发和诊断接口，不是推荐的日常运行方式。
+多点扫描的统一配置、记录和恢复见 `TEMPERATURE_SCAN_GUIDE.md`；它不会改变本页
+单点 30 分钟运行的验收语义。
 
 ## 一次性配置
 
@@ -49,6 +52,10 @@ max_delta_k = 250.0
 max_overshoot_k = 0.2
 pre_measure_wait_s = 1800.0
 poll_interval_s = 1.0
+# continue / abort / wait-confirmation；默认 abort
+interrupt_policy = "abort"
+# 中断后继续前要求重新读取完整状态的时间
+resume_recheck_s = 30.0
 ```
 
 参数含义：
@@ -60,6 +67,8 @@ poll_interval_s = 1.0
 | `max_overshoot_k` | 实际样品温度允许超过目标的最大值；commissioned 值为 0.2 K |
 | `pre_measure_wait_s` | 写入目标后持续监测多久才允许进入测量；当前为 1800 s |
 | `poll_interval_s` | 完整状态读取和实际温度记录间隔；当前为 1 s |
+| `interrupt_policy` | 可恢复的操作者中断策略：`continue` 自动恢复一次，`abort` 立即按现有策略关闭温控并退出，`wait-confirmation` 保持已确认安全状态并等待用户确认；缺省为 `abort` |
+| `resume_recheck_s` | `continue` 或确认继续后，重新确认完整温控状态的最短时间；默认 30 s |
 
 例如 `target_k = 1.8` 时，实际样品温度达到或超过 2.0 K 会触发失败清理。
 
@@ -137,18 +146,33 @@ attodry-temperature-run |
 
 ## 失败和安全行为
 
-以下情况不会标记 measurement-ready：
+以下情况不会标记 measurement-ready，也不能由三种中断策略绕过：
 
 - 实际温度达到 `target_k + max_overshoot_k`；
 - 温控标志在监测期间关闭；
 - setpoint 发生变化；
 - attoDRY 返回非零错误码；
 - DLL/COM 读取失败；
-- 用户按下 `Ctrl+C`。
+- 用户按下 `Ctrl+C` 并最终选择 `abort` 或拒绝继续。
 
-如果写入阶段已经开始，程序会尝试幂等关闭 Full Temperature Control，读取最终状态，
+`interrupt_policy` 只处理操作者发出的可恢复中断。`continue` 会保留目标和已确认的
+温控状态，并要求 `resume_recheck_s` 的新读回；第二次自动中断会转入等待确认。
+`wait-confirmation` 会询问是否重试当前流程；回答否等同于 `abort`。过冲、非零错误码、
+通信失败、控制状态或 setpoint 无法确认等硬故障始终走 fail-closed 清理。
+
+如果写入阶段已经开始，`abort` 或确认中止时程序会尝试幂等关闭 Full Temperature Control，读取最终状态，
 记录 heater power 和触发状态，然后 Disconnect/end。通信或清理读回失败时，程序不会
-声称设备已经安全，必须人工检查 GUI。
+ 声称设备已经安全，必须人工检查 GUI。
+
+正式 acquisition 的中断点恢复沿用 SQLite 的 accepted/checkpoint 约定：中断尝试保留为
+rejected，恢复时从第一个没有 accepted 结果的 condition 开始，并以新的
+`attempt_index` 重测整个当前点，不拼接半份数据。可用硬件无关的示例命令验证该路径：
+
+```powershell
+python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --resume
+```
+
+该命令只用于已有模拟 run；日常 attoDRY 温控入口仍不会自动连接真实测量仪器。
 
 ## Commissioning 诊断工具
 

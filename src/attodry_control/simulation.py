@@ -151,6 +151,19 @@ class SimulationCryostat:
         )
         return self._state
 
+    def recheck_temperature(self, target_k: float) -> CryostatState:
+        """Model the short readback recheck after a persisted qualification."""
+        self._failures.check("recheck_temperature")
+        self.event_log.append("cryostat.recheck_temperature")
+        self._state = replace(
+            self._state,
+            sample_temperature_k=target_k,
+            user_temperature_k=target_k,
+            vti_temperature_k=target_k,
+            temperature_control_enabled=True,
+        )
+        return self._state
+
     def set_vector_field(self, target: VectorField) -> None:
         self._failures.check("set_vector_field")
         checked = validate_vector_field(target, self.limits)
@@ -420,6 +433,7 @@ class SimulationStation:
         attempt_index: int,
         started_at_utc: datetime | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        temperature_prequalified: bool = False,
     ) -> SimulatedAttemptOutcome:
         started = started_at_utc or now()
         raw_readings: list[RawTransportReading] = []
@@ -428,9 +442,14 @@ class SimulationStation:
         try:
             self.cryostat.ensure_temperature_control(True)
             self.cryostat.set_temperature(condition.temperature_k)
-            last_confirmed = self.cryostat.wait_for_temperature(
-                self.temperature_max_polls
-            )
+            if temperature_prequalified:
+                last_confirmed = self.cryostat.recheck_temperature(
+                    condition.temperature_k
+                )
+            else:
+                last_confirmed = self.cryostat.wait_for_temperature(
+                    self.temperature_max_polls
+                )
             self.cryostat.ensure_field_control(True)
             self.cryostat.set_vector_field(condition.field)
             last_confirmed = self.cryostat.wait_for_field(self.field_max_polls)

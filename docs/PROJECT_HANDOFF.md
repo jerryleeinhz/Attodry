@@ -655,6 +655,44 @@ temperature operation uses the unified hardware TOML and dedicated command witho
 additional authorization flags. SMUs and real end-to-end acquisition still require
 staged authorization.
 
+Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
+`interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
+`resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state
+recheck and then requires confirmation on another interruption; `wait-confirmation`
+asks before retrying. Overshoot, nonzero device errors, communication failures, and
+unconfirmed control/setpoint states remain hard fail-closed faults. The SQLite
+acquisition audit now records that a resumed run repeats the interrupted condition;
+partial attempts remain rejected and retained. A confirmed error-free temperature
+state is persisted per run/target so a later same-target simulated condition uses a
+short recheck instead of repeating the full wait; a real integration must revalidate
+that state against the device before using it. Fake-DLL, simulated-station, and
+SQLite tests cover the new paths. No real hardware interruption/recovery was
+performed, and the full real attoDRY measurement engine is still pending.
+
+Temperature stability-scan follow-up (2026-08-25): the Temperature branch now has
+an offline-complete, explicitly gated ascending scan CLI. The unified hardware TOML
+adds `[temperature_scan]` with the planned 1.7--2.7 K/0.1 K grid, run metadata, and
+output directory while reusing the existing stability, movement, 0.2 K overshoot,
+and interruption settings. The full grid is validated before DLL loading. Each point
+keeps control-before-setpoint order and archives requested/actual setpoint, actual
+sample temperature, time to first tolerance, time to stable, and the stable-window
+range. Incremental JSONL, final JSON, and CSV retain partial and completed evidence;
+soft interruption restarts the current dwell, and process resume skips only
+contiguous completed points after an exact configuration check. Failure attempts
+disable temperature control; normal completion holds the final target/control.
+Source/test compilation and all 315 offline tests passed (5 optional matplotlib
+skips). Target-offline then passed from a DLL-free isolated snapshot on
+`LK_setup` with exact 64-bit Python 3.12.13 `lyr`: compileall and all 315 tests
+passed with 0 skips, the example expanded to 11 points, CLI help passed, and the
+unauthorized command stopped before DLL loading. Snapshot SHA-256 was
+`CB8CAC713B92FB414E6382710878DA8E7DA39CAA5EB26CB765FB90F331BA3DBC`.
+The target snapshot directory and transferred archive were verified, removed,
+and confirmed absent after validation.
+No existing `hardware.local.toml` was found below the target user profile, so the
+ignored station-local config and DLL path still need creation/verification before
+hardware use. No real DLL, connection, setpoint, or toggle was used. Real
+1.7--1.8 K and full 1.7--2.7 K execution each require fresh operator authorization.
+
 Module handoff packages are available under `docs/modules/` for separate Chat
 follow-up:
 
@@ -991,11 +1029,29 @@ Caught acquisition exception or `Ctrl+C`:
 
 A communication failure must not be reported as successful zeroing. A hard process crash cannot be cleaned up by Python and requires manual inspection.
 
+## Current temperature scan implementation update (2026-08-26)
+
+The temperature scan now has a hardware-commissioned `stable-readback` acceptance mode.
+It still writes and verifies each requested setpoint, but measurement readiness is
+based on the actual sample-temperature plateau. The stable-window mean is archived as
+`measurement_temperature_k`; downstream measurement must use that value, not the
+requested setpoint. `min_response_k` prevents later points from silently reusing an
+unchanged plateau.
+
+The rolling-window evaluator now retains one sample before the dwell cutoff, so
+ordinary polling jitter does not make a nominal 30 s dwell impossible. PID gains and
+heater configuration remain untouched; heater power is diagnostic readback only.
+Offline tests cover target mode, stable-readback mode, and jitter. The previous rejected
+run remains rejected. A separate authorized run on `LK_setup` at commit `cba448b`
+completed all 11 points from 1.7 K through 3.7 K in 0.2 K steps. The final confirmed
+state had a 3.7 K user setpoint, 3.569 K sample readback, temperature control enabled,
+error code zero, and a clean DLL disconnect. PID and heater settings were not written.
+
 ## Immediate next implementation tasks
 
-1. Review the failed 1.8 K trace and decide explicitly whether the slow response
-   requires a longer timeout, different stability target, or manual thermal/PID
-   diagnosis; do not infer or alter PID values automatically.
+1. Integrate `measurement_temperature_k` into the downstream measurement coordinator
+   and hardware-test the interruption/resume path separately; do not infer or alter
+   PID values automatically.
 2. Add the two vendor SMU adapters only after exact models, limits, and command
    references are supplied.
 3. Freeze and verify the complete hardware wheelhouse on the offline control

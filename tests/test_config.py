@@ -7,6 +7,8 @@ from attodry_control.config import (
     ConfigError,
     RunMode,
     ReserveMode,
+    TemperatureInterruptPolicy,
+    TemperatureStabilityMode,
     load_config,
     load_temperature_operation_config,
 )
@@ -611,6 +613,80 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.temperature_run.target_k, 1.8)
         self.assertEqual(config.temperature_run.max_delta_k, 250.0)
         self.assertEqual(config.temperature_run.max_overshoot_k, 0.2)
+        self.assertEqual(
+            config.temperature_run.interrupt_policy,
+            TemperatureInterruptPolicy.ABORT,
+        )
+        self.assertEqual(config.temperature_run.resume_recheck_s, 30.0)
+        self.assertEqual(
+            config.temperature_stability.acceptance_mode,
+            TemperatureStabilityMode.STABLE_READBACK,
+        )
+        self.assertEqual(config.temperature_stability.min_response_k, 0.02)
+
+    def test_temperature_run_interrupt_policy_is_configurable(self) -> None:
+        base = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8")
+        for value in ("continue", "abort", "wait-confirmation"):
+            text = base.replace(
+                'interrupt_policy = "abort"',
+                f'interrupt_policy = "{value}"',
+            )
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                config = load_temperature_operation_config("test.toml")
+            self.assertEqual(config.temperature_run.interrupt_policy.value, value)
+
+    def test_temperature_run_interrupt_policy_rejects_unknown_value(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            'interrupt_policy = "abort"',
+            'interrupt_policy = "ignore"',
+        )
+        with self.assertRaisesRegex(ConfigError, "interrupt_policy"):
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
+
+    def test_temperature_scan_loads_unified_grid_and_audit_fields(self) -> None:
+        with patch(
+            "attodry_control.config.Path.open",
+            mock_open(read_data=HARDWARE_EXAMPLE_CONFIG.read_bytes()),
+        ):
+            config = load_temperature_operation_config("test.toml")
+
+        self.assertIsNotNone(config.temperature_scan)
+        scan = config.temperature_scan
+        assert scan is not None
+        self.assertEqual((scan.start_k, scan.stop_k, scan.step_k), (1.7, 2.7, 0.1))
+        self.assertEqual(scan.run_name, "temperature_1p7_to_2p7")
+        self.assertEqual(
+            scan.output_directory, Path("../run_data/temperature_commissioning")
+        )
+
+    def test_temperature_scan_rejects_unknown_field_before_hardware(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            "start_k = 1.7", "start_k = 1.7\nunknown_option = true"
+        )
+        with self.assertRaisesRegex(ConfigError, r"temperature_scan.*unknown_option"):
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
+
+    def test_temperature_scan_requires_step_to_land_on_stop(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            "step_k = 0.1", "step_k = 0.3"
+        )
+        with self.assertRaisesRegex(ConfigError, "land exactly"):
+            with patch(
+                "attodry_control.config.Path.open",
+                mock_open(read_data=text.encode("utf-8")),
+            ):
+                load_temperature_operation_config("test.toml")
 
     def test_malformed_toml_is_reported_as_configuration_error(self) -> None:
         with self.assertRaisesRegex(ConfigError, "Invalid TOML"):

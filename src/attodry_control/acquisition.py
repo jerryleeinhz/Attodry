@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 from typing import Callable, Iterable
 
 from .cleanup import CleanupReport
-from .config import FieldEndPolicy
+from .config import FieldEndPolicy, TemperatureInterruptPolicy
 from .models import CryostatState
-from .records import AttemptStatus, ExperimentCondition
+from .records import AttemptStatus, ExperimentCondition, RawStationSample
 from .simulation import InterruptedAttemptState, SimulationStation
 from .storage import RunStore
 
@@ -34,6 +34,10 @@ class SimulationRunEngine:
         station_factory: Callable[[], SimulationStation],
         max_attempts_per_condition: int = 2,
         normal_end_field_policy: FieldEndPolicy = FieldEndPolicy.HOLD,
+        interrupt_policy: TemperatureInterruptPolicy = (
+            TemperatureInterruptPolicy.ABORT
+        ),
+        confirmation: Callable[[str], str] | None = None,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         if not run_id.strip():
@@ -45,6 +49,8 @@ class SimulationRunEngine:
         self.station_factory = station_factory
         self.max_attempts_per_condition = max_attempts_per_condition
         self.normal_end_field_policy = normal_end_field_policy
+        self.interrupt_policy = interrupt_policy
+        self.confirmation = confirmation
         self.now = now
 
     def start_new(
@@ -75,11 +81,16 @@ class SimulationRunEngine:
             self.run_id,
             completed_at_utc=self.now(),
         )
+        pending = self.store.pending_condition_ids(self.run_id)
         self.store.append_event(
             self.run_id,
             event_type="run_resumed",
             message="simulation acquisition resumed",
-            payload={"recovered_incomplete_attempts": recovered},
+            payload={
+                "recovered_incomplete_attempts": recovered,
+                "resume_strategy": "repeat-first-pending-condition",
+                "resume_condition_id": pending[0] if pending else None,
+            },
             created_at_utc=self.now(),
         )
         return self._execute(ordered)
@@ -94,7 +105,12 @@ class SimulationRunEngine:
             if condition.condition_id not in pending:
                 continue
             accepted = False
-            for _ in range(self.max_attempts_per_condition):
+            automatic_recoveries = 0
+            attempts_allowed = self.max_attempts_per_condition
+            attempts_used = 0
+            confirmation_retry_used = False
+            while attempts_used < attempts_allowed:
+                attempts_used += 1
                 started = self.now()
                 attempt_index = self.store.start_attempt(
                     self.run_id,
@@ -103,17 +119,32 @@ class SimulationRunEngine:
                 )
                 station = self.station_factory()
                 try:
-                    outcome = station.run_attempt(
-                        condition,
-                        attempt_index=attempt_index,
-                        started_at_utc=started,
-                        now=self.now,
+                    temperature_prequalified = (
+                        self.store.has_temperature_qualification(
+                            self.run_id, condition.temperature_k
+                        )
                     )
+                    if temperature_prequalified:
+                        outcome = station.run_attempt(
+                            condition,
+                            attempt_index=attempt_index,
+                            started_at_utc=started,
+                            now=self.now,
+                            temperature_prequalified=True,
+                        )
+                    else:
+                        outcome = station.run_attempt(
+                            condition,
+                            attempt_index=attempt_index,
+                            started_at_utc=started,
+                            now=self.now,
+                        )
                 except KeyboardInterrupt as exc:
                     interrupted = getattr(exc, "attempt_state", None)
                     if isinstance(interrupted, InterruptedAttemptState):
                         for sample in interrupted.station_samples:
                             self.store.append_station_sample(self.run_id, sample)
+                            self._save_temperature_qualification(condition, sample)
                         for raw in interrupted.raw_readings:
                             self.store.append_raw_reading(self.run_id, raw)
                     self.store.reject_incomplete_attempts(
@@ -121,18 +152,36 @@ class SimulationRunEngine:
                         completed_at_utc=self.now(),
                         reason="operator interrupt; hardware cleanup attempted",
                     )
+                    action = self._interrupt_action(automatic_recoveries)
                     self.store.append_event(
                         self.run_id,
                         event_type="run_interrupted",
-                        message="operator interrupt; run aborted",
-                        payload=_cleanup_audit_payload(
-                            None if interrupted is None else interrupted.cleanup
-                        ),
+                        message="operator interrupt; recovery decision recorded",
+                        payload={
+                            **_cleanup_audit_payload(
+                                None if interrupted is None else interrupted.cleanup
+                            ),
+                            "policy": self.interrupt_policy.value,
+                            "action": action,
+                            "resume_strategy": "repeat-interrupted-condition",
+                            "resume_condition_id": condition.condition_id,
+                            "resume_attempt_index": attempt_index,
+                        },
                         level="WARNING",
                         condition_id=condition.condition_id,
                         attempt_index=attempt_index,
                         created_at_utc=self.now(),
                     )
+                    if action in {"continue", "continue-after-confirmation"}:
+                        if (
+                            action == "continue-after-confirmation"
+                            and not confirmation_retry_used
+                        ):
+                            confirmation_retry_used = True
+                            attempts_allowed += 1
+                        rejected_attempts += 1
+                        automatic_recoveries += 1
+                        continue
                     self.store.set_run_status(self.run_id, "aborted")
                     raise
 
@@ -166,6 +215,9 @@ class SimulationRunEngine:
                             accepted_result=None,
                             cleanup=shutdown,
                         )
+
+                for station_sample in outcome.station_samples:
+                    self._save_temperature_qualification(condition, station_sample)
 
                 for station_sample in outcome.station_samples:
                     self.store.append_station_sample(self.run_id, station_sample)
@@ -226,6 +278,45 @@ class SimulationRunEngine:
             accepted_conditions=accepted_conditions,
             rejected_attempts=rejected_attempts,
         )
+
+    def _interrupt_action(self, automatic_recoveries: int) -> str:
+        policy = self.interrupt_policy
+        if policy is TemperatureInterruptPolicy.ABORT:
+            return "abort"
+        if (
+            policy is TemperatureInterruptPolicy.CONTINUE
+            and automatic_recoveries >= 1
+        ):
+            policy = TemperatureInterruptPolicy.WAIT_CONFIRMATION
+        if policy is TemperatureInterruptPolicy.WAIT_CONFIRMATION:
+            answerer = self.confirmation or input
+            try:
+                answer = answerer(
+                    "Temperature/acquisition state was cleaned up. Repeat the "
+                    "interrupted condition? [y/N] "
+                )
+            except KeyboardInterrupt:
+                return "abort"
+            if answer.strip().lower() not in {"y", "yes", "continue"}:
+                return "abort"
+            return "continue-after-confirmation"
+        return "continue"
+
+    def _save_temperature_qualification(
+        self, condition: ExperimentCondition, station_sample: RawStationSample
+    ) -> None:
+        cryostat = station_sample.cryostat
+        if (
+            cryostat.temperature_control_enabled
+            and cryostat.error_code == 0
+            and abs(cryostat.user_temperature_k - condition.temperature_k) <= 1e-4
+        ):
+            self.store.save_temperature_qualification(
+                self.run_id,
+                target_k=condition.temperature_k,
+                state=cryostat,
+                qualified_at_utc=station_sample.captured_at_utc,
+            )
 
     @staticmethod
     def _ordered_conditions(

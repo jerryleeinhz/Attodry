@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from .lockin_autorange import AutorangePolicy
 from .models import LockinRole
 from .safety import MagnetLimits
+from .scans import temperature_scan_points
 from .sr830_settings import (
     ExternalReferenceEdge,
     InputCoupling,
@@ -43,6 +44,21 @@ class FieldEndPolicy(StrEnum):
     ZERO = "zero"
 
 
+class TemperatureInterruptPolicy(StrEnum):
+    """How a recoverable operator interruption is handled."""
+
+    CONTINUE = "continue"
+    ABORT = "abort"
+    WAIT_CONFIRMATION = "wait-confirmation"
+
+
+class TemperatureStabilityMode(StrEnum):
+    """How a temperature point becomes measurement-ready."""
+
+    TARGET = "target"
+    STABLE_READBACK = "stable-readback"
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectConfig:
     mode: RunMode
@@ -65,6 +81,8 @@ class StabilityConfig:
     criteria: StabilityCriteria
     poll_interval_s: float
     wait_timeout_s: float
+    acceptance_mode: TemperatureStabilityMode = TemperatureStabilityMode.TARGET
+    min_response_k: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +92,18 @@ class TemperatureRunConfig:
     max_overshoot_k: float
     pre_measure_wait_s: float
     poll_interval_s: float
+    interrupt_policy: TemperatureInterruptPolicy = TemperatureInterruptPolicy.ABORT
+    resume_recheck_s: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class TemperatureScanConfig:
+    start_k: float
+    stop_k: float
+    step_k: float
+    run_name: str
+    note: str
+    output_directory: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +112,7 @@ class TemperatureOperationConfig:
     magnet: MagnetConfig
     temperature_stability: StabilityConfig
     temperature_run: TemperatureRunConfig
+    temperature_scan: TemperatureScanConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,7 +328,11 @@ def load_config(
             document,
             "top level",
             expected_tables,
-            {"temperature_run"} if project.mode is RunMode.HARDWARE else set(),
+            (
+                {"temperature_run", "temperature_scan"}
+                if project.mode is RunMode.HARDWARE
+                else set()
+            ),
         )
 
         cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
@@ -448,18 +483,49 @@ def _parse_stability(
     table: Mapping[str, Any], name: str, value_prefix: str
 ) -> StabilityConfig:
     tolerance_key = f"{value_prefix}tolerance_t" if value_prefix else "tolerance_k"
-    expected = {
-        tolerance_key,
-        "stable_range_t" if value_prefix else "stable_range_k",
-        "stable_dwell_s",
-        "poll_interval_s",
-        "wait_timeout_s",
-    }
-    if name != "magnet":
-        _strict_keys(table, name, expected)
     range_key = "stable_range_t" if value_prefix else "stable_range_k"
+    if value_prefix:
+        if name != "magnet":
+            _strict_keys(
+                table,
+                name,
+                {
+                    tolerance_key,
+                    range_key,
+                    "stable_dwell_s",
+                    "poll_interval_s",
+                    "wait_timeout_s",
+                },
+            )
+        acceptance_mode = TemperatureStabilityMode.TARGET
+        min_response_k = 0.0
+    else:
+        _strict_keys_with_optional(
+            table,
+            name,
+            {range_key, "stable_dwell_s", "poll_interval_s", "wait_timeout_s"},
+            {tolerance_key, "acceptance_mode", "min_response_k"},
+        )
+        try:
+            acceptance_mode = TemperatureStabilityMode(
+                _string(table.get("acceptance_mode", "target"), f"{name}.acceptance_mode")
+            )
+        except ValueError as exc:
+            allowed = ", ".join(mode.value for mode in TemperatureStabilityMode)
+            raise ConfigError(
+                f"{name}.acceptance_mode must be one of: {allowed}."
+            ) from exc
+        min_response_k = _nonnegative_number(
+            table.get("min_response_k", 0.0), f"{name}.min_response_k"
+        )
+        if acceptance_mode is TemperatureStabilityMode.TARGET and tolerance_key not in table:
+            raise ConfigError(f"{name} is missing field(s): {tolerance_key}.")
     criteria = StabilityCriteria(
-        tolerance=_positive_number(table[tolerance_key], f"{name}.{tolerance_key}"),
+        tolerance=(
+            _positive_number(table[tolerance_key], f"{name}.{tolerance_key}")
+            if tolerance_key in table
+            else None
+        ),
         stable_range=_nonnegative_number(table[range_key], f"{name}.{range_key}"),
         dwell_s=_positive_number(table["stable_dwell_s"], f"{name}.stable_dwell_s"),
     )
@@ -471,14 +537,20 @@ def _parse_stability(
     )
     if wait_timeout_s < criteria.dwell_s:
         raise ConfigError(f"{name}.wait_timeout_s must cover stable_dwell_s.")
-    return StabilityConfig(criteria, poll_interval_s, wait_timeout_s)
+    return StabilityConfig(
+        criteria,
+        poll_interval_s,
+        wait_timeout_s,
+        acceptance_mode=acceptance_mode,
+        min_response_k=min_response_k,
+    )
 
 
 def _parse_temperature_run(
     table: Mapping[str, Any], cryostat: CryostatConfig
 ) -> TemperatureRunConfig:
     name = "temperature_run"
-    _strict_keys(
+    _strict_keys_with_optional(
         table,
         name,
         {
@@ -488,6 +560,7 @@ def _parse_temperature_run(
             "pre_measure_wait_s",
             "poll_interval_s",
         },
+        {"interrupt_policy", "resume_recheck_s"},
     )
     target_k = _positive_number(table["target_k"], f"{name}.target_k")
     max_delta_k = _positive_number(table["max_delta_k"], f"{name}.max_delta_k")
@@ -499,6 +572,21 @@ def _parse_temperature_run(
     )
     poll_interval_s = _positive_number(
         table["poll_interval_s"], f"{name}.poll_interval_s"
+    )
+    raw_policy = table.get(
+        "interrupt_policy", TemperatureInterruptPolicy.ABORT.value
+    )
+    try:
+        interrupt_policy = TemperatureInterruptPolicy(
+            _string(raw_policy, f"{name}.interrupt_policy")
+        )
+    except ValueError as exc:
+        allowed = ", ".join(policy.value for policy in TemperatureInterruptPolicy)
+        raise ConfigError(
+            f"{name}.interrupt_policy must be one of: {allowed}."
+        ) from exc
+    resume_recheck_s = _positive_number(
+        table.get("resume_recheck_s", 30.0), f"{name}.resume_recheck_s"
     )
     if not cryostat.temperature_min_k <= target_k <= cryostat.temperature_max_k:
         raise ConfigError("temperature_run.target_k is outside cryostat limits.")
@@ -516,6 +604,54 @@ def _parse_temperature_run(
         max_overshoot_k=max_overshoot_k,
         pre_measure_wait_s=pre_measure_wait_s,
         poll_interval_s=poll_interval_s,
+        interrupt_policy=interrupt_policy,
+        resume_recheck_s=resume_recheck_s,
+    )
+
+
+def _parse_temperature_scan(
+    table: Mapping[str, Any],
+    cryostat: CryostatConfig,
+    temperature_run: TemperatureRunConfig,
+) -> TemperatureScanConfig:
+    name = "temperature_scan"
+    _strict_keys(
+        table,
+        name,
+        {
+            "start_k",
+            "stop_k",
+            "step_k",
+            "run_name",
+            "note",
+            "output_directory",
+        },
+    )
+    start_k = _positive_number(table["start_k"], f"{name}.start_k")
+    stop_k = _positive_number(table["stop_k"], f"{name}.stop_k")
+    step_k = _positive_number(table["step_k"], f"{name}.step_k")
+    if not cryostat.temperature_min_k <= start_k <= cryostat.temperature_max_k:
+        raise ConfigError("temperature_scan.start_k is outside cryostat limits.")
+    if not cryostat.temperature_min_k <= stop_k <= cryostat.temperature_max_k:
+        raise ConfigError("temperature_scan.stop_k is outside cryostat limits.")
+    if stop_k + temperature_run.max_overshoot_k > cryostat.temperature_max_k:
+        raise ConfigError(
+            "temperature_scan stop plus temperature_run.max_overshoot_k exceeds "
+            "the cryostat limit."
+        )
+    try:
+        temperature_scan_points(start_k, stop_k, step_k)
+    except ValueError as exc:
+        raise ConfigError(f"Invalid temperature_scan grid: {exc}") from exc
+    return TemperatureScanConfig(
+        start_k=start_k,
+        stop_k=stop_k,
+        step_k=step_k,
+        run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
+        note=_sweep_note(table["note"], f"{name}.note"),
+        output_directory=_relative_directory(
+            table["output_directory"], f"{name}.output_directory"
+        ),
     )
 
 
@@ -534,6 +670,7 @@ def load_temperature_operation_config(
         "magnet",
         "temperature_stability",
         "temperature_run",
+        "temperature_scan",
         "cleanup",
         "visa",
         "lockin_xx",
@@ -564,11 +701,19 @@ def load_temperature_operation_config(
     temperature_run = _parse_temperature_run(
         _table(document, "temperature_run"), cryostat
     )
+    temperature_scan = (
+        _parse_temperature_scan(
+            _table(document, "temperature_scan"), cryostat, temperature_run
+        )
+        if "temperature_scan" in document
+        else None
+    )
     return TemperatureOperationConfig(
         cryostat=cryostat,
         magnet=magnet,
         temperature_stability=temperature_stability,
         temperature_run=temperature_run,
+        temperature_scan=temperature_scan,
     )
 
 

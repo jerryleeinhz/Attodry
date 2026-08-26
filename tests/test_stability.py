@@ -1,6 +1,11 @@
 import unittest
 
-from attodry_control.stability import StabilityCriteria, TimedValue, evaluate_stability
+from attodry_control.stability import (
+    StabilityCriteria,
+    TimedValue,
+    evaluate_readback_stability,
+    evaluate_stability,
+)
 
 
 CRITERIA = StabilityCriteria(
@@ -20,6 +25,25 @@ class StabilityTests(unittest.TestCase):
         ]
 
         self.assertTrue(evaluate_stability(samples, 2.0, CRITERIA))
+
+    def test_dwell_accepts_poll_jitter_without_exact_cutoff_sample(self) -> None:
+        samples = [
+            TimedValue(index * 1.501, 2.0) for index in range(21)
+        ]
+
+        self.assertTrue(evaluate_stability(samples, 2.0, CRITERIA))
+
+    def test_readback_stability_does_not_require_setpoint_tolerance(self) -> None:
+        samples = [
+            TimedValue(0.0, 1.72),
+            TimedValue(5.0, 1.73),
+            TimedValue(10.0, 1.72),
+        ]
+        criteria = StabilityCriteria(
+            tolerance=None, stable_range=0.02, dwell_s=10.0
+        )
+
+        self.assertTrue(evaluate_readback_stability(samples, criteria))
 
     def test_out_of_tolerance_sample_breaks_stability(self) -> None:
         samples = [

@@ -34,6 +34,19 @@ def frequency_scan(
     return values
 
 
+def temperature_scan_points(
+    start_k: float, stop_k: float, step_k: float
+) -> tuple[float, ...]:
+    """Return an inclusive, ascending temperature plan without float drift."""
+
+    values = _inclusive_scan(start_k, stop_k, step_k, "temperature")
+    if any(value <= 0 for value in values):
+        raise ValueError("Temperature scan values must be positive.")
+    if len(values) > 1 and step_k <= 0:
+        raise ValueError("Temperature scans must be ascending.")
+    return values
+
+
 def field_grid(
     *,
     bx_values: Iterable[float],

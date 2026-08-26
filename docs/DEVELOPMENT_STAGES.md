@@ -859,3 +859,91 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   current–Vxx/Vxy curves grouped by actual frequency; the notebook exposes a
   combined-record selector and exports it in `selection_manifest.json`. Offline
   tests and notebook compilation pass; no hardware resource was opened.
+## Stage 7 follow-up - temperature interruption and point recovery
+
+Status: offline implementation complete (2026-08-24); real interruption/recovery
+remains pending explicit hardware authorization.
+
+- Added `[temperature_run].interrupt_policy` with `continue`, `abort` (default), and
+  `wait-confirmation`; omitted policy values remain backward-compatible with the
+  existing abort behavior.
+- Added `[temperature_run].resume_recheck_s`, default 30 s. A continue or confirmed
+  resume requires a fresh full-state recheck before the temperature run can become
+  measurement-ready. A second automatic continue request changes to confirmation.
+- Overshoot, nonzero attoDRY errors, communication failures, and unconfirmed
+  control/setpoint states remain hard fail-closed paths regardless of policy.
+- Extended SQLite acquisition interruption/resume audit payloads to identify the
+  interrupted condition; resume repeats that condition with a new attempt index and
+  keeps partial raw data rejected for audit.
+- Persisted an error-free, enabled temperature qualification per run/target. A later
+  pending condition at the same target uses a short simulated readback recheck rather
+  than repeating the full temperature wait; the real integration must perform the
+  corresponding hardware recheck before relying on the token.
+- Added fake-DLL, simulated-station, configuration, and SQLite tests. No vendor DLL
+  was loaded and no real instrument was connected for this feature.
+
+## Stage 7 follow-up - ascending temperature stability scan
+
+Status: target-offline complete (2026-08-25); real multi-point commissioning
+remains pending separate authorization.
+
+- Added strict `[temperature_scan]` configuration for the 1.7--2.7 K, 0.1 K
+  ascending grid, `run_name`, `note`, and a TOML-relative output directory.
+  Stability timing remains solely in `[temperature_stability]`; movement,
+  0.2 K overshoot, and interruption behavior remain solely in `[temperature_run]`.
+- Added the explicitly gated `attodry-temperature-scan` entry point. The entire
+  grid and consecutive movement bound are validated before DLL loading; the real
+  path is unavailable without `--authorize-temperature-scan`.
+- Every point preserves the commissioned control-before-setpoint order and records
+  requested setpoint, actual setpoint readback, actual sample temperature,
+  time-to-first-tolerance, time-to-stable, and stable-window range statistics.
+- Raw state/transition/interruption records are fsynced incrementally to JSONL.
+  Final JSON and CSV retain completed, rejected, and interrupted outcomes, resolved
+  configuration, Git commit, cleanup errors, and last confirmed state.
+- Soft interruption recovery requires a fresh full-state recheck and restarts the
+  current dwell window. `--resume-progress` verifies the archived configuration,
+  preserves contiguous completed points, and repeats the first incomplete point.
+- Failure attempts idempotently disable temperature control when a write may have
+  occurred. Normal completion holds the final target with control enabled. A
+  communication/readback failure never claims confirmed shutdown.
+- Source/test compilation and the complete offline suite passed: 315 tests, with
+  5 optional matplotlib-dependent skips. Fake-DLL cases cover authorization before
+  DLL load, successful timing, overshoot cleanup, soft interruption, and process
+  resume. No real DLL was loaded, no attoDRY connection was opened, and no hardware
+  command was sent.
+- Target-offline passed from an isolated, DLL-free source snapshot on `LK_setup`
+  using `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`, Python 3.12.13 64-bit.
+  Import resolved to that snapshot's `src`; compileall and all 315 tests passed
+  with 0 skips. The strict example parsed to all 11 points, CLI help passed, and
+  invoking the scan without authorization returned the expected pre-DLL error.
+  Snapshot SHA-256 was
+  `CB8CAC713B92FB414E6382710878DA8E7DA39CAA5EB26CB765FB90F331BA3DBC`.
+  The dedicated target directory and transferred archive were path-verified,
+  removed after validation, and confirmed absent.
+  No existing `hardware.local.toml` was found under the target user profile, so
+  this stage validated the tracked example rather than claiming station-local
+  configuration readiness.
+- A real run requires new authorization plus creation/verification of the ignored
+  local TOML and DLL path. The recommended first orchestration write is
+  1.7--1.8 K before the full 1.7--2.7 K scan.
+
+## Stage 7 follow-up - stable-readback measurement acceptance
+
+Status: real hardware commissioned on `LK_setup` (2026-08-26).
+
+- Added `temperature_stability.acceptance_mode = "stable-readback"`, which uses the
+  actual sample-temperature plateau for measurement readiness and keeps the requested
+  setpoint as an audited command rather than an analysis coordinate.
+- Added `min_response_k` for points after the first and archived
+  `measurement_temperature_k`, response time, stable-window mean, standard deviation,
+  range, and sample count in JSON and CSV.
+- Fixed rolling stability at non-exact polling boundaries by retaining one sample
+  before the dwell cutoff. A 1.501 s polling-jitter regression test now covers the
+  failure seen during the previous real scan.
+- PID gains and heater settings remain read-only; the scan does not write either.
+- Offline tests passed with the existing target mode and the new readback mode.
+- The authorized `LK_setup` run at commit `cba448b` completed all 11 requested points
+  from 1.7 K through 3.7 K in 0.2 K steps. The final confirmed state retained a
+  3.7 K user setpoint with a 3.569 K sample readback, temperature control enabled,
+  error code zero, and a clean DLL disconnect. Every point archived its stable-window
+  measurement and timing; PID and heater settings were not written.
