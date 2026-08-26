@@ -56,9 +56,13 @@ resume_recheck_s = 30.0
 # come from [temperature_stability]; movement, overshoot, and interruption policy
 # come from [temperature_run], so those safety facts are not duplicated here.
 [temperature_scan]
-start_k = 1.7
-stop_k = 2.7
-step_k = 0.1
+# Each range is inclusive. Ranges must be strictly ascending and must not share
+# an endpoint. Linear ranges use exactly one of step or points; log ranges use
+# points only. Use start_k/stop_k/step_k only for a legacy single linear grid.
+temperature_ranges = [
+  { min = 1.7, max = 2.1, scale = "linear", points = 5 },
+  { min = 2.2, max = 2.7, scale = "linear", points = 6 },
+]
 run_name = "temperature_1p7_to_2p7"
 note = "First stepwise temperature-stability timing scan."
 # Relative to this TOML. Raw JSONL is flushed throughout the run; the command

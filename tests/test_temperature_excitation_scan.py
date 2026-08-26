@@ -45,7 +45,14 @@ class TemperatureExcitationScanTests(unittest.TestCase):
             .replace("C:/CHANGE_ME/attoDRYxyz64bit.dll", "fake-attodry.dll")
             .replace("CHANGE_ME_SR830_XX_VISA_ADDRESS", "XX")
             .replace("CHANGE_ME_SR830_XY_VISA_ADDRESS", "XY")
-            .replace("stop_k = 2.7", "stop_k = 1.7", 1)
+            .replace(
+                'temperature_ranges = [\n'
+                '  { min = 1.7, max = 2.1, scale = "linear", points = 5 },\n'
+                '  { min = 2.2, max = 2.7, scale = "linear", points = 6 },\n'
+                ']\n',
+                "start_k = 1.7\nstop_k = 1.7\nstep_k = 0.1\n",
+                1,
+            )
             .replace(
                 "stable_dwell_s = 30.0\npoll_interval_s = 1.5\nwait_timeout_s = 1800.0",
                 "stable_dwell_s = 1.0\npoll_interval_s = 0.1\nwait_timeout_s = 10.0",
@@ -75,6 +82,9 @@ class TemperatureExcitationScanTests(unittest.TestCase):
                 'output_directory = "temperature-excitation-output"',
                 1,
             )
+            # Keep generated fixture files below Windows' legacy path limit when
+            # this test suite itself is run from a deeply nested worktree.
+            .replace('run_name = "temperature_excitation"', 'run_name = "te"', 1)
         )
         config_path.write_text(text, encoding="utf-8")
         (self.workdir / "lockin_safety.toml").write_text(

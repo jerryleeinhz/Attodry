@@ -36,7 +36,6 @@ from .lockin_test import (
     prepare_configured_excitation_sweep,
 )
 from .models import CryostatState
-from .scans import temperature_scan_points
 from .sr830 import Sr830Error
 from .temperature_run import _close_with_note, _record_failure_diagnostic
 from .temperature_scan import (
@@ -121,11 +120,7 @@ def run(
     args = build_parser().parse_args(argv)
     config_path = args.config.resolve()
     config = load_temperature_excitation_operation_config(config_path)
-    temperature_points_k = temperature_scan_points(
-        config.temperature_scan.start_k,
-        config.temperature_scan.stop_k,
-        config.temperature_scan.step_k,
-    )
+    temperature_points_k = config.temperature_scan.points_k
     _validate_static_path(temperature_points_k, config.temperature_run)
     (
         lockin_args,

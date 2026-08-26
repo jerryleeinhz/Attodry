@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 import math
 from pathlib import Path
@@ -97,10 +98,20 @@ class TemperatureRunConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TemperatureRangeConfig:
+    """One inclusive ascending temperature segment from the local TOML."""
+
+    minimum_k: float
+    maximum_k: float
+    scale: str
+    step_k: float | None
+    points: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class TemperatureScanConfig:
-    start_k: float
-    stop_k: float
-    step_k: float
+    points_k: tuple[float, ...]
+    ranges: tuple[TemperatureRangeConfig, ...]
     run_name: str
     note: str
     output_directory: Path
@@ -651,44 +662,177 @@ def _parse_temperature_scan(
     temperature_run: TemperatureRunConfig,
 ) -> TemperatureScanConfig:
     name = "temperature_scan"
-    _strict_keys(
+    legacy_grid_keys = {"start_k", "stop_k", "step_k"}
+    _strict_keys_with_optional(
         table,
         name,
-        {
-            "start_k",
-            "stop_k",
-            "step_k",
-            "run_name",
-            "note",
-            "output_directory",
-        },
+        {"run_name", "note", "output_directory"},
+        legacy_grid_keys | {"temperature_ranges"},
     )
-    start_k = _positive_number(table["start_k"], f"{name}.start_k")
-    stop_k = _positive_number(table["stop_k"], f"{name}.stop_k")
-    step_k = _positive_number(table["step_k"], f"{name}.step_k")
-    if not cryostat.temperature_min_k <= start_k <= cryostat.temperature_max_k:
-        raise ConfigError("temperature_scan.start_k is outside cryostat limits.")
-    if not cryostat.temperature_min_k <= stop_k <= cryostat.temperature_max_k:
-        raise ConfigError("temperature_scan.stop_k is outside cryostat limits.")
-    if stop_k + temperature_run.max_overshoot_k > cryostat.temperature_max_k:
+    legacy_keys_present = legacy_grid_keys.intersection(table)
+    ranges_present = "temperature_ranges" in table
+    if legacy_keys_present and legacy_keys_present != legacy_grid_keys:
+        missing = ", ".join(sorted(legacy_grid_keys - legacy_keys_present))
+        raise ConfigError(f"{name} legacy grid is missing: {missing}.")
+    if bool(legacy_keys_present) == ranges_present:
+        raise ConfigError(
+            f"{name} requires exactly one of temperature_ranges or the legacy "
+            "start_k/stop_k/step_k grid."
+        )
+    if ranges_present:
+        ranges, points_k = _parse_temperature_ranges(
+            table["temperature_ranges"],
+            f"{name}.temperature_ranges",
+            minimum_k=cryostat.temperature_min_k,
+            maximum_k=cryostat.temperature_max_k,
+        )
+    else:
+        start_k = _positive_number(table["start_k"], f"{name}.start_k")
+        stop_k = _positive_number(table["stop_k"], f"{name}.stop_k")
+        step_k = _positive_number(table["step_k"], f"{name}.step_k")
+        if not cryostat.temperature_min_k <= start_k <= cryostat.temperature_max_k:
+            raise ConfigError("temperature_scan.start_k is outside cryostat limits.")
+        if not cryostat.temperature_min_k <= stop_k <= cryostat.temperature_max_k:
+            raise ConfigError("temperature_scan.stop_k is outside cryostat limits.")
+        try:
+            points_k = temperature_scan_points(start_k, stop_k, step_k)
+        except ValueError as exc:
+            raise ConfigError(f"Invalid temperature_scan grid: {exc}") from exc
+        ranges = (
+            TemperatureRangeConfig(
+                minimum_k=start_k,
+                maximum_k=stop_k,
+                scale="linear",
+                step_k=step_k,
+                points=None,
+            ),
+        )
+    if points_k[-1] + temperature_run.max_overshoot_k > cryostat.temperature_max_k:
         raise ConfigError(
             "temperature_scan stop plus temperature_run.max_overshoot_k exceeds "
             "the cryostat limit."
         )
-    try:
-        temperature_scan_points(start_k, stop_k, step_k)
-    except ValueError as exc:
-        raise ConfigError(f"Invalid temperature_scan grid: {exc}") from exc
     return TemperatureScanConfig(
-        start_k=start_k,
-        stop_k=stop_k,
-        step_k=step_k,
+        points_k=points_k,
+        ranges=ranges,
         run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
         note=_sweep_note(table["note"], f"{name}.note"),
         output_directory=_relative_directory(
             table["output_directory"], f"{name}.output_directory"
         ),
     )
+
+
+def _parse_temperature_ranges(
+    value: Any,
+    name: str,
+    *,
+    minimum_k: float,
+    maximum_k: float,
+) -> tuple[tuple[TemperatureRangeConfig, ...], tuple[float, ...]]:
+    if not isinstance(value, list) or not value:
+        raise ConfigError(f"{name} must be a non-empty array of range tables.")
+    ranges: list[TemperatureRangeConfig] = []
+    values: list[float] = []
+    previous_maximum_k: float | None = None
+    for index, raw_segment in enumerate(value):
+        segment_name = f"{name}[{index}]"
+        if not isinstance(raw_segment, dict):
+            raise ConfigError(f"{segment_name} must be a TOML table.")
+        _strict_keys_with_optional(
+            raw_segment,
+            segment_name,
+            {"min", "max", "scale"},
+            {"step", "points"},
+        )
+        segment_minimum_k = _positive_number(raw_segment["min"], f"{segment_name}.min")
+        segment_maximum_k = _positive_number(raw_segment["max"], f"{segment_name}.max")
+        if segment_minimum_k < minimum_k or segment_maximum_k > maximum_k:
+            raise ConfigError(
+                f"{segment_name} must remain within {minimum_k:g}-{maximum_k:g} K."
+            )
+        if segment_maximum_k <= segment_minimum_k:
+            raise ConfigError(f"{segment_name}.max must be greater than min.")
+        if (
+            previous_maximum_k is not None
+            and segment_minimum_k <= previous_maximum_k
+        ):
+            raise ConfigError(
+                f"{segment_name}.min must be greater than the previous segment max; "
+                "segments may not overlap or share a boundary point."
+            )
+        scale = _string(raw_segment["scale"], f"{segment_name}.scale")
+        if scale not in {"linear", "log"}:
+            raise ConfigError(f"{segment_name}.scale must be 'linear' or 'log'.")
+        step_k: float | None = None
+        points: int | None = None
+        if scale == "linear":
+            has_step = "step" in raw_segment
+            has_points = "points" in raw_segment
+            if has_step == has_points:
+                raise ConfigError(
+                    f"{segment_name} with linear scale requires exactly one of "
+                    "step or points."
+                )
+            if has_step:
+                step_k = _positive_number(raw_segment["step"], f"{segment_name}.step")
+                try:
+                    segment_values = temperature_scan_points(
+                        segment_minimum_k, segment_maximum_k, step_k
+                    )
+                except ValueError as exc:
+                    raise ConfigError(f"Invalid {segment_name}: {exc}") from exc
+            else:
+                points = _integer(raw_segment["points"], f"{segment_name}.points", minimum=2)
+                decimal_minimum = Decimal(str(segment_minimum_k))
+                decimal_span = Decimal(str(segment_maximum_k)) - decimal_minimum
+                decimal_denominator = Decimal(points - 1)
+                segment_values = tuple(
+                    float(
+                        decimal_minimum
+                        + decimal_span * Decimal(point_index) / decimal_denominator
+                    )
+                    for point_index in range(points)
+                )
+                segment_values = (
+                    segment_minimum_k,
+                    *segment_values[1:-1],
+                    segment_maximum_k,
+                )
+        else:
+            if "points" not in raw_segment or "step" in raw_segment:
+                raise ConfigError(
+                    f"{segment_name} with log scale requires points and forbids step."
+                )
+            points = _integer(raw_segment["points"], f"{segment_name}.points", minimum=2)
+            segment_values = tuple(
+                math.exp(
+                    math.log(segment_minimum_k)
+                    + (math.log(segment_maximum_k) - math.log(segment_minimum_k))
+                    * point_index
+                    / (points - 1)
+                )
+                for point_index in range(points)
+            )
+            segment_values = (
+                segment_minimum_k,
+                *segment_values[1:-1],
+                segment_maximum_k,
+            )
+        ranges.append(
+            TemperatureRangeConfig(
+                minimum_k=segment_minimum_k,
+                maximum_k=segment_maximum_k,
+                scale=scale,
+                step_k=step_k,
+                points=points,
+            )
+        )
+        values.extend(segment_values)
+        previous_maximum_k = segment_maximum_k
+    points_k = tuple(values)
+    _require_strictly_increasing(points_k, name)
+    return tuple(ranges), points_k
 
 
 def _parse_temperature_excitation_scan(

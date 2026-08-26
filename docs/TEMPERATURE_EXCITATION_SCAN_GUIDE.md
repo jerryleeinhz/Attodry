@@ -13,8 +13,8 @@ SR830 写入必须在未来获得一次范围明确的真实硬件授权后才�
 
 ## 运行前提和命令
 
-运行配置仍以 ignored 的 `config/hardware.local.toml` 为唯一日常来源：温度网格与稳定
-判据来自已有的温度表，SR830 的角色、幅值路径、正式谐波、时序和电学边界来自已有的
+运行配置仍以 ignored 的 `config/hardware.local.toml` 为唯一日常来源：温度网格（包括
+可分段的 `temperature_ranges`）与稳定判据来自已有的温度表，SR830 的角色、幅值路径、正式谐波、时序和电学边界来自已有的
 Lock-in 表；`[temperature_excitation_scan]` 只保存本组合扫描的运行标签、备注和输出目录。
 不要把地址、DLL 路径或原始数据提交到 Git。
 

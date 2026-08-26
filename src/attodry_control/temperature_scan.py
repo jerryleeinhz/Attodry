@@ -26,7 +26,6 @@ from .config import (
     load_temperature_operation_config,
 )
 from .models import CryostatState
-from .scans import temperature_scan_points
 from .temperature_run import (
     _close_with_note,
     _handle_operator_interrupt,
@@ -35,7 +34,7 @@ from .temperature_run import (
 
 
 DEFAULT_CONFIG_PATH = Path("config/hardware.local.toml")
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class _JsonlWriter:
@@ -112,7 +111,7 @@ def run(
     scan = config.temperature_scan
     if scan is None:
         raise ValueError("hardware TOML is missing the [temperature_scan] table.")
-    points_k = temperature_scan_points(scan.start_k, scan.stop_k, scan.step_k)
+    points_k = scan.points_k
     _validate_static_path(points_k, config.temperature_run)
     if not args.authorize_temperature_scan:
         raise AttoDryAuthorizationError(
@@ -626,9 +625,7 @@ def _measurement_config(
             "resume_recheck_s": run.resume_recheck_s,
         },
         "temperature_scan": {
-            "start_k": scan.start_k,
-            "stop_k": scan.stop_k,
-            "step_k": scan.step_k,
+            "ranges": [asdict(item) for item in scan.ranges],
             "points_k": list(points_k),
             "run_name": scan.run_name,
             "note": scan.note,

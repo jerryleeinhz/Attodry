@@ -1040,3 +1040,17 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   The complete offline suite passed with 396 tests and 5 optional
   matplotlib-dependent skips. No real DLL or
   real VISA resource was opened, and no hardware command was sent for this feature.
+
+## Stage 7 follow-up - segmented temperature grids
+
+Status: offline implementation complete (2026-08-26); no real hardware operation.
+
+- `[temperature_scan]` now accepts the recommended `temperature_ranges` array:
+  each inclusive, strictly ascending segment defines `min`, `max`, `scale`, and
+  either linear `step`/`points` or logarithmic `points`. Segments may not overlap
+  or share endpoints; every expanded point remains inside the cryostat and
+  overshoot limits before DLL loading.
+- The legacy `start_k`/`stop_k`/`step_k` single linear grid remains supported for
+  existing local configurations, but it cannot be mixed with `temperature_ranges`.
+  Both standalone temperature and temperature–excitation scans now use the same
+  archived expanded point sequence and segment metadata.

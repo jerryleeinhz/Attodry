@@ -1174,3 +1174,14 @@ authorized run. The detailed contract is in
    write still requires a separate plan-specific authorization.
 4. Freeze and verify the complete hardware wheelhouse on the offline control
    computer after its Python/VISA environment is known.
+
+## Current segmented temperature-grid update (2026-08-26)
+
+`[temperature_scan]` now supports lock-in-style `temperature_ranges`: each
+inclusive non-overlapping ascending segment selects linear or logarithmic spacing
+and an exact `step` or number of `points` as applicable. The expanded point sequence
+and segment metadata are the single contract used by both the standalone
+temperature scan and the temperature–excitation outer loop. The former
+`start_k`/`stop_k`/`step_k` format remains a read-compatible single-linear-grid
+fallback and cannot be combined with ranges. This is an offline configuration
+change only; it does not authorize or report a real DLL/VISA operation.

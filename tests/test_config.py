@@ -676,7 +676,7 @@ class ConfigurationTests(unittest.TestCase):
             ):
                 load_temperature_operation_config("test.toml")
 
-    def test_temperature_scan_loads_unified_grid_and_audit_fields(self) -> None:
+    def test_temperature_scan_loads_segmented_grid_and_audit_fields(self) -> None:
         with patch(
             "attodry_control.config.Path.open",
             mock_open(read_data=HARDWARE_EXAMPLE_CONFIG.read_bytes()),
@@ -686,7 +686,13 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIsNotNone(config.temperature_scan)
         scan = config.temperature_scan
         assert scan is not None
-        self.assertEqual((scan.start_k, scan.stop_k, scan.step_k), (1.7, 2.7, 0.1))
+        self.assertEqual(
+            scan.points_k,
+            (1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7),
+        )
+        self.assertEqual(len(scan.ranges), 2)
+        self.assertEqual(scan.ranges[0].points, 5)
+        self.assertEqual(scan.ranges[1].points, 6)
         self.assertEqual(scan.run_name, "temperature_1p7_to_2p7")
         self.assertEqual(
             scan.output_directory, Path("../run_data/temperature_commissioning")
@@ -694,7 +700,8 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_temperature_scan_rejects_unknown_field_before_hardware(self) -> None:
         text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
-            "start_k = 1.7", "start_k = 1.7\nunknown_option = true"
+            'run_name = "temperature_1p7_to_2p7"',
+            'run_name = "temperature_1p7_to_2p7"\nunknown_option = true',
         )
         with self.assertRaisesRegex(ConfigError, r"temperature_scan.*unknown_option"):
             with patch(
@@ -703,16 +710,52 @@ class ConfigurationTests(unittest.TestCase):
             ):
                 load_temperature_operation_config("test.toml")
 
-    def test_temperature_scan_requires_step_to_land_on_stop(self) -> None:
+    def test_temperature_scan_rejects_overlapping_segments(self) -> None:
         text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
-            "step_k = 0.1", "step_k = 0.3"
+            '{ min = 2.2, max = 2.7, scale = "linear", points = 6 }',
+            '{ min = 2.1, max = 2.7, scale = "linear", points = 6 }',
         )
-        with self.assertRaisesRegex(ConfigError, "land exactly"):
+        with self.assertRaisesRegex(ConfigError, "may not overlap"):
             with patch(
                 "attodry_control.config.Path.open",
                 mock_open(read_data=text.encode("utf-8")),
             ):
                 load_temperature_operation_config("test.toml")
+
+    def test_temperature_scan_accepts_legacy_single_linear_grid(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            'temperature_ranges = [\n'
+            '  { min = 1.7, max = 2.1, scale = "linear", points = 5 },\n'
+            '  { min = 2.2, max = 2.7, scale = "linear", points = 6 },\n'
+            ']\n',
+            "start_k = 1.7\nstop_k = 2.7\nstep_k = 0.1\n",
+        )
+        with patch(
+            "attodry_control.config.Path.open",
+            mock_open(read_data=text.encode("utf-8")),
+        ):
+            config = load_temperature_operation_config("test.toml")
+        assert config.temperature_scan is not None
+        self.assertEqual(config.temperature_scan.points_k[-1], 2.7)
+        self.assertEqual(config.temperature_scan.ranges[0].step_k, 0.1)
+
+    def test_temperature_scan_expands_linear_and_log_segments(self) -> None:
+        text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").replace(
+            '  { min = 1.7, max = 2.1, scale = "linear", points = 5 },\n'
+            '  { min = 2.2, max = 2.7, scale = "linear", points = 6 },',
+            '  { min = 1.7, max = 2.1, scale = "linear", points = 3 },\n'
+            '  { min = 2.2, max = 8.8, scale = "log", points = 3 },',
+        )
+        with patch(
+            "attodry_control.config.Path.open",
+            mock_open(read_data=text.encode("utf-8")),
+        ):
+            config = load_temperature_operation_config("test.toml")
+        assert config.temperature_scan is not None
+        self.assertEqual(config.temperature_scan.points_k[:3], (1.7, 1.9, 2.1))
+        self.assertAlmostEqual(config.temperature_scan.points_k[4], 4.4)
+        self.assertEqual(config.temperature_scan.points_k[-1], 8.8)
+        self.assertEqual(config.temperature_scan.ranges[1].scale, "log")
 
     def test_temperature_excitation_loader_requires_no_gate_or_smu_tables(self) -> None:
         text = HARDWARE_EXAMPLE_CONFIG.read_text(encoding="utf-8").split(
@@ -721,10 +764,7 @@ class ConfigurationTests(unittest.TestCase):
 
         config = self.load_temperature_excitation_text(text)
 
-        self.assertEqual(
-            config.temperature_scan.start_k,
-            1.7,
-        )
+        self.assertEqual(config.temperature_scan.points_k[0], 1.7)
         self.assertEqual(
             config.lockin_sweep.excitation_points_v_rms[0],
             0.004,

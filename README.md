@@ -108,7 +108,7 @@ python -m attodry_control.lockin_test --help
 严格稳定性诊断。
 
 逐点温度稳定性计时使用同一个 `hardware.local.toml` 中的
-`[temperature_scan]` 网格，并复用 `[temperature_stability]` 和
+`[temperature_scan]` 分段网格（`temperature_ranges`，可线性/对数并指定每段 points），并复用 `[temperature_stability]` 和
 `[temperature_run]` 的安全/中断参数。新命令当前只完成离线验证，真实多点写入仍需
 单独确认并带 `--authorize-temperature-scan`；操作、实时 JSONL 和断点恢复说明见
 [`docs/TEMPERATURE_SCAN_GUIDE.md`](docs/TEMPERATURE_SCAN_GUIDE.md)。

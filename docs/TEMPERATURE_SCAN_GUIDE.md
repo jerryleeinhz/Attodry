@@ -20,9 +20,13 @@ COM 端口占用。
 
 ```toml
 [temperature_scan]
-start_k = 1.7
-stop_k = 2.7
-step_k = 0.1
+# Every segment includes both endpoints. Segments must be ascending and cannot
+# overlap or share an endpoint. Linear segments use exactly one of step/points;
+# log segments use points only.
+temperature_ranges = [
+  { min = 1.7, max = 2.1, scale = "linear", points = 5 },
+  { min = 2.2, max = 2.7, scale = "linear", points = 6 },
+]
 run_name = "temperature_1p7_to_2p7"
 note = "First stepwise temperature-stability timing scan."
 output_directory = "../run_data/temperature_commissioning"
@@ -50,6 +54,11 @@ min_response_k = 0.02
 `pre_measure_wait_s` 与 `[temperature_run].target_k` 不参与稳定扫描；它们仍只服务
 原有单点日常运行。这样网格、稳定判据和安全事实各有一个来源。
 
+`temperature_ranges` 是日常推荐格式，允许把温度区间拆成任意多个线性或对数段；每段
+使用 `min`、`max`、`scale`，线性段再二选一 `step` 或 `points`，对数段必须使用
+`points`。所有段展开后必须严格升序，不能重叠或共享端点。旧的
+`start_k`/`stop_k`/`step_k` 单一线性格式仍可读取，不能与 `temperature_ranges` 混用。
+
 当前命令只接受升温网格。降温时同一个正向过冲判据含义不同，因此在另行确认降温
 安全和验收规则前不会把负步长默认为安全。
 
@@ -69,7 +78,7 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -c `
 ```powershell
 $env:PYTHONPATH = (Resolve-Path src).Path
 C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -c `
-  "from attodry_control.config import load_temperature_operation_config as load; from attodry_control.scans import temperature_scan_points; c=load('config/hardware.local.toml'); s=c.temperature_scan; print(s); print(temperature_scan_points(s.start_k,s.stop_k,s.step_k))"
+  "from attodry_control.config import load_temperature_operation_config as load; c=load('config/hardware.local.toml'); s=c.temperature_scan; print(s.ranges); print(s.points_k)"
 C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
   attodry_control.temperature_scan --help
 ```
