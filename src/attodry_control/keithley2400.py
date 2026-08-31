@@ -58,8 +58,8 @@ class KeithleyMonitorReading:
     source_mode: SourceMode
     source_setpoint: float
     output_enabled: bool
-    voltage_v: float
-    current_a: float
+    voltage_v: float | None
+    current_a: float | None
     compliance_limit: float
     source_range: float
     measure_range: float
@@ -70,7 +70,7 @@ class KeithleyMonitorReading:
 
     @property
     def resistance_ohm(self) -> float | None:
-        if self.current_a == 0:
+        if self.voltage_v is None or self.current_a in (None, 0):
             return None
         return self.voltage_v / self.current_a
 
@@ -360,11 +360,17 @@ class VisaKeithley2400Monitor:
         mode = _parse_source_mode(self.ask(":SOUR:FUNC?"), self.role)
         source = self._query_source(mode)
         output = _parse_bool(self.ask(":OUTP?"), f"{self.role} output")
-        values = _parse_float_list(self.ask(":READ?"))
-        if len(values) < 2 or not all(math.isfinite(value) for value in values[:2]):
-            raise Keithley2400Error(
-                f"{self.role} :READ? did not return finite voltage/current"
-            )
+        voltage_v: float | None = None
+        current_a: float | None = None
+        if output:
+            values = _parse_float_list(self.ask(":READ?"))
+            if len(values) < 2 or not all(
+                math.isfinite(value) for value in values[:2]
+            ):
+                raise Keithley2400Error(
+                    f"{self.role} :READ? did not return finite voltage/current"
+                )
+            voltage_v, current_a = values[:2]
         source_function = "VOLT" if mode is SourceMode.VOLTAGE else "CURR"
         measure_function = "CURR" if mode is SourceMode.VOLTAGE else "VOLT"
         compliance = self._query_float(
@@ -395,8 +401,8 @@ class VisaKeithley2400Monitor:
             source_mode=mode,
             source_setpoint=source,
             output_enabled=output,
-            voltage_v=values[0],
-            current_a=values[1],
+            voltage_v=voltage_v,
+            current_a=current_a,
             compliance_limit=compliance,
             source_range=source_range,
             measure_range=measure_range,

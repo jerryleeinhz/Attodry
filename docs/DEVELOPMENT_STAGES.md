@@ -654,10 +654,10 @@ writes remain uncommissioned and require separate explicit authorization.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 
-Status: model-independent offline core and the independent Three-SMU QCoDeS S0
-module are complete (updated 2026-08-26, direct-points safety contract follow-up);
-target-computer and real-SMU commissioning remain pending explicit authorization
-and operator-filled limits.
+Status: model-independent offline core and Three-SMU target-offline validation are
+complete. One bounded M4 read-only commissioning run passed for the current
+bottom-only active plan (updated 2026-09-01); other roles, status-queue consumption,
+all setting writes, and integration remain pending separate authorization.
 
 - Added an explicitly write-authorized, model-independent gate controller with
   configured absolute-voltage limit, current compliance, stepped ramps, voltage
@@ -712,7 +712,7 @@ and operator-filled limits.
   chooser, and a bias slice can be selected for a two-gate map.
 - Added `three_smu_cli monitor-live`: an independent raw-VISA, query-only terminal
   monitor for the three configured semantic roles. It reports plan role, actual
-  V/I/R, source/output, compliance/trip/ranges/sense/identity and non-corrective
+  V/I/R when output is already on, source/output, compliance/trip/ranges/sense/identity and non-corrective
   safety warnings; it has no configure/ramp/output/cleanup path. Its default does
   not consume `:SYST:ERR?`; `--consume-status-queue` remains explicit, and the
   monitor may not run concurrently with a scan.
@@ -779,6 +779,16 @@ and operator-filled limits.
   Keithley, CLI, Notebook, analysis, and gate tests passed; the full offline suite
   passed all 400 tests with five optional plotting skips, and `compileall` passed.
   No real hardware library/resource was opened and no real query or write occurred.
+- Target read-only monitor follow-up (2026-09-01): the target `lyr` environment
+  passes all 402 offline tests plus `src/tests` compilation. A bounded real sample
+  opened only the current active `gate_bottom` Keithley 2400 and confirmed identity,
+  0 V setpoint, output OFF, compliance/ranges, 2-wire sense, and trip-clear without
+  consuming the error queue or sending setting writes. The monitor now skips
+  `:READ?` while output is OFF and reports V/I/R as unavailable; it never enables
+  output. Twenty-three focused fake/CLI regressions cover both output states. The
+  target's unused NI GPIB passport was disabled in favor of the installed Keithley
+  KUSB passport, and one selective device clear recovered a previously stuck parser
+  without `*RST` or source/output/compliance changes.
 
 ## Stage 6 - analysis and notebook migration
 
@@ -835,8 +845,8 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   wiring, phase preservation, settling, sensitivity transitions, latch handling,
   frequency tolerance, sequential pair reads, and cleanup. This is a planning
   and handoff deliverable only; it does not commission any new hardware writes.
-- Pending: Three-SMU target-`lyr` offline checks, operator-filled local safety
-  configuration, separately authorized real-SMU commissioning, integration into
+- Pending: remaining-role Three-SMU read-only commissioning, separately authorized
+  status-queue consumption and real-SMU setting writes, integration into
   the main acquisition, frozen hardware wheelhouse, and offline-control-computer
   installation verification.
 

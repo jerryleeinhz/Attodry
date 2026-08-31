@@ -2,12 +2,13 @@
 
 ## 状态与范围
 
-状态：`S0 offline complete`（2026-08-31 更新）。模块最多控制三台 Keithley 2400，语义角色为
+状态：`target offline complete`；当前 bottom-only active 计划已完成一次有界
+`read-only commissioned` 验收（2026-09-01 更新）。模块最多控制三台 Keithley 2400，语义角色为
 `smu_bias`、`gate_top`、`gate_bottom`。它提供统一 TOML、无 GUI CLI、调用同一
 `ThreeSmuSession` generator 的实时 Notebook、query-only 终端监控和 accepted-only 分析。
 
-第一版不连接、不读取、不记录 Lock-in，也不控制冷台或磁场。所有验收仍是离线和 fake
-instrument；真实 VISA 查询、状态队列消费和写入都未执行、未授权。
+第一版不连接、不读取、不记录 Lock-in，也不控制冷台或磁场。除当前 bottom-only 计划的一次明确
+授权 query-only 验收外，其余角色的真实 VISA 验收、状态队列消费和任何设置写入均未完成。
 
 `[three_smu_run.<role>].role` 是启用角色的唯一事实来源。`fixed`/`sweep` 角色
 必须有完整的同名硬件表，并且只有这些 active 角色会被验证、打开、读写、
@@ -92,7 +93,8 @@ python -m attodry_control.three_smu_cli run
 ```
 
 `describe` 完全离线。`monitor-live` 只有获得真实查询授权后才能使用；默认不消费
-`:SYST:ERR?`，`--consume-status-queue` 仍需单独授权。`run` 无需长授权参数，但会在打开硬件前
+`:SYST:ERR?`，`--consume-status-queue` 仍需单独授权。monitor 仅在仪器 output 已经 ON 时发送
+`:READ?`；output OFF 时保持 OFF 并把 V/I/R 显示为 `n/a`。`run` 无需长授权参数，但会在打开硬件前
 要求精确输入 `RUN THREE SMU`。
 
 每个 run 保存 schema v5 `metadata.json`、`raw.jsonl` 和 `data.csv`。schema v5 保留 v4
@@ -101,17 +103,16 @@ CSV 保留稳定列，off 角色字段为空。配置快照只含两条绝对边
 读回事件。requested source 与实际 setpoint/V/I 分开保存。默认分析只加载
 `completed + accepted + clean` formal samples；rejected/problem 需要显式 opt-in。
 
-当前 ordered-ranges/active/off 配置改动的 focused Three-SMU/Keithley/CLI/Notebook/
-analysis/gate 回归 76 项通过；完整离线回归 400 项通过（5 项可选 matplotlib 绘图跳过），
-`src/tests` compileall 通过。
-真实硬件动作数为 0。
+本次 monitor 修复的 23 项 Keithley/live/CLI 聚焦测试通过；完整离线回归 402 项通过，
+`src/tests` compileall 通过。当前仅启用 `gate_bottom` 的一次真实 query-only 样本通过：确认 output
+OFF、0 V setpoint、compliance/range/sense/trip，未发送 `:READ?`、未消费 error queue，也未发送
+设置写命令。
 
 完整操作者说明见 [`../THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)，实时
 监控边界见 [`../THREE_SMU_LIVE_MONITOR.md`](../THREE_SMU_LIVE_MONITOR.md)。
 
 ## 下一阶段
 
-下一步是 `S1 target offline`：仅在 `LK_setup` 的 `lyr` 环境安装/导入依赖、运行离线测试和
-`describe`，仍不打开 VISA。之后真实 read-only、状态队列消费和最小写入分别需要新授权。
-第一次实机前仍须人工确认本次 active SMU 的实际地址/identity、接线、2/4-wire、guard/ground/common、
+下一步是在分别授权下完成其他计划角色的 M4 real read-only 验收；状态队列消费和最小写入仍需各自
+的新授权。第一次写入前仍须人工确认本次 active SMU 的实际地址/identity、接线、2/4-wire、guard/ground/common、
 每台 source mode、两条绝对边界、容性负载/互锁和 output-off 语义。

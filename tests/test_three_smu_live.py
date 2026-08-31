@@ -34,7 +34,7 @@ def reading(role: str, **changes) -> KeithleyMonitorReading:
         identity=f"KEITHLEY,MODEL 2400,{role},1.0",
         source_mode=SourceMode.VOLTAGE,
         source_setpoint=0.1,
-        output_enabled=False,
+        output_enabled=True,
         voltage_v=0.1,
         current_a=5e-7,
         compliance_limit=1e-3,
@@ -76,6 +76,34 @@ class ThreeSmuLiveTests(unittest.TestCase):
             "gate_top", smu("gate_top"), reading("gate_top", current_a=2e-3)
         )
         self.assertTrue(any("max_abs_current_a" in problem for problem in problems))
+
+    def test_output_off_panel_marks_measurements_unavailable(self) -> None:
+        snapshot = ThreeSmuLiveSnapshot(
+            sample_index=0,
+            captured_at_utc=datetime(2026, 8, 26, tzinfo=timezone.utc),
+            status_queue_consumed=False,
+            plan_roles={
+                "smu_bias": ChannelRole.FIXED,
+                "gate_top": ChannelRole.OFF,
+                "gate_bottom": ChannelRole.OFF,
+            },
+            readings={
+                "smu_bias": reading(
+                    "smu_bias",
+                    output_enabled=False,
+                    voltage_v=None,
+                    current_a=None,
+                )
+            },
+        )
+        panel = format_live_three_smu_snapshot(snapshot)
+        self.assertIn("n/a", panel)
+        self.assertIn("live V/I/R unavailable while output is OFF", panel)
+        self.assertFalse(
+            monitor_problems(
+                "smu_bias", smu("smu_bias"), snapshot.readings["smu_bias"]
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -65,15 +65,19 @@ def monitor_problems(
             f"{role} source mode is {reading.source_mode.value}, expected "
             f"{config.source_mode.value}"
         )
-    if config.max_abs_voltage_v is not None and (
-        abs(reading.voltage_v) > config.max_abs_voltage_v
+    if (
+        reading.voltage_v is not None
+        and config.max_abs_voltage_v is not None
+        and abs(reading.voltage_v) > config.max_abs_voltage_v
     ):
         problems.append(
             f"{role} voltage {reading.voltage_v:g} V exceeds max_abs_voltage_v "
             f"{config.max_abs_voltage_v:g} V"
         )
-    if config.max_abs_current_a is not None and (
-        abs(reading.current_a) > config.max_abs_current_a
+    if (
+        reading.current_a is not None
+        and config.max_abs_current_a is not None
+        and abs(reading.current_a) > config.max_abs_current_a
     ):
         problems.append(
             f"{role} current {reading.current_a:g} A exceeds max_abs_current_a "
@@ -120,13 +124,15 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
             continue
         reading = snapshot.readings[role]
         source_unit = "V" if reading.source_mode is SourceMode.VOLTAGE else "A"
+        voltage = _format_measurement(reading.voltage_v, "V")
+        current = _format_measurement(reading.current_a, "A")
         resistance = _format_resistance(reading.resistance_ohm)
         lines.append(
             f"{role:<12} {snapshot.plan_roles[role].value:<6} "
             f"{reading.source_mode.value:<12} "
             f"{reading.source_setpoint:>9.4g} {source_unit:<1} "
-            f"{reading.voltage_v:>11.4e} V "
-            f"{reading.current_a:>11.4e} A "
+            f"{voltage:>13} "
+            f"{current:>13} "
             f"{resistance:>11} "
             f"{'ON' if reading.output_enabled else 'OFF':<7} "
             f"{'TRIP' if reading.compliance_trip else 'clear':<6} "
@@ -139,6 +145,11 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
             f"{measure_unit}; source range={reading.source_range:g} {source_unit}; "
             f"measure range={reading.measure_range:g} {measure_unit}; status={status}"
         )
+        if not reading.output_enabled:
+            lines.append(
+                f"  {role}: live V/I/R unavailable while output is OFF; "
+                ":READ? not sent"
+            )
     if snapshot.problems:
         lines.append("warnings:")
         lines.extend(f"  - {problem}" for problem in snapshot.problems)
@@ -150,7 +161,11 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
 
 
 def _format_resistance(value: float | None) -> str:
-    return "—" if value is None else f"{value:.4e} ohm"
+    return "n/a" if value is None else f"{value:.4e} ohm"
+
+
+def _format_measurement(value: float | None, unit: str) -> str:
+    return "n/a" if value is None else f"{value:.4e} {unit}"
 
 
 def _status_is_clean(status: str | None) -> bool:

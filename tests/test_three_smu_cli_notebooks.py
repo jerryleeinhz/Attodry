@@ -239,6 +239,10 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             self.assertTrue(resources["FAKE::1"].closed)
             self.assertFalse(resources["FAKE::2"].closed)
             self.assertFalse(resources["FAKE::3"].closed)
+            self.assertNotIn(":READ?", resources["FAKE::1"].queries)
+            self.assertIn(
+                "live V/I/R unavailable while output is OFF", output.getvalue()
+            )
             self.assertTrue(
                 all(":SYST:ERR?" not in resource.queries for resource in resources.values())
             )

@@ -645,7 +645,7 @@ Completed offline in Stage 4:
   removed after its absolute cleanup path was verified.
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
-harmonic validation, the independent Three-SMU QCoDeS S0 module plus query-only
+harmonic validation, the independent Three-SMU QCoDeS module plus query-only
 monitor, and the attoDRY read-only connection are complete. The first
 attoDRY temperature setpoint/control actions, control-first ordering, actual sensor
 recording, and heater-driven warming are operator-accepted for this experiment.
@@ -653,8 +653,9 @@ The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; th
 fact remains diagnostic rather than being rewritten as stability. The commissioned
 0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Daily
 temperature operation uses the unified hardware TOML and dedicated command without
-additional authorization flags. Three-SMU target-computer validation, all real SMU
-connections/writes, integration of the independent SMU module into the main
+additional authorization flags. Three-SMU target-offline validation and one bounded
+bottom-only read-only monitor sample are complete; remaining-role queries, all real SMU
+setting writes, integration of the independent SMU module into the main
 acquisition, other attoDRY setting writes, and real end-to-end acquisition still
 require staged authorization.
 
@@ -723,6 +724,18 @@ show all supported forms. All 76 focused Three-SMU/Keithley/fake tests and the f
 400-test offline suite passed (five optional plotting skips); `compileall` passed.
 No VISA resource was opened and no real query, status consumption, or setting write
 occurred.
+
+Three-SMU target read-only monitor follow-up (2026-09-01): the SNOM target's `lyr`
+environment passed 23 focused monitor/Keithley/CLI tests, all 402 offline tests, and
+`src/tests` compilation. Under explicit query-only authorization, the current plan
+opened only active `gate_bottom` and confirmed a Keithley 2400 identity, 0 V source
+setpoint, output OFF, compliance/ranges, 2-wire sense, and no compliance trip. The
+monitor now avoids `:READ?` while output is OFF, displays V/I/R as `n/a`, never turns
+output on, and leaves `:SYST:ERR?` unconsumed by default. No setting write or `*RST`
+was sent. The target's unused NI GPIB passport was disabled while retaining the
+Keithley KUSB passport; one selective device clear recovered a stuck parser/output
+queue without changing source/output/compliance. Other roles, consumptive status
+queries, smallest writes, and integrated acquisition remain uncommissioned.
 
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
@@ -800,9 +813,10 @@ These files are planning and handoff artifacts. They do not authorize hardware
 connections, status-latch consumption, or setting writes, and no such action was
 performed while creating them.
 
-Stage 5 - gate safety and integrated acquisition: model-independent offline core
-and independent Three-SMU QCoDeS S0 module complete; target/real commissioning
-and main-acquisition integration remain pending.
+Stage 5 - gate safety and integrated acquisition: model-independent offline core,
+Three-SMU target-offline checks, and the current bottom-only read-only monitor path
+are complete; remaining-role/read-write commissioning and main-acquisition
+integration remain pending.
 
 Completed offline in Stage 5:
 
@@ -1194,8 +1208,8 @@ error code zero, and a clean DLL disconnect. PID and heater settings were not wr
    PID values automatically.
 2. Perform staged attoDRY small-movement commissioning only after a new explicit
    write authorization and operator-selected smallest practical targets.
-3. Run Three-SMU S1 target-offline validation in `LK_setup` `lyr`, then fill
-   the ignored local addresses and safety values. Any real connection or setting
-   write still requires a separate plan-specific authorization.
+3. Complete Three-SMU read-only commissioning for the remaining planned roles under
+   separate authorization. Status-queue consumption and any setting write still
+   require separate plan-specific authorization and front-panel safety review.
 4. Freeze and verify the complete hardware wheelhouse on the offline control
    computer after its Python/VISA environment is known.

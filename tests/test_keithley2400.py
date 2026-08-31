@@ -202,13 +202,23 @@ class Keithley2400AdapterTests(unittest.TestCase):
         resource = FakeVisaResource()
         reading = VisaKeithley2400Monitor("smu_bias", resource).read_monitor()
         self.assertEqual(reading.identity, "KEITHLEY,MODEL 2400,4321,1.0")
-        self.assertEqual(reading.voltage_v, 0.125)
-        self.assertEqual(reading.current_a, 0.0000005)
-        self.assertEqual(reading.resistance_ohm, 250000.0)
+        self.assertIsNone(reading.voltage_v)
+        self.assertIsNone(reading.current_a)
+        self.assertIsNone(reading.resistance_ohm)
         self.assertFalse(reading.output_enabled)
+        self.assertNotIn(":READ?", resource.queries)
         self.assertFalse(reading.status_queue_consumed)
         self.assertNotIn(":SYST:ERR?", resource.queries)
         self.assertFalse(hasattr(resource, "write"))
+
+    def test_live_monitor_reads_measurement_only_when_output_is_on(self) -> None:
+        resource = FakeVisaResource()
+        resource.responses[":OUTP?"] = "1"
+        reading = VisaKeithley2400Monitor("smu_bias", resource).read_monitor()
+        self.assertEqual(reading.voltage_v, 0.125)
+        self.assertEqual(reading.current_a, 0.0000005)
+        self.assertEqual(reading.resistance_ohm, 250000.0)
+        self.assertIn(":READ?", resource.queries)
 
     def test_live_monitor_status_queue_consumption_is_explicit(self) -> None:
         resource = FakeVisaResource()
