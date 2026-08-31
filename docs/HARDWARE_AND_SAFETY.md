@@ -97,10 +97,13 @@ three hardware roles use one flat table shape; the Three-SMU VISA timeout is a
 fixed 5000 ms and is not an operator-configurable safety value.
 
 An off run-plan role is normalized without parsing the values of recognized
-scan-only fields (`fixed`, `points`, `start`, `stop`, `step`, or
+scan-only fields (`fixed`, `points`, `ranges`, `start`, `stop`, `step`, or
 `bidirectional`). This permits temporarily disabling a role without editing its
 saved vector. Misspelled/unknown field names are still rejected, and changing
 the role back to `fixed` or `sweep` restores the complete strict validation.
+An active sweep accepts exactly one of explicit `points` or ordered `ranges`.
+Range expansion is purely offline and feeds the same pre-write target-limit
+validation as explicit points; legacy active top-level `start/stop/step` is rejected.
 
 Keithley compliance remains an instrument protection setting, but it is not a
 second user-entered boundary. Voltage-source roles derive current compliance from

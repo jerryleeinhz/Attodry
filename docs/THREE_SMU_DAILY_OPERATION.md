@@ -127,15 +127,58 @@ points = [1.0, 3.0, 7.0, 2.0]
 [three_smu_run.gate_bottom]
 role = "sweep"
 bidirectional = false
-start = -1.0
-stop = 1.0
-step = 0.05
+ranges = [
+  { min = -1.0, max = 1.0, scale = "linear", step = 0.05 },
+]
 ```
 
-`points` 与 `start/stop/step` 二选一。显式向量保持输入顺序、重复和非单调点；上述 top gate
-双向展开为 `[1,3,7,2,7,3,1]`。range 的 `step` 必须为正，方向由 start/stop 决定。
+active sweep 的 `points` 与 `ranges` 二选一；旧的顶层 `start/stop/step` 不再接受。显式
+`points` 保持输入顺序、重复和非单调点；上述 top gate 双向展开为
+`[1,3,7,2,7,3,1]`。
+
+`ranges` 支持以下三种段，并可在一个数组中任意依次组合：
+
+linear 按步长（包含 min/max）：
+
+```toml
+ranges = [
+  { min = -0.1, max = 0.1, scale = "linear", step = 0.05 },
+]
+```
+
+linear 按总点数等间距（包含 min/max）：
+
+```toml
+ranges = [
+  { min = -0.1, max = 0.1, scale = "linear", points = 5 },
+]
+```
+
+log 在正数区间按总点数对数等间距（包含 min/max）：
+
+```toml
+ranges = [
+  { min = 1e-6, max = 1e-3, scale = "log", points = 10 },
+]
+```
+
+多段按列出顺序拼成一个最终向量：
+
+```toml
+ranges = [
+  { min = -1.0, max = -0.2, scale = "linear", step = 0.1 },
+  { min = -0.1, max = 0.1, scale = "linear", points = 11 },
+  { min = 0.2, max = 1.0, scale = "linear", step = 0.1 },
+]
+```
+
+每段必须 `max > min`。linear 段的 `step`/`points` 必须且只能写一个；log 段只接受
+`points` 且 min/max 都必须大于 0。多段边界不会自动去重：若前一段 max 等于后一段 min，
+该值会按配置出现两次。`bidirectional=true` 在所有 ranges 完整拼接后再追加反向路径，
+且不重复最终转折点。需要降序或任意轨迹时直接使用显式 `points`。
+
 `off` 表推荐只保留 `role = "off"`。为了方便暂时关闭某台 SMU，off 表中已知的
-`bidirectional`/`fixed`/`points`/`start`/`stop`/`step` 可以暂时保留，loader 不解析
+`bidirectional`/`fixed`/`points`/`ranges`/`start`/`stop`/`step` 可以暂时保留，loader 不解析
 或验证它们，内部统一归一为 off。字段名拼错仍会被拒绝。将该角色改回
 `fixed` 或 `sweep` 时，对应参数会重新严格校验。`fixed` 表必须使用 `fixed` 且
 `bidirectional=false`。

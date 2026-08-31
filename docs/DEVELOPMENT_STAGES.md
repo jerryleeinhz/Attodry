@@ -764,6 +764,21 @@ and operator-filled limits.
   expansion. The 42 focused config/CLI/fake-session tests and all 396 offline
   tests passed (five optional matplotlib skips); `compileall` passed. No real
   hardware library/resource was opened and no query or write occurred.
+- Ordered-range scan follow-up (2026-08-31): an active Three-SMU sweep now accepts
+  exactly one of an explicit ordered `points` vector or an ordered `ranges` array.
+  Linear ranges accept exactly one of positive `step` or point count; logarithmic
+  ranges require positive endpoints and point count. Every segment includes both
+  endpoints, multiple segments concatenate in TOML order without hidden boundary
+  de-duplication, and per-role bidirectional expansion occurs after concatenation.
+  The loader expands ranges into the existing point vector before the shared scan
+  generator, target-limit checks, session, and record path, so no hardware or audit
+  schema changed. Active top-level `start/stop/step` is now rejected; dormant known
+  fields, including malformed `ranges`, remain unparsed while a role is off. The
+  unified example and operator/module/safety guides document explicit, linear-step,
+  linear-count, log-count, and multi-segment forms. All 76 focused Three-SMU,
+  Keithley, CLI, Notebook, analysis, and gate tests passed; the full offline suite
+  passed all 400 tests with five optional plotting skips, and `compileall` passed.
+  No real hardware library/resource was opened and no real query or write occurred.
 
 ## Stage 6 - analysis and notebook migration
 

@@ -708,6 +708,22 @@ focused config/CLI/fake-session tests and the complete 396-test offline suite
 passed with five optional matplotlib skips; `compileall` passed. No real VISA
 resource was opened and no query, status consumption, or setting write occurred.
 
+Three-SMU ordered-range follow-up (2026-08-31): active sweep roles now require
+exactly one of an explicit ordered `points` vector or an ordered `ranges` array;
+the former active top-level `start/stop/step` form is rejected. A linear segment
+uses exactly one of positive `step` or a point count, while a logarithmic segment
+requires positive endpoints and a point count. Segments include their endpoints,
+concatenate in listed order without automatic boundary de-duplication, and then
+receive that role's bidirectional expansion. The loader resolves ranges immediately
+to the existing final point vector, so generator, target validation, session,
+cleanup, and schema-v5 recording are unchanged. An off role still ignores dormant
+recognized values, now including malformed `ranges`, while misspelled keys remain
+strict errors. The unified example and Three-SMU daily/module/safety documents now
+show all supported forms. All 76 focused Three-SMU/Keithley/fake tests and the full
+400-test offline suite passed (five optional plotting skips); `compileall` passed.
+No VISA resource was opened and no real query, status consumption, or setting write
+occurred.
+
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
 `resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state

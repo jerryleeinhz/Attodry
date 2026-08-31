@@ -137,9 +137,9 @@ points = [-1.0, 0.0, 1.0]
 [three_smu_run.gate_bottom]
 role = "sweep"
 bidirectional = false
-start = -1.0
-stop = 1.0
-step = 1.0
+ranges = [
+  { min = -1.0, max = 1.0, scale = "linear", step = 1.0 },
+]
 """
 
 
@@ -204,6 +204,7 @@ role = "off"
 bidirectional = "ignored while off"
 fixed = "ignored while off"
 points = "ignored while off"
+ranges = "ignored while off"
 start = "ignored while off"
 stop = "ignored while off"
 step = "ignored while off"
@@ -236,7 +237,111 @@ step = "ignored while off"
         self.assertEqual(operation.hardware.gate_top.max_abs_voltage_v, 3.0)
         self.assertEqual(operation.hardware.gate_bottom.max_abs_current_a, 0.0005)
         self.assertEqual(operation.hardware.smu_bias.nplc, 1.0)
+        self.assertEqual(operation.plan.gate_bottom.points, (-1.0, 0.0, 1.0))
         self.assertEqual(len(validate_plan_targets(operation.hardware, operation.plan)), 9)
+
+    def test_sweep_ranges_expand_linear_points_log_and_multiple_segments(self) -> None:
+        original = '''ranges = [
+  { min = -1.0, max = 1.0, scale = "linear", step = 1.0 },
+]'''
+        cases = (
+            (
+                '''ranges = [
+  { min = -1.0, max = 1.0, scale = "linear", points = 5 },
+]''',
+                (-1.0, -0.5, 0.0, 0.5, 1.0),
+            ),
+            (
+                '''ranges = [
+  { min = 0.001, max = 1.0, scale = "log", points = 4 },
+]''',
+                (0.001, 0.01, 0.1, 1.0),
+            ),
+            (
+                '''ranges = [
+  { min = -1.0, max = 0.0, scale = "linear", step = 1.0 },
+  { min = 0.0, max = 1.0, scale = "linear", points = 2 },
+]''',
+                (-1.0, 0.0, 0.0, 1.0),
+            ),
+        )
+        for replacement, expected in cases:
+            with self.subTest(replacement=replacement):
+                text = OPERATION_TEXT.replace(original, replacement)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "hardware.local.toml"
+                    path.write_text(text, encoding="utf-8")
+                    operation = load_three_smu_operation_config(path)
+                self.assertEqual(
+                    len(operation.plan.gate_bottom.points or ()), len(expected)
+                )
+                for actual, wanted in zip(
+                    operation.plan.gate_bottom.points or (), expected, strict=True
+                ):
+                    self.assertAlmostEqual(actual, wanted)
+
+    def test_bidirectional_applies_after_all_ranges_are_concatenated(self) -> None:
+        text = BOTTOM_ONLY_OPERATION_TEXT.replace(
+            "bidirectional = false\npoints = [-1.0, 0.0, 1.0]",
+            '''bidirectional = true
+ranges = [
+  { min = -1.0, max = 0.0, scale = "linear", points = 2 },
+  { min = 0.5, max = 1.0, scale = "linear", points = 2 },
+]''',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hardware.local.toml"
+            path.write_text(text, encoding="utf-8")
+            operation = load_three_smu_operation_config(path)
+        points = generate_scan_points(operation.plan)
+        self.assertEqual(
+            [point.coordinates["gate_bottom"] for point in points],
+            [-1.0, 0.0, 0.5, 1.0, 0.5, 0.0, -1.0],
+        )
+
+    def test_active_sweep_requires_exactly_one_of_points_or_ranges(self) -> None:
+        original = '''ranges = [
+  { min = -1.0, max = 1.0, scale = "linear", step = 1.0 },
+]'''
+        cases = (
+            original + "\npoints = [-1.0, 0.0, 1.0]",
+            "start = -1.0\nstop = 1.0\nstep = 1.0",
+        )
+        for replacement in cases:
+            with self.subTest(replacement=replacement):
+                text = OPERATION_TEXT.replace(original, replacement)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "hardware.local.toml"
+                    path.write_text(text, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        ThreeSmuConfigError, "points|ranges|unknown"
+                    ):
+                        load_three_smu_operation_config(path)
+
+    def test_invalid_sweep_range_definitions_fail_closed(self) -> None:
+        original = '''ranges = [
+  { min = -1.0, max = 1.0, scale = "linear", step = 1.0 },
+]'''
+        cases = (
+            '''ranges = [
+  { min = -1.0, max = 1.0, scale = "linear", step = 1.0, points = 3 },
+]''',
+            '''ranges = [
+  { min = -1.0, max = 1.0, scale = "log", points = 3 },
+]''',
+            '''ranges = [
+  { min = 1.0, max = 10.0, scale = "log", step = 1.0 },
+]''',
+            "ranges = []",
+        )
+        for replacement in cases:
+            with self.subTest(replacement=replacement):
+                text = OPERATION_TEXT.replace(original, replacement)
+                with tempfile.TemporaryDirectory() as directory:
+                    path = Path(directory) / "hardware.local.toml"
+                    path.write_text(text, encoding="utf-8")
+                    with self.assertRaises(ThreeSmuConfigError):
+                        load_three_smu_operation_config(path)
 
     def test_checked_in_unified_template_is_intentionally_not_ready(self) -> None:
         operation = load_three_smu_operation_config(HARDWARE_EXAMPLE)
@@ -261,11 +366,22 @@ step = "ignored while off"
             self.assertNotIn(removed, text)
         three_smu_text = text.split("[gate_top]", 1)[1]
         self.assertNotIn("timeout_ms", three_smu_text)
-        self.assertIn("points = [-0.1, -0.05, 0.0, 0.05, 0.1]", three_smu_text)
+        self.assertIn(
+            '{ min = -0.1, max = 0.1, scale = "linear", step = 0.05 }',
+            three_smu_text,
+        )
+        self.assertIn(
+            '#   { min = -0.1, max = 0.1, scale = "linear", points = 5 }',
+            three_smu_text,
+        )
+        self.assertIn(
+            '#   { min = 1e-6, max = 1e-3, scale = "log", points = 10 }',
+            three_smu_text,
+        )
+        self.assertIn("# points = [-0.1, -0.05, 0.0, 0.05, 0.1]", three_smu_text)
         self.assertIn("# points = [1.0, 3.0, 7.0, 2.0, 2.0]", three_smu_text)
-        self.assertIn("# start = -0.1", three_smu_text)
-        self.assertIn("# stop = 0.1", three_smu_text)
-        self.assertIn("# step = 0.05", three_smu_text)
+        self.assertNotIn("# start =", three_smu_text)
+        self.assertNotIn("# stop =", three_smu_text)
         self.assertFalse((PROJECT_ROOT / "config" / "three_smu_hardware.example.toml").exists())
         self.assertFalse((PROJECT_ROOT / "config" / "three_smu_scan.example.toml").exists())
 

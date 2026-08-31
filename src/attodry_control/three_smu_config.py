@@ -579,6 +579,7 @@ def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
         "role",
         "bidirectional",
         "fixed",
+        "ranges",
         "start",
         "stop",
         "step",
@@ -596,7 +597,12 @@ def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
         expected = base | {"fixed"}
     else:
         has_points = "points" in table
-        expected = base | ({"points"} if has_points else {"start", "stop", "step"})
+        has_ranges = "ranges" in table
+        if has_points == has_ranges:
+            raise ThreeSmuConfigError(
+                f"{role} sweep requires exactly one of points or ranges"
+            )
+        expected = base | ({"points"} if has_points else {"ranges"})
     _strict_keys(table, role, expected)
     return ChannelPlan(
         role=channel_role,
@@ -606,23 +612,83 @@ def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
             if channel_role is ChannelRole.FIXED
             else None
         ),
-        start=(
-            _number(table["start"], f"{role}.start")
-            if "start" in table
-            else None
-        ),
-        stop=(
-            _number(table["stop"], f"{role}.stop") if "stop" in table else None
-        ),
-        step=(
-            _positive(table["step"], f"{role}.step") if "step" in table else None
-        ),
         points=(
             _number_vector(table["points"], f"{role}.points")
             if "points" in table
-            else None
+            else (
+                _parse_sweep_ranges(table["ranges"], f"{role}.ranges")
+                if "ranges" in table
+                else None
+            )
         ),
     )
+
+
+def _parse_sweep_ranges(value: Any, name: str) -> tuple[float, ...]:
+    if not isinstance(value, list) or not value:
+        raise ThreeSmuConfigError(f"{name} must be a non-empty array of tables")
+    expanded: list[float] = []
+    for index, raw_range in enumerate(value):
+        range_name = f"{name}[{index}]"
+        if not isinstance(raw_range, dict):
+            raise ThreeSmuConfigError(f"{range_name} must be a table")
+        scale = _string(raw_range.get("scale"), f"{range_name}.scale")
+        if scale == "linear":
+            has_step = "step" in raw_range
+            has_points = "points" in raw_range
+            if has_step == has_points:
+                raise ThreeSmuConfigError(
+                    f"{range_name} linear range requires exactly one of step or points"
+                )
+            expected = {"min", "max", "scale", "step" if has_step else "points"}
+        elif scale == "log":
+            expected = {"min", "max", "scale", "points"}
+        else:
+            raise ThreeSmuConfigError(
+                f"{range_name}.scale must be one of: 'linear', 'log'"
+            )
+        _strict_keys(raw_range, range_name, expected)
+        minimum = _number(raw_range["min"], f"{range_name}.min")
+        maximum = _number(raw_range["max"], f"{range_name}.max")
+        if maximum <= minimum:
+            raise ThreeSmuConfigError(f"{range_name}.max must be greater than min")
+        if scale == "linear" and "step" in raw_range:
+            step = _positive(raw_range["step"], f"{range_name}.step")
+            segment = _sweep_values(
+                ChannelPlan(
+                    role=ChannelRole.SWEEP,
+                    bidirectional=False,
+                    start=minimum,
+                    stop=maximum,
+                    step=step,
+                )
+            )
+        else:
+            point_count = _integer(
+                raw_range["points"], f"{range_name}.points", 2
+            )
+            if scale == "linear":
+                interval = (maximum - minimum) / (point_count - 1)
+                segment = tuple(
+                    minimum if point == 0
+                    else maximum if point == point_count - 1
+                    else minimum + interval * point
+                    for point in range(point_count)
+                )
+            else:
+                if minimum <= 0:
+                    raise ThreeSmuConfigError(
+                        f"{range_name} log range requires min and max to be positive"
+                    )
+                ratio = (maximum / minimum) ** (1.0 / (point_count - 1))
+                segment = tuple(
+                    minimum if point == 0
+                    else maximum if point == point_count - 1
+                    else minimum * ratio**point
+                    for point in range(point_count)
+                )
+        expanded.extend(segment)
+    return tuple(expanded)
 
 
 def _load_toml(path: str | Path) -> Mapping[str, Any]:

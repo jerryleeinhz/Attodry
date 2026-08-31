@@ -255,25 +255,40 @@ pulse_period_s = 0.0
 [three_smu_run.smu_bias]
 role = "sweep"
 bidirectional = false
-# Sweep form 1: an explicit ordered vector. Values use this SMU's source_mode
-# unit (V for voltage source, A for current source).
-points = [-0.1, -0.05, 0.0, 0.05, 0.1]
-# Sweep form 2: replace the line above with any explicit order; non-monotonic
-# values and repeats are preserved exactly:
+# Active sweep form 1: one or more ranges. Values use this SMU's source_mode
+# unit (V for voltage source, A for current source). Endpoints are included.
+ranges = [
+  { min = -0.1, max = 0.1, scale = "linear", step = 0.05 },
+]
+# Alternative 2: explicit ordered points. Replace the ranges block above with:
+# points = [-0.1, -0.05, 0.0, 0.05, 0.1]
+# Explicit points may be non-monotonic and repeated; order is preserved:
 # points = [1.0, 3.0, 7.0, 2.0, 2.0]
-# Sweep form 3: remove points and use all three range fields together:
-# start = -0.1
-# stop = 0.1
-# step = 0.05
-# step is always positive; swap start and stop for a descending sweep.
+# Alternative 3: one linear range with an exact point count:
+# ranges = [
+#   { min = -0.1, max = 0.1, scale = "linear", points = 5 },
+# ]
+# Alternative 4: one logarithmic range (positive endpoints, points required):
+# ranges = [
+#   { min = 1e-6, max = 1e-3, scale = "log", points = 10 },
+# ]
+# Alternative 5: multiple ranges concatenate in listed order:
+# ranges = [
+#   { min = -1.0, max = -0.2, scale = "linear", step = 0.1 },
+#   { min = -0.1, max = 0.1, scale = "linear", points = 11 },
+#   { min = 0.2, max = 1.0, scale = "linear", step = 0.1 },
+# ]
+# A linear range uses exactly one of step or points. A log range uses points.
+# Each range requires max > min. Shared boundaries are not removed, so adjacent
+# ranges that repeat an endpoint deliberately produce that point twice.
 # Set bidirectional=true to append the reverse path without repeating the
 # turnaround point, e.g. [-0.1, 0.0, 0.1, 0.0, -0.1].
-# Exactly one active sweep form is allowed: points OR start/stop/step.
+# Exactly one active sweep form is allowed: points OR ranges.
 
 [three_smu_run.gate_top]
 role = "off"
 bidirectional = false
-# Recognized leftover fixed/points/start/stop/step values are ignored while
+# Recognized leftover fixed/points/ranges/start/stop/step values are ignored while
 # role="off". Removing them is recommended so the next activation is explicit.
 
 [three_smu_run.gate_bottom]
