@@ -134,7 +134,11 @@ step = 0.05
 
 `points` 与 `start/stop/step` 二选一。显式向量保持输入顺序、重复和非单调点；上述 top gate
 双向展开为 `[1,3,7,2,7,3,1]`。range 的 `step` 必须为正，方向由 start/stop 决定。
-`off` 表只写 `role` 和 `bidirectional=false`；`fixed` 表只额外写 `fixed`。
+`off` 表推荐只保留 `role = "off"`。为了方便暂时关闭某台 SMU，off 表中已知的
+`bidirectional`/`fixed`/`points`/`start`/`stop`/`step` 可以暂时保留，loader 不解析
+或验证它们，内部统一归一为 off。字段名拼错仍会被拒绝。将该角色改回
+`fixed` 或 `sweep` 时，对应参数会重新严格校验。`fixed` 表必须使用 `fixed` 且
+`bidirectional=false`。
 例如只扫 bottom gate 时，可完全删除 `[smu_bias]` 和 `[gate_top]` 硬件表：
 
 ```toml

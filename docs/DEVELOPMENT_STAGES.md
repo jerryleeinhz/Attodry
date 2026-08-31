@@ -754,6 +754,16 @@ and operator-filled limits.
   tests passed. The complete hardware-free suite passed all 394 tests with five
   optional matplotlib tests skipped, and `compileall` passed for `src` and `tests`.
   No real instrument library/resource was opened.
+- Off-role scan-value follow-up (2026-08-31): `role = "off"` now normalizes the
+  recognized `bidirectional`/`fixed`/`points`/`start`/`stop`/`step` values without
+  parsing them, so temporarily disabled channels cannot fail `describe` because
+  of dormant scan values. Misspelled field names remain strict errors, and all
+  value/type/exclusivity checks return when the role becomes `fixed` or `sweep`.
+  `hardware.example.toml` now shows an ordered vector, arbitrary non-monotonic/
+  repeated vector, `start/stop/step`, descending direction, and bidirectional
+  expansion. The 42 focused config/CLI/fake-session tests and all 396 offline
+  tests passed (five optional matplotlib skips); `compileall` passed. No real
+  hardware library/resource was opened and no query or write occurred.
 
 ## Stage 6 - analysis and notebook migration
 

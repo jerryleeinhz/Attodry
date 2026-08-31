@@ -2,7 +2,7 @@
 
 ## 状态与范围
 
-状态：`S0 offline complete`（2026-08-26）。模块最多控制三台 Keithley 2400，语义角色为
+状态：`S0 offline complete`（2026-08-31 更新）。模块最多控制三台 Keithley 2400，语义角色为
 `smu_bias`、`gate_top`、`gate_bottom`。它提供统一 TOML、无 GUI CLI、调用同一
 `ThreeSmuSession` generator 的实时 Notebook、query-only 终端监控和 accepted-only 分析。
 
@@ -47,12 +47,14 @@ measurement autorange 当前必须为 `true`，避免未配置的固定档位成
 
 每个角色独立选择：
 
-- `role = "off"`：只允许 `bidirectional = false`；
+- `role = "off"`：不扫描也不解析其已知扫描值；暂存的 `fixed`/`points`/
+  `start`/`stop`/`step`/`bidirectional` 可保留，但推荐删除以便下次启用时显式配置；
 - `role = "fixed"`：填写 `fixed`，且 `bidirectional = false`；
 - `role = "sweep"`：填写 `points = [...]`，或完整的 `start/stop/step` 三元组，二选一。
 
 `points` 非空、有限，保留任意顺序、重复值和非单调序列。`bidirectional = true` 位于每台
 SMU 的 run 子表；例如 `[1, 3, 7, 2]` 展开为 `[1, 3, 7, 2, 7, 3, 1]`，转折点不重复。
+off 只忽略上述已知字段的值；拼错的未知字段仍由 strict loader 拒绝。
 
 - 一维扫描只展开该角色；
 - `paired_gate` 分别展开两个 gate，最终长度不同则配置错误；
@@ -94,8 +96,8 @@ CSV 保留稳定列，off 角色字段为空。配置快照只含两条绝对边
 读回事件。requested source 与实际 setpoint/V/I 分开保存。默认分析只加载
 `completed + accepted + clean` formal samples；rejected/problem 需要显式 opt-in。
 
-本次 active-only 改动的 focused fake/config 回归 109 项通过；完整离线回归
-394 项通过（5 项可选 matplotlib 绘图跳过），`src/tests` compileall 通过。
+当前 active/off 配置改动的 focused config/CLI/fake-session 回归 42 项通过；
+完整离线回归 396 项通过（5 项可选 matplotlib 绘图跳过），`src/tests` compileall 通过。
 真实硬件动作数为 0。
 
 完整操作者说明见 [`../THREE_SMU_DAILY_OPERATION.md`](../THREE_SMU_DAILY_OPERATION.md)，实时

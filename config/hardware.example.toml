@@ -255,13 +255,26 @@ pulse_period_s = 0.0
 [three_smu_run.smu_bias]
 role = "sweep"
 bidirectional = false
-# Use an arbitrary explicit vector (order and repeats are preserved):
+# Sweep form 1: an explicit ordered vector. Values use this SMU's source_mode
+# unit (V for voltage source, A for current source).
 points = [-0.1, -0.05, 0.0, 0.05, 0.1]
-# Or replace points with all three range fields: start, stop, step.
+# Sweep form 2: replace the line above with any explicit order; non-monotonic
+# values and repeats are preserved exactly:
+# points = [1.0, 3.0, 7.0, 2.0, 2.0]
+# Sweep form 3: remove points and use all three range fields together:
+# start = -0.1
+# stop = 0.1
+# step = 0.05
+# step is always positive; swap start and stop for a descending sweep.
+# Set bidirectional=true to append the reverse path without repeating the
+# turnaround point, e.g. [-0.1, 0.0, 0.1, 0.0, -0.1].
+# Exactly one active sweep form is allowed: points OR start/stop/step.
 
 [three_smu_run.gate_top]
 role = "off"
 bidirectional = false
+# Recognized leftover fixed/points/start/stop/step values are ignored while
+# role="off". Removing them is recommended so the next activation is explicit.
 
 [three_smu_run.gate_bottom]
 role = "off"

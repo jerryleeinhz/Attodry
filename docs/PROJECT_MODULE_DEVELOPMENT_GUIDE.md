@@ -465,6 +465,8 @@ main + 本地改动”。交付时分别报告 HEAD、`origin/main`、目标电�
 最多三台 Keithley 2400 角色：`smu_bias`、`gate_top`、`gate_bottom`。每次运行的
 active hardware path 仅包含 scan plan 中的 `fixed`/`sweep` 角色；`off` 角色不要求硬件表，
 也不得被打开、读写、清理或记录。其物理状态仍未知。
+为便于暂时停用角色，off 角色的已知扫描字段值可保留但不解析；未知/拼错字段仍拒绝，
+改回 `fixed`/`sweep` 时恢复完整严格校验。
 配置、CLI 和 Notebook 必须调用同一 strict loader、point generator、adapter 与 cleanup。
 
 本项目确认的 Three-SMU 单一安全事实来源是每台独立的 `max_abs_voltage_v` 与

@@ -575,10 +575,24 @@ def _parse_hardware_role(
 
 def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
     channel_role = _enum(ChannelRole, table.get("role"), f"{role}.role")
-    base = {"role", "bidirectional"}
+    channel_fields = {
+        "role",
+        "bidirectional",
+        "fixed",
+        "start",
+        "stop",
+        "step",
+        "points",
+    }
     if channel_role is ChannelRole.OFF:
-        expected = base
-    elif channel_role is ChannelRole.FIXED:
+        unknown = sorted(set(table) - channel_fields)
+        if unknown:
+            raise ThreeSmuConfigError(
+                f"{role} has unknown field(s): {', '.join(unknown)}"
+            )
+        return ChannelPlan(role=ChannelRole.OFF, bidirectional=False)
+    base = {"role", "bidirectional"}
+    if channel_role is ChannelRole.FIXED:
         expected = base | {"fixed"}
     else:
         has_points = "points" in table

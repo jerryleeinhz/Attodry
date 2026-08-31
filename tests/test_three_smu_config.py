@@ -193,6 +193,41 @@ class ThreeSmuConfigTests(unittest.TestCase):
         self.assertEqual(operation.hardware.gate_bottom.max_abs_voltage_v, 4.0)
         self.assertEqual(len(validate_plan_targets(operation.hardware, operation.plan)), 3)
 
+    def test_off_role_ignores_recognized_stale_scan_values(self) -> None:
+        text = BOTTOM_ONLY_OPERATION_TEXT.replace(
+            """[three_smu_run.smu_bias]
+role = "off"
+bidirectional = false
+""",
+            """[three_smu_run.smu_bias]
+role = "off"
+bidirectional = "ignored while off"
+fixed = "ignored while off"
+points = "ignored while off"
+start = "ignored while off"
+stop = "ignored while off"
+step = "ignored while off"
+""",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hardware.local.toml"
+            path.write_text(text, encoding="utf-8")
+            operation = load_three_smu_operation_config(path)
+        self.assertEqual(operation.plan.smu_bias, ChannelPlan(ChannelRole.OFF, False))
+        self.assertEqual(set(operation.hardware.by_role()), {"gate_bottom"})
+
+    def test_off_role_still_rejects_unknown_scan_field_names(self) -> None:
+        text = BOTTOM_ONLY_OPERATION_TEXT.replace(
+            'role = "off"\nbidirectional = false',
+            'role = "off"\nbidirectional = false\npoitns = [1.0]',
+            1,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "hardware.local.toml"
+            path.write_text(text, encoding="utf-8")
+            with self.assertRaisesRegex(ThreeSmuConfigError, "unknown.*poitns"):
+                load_three_smu_operation_config(path)
+
     def test_single_daily_operation_config_loads_minimal_safety_contract(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "hardware.local.toml"
@@ -226,6 +261,11 @@ class ThreeSmuConfigTests(unittest.TestCase):
             self.assertNotIn(removed, text)
         three_smu_text = text.split("[gate_top]", 1)[1]
         self.assertNotIn("timeout_ms", three_smu_text)
+        self.assertIn("points = [-0.1, -0.05, 0.0, 0.05, 0.1]", three_smu_text)
+        self.assertIn("# points = [1.0, 3.0, 7.0, 2.0, 2.0]", three_smu_text)
+        self.assertIn("# start = -0.1", three_smu_text)
+        self.assertIn("# stop = 0.1", three_smu_text)
+        self.assertIn("# step = 0.05", three_smu_text)
         self.assertFalse((PROJECT_ROOT / "config" / "three_smu_hardware.example.toml").exists())
         self.assertFalse((PROJECT_ROOT / "config" / "three_smu_scan.example.toml").exists())
 

@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-25
+Last updated: 2026-08-31
 
 ## Current stage
 
@@ -694,6 +694,19 @@ bias/top factories and resources are never touched. Focused regression: 109
 tests pass. The complete hardware-free suite passed all 394 tests with five
 optional matplotlib tests skipped, and `compileall` passed for `src` and `tests`.
 No real instrument library/resource was opened and no real query or write ran.
+
+Three-SMU off-role scan-value follow-up (2026-08-31): an off run-plan role now
+ignores the values of recognized dormant scan fields (`bidirectional`, `fixed`,
+`points`, `start`, `stop`, and `step`) and normalizes its internal channel plan
+to off/false/empty. This lets an operator temporarily switch a role off without
+deleting its saved vector. Unknown/misspelled field names remain errors, and
+switching back to fixed/sweep restores strict type, completeness, exclusivity,
+and numeric validation. The tracked hardware example now documents ordered and
+arbitrary explicit vectors, range expansion, descending direction, and
+bidirectional behavior. No record schema or hardware path changed. The 42
+focused config/CLI/fake-session tests and the complete 396-test offline suite
+passed with five optional matplotlib skips; `compileall` passed. No real VISA
+resource was opened and no query, status consumption, or setting write occurred.
 
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
