@@ -116,5 +116,20 @@ last-confirmed state，再决定是否需要前面板或接线检查。正常完
 一起显示或做漂移审计，但不能被悄悄替换。相位、X、Y、R、谐波、SR830 source/readback
 和状态元数据继续原样保留。
 
+读取和叠图使用 `notebooks/sr830_commissioning_sweeps.ipynb` 顶部的
+`TEMPERATURE_DATA_DIRECTORY`，默认指向
+`run_data/temperature_excitation_commissioning`。刷新后可同时选择多个 summary JSON 或
+formal CSV，再按状态和具体 temperature condition 筛选。若同一次扫描的 summary 与 formal
+CSV 同时存在，目录发现优先使用 summary，避免同一数据重复计数；选择多个不同文件时则
+保留文件和 temperature index 身份，不会把相同温度的不同运行静默合并。
+
+每个可用的 `Vxx/Vxy × h1/h2/h3` 通道生成两张独立图：一张 `R` 幅值图和一张相位图。
+横轴是文件中归档的、由实际 SINE OUT readback 得到的 `nominal_current_a_rms`，不会用当前
+TOML 重新计算。每个实际 formal-window 条件平均温度是一条曲线，图例同时显示实测温度和
+请求 setpoint。幅值重复样本使用普通均值/样本标准差；相位使用圆周均值/圆周标准差，并
+只在递增电流方向做显示展开。低幅值处即使锁定正常，相位也可能没有物理意义，因此应结合
+相位误差条、幅值和状态筛选判断，而不能只看展开后的线条。可选导出会保存选中样本、每张
+PNG/PDF 和包含输入文件、状态、temperature condition 与相位处理方式的 manifest。
+
 此文件只说明组合扫描的合同和将来操作路径；它不构成真实仪器授权，也不报告任何实际
 温度—激励硬件运行已经发生。

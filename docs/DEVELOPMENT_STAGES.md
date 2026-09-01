@@ -1040,6 +1040,16 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   The complete offline suite passed with 396 tests and 5 optional
   matplotlib-dependent skips. No real DLL or
   real VISA resource was opened, and no hardware command was sent for this feature.
+- Added read-only temperature-stacked I–V analysis (2026-09-01). The commissioning
+  Notebook now discovers completed temperature–excitation summary JSON/formal CSV
+  records from a separate remote-friendly directory, filters formal sample status
+  and selected temperature conditions, and makes separate amplitude and phase
+  figures for every available XX/XY × h1/h2/h3 channel. Curves use the archived
+  readback-derived current and actual formal-window mean temperature. Phase repeats
+  use circular statistics and are unwrapped only along increasing current for
+  display; raw values are unchanged. Synthetic summary/CSV, filtering, multi-run,
+  circular-phase, Notebook-compilation, and Matplotlib-render tests passed. No
+  hardware module was imported or instrument operation performed.
 
 ## Stage 7 follow-up - segmented temperature grids
 

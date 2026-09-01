@@ -698,7 +698,12 @@ class CommissioningAnalysisTests(unittest.TestCase):
         ):
             exec("".join(cells[1]["source"]), scope)
             scope["DATA_DIRECTORY"] = source.parent
-            exec("".join(cells[3]["source"]), scope)
+            selector_cell = next(
+                cell
+                for cell in cells
+                if "def _load_selected_formal_samples" in "".join(cell["source"])
+            )
+            exec("".join(selector_cell["source"]), scope)
             scope["excitation_record_widget"].value = str(source)
             scope["_load_selected_records"](None)
 

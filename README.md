@@ -186,6 +186,12 @@ unlock/overload/error 审计筛选。只选择一种扫描时，Notebook只画�
 排除控件不会修改原始 JSON，并在可选导出中记录筛选清单。转换期和 cleanup 数据不会
 进入默认曲线。
 
+同一 Notebook 也可从独立的 `TEMPERATURE_DATA_DIRECTORY` 浏览一个或多个
+temperature–excitation summary JSON / formal CSV。选择状态和温度 condition 后，它按
+Vxx/Vxy、h1/h2/h3 和幅值/相位分别作图；每张图把不同实际测量窗口平均温度的曲线叠加在
+一起，横轴使用记录中已保存的 `nominal_current_a_rms`。相位重复样本采用圆周均值与圆周
+标准差，并只为显示沿递增电流展开；原始相位不会被修改。默认仍只使用 `clean` 正式样本。
+
 只查看频率扫描和幅值扫描中的 XY 信号时，使用
 [`notebooks/sr830_xy_sweeps.ipynb`](notebooks/sr830_xy_sweeps.ipynb)。
 该 Notebook 在读取阶段丢弃 XX，保留 completed/clean 和 Browse 筛选，

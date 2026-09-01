@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-08-26
+Last updated: 2026-09-01
 
 ## Current stage
 
@@ -1161,6 +1161,25 @@ that names the temperature writes, SR830 writes, latch consumption, physical wir
 limits and cleanup scope. Use `lyr` on `LK_setup` for any future target validation or
 authorized run. The detailed contract is in
 [`TEMPERATURE_EXCITATION_SCAN_GUIDE.md`](TEMPERATURE_EXCITATION_SCAN_GUIDE.md).
+
+## Current temperature–excitation analysis update (2026-09-01)
+
+The read-only commissioning Notebook now has a dedicated remote-friendly
+temperature–excitation browser. It discovers summary JSON/formal CSV records under
+`TEMPERATURE_DATA_DIRECTORY`, defaults to `clean` formal samples, and lets the
+operator select one or more files and individual completed temperature conditions.
+Matching summary/CSV pairs are de-duplicated in favor of the summary; independently
+selected runs retain their source-file and temperature-index identity.
+
+For each available XX/XY × h1/h2/h3 channel, analysis produces a separate R-amplitude
+figure and phase figure. Each actual formal-window mean temperature is a separate
+curve versus the archived readback-derived RMS current. Phase repeats use circular
+mean/standard deviation and are unwrapped along increasing current only for display;
+the raw record is never changed. Optional CSV/PNG/PDF export records the selected
+files, statuses, temperature conditions, and phase treatment in its manifest.
+Synthetic summary and formal-CSV loading, status filters, multi-run identity,
+circular phase, Notebook compilation, and actual Matplotlib rendering were tested.
+This change imports no hardware control path and performed no instrument I/O.
 
 ## Immediate next implementation tasks
 
