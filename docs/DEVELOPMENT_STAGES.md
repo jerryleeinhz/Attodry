@@ -1102,3 +1102,23 @@ Status: real hardware commissioned on `LK_setup` (2026-08-26).
   3.7 K user setpoint with a 3.569 K sample readback, temperature control enabled,
   error code zero, and a clean DLL disconnect. Every point archived its stable-window
   measurement and timing; PID and heater settings were not written.
+
+## Three-SMU follow-up - unified live and historical plotting UI
+
+Status: offline implementation complete (2026-09-01).
+
+- Replaced the separate Three-SMU live and analysis Notebooks with one read-only
+  `notebooks/three_smu.ipynb` dashboard. Historical data remains completed/accepted/clean
+  by default; rejected runs and problem samples require visible Audit opt-in.
+- `three_smu_cli run` binds a loopback-only (`127.0.0.1:8765`) event stream before
+  opening the session. One formal sample is durably recorded once, then fanned out to the
+  terminal FIFO and Notebook stream; no presentation consumer can query, write, or consume
+  an SMU status queue. Bind failure occurs before any QCoDeS/VISA resource is opened.
+- The Notebook normalizes both sources into sample-wide records and supports arbitrarily
+  added line/scatter/live-incomplete-map panels. X/Y/colour can use point/repeat/time or any
+  active role's coordinate, source readback, U/I/R/G; series, segment/repeat, and coordinate
+  slice controls support gate-indexed multi-curve bias I--V plots without mixing segments.
+- Added standard analysis dependency `ipywidgets>=8,<9`, pure live/archived plot conversion,
+  loopback stream tests, notebook syntax/import-boundary checks, and fake-session CLI coverage.
+  The full offline suite passed 410 tests with 6 optional Matplotlib rendering skips. No real
+  instrument was connected, queried, status-consumed, or written.

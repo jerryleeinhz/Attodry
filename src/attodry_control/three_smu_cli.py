@@ -30,6 +30,7 @@ from .three_smu_live import (
     format_live_three_smu_snapshot,
     monitor_problems,
 )
+from .three_smu_stream import LIVE_STREAM_URL, ThreeSmuLivePublisher
 
 
 DEFAULT_CONFIG_PATH = Path("config/hardware.local.toml")
@@ -84,6 +85,7 @@ def run(
     sleep: Callable[[float], None] = time.sleep,
     session_open: Callable[..., ThreeSmuSession] = ThreeSmuSession.open,
     monitor_resource_manager_factory: Callable[[], Any] | None = None,
+    live_publisher_factory: Callable[[], ThreeSmuLivePublisher] = ThreeSmuLivePublisher,
 ) -> int:
     """Run the CLI while keeping connection paths injectable for fake tests."""
 
@@ -115,6 +117,17 @@ def run(
     sample_queue: SimpleQueue[ThreeSmuSample] = SimpleQueue()
     displayed_samples = 0
     total_samples = len(points) * plan.samples_per_point
+    publisher = live_publisher_factory()
+    try:
+        # This binds before QCoDeS/VISA opens. A local endpoint failure must never
+        # leave a scan running without the requested live-plot data path.
+        publisher.start(plan, total_samples=total_samples)
+    except OSError as exc:
+        raise SystemExit(
+            f"Cannot start Three-SMU live stream at {LIVE_STREAM_URL}: {exc}. "
+            "No QCoDeS/VISA resource was opened."
+        ) from exc
+    print_fn(f"Live Notebook endpoint: {publisher.endpoint} (memory samples; no extra queries)")
 
     def display_pending_samples() -> None:
         nonlocal displayed_samples
@@ -130,26 +143,42 @@ def run(
                 print_fn=print_fn,
             )
 
-    with session_open(
-        hardware,
-        plan,
-        authorize_writes=True,
-        authorize_status_consumption=True,
-    ) as session:
-        try:
-            for _sample in session.run(
-                output_dir=output_dir,
-                run_name="" if operation is None else operation.run_name,
-                note="" if operation is None else operation.note,
-                config_path=None if operation is None else operation.config_path,
-                on_sample=sample_queue.put,
-            ):
+    def publish_formal_sample(sample: ThreeSmuSample) -> None:
+        """Fan out one already-recorded sample without performing hardware I/O."""
+
+        sample_queue.put(sample)
+        publisher.publish_sample(sample)
+
+    try:
+        with session_open(
+            hardware,
+            plan,
+            authorize_writes=True,
+            authorize_status_consumption=True,
+        ) as session:
+            try:
+                for _sample in session.run(
+                    output_dir=output_dir,
+                    run_name="" if operation is None else operation.run_name,
+                    note="" if operation is None else operation.note,
+                    config_path=None if operation is None else operation.config_path,
+                    on_sample=publish_formal_sample,
+                ):
+                    display_pending_samples()
+            finally:
+                # The generator invokes the callback before raising for an unsafe
+                # formal sample, so this also displays that retained problem sample.
                 display_pending_samples()
-        finally:
-            # The generator invokes the callback before raising for an unsafe
-            # formal sample, so this also displays that retained problem sample.
-            display_pending_samples()
+        publisher.finish(status="completed")
         print_fn(session.last_run_dir)
+    except BaseException as exc:
+        publisher.finish(
+            status="interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    finally:
+        publisher.close()
     return 0
 
 

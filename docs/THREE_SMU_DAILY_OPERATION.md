@@ -279,6 +279,33 @@ output off → 查询确认 0 setpoint/output OFF”。关闭后的 V/I 明确�
 通信失败时不能声称已经归零或关闭；本次 active
 仪器必须查看前面板，off 角色始终保持“未连接/物理状态未知”。
 
+### 统一实时/历史绘图 Notebook
+
+安装一次分析 UI 依赖（在本 checkout 的 Python/`lyr` 环境）：
+
+```powershell
+python -m pip install -e ".[analysis]"
+```
+
+打开并运行 `notebooks/three_smu.ipynb`。这是唯一的 Three-SMU 绘图 Notebook，绝不打开
+VISA/QCoDeS 或读取 `hardware.local.toml`：
+
+- **Saved run**：选择数据目录和 run，默认仅加载 completed/accepted/clean formal samples；
+  rejected run 或 problem sample 只能显式勾选 Audit；
+- **Live run**：先点击 `Connect live run`，再在另一终端运行
+  `python -m attodry_control.three_smu_cli run`。CLI 是唯一硬件进程，Notebook 只读取同机
+  `127.0.0.1:8765/events` 的已记录内存样本。两个程序必须在同一台 `LK_setup`/SSH 远程机上运行；
+  Notebook 关闭不会中止扫描；
+- 点击 **Add plot** 可添加任意多张 line/scatter/2D colour-map 图。各图可选 X/Y/colour 为
+  point、repeat、elapsed time 或任意 active role 的 requested coordinate、source readback、U、I、R、G；
+  并可按 segment、repeat、另一坐标 slice 过滤；
+- 画不同 gate 下的多条 bias I--V 曲线：X 选 `smu_bias: requested coordinate`，Y 选
+  `smu_bias: current I (A)`，Series 选对应 gate 的 `requested coordinate`。若另一个 gate
+  也扫描，用 Slice 固定它的一个值。forward/reverse 默认分开显示。
+
+Live run 在最终 `run_finished` 前是 provisional；若 CLI 发出 `run_failed`，这些保留样本只应
+作为审计证据。完成后切换 Saved run 重新加载 accepted-only 数据。
+
 ## 数据与分析
 
 每个 run 目录保存 schema v5 `metadata.json`、`raw.jsonl`、`data.csv`。metadata 明确记录
@@ -287,10 +314,8 @@ output off → 查询确认 0 setpoint/output OFF”。关闭后的 V/I 明确�
 source setpoint/V/I 分开记录；实际数值差异本身不触发 tolerance rejection，但 V/I 绝对越界、
 trip、output 状态或错误队列问题仍会拒绝。
 
-`notebooks/three_smu_analysis.ipynb` 默认只读取 completed/accepted/clean formal samples；原始
-rejected/problem 记录只能显式 opt-in 审计。`notebooks/three_smu_live.ipynb` 调用同一 session
-generator，不是另一套写路径，且授权开关默认必须保持 `False`。它的实时图只从 session 回调
-填入的内存 FIFO 消费 formal samples，不直接访问硬件。
+`notebooks/three_smu.ipynb` 统一实时显示和历史 accepted-only 分析。历史 rejected/problem
+记录只能显式 opt-in 审计；实时图只从 CLI 已发布的内存 formal samples 消费，不直接访问硬件。
 
 ## 常见停止原因
 

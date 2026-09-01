@@ -777,6 +777,22 @@ renderer has no hardware access. Eleven focused fake CLI/Notebook tests passed;
 the complete 406-test offline suite passed with five optional plotting skips. No
 real resource was opened, queried, consumed, or written.
 
+Three-SMU unified plotting follow-up (2026-09-01): `notebooks/three_smu.ipynb`
+replaces the old separate live and accepted-only notebooks. The CLI alone owns the
+SMU session and, before opening it, binds a loopback-only Server-Sent Events endpoint at
+`127.0.0.1:8765/events`. It publishes the same already-durable formal samples that feed
+the terminal FIFO; Notebook consumers cannot create a session, import the hardware path,
+query VISA, write settings, or consume status queues. The dashboard defaults historical
+loading to completed/accepted/clean data, labels live data provisional until finalization,
+and makes rejected/problem evidence explicit Audit opt-in. It supports added line/scatter/
+incomplete-map panels, cross-role coordinate/readback U/I/R/G axes, gate-value series and
+slicing, so bias I--V families at different gate voltages can be displayed together without
+mixing forward/reverse segments. The feature is offline-only: 23 focused CLI/analysis/
+stream/Notebook tests passed (one optional Matplotlib rendering test skipped because this
+development environment lacks the analysis extra); source/test compilation and the complete
+offline suite (410 passed, 6 optional Matplotlib skips) passed. No real instrument resource
+was opened and no hardware command or status query ran.
+
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
 `resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state

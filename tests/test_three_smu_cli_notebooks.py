@@ -21,6 +21,28 @@ from attodry_control.three_smu_cli import run
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+class _FakeLivePublisher:
+    """Keep CLI tests offline without binding the fixed Notebook port."""
+
+    endpoint = "http://127.0.0.1:8765/events"
+
+    def __init__(self) -> None:
+        self.events = []
+        self.closed = False
+
+    def start(self, plan, *, total_samples) -> None:
+        self.events.append(("started", plan.mode.value, total_samples))
+
+    def publish_sample(self, sample) -> None:
+        self.events.append(("sample", sample))
+
+    def finish(self, *, status, error=None) -> None:
+        self.events.append(("finished", status, error))
+
+    def close(self) -> None:
+        self.closed = True
+
+
 OPERATION_TEXT = """
 [smu_bias]
 model = "Keithley2400"
@@ -207,12 +229,28 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                 ["run", "--config", str(config)],
                 input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
                 session_open=fake_session_open,
+                live_publisher_factory=_FakeLivePublisher,
             )
             self.assertEqual(result, 0)
             self.assertEqual(
                 opened["kwargs"],
                 {"authorize_writes": True, "authorize_status_consumption": True},
             )
+
+    def test_live_endpoint_failure_stops_before_session_open(self) -> None:
+        class BrokenPublisher(_FakeLivePublisher):
+            def start(self, plan, *, total_samples) -> None:
+                raise OSError("port is already in use")
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(OPERATION_TEXT, encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "No QCoDeS/VISA resource was opened"):
+                run(
+                    ["run", "--config", str(config)],
+                    session_open=lambda *_args, **_kwargs: self.fail("must not open"),
+                    live_publisher_factory=BrokenPublisher,
+                )
 
     def test_run_panel_displays_queued_clean_samples_without_status_queue(self) -> None:
         def sample(point_index: int) -> ThreeSmuSample:
@@ -267,6 +305,7 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                     input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
                     print_fn=output.append,
                     session_open=lambda *_args, **_kwargs: FakeSession(),
+                    live_publisher_factory=_FakeLivePublisher,
                 )
         rendered = "\n".join(map(str, output))
         self.assertEqual(result, 0)
@@ -400,6 +439,7 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                     input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
                     print_fn=output.append,
                     session_open=lambda *_args, **_kwargs: FakeSession(),
+                    live_publisher_factory=_FakeLivePublisher,
                 )
         rendered = "\n".join(output)
         self.assertIn("PROBLEM", rendered)
@@ -498,37 +538,29 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             self.assertTrue(resource.closed)
             self.assertTrue(manager.closed)
 
-    def test_notebooks_are_clean_syntax_valid_and_obey_import_boundaries(self) -> None:
-        live = PROJECT_ROOT / "notebooks" / "three_smu_live.ipynb"
-        analysis = PROJECT_ROOT / "notebooks" / "three_smu_analysis.ipynb"
-        for notebook in (live, analysis):
-            document = json.loads(notebook.read_text(encoding="utf-8"))
-            code = "\n\n".join(
-                "".join(cell.get("source", ()))
-                for cell in document["cells"]
-                if cell["cell_type"] == "code"
-            )
-            ast.parse(code)
-            for cell in document["cells"]:
-                if cell["cell_type"] == "code":
-                    self.assertIsNone(cell["execution_count"])
-                    self.assertEqual(cell["outputs"], [])
-        live_code = "\n".join(
+    def test_unified_notebook_is_clean_syntax_valid_and_has_no_hardware_path(self) -> None:
+        notebook = PROJECT_ROOT / "notebooks" / "three_smu.ipynb"
+        self.assertFalse((PROJECT_ROOT / "notebooks" / "three_smu_live.ipynb").exists())
+        self.assertFalse((PROJECT_ROOT / "notebooks" / "three_smu_analysis.ipynb").exists())
+        document = json.loads(notebook.read_text(encoding="utf-8"))
+        code = "\n\n".join(
             "".join(cell.get("source", ()))
-            for cell in json.loads(live.read_text(encoding="utf-8"))["cells"]
+            for cell in document["cells"]
             if cell["cell_type"] == "code"
         )
-        analysis_code = "\n".join(
-            "".join(cell.get("source", ()))
-            for cell in json.loads(analysis.read_text(encoding="utf-8"))["cells"]
-            if cell["cell_type"] == "code"
-        )
-        self.assertNotIn("qcodes", live_code.lower())
-        self.assertIn("session.run", live_code)
-        self.assertIn("on_sample=sample_queue.put", live_code)
-        self.assertIn("display_queued_samples", live_code)
-        self.assertNotIn("from attodry_control.three_smu import", analysis_code)
-        self.assertIn("attodry_control.three_smu_analysis", analysis_code)
+        ast.parse(code)
+        for cell in document["cells"]:
+            if cell["cell_type"] == "code":
+                self.assertIsNone(cell["execution_count"])
+                self.assertEqual(cell["outputs"], [])
+        self.assertNotIn("qcodes", code.lower())
+        self.assertNotIn("ThreeSmuSession", code)
+        self.assertNotIn("three_smu_cli", code)
+        self.assertIn("ipywidgets", code)
+        self.assertIn("Connect live run", code)
+        self.assertIn("Series:", code)
+        self.assertIn("Slice:", code)
+        self.assertIn("load_three_smu_plot_samples", code)
 
 
 if __name__ == "__main__":

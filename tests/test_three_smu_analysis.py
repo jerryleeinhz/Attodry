@@ -11,6 +11,7 @@ from attodry_control.three_smu_analysis import (
     resolve_run_dir,
 )
 from attodry_control.three_smu_config import SEMANTIC_ROLES
+from attodry_control.three_smu_plot import load_three_smu_plot_samples
 
 
 def make_run(
@@ -129,6 +130,13 @@ class ThreeSmuAnalysisTests(unittest.TestCase):
             self.assertEqual(len(rows), 4)
             self.assertTrue(all(row.role == "gate_bottom" for row in rows))
             self.assertEqual(load_three_smu_rows(run_dir, role="smu_bias"), ())
+
+    def test_plot_loader_reconstructs_one_wide_sample_per_formal_point(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            samples = load_three_smu_plot_samples(make_run(Path(directory)))
+        self.assertEqual(len(samples), 4)
+        self.assertEqual(set(samples[0].readings), set(SEMANTIC_ROLES))
+        self.assertEqual(samples[0].readings["smu_bias"].conductance_s, 0.001)
 
     def test_rectangular_two_gate_map_uses_bias_measurement_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

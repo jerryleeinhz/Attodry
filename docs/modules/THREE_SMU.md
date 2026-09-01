@@ -108,8 +108,17 @@ setpoint readback、V、I、R 和 output 状态，并用 `CLEAN` 或 `PROBLEM` �
 问题说明。问题样本在抛出安全异常前已经写入审计记录并放入 FIFO，因此不会因终端显示而改变
 fail-closed/cleanup 顺序。
 
-`notebooks/three_smu_live.ipynb` 使用同一个回调将 formal samples 放入内存 FIFO；绘图只从该
-FIFO 消费，不独立访问硬件，也不建立第二条 session 或硬件读回路径。
+统一的 `notebooks/three_smu.ipynb` 是唯一绘图入口。Saved run 模式只加载
+`metadata.json`/`data.csv`，仍默认 `completed + accepted + clean`；Live run 模式只订阅
+`run` 在 `127.0.0.1:8765/events` 发布的已记录内存 formal samples。CLI 始终是唯一
+SMU/VISA owner；Notebook 不导入硬件控制模块、不读 TOML、不建立第二条 session，也不发送
+任何查询或写入。端点只监听本机，且不携带地址或本机配置。
+
+绘图 UI 可动态添加 line、scatter 或 incomplete-grid 2D colour map。每张图独立选择 X/Y
+（及 map colour）为 point/repeat/time 或任一 active role 的 requested coordinate、source
+setpoint readback、U、I、R、G（`G=1/R`）；可按 segment/repeat/slice 过滤并按 gate coordinate
+分组。因而可在同一张图上画多条不同 gate 下的 bias I--V 曲线。双向 forward/reverse segment
+默认分开，绝不静默连接为一条曲线。
 
 终端宽度至少 96 列时，CLI 的 FIFO 面板以一次表头和固定列宽追加 role 的 setpoint/V/I/R/output
 readback，使用工程单位；较窄终端自动使用紧凑每-role 行，避免换行破坏可读性。
