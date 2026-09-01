@@ -793,6 +793,14 @@ development environment lacks the analysis extra); source/test compilation and t
 offline suite (410 passed, 6 optional Matplotlib skips) passed. No real instrument resource
 was opened and no hardware command or status query ran.
 
+Three-SMU live-plot rendering correction (2026-09-01): live stream receipt was confirmed by
+the dashboard status counter, but asynchronous `display(fig)` did not reliably render inside
+the VS Code/Jupyter widget callback. Each plot card now writes Matplotlib PNG bytes directly
+to an `ipywidgets.Image`, so the same event that increments the formal-sample counter visibly
+refreshes the chart. This changes presentation only; session, stream, safety and hardware
+ownership are unchanged. Notebook JSON/code syntax and 14 focused fake CLI/stream/Notebook
+tests passed (one optional Matplotlib test skipped); no instrument operation ran.
+
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
 `resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state

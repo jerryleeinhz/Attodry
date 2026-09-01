@@ -557,6 +557,8 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
         self.assertNotIn("ThreeSmuSession", code)
         self.assertNotIn("three_smu_cli", code)
         self.assertIn("ipywidgets", code)
+        self.assertIn("widgets.Image", code)
+        self.assertIn("figure.savefig", code)
         self.assertIn("Connect live run", code)
         self.assertIn("Series:", code)
         self.assertIn("Slice:", code)

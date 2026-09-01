@@ -1122,3 +1122,6 @@ Status: offline implementation complete (2026-09-01).
   loopback stream tests, notebook syntax/import-boundary checks, and fake-session CLI coverage.
   The full offline suite passed 410 tests with 6 optional Matplotlib rendering skips. No real
   instrument was connected, queried, status-consumed, or written.
+- The live panels render each Matplotlib figure to an explicit `ipywidgets.Image` PNG rather
+  than relying on asynchronous `display(fig)` capture. This keeps charts visible when live
+  samples arrive through the Notebook event task; no hardware path changed.
