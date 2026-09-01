@@ -216,6 +216,11 @@ class TemperatureExcitationAnalysisTests(unittest.TestCase):
         self.assertIn("TEMPERATURE_DATA_DIRECTORY", code)
         self.assertIn("phase_statistics", code)
         self.assertIn("circular mean/std", code)
+        self.assertIn("SOURCE_DIRECTORY = PROJECT_ROOT / 'src'", code)
+        self.assertLess(
+            code.index("sys.path.insert(0, source_directory_text)"),
+            code.index("from attodry_control.commissioning_analysis"),
+        )
         self.assertNotIn("attodry_control.attodry", code)
         self.assertNotIn("attodry_control.sr830", code)
 

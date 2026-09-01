@@ -1181,6 +1181,13 @@ Synthetic summary and formal-CSV loading, status filters, multi-run identity,
 circular phase, Notebook compilation, and actual Matplotlib rendering were tested.
 This change imports no hardware control path and performed no instrument I/O.
 
+The Notebook first cell now also supports direct execution from a clean source
+checkout without an editable package installation. When Jupyter starts from the
+repository root or its `notebooks` directory, it validates and prepends that
+checkout's `src` directory before importing `attodry_control`. Branch and worktree
+names are never used as Python package names. A clean-checkout execution without
+`PYTHONPATH` passed; this is analysis-only and performs no instrument I/O.
+
 ## Immediate next implementation tasks
 
 1. Obtain a distinct, limited real-hardware authorization before any combined DLL/VISA

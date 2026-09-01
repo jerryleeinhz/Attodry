@@ -1050,6 +1050,13 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   display; raw values are unchanged. Synthetic summary/CSV, filtering, multi-run,
   circular-phase, Notebook-compilation, and Matplotlib-render tests passed. No
   hardware module was imported or instrument operation performed.
+- Corrected direct Notebook execution from a source checkout (2026-09-01). Before
+  importing `attodry_control`, the first cell now resolves a repository root when
+  Jupyter starts in either the root or `notebooks`, verifies `src/attodry_control`,
+  and prepends that exact `src` directory to `sys.path`. This removes the editable-
+  install assumption without treating a Git branch/worktree name as a Python package.
+  The clean checkout executed successfully without `PYTHONPATH`; no hardware path
+  was imported or instrument operation performed.
 
 ## Stage 7 follow-up - segmented temperature grids
 
