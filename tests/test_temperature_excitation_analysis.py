@@ -189,6 +189,13 @@ class TemperatureExcitationAnalysisTests(unittest.TestCase):
         self.assertEqual(phase.axes[0].get_ylabel(), "Vxx phase (degree)")
         self.assertEqual(len(amplitude.axes[0].get_legend_handles_labels()[1]), 2)
         self.assertEqual(len(phase.axes[0].get_legend_handles_labels()[1]), 2)
+        amplitude.canvas.draw()
+        legend = amplitude.axes[0].get_legend()
+        self.assertIsNotNone(legend)
+        self.assertGreater(
+            legend.get_window_extent().x0,
+            amplitude.axes[0].get_window_extent().x1,
+        )
         self.assertGreater((self.root / "xx_h1_phase.png").stat().st_size, 0)
         self.assertEqual(
             set(suite),
@@ -213,6 +220,10 @@ class TemperatureExcitationAnalysisTests(unittest.TestCase):
         self.assertIn("load_temperature_excitation_sample_files", code)
         self.assertIn("plot_temperature_iv_suite", code)
         self.assertIn("temperature_excitation_record_widget", code)
+        self.assertIn("temperature_current_minimum_widget", code)
+        self.assertIn("temperature_current_maximum_widget", code)
+        self.assertIn("T × I selection applied", code)
+        self.assertIn("current_a_rms", code)
         self.assertIn("TEMPERATURE_DATA_DIRECTORY", code)
         self.assertIn("phase_statistics", code)
         self.assertIn("circular mean/std", code)

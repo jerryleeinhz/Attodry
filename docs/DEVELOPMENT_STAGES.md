@@ -1050,6 +1050,11 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   display; raw values are unchanged. Synthetic summary/CSV, filtering, multi-run,
   circular-phase, Notebook-compilation, and Matplotlib-render tests passed. No
   hardware module was imported or instrument operation performed.
+- The temperature–excitation browser also accepts optional lower/upper archived
+  RMS-current bounds. It plots and exports only their intersection with selected
+  temperature conditions, records both bounds in the selection manifest, and places
+  each temperature legend outside the plot frame on the right. This remains
+  analysis-only; no instrument path is imported.
 - Corrected direct Notebook execution from a source checkout (2026-09-01). Before
   importing `attodry_control`, the first cell now resolves a repository root when
   Jupyter starts in either the root or `notebooks`, verifies `src/attodry_control`,
@@ -1071,3 +1076,25 @@ Status: offline implementation complete (2026-08-26); no real hardware operation
   existing local configurations, but it cannot be mixed with `temperature_ranges`.
   Both standalone temperature and temperature–excitation scans now use the same
   archived expanded point sequence and segment metadata.
+
+## Stage 7 follow-up - file-only progress monitors
+
+Status: offline implementation complete (2026-09-01); no hardware connection.
+
+- Added `temperature_progress_monitor` and `lockin_progress_monitor`, two
+  standard-library-only terminal readers for the fsynced JSONL records. Neither
+  module imports a cryostat DLL, VISA backend, SR830 adapter, or hardware config;
+  they cannot open COM/GPIB or consume `LIAS?`/`ERRS?` latches.
+- The combined scan now writes `lockin_point_ready`, `lockin_formal_sample`, and
+  `lockin_point_completed` with the current point index, SINE OUT request and
+  existing `SLVL?` readback, readback-derived nominal current, frequency context,
+  and formal Vxx/Vxy phase/status data. No extra instrument query was introduced.
+- Standalone frequency, excitation, and frequency-by-excitation sweeps now create
+  incremental `*_lockin_<scan>_progress.jsonl` files with the same point/formal
+  sample contract. Existing final JSON results and rejected/interrupted evidence
+  remain unchanged.
+- JSONL tailing handles an incomplete final line without inventing a sample; old
+  records with no point context display missing fields rather than guessed values.
+  Offline tests cover tailing, current temperature/Lock-in rendering, latest-file
+  discovery, CLI `--once`, and sweep-point propagation. No real DLL or VISA
+  resource was created.

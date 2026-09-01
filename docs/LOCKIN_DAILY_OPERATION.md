@@ -159,16 +159,29 @@ SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次�
 本次数据的简短名称并进入 JSON 文件名，后者记录样品、接线状态或本次测试目的，
 只保存在 JSON 审计记录中。
 
-若需要在没有 sweep 占用两台仪器时实时查看 XX/XY 的电压、相位、频率、量程和锁定
-状态，运行：
+正在运行 sweep 时，使用纯文件 monitor 读取本次 `*_lockin_*_progress.jsonl`：
+
+```powershell
+python -m attodry_control.lockin_progress_monitor `
+  --directory run_data\commissioning
+```
+
+它不打开 VISA/GPIB、不发送查询，也不清除锁存位；每个已经完成 `SLVL?` 读回的点会显示
+当前 SINE OUT target/readback、名义电流、频率、harmonic、Vxx/Vxy R/phase 与已记录状态。
+温度—激励扫描则将温度和 Lock-in 事件写进同一个 parent JSONL，可同时运行
+`temperature_progress_monitor`。完整命令和读回含义见
+[`FILE_PROGRESS_MONITORS.md`](FILE_PROGRESS_MONITORS.md)。
+
+只有在**没有 sweep 或其他程序占用两台仪器**时，才可用下列独立实时诊断查看 XX/XY
+的电压、相位、频率、量程和锁定状态：
 
 ```powershell
 python -m attodry_control.lockin_test monitor-live --consume-status-latches
 ```
 
 这是独立的只读面板；`--consume-status-latches` 会清除 `LIAS?`/`ERRS?` 锁存位，不能
-与扫描并行运行。字段说明、停止方式和无锁存读取的含义见
-[`LOCKIN_LIVE_MONITOR.md`](LOCKIN_LIVE_MONITOR.md)。
+与扫描并行运行。不带该 flag 也不能与 scan 并行，因为仍会竞争 VISA 资源。字段说明、
+停止方式和无锁存读取的含义见 [`LOCKIN_LIVE_MONITOR.md`](LOCKIN_LIVE_MONITOR.md)。
 
 ### 中断后的 VISA 接口恢复
 

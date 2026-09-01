@@ -216,7 +216,7 @@ def plot_temperature_iv_curves(
         raise RuntimeError(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
-    figure, axis = plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
+    figure, axis = plt.subplots(figsize=(9.6, 4.8), constrained_layout=True)
     curve_keys = sorted(
         {
             (
@@ -279,7 +279,12 @@ def plot_temperature_iv_curves(
         f"Temperature–excitation · {signal_name} {metric_name} · h{harmonic}"
     )
     axis.grid(True, alpha=0.25)
-    axis.legend(title="Actual formal-window temperature")
+    axis.legend(
+        title="Actual formal-window temperature",
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+    )
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -66,6 +67,109 @@ SWEEP_FREQUENCY_REL_TOLERANCE = 100e-6
 SWEEP_FREQUENCY_ABS_TOLERANCE_HZ = PAIR_FREQUENCY_ABS_TOLERANCE_HZ
 SR830_FREQUENCY_READBACK_SIGNIFICANT_DIGITS = 4
 SR830_FREQUENCY_READBACK_MINIMUM_QUANTUM_HZ = 0.0001
+SWEEP_PROGRESS_SCHEMA_VERSION = 1
+
+
+class _JsonlProgressWriter:
+    """Append durable, incremental sweep events without owning any instrument."""
+
+    def __init__(self, path: Path) -> None:
+        path.open("x", encoding="utf-8").close()
+        self.path = path
+
+    def append(self, event: Mapping[str, object]) -> None:
+        with self.path.open("a", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+
+def _new_sweep_progress_writer(
+    record_directory: Path,
+    settings: dict[str, object],
+    *,
+    scan: str,
+    points_total: int,
+) -> _JsonlProgressWriter:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    run_name = _sweep_filename_label(_sweep_run_metadata(settings)["name"])
+    writer = _JsonlProgressWriter(
+        record_directory / f"{timestamp}_{run_name}_lockin_{scan}_progress.jsonl"
+    )
+    writer.append(
+        {
+            "event": "scan_started",
+            "schema_version": SWEEP_PROGRESS_SCHEMA_VERSION,
+            "captured_unix_s": time.time(),
+            "command": "lockin-sweep",
+            "scan": scan,
+            "points_total": points_total,
+            "run_metadata": _sweep_run_metadata(settings),
+        }
+    )
+    return writer
+
+
+def _sweep_point_progress_snapshot(record: Mapping[str, object]) -> dict[str, object]:
+    """Copy only the current point's stable, already-read-back monitor fields."""
+
+    fields = (
+        "point_index",
+        "points_total",
+        "frequency_index",
+        "frequency_points_total",
+        "excitation_index",
+        "excitation_points_total",
+        "target_frequency_hz",
+        "requested_frequency_hz",
+        "actual_frequency_hz",
+        "frequency_readback_hz",
+        "source_v_rms",
+        "source_readback_v_rms",
+        "requested_nominal_current_a_rms",
+        "nominal_current_a_rms",
+        "range_segment_index",
+        "requested_full_scale_v",
+        "skipped_harmonics",
+    )
+    return {field: record[field] for field in fields if field in record}
+
+
+def _append_sweep_progress_point(
+    writer: _JsonlProgressWriter,
+    *,
+    event: str,
+    scan: str,
+    point: Mapping[str, object],
+) -> None:
+    writer.append(
+        {
+            "event": event,
+            "captured_unix_s": time.time(),
+            "scan": scan,
+            "sweep_point": _sweep_point_progress_snapshot(point),
+        }
+    )
+
+
+def _sweep_progress_formal_sample_callback(
+    writer: _JsonlProgressWriter, *, scan: str
+) -> Callable[[Mapping[str, object]], None]:
+    def record(sample: Mapping[str, object]) -> None:
+        point = sample.get("sweep_point")
+        writer.append(
+            {
+                "event": "lockin_formal_sample",
+                "captured_unix_s": time.time(),
+                "scan": scan,
+                "sweep_point": (
+                    dict(point) if isinstance(point, Mapping) else {}
+                ),
+                "sample": sample,
+            }
+        )
+
+    return record
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1051,6 +1155,9 @@ def _run_frequency_sweep(
     )
     source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
     records: list[dict[str, object]] = []
+    progress_writer = _new_sweep_progress_writer(
+        record_directory, settings, scan="frequency", points_total=len(points)
+    )
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         controller = DualSr830Controller(lockin_xx, lockin_xy)
         preflight_xx = None
@@ -1131,6 +1238,7 @@ def _run_frequency_sweep(
                 )
                 point_record: dict[str, object] = {
                     "point_index": point_index,
+                    "points_total": len(points),
                     "target_frequency_hz": target_hz,
                     "requested_frequency_hz": target_hz,
                     "actual_frequency_hz": None,
@@ -1188,6 +1296,12 @@ def _run_frequency_sweep(
                     skip_unsupported=args.skip_unsupported_harmonics,
                 )
                 point_record["skipped_harmonics"] = skipped_harmonics
+                _append_sweep_progress_point(
+                    progress_writer,
+                    event="lockin_point_ready",
+                    scan="frequency",
+                    point=point_record,
+                )
                 _apply_sweep_segment_ranges(
                     lockin_xx,
                     lockin_xy,
@@ -1222,6 +1336,15 @@ def _run_frequency_sweep(
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
                     frequency_rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
+                    on_formal_sample_recorded=_sweep_progress_formal_sample_callback(
+                        progress_writer, scan="frequency"
+                    ),
+                )
+                _append_sweep_progress_point(
+                    progress_writer,
+                    event="lockin_point_completed",
+                    scan="frequency",
+                    point=point_record,
                 )
         except BaseException as exc:
             failure = exc
@@ -1318,7 +1441,7 @@ def _run_frequency_sweep(
             "interface_clear": interface_clear,
             "error": None if failure is None else str(failure),
         }
-        _emit_sweep_result(record_directory, result)
+        _emit_sweep_result(record_directory, result, progress_writer=progress_writer)
         if failure is not None:
             raise failure
         if not cleanup["verified"]:
@@ -1360,6 +1483,12 @@ def _run_frequency_excitation_sweep(
     )
     records: list[dict[str, object]] = []
     frequency_records: list[dict[str, object]] = []
+    progress_writer = _new_sweep_progress_writer(
+        record_directory,
+        settings,
+        scan="frequency_excitation",
+        points_total=len(frequencies) * len(amplitudes),
+    )
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         controller = DualSr830Controller(lockin_xx, lockin_xy)
         preflight_xx = None
@@ -1468,8 +1597,11 @@ def _run_frequency_excitation_sweep(
                     )
                     point_record: dict[str, object] = {
                         "point_index": len(records),
+                        "points_total": len(frequencies) * len(amplitudes),
                         "frequency_index": frequency_index,
+                        "frequency_points_total": len(frequencies),
                         "excitation_index": excitation_index,
+                        "excitation_points_total": len(amplitudes),
                         "target_frequency_hz": target_hz,
                         "requested_frequency_hz": target_hz,
                         "actual_frequency_hz": xx_readback,
@@ -1508,6 +1640,12 @@ def _run_frequency_excitation_sweep(
                     point_record["nominal_current_a_rms"] = output_readback / float(
                         source_readback_safety["nominal_total_resistance_ohm"]
                     )
+                    _append_sweep_progress_point(
+                        progress_writer,
+                        event="lockin_point_ready",
+                        scan="frequency_excitation",
+                        point=point_record,
+                    )
                     _apply_sweep_segment_ranges(
                         lockin_xx,
                         lockin_xy,
@@ -1542,6 +1680,15 @@ def _run_frequency_excitation_sweep(
                         sample_interval_s=args.sample_interval_s,
                         record=point_record,
                         frequency_rel_tolerance=1e-5,
+                        on_formal_sample_recorded=_sweep_progress_formal_sample_callback(
+                            progress_writer, scan="frequency_excitation"
+                        ),
+                    )
+                    _append_sweep_progress_point(
+                        progress_writer,
+                        event="lockin_point_completed",
+                        scan="frequency_excitation",
+                        point=point_record,
                     )
         except BaseException as exc:
             failure = exc
@@ -1636,7 +1783,7 @@ def _run_frequency_excitation_sweep(
             "interface_clear": interface_clear,
             "error": None if failure is None else str(failure),
         }
-        _emit_sweep_result(record_directory, result)
+        _emit_sweep_result(record_directory, result, progress_writer=progress_writer)
         if failure is not None:
             raise failure
         if not cleanup["verified"]:
@@ -1653,6 +1800,9 @@ def _run_excitation_sweep(
     record_directory = _prepare_sweep_record_directory(args, settings)
     points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
+    progress_writer = _new_sweep_progress_writer(
+        record_directory, settings, scan="excitation", points_total=len(points)
+    )
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         result, failure = _execute_excitation_sweep_on_open_pair(
             lockin_xx,
@@ -1661,8 +1811,23 @@ def _run_excitation_sweep(
             settings=settings,
             points=points,
             safety=safety,
+            on_formal_sample_recorded=_sweep_progress_formal_sample_callback(
+                progress_writer, scan="excitation"
+            ),
+            on_point_ready=lambda point: _append_sweep_progress_point(
+                progress_writer,
+                event="lockin_point_ready",
+                scan="excitation",
+                point=point,
+            ),
+            on_point_completed=lambda point: _append_sweep_progress_point(
+                progress_writer,
+                event="lockin_point_completed",
+                scan="excitation",
+                point=point,
+            ),
         )
-        _emit_sweep_result(record_directory, result)
+        _emit_sweep_result(record_directory, result, progress_writer=progress_writer)
         if failure is not None:
             raise failure
         cleanup = result["cleanup"]
@@ -1725,6 +1890,8 @@ def _execute_excitation_sweep_on_open_pair(
     measurement_context: Callable[[str, int, int], Mapping[str, object] | None]
     | None = None,
     on_formal_sample_recorded: Callable[[Mapping[str, object]], None] | None = None,
+    on_point_ready: Callable[[Mapping[str, object]], None] | None = None,
+    on_point_completed: Callable[[Mapping[str, object]], None] | None = None,
 ) -> tuple[dict[str, object], BaseException | None]:
     """Run one configured excitation cycle without owning the VISA resources.
 
@@ -1800,6 +1967,7 @@ def _execute_excitation_sweep_on_open_pair(
             )
             point_record: dict[str, object] = {
                 "point_index": point_index,
+                "points_total": len(points),
                 "target_frequency_hz": baseline_hz,
                 "requested_frequency_hz": baseline_hz,
                 "actual_frequency_hz": None,
@@ -1839,6 +2007,8 @@ def _execute_excitation_sweep_on_open_pair(
                 "lockin_xy": xy_frequency_readback,
             }
             point_record["actual_frequency_hz"] = xx_frequency_readback
+            if on_point_ready is not None:
+                on_point_ready(point_record)
             point_harmonics, skipped_harmonics = _harmonics_for_frequency(
                 max(baseline_hz, xx_frequency_readback, xy_frequency_readback),
                 harmonics,
@@ -1882,6 +2052,8 @@ def _execute_excitation_sweep_on_open_pair(
                 measurement_context=measurement_context,
                 on_formal_sample_recorded=on_formal_sample_recorded,
             )
+            if on_point_completed is not None:
+                on_point_completed(point_record)
     except BaseException as exc:
         failure = exc
         interface_clear["before_cleanup"] = _clear_pair_interfaces(
@@ -2149,7 +2321,12 @@ def _sweep_outcome(
     return "rejected"
 
 
-def _emit_sweep_result(record_directory: Path, result: dict[str, object]) -> None:
+def _emit_sweep_result(
+    record_directory: Path,
+    result: dict[str, object],
+    *,
+    progress_writer: _JsonlProgressWriter | None = None,
+) -> None:
     try:
         _save_sweep_result(record_directory, result)
     except OSError as exc:
@@ -2158,6 +2335,21 @@ def _emit_sweep_result(record_directory: Path, result: dict[str, object]) -> Non
         result["recording_error"] = str(exc)
         if result.get("error") is None:
             result["error"] = f"audit record write failed: {exc}"
+    if progress_writer is not None:
+        cleanup = result.get("cleanup")
+        progress_writer.append(
+            {
+                "event": "scan_finished",
+                "captured_unix_s": time.time(),
+                "scan": result.get("scan"),
+                "completed": result.get("completed"),
+                "outcome": result.get("outcome"),
+                "cleanup_verified": (
+                    cleanup.get("verified") if isinstance(cleanup, Mapping) else None
+                ),
+                "error": result.get("error"),
+            }
+        )
     print(json.dumps(result, indent=2, ensure_ascii=False), flush=True)
     if "recording_error" in result:
         raise Sr830Error("Sweep audit record could not be saved.")
@@ -3614,6 +3806,7 @@ def _capture_sweep_point(
                 "harmonic": harmonic,
                 "sample_index": sample_index,
                 "captured_unix_s": time.time(),
+                "sweep_point": _sweep_point_progress_snapshot(record),
                 "selected_roles": list(selected_roles),
                 "lockin_xx": _audited_harmonic_sample_record(xx),
                 "lockin_xy": _audited_harmonic_sample_record(xy),

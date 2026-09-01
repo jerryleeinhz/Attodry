@@ -119,6 +119,18 @@ minimum、maximum、mean、standard deviation、peak-to-peak 和样本数。`tar
 通信失败不代表温控已关闭。若最终读回或 close 失败，记录只保存最后确认状态并要求
 人工查看 GUI，不会写成安全完成。
 
+扫描运行中可在另一个终端只读该 JSONL：
+
+```powershell
+python -m attodry_control.temperature_progress_monitor `
+  --directory run_data\temperature_commissioning
+```
+
+它显示最后写入的目标、sample/VTI 温度、实际 setpoint、温控和错误状态；不加载 DLL、
+不打开 COM，也不改变扫描或温控。用 `--once` 只显示一次快照。请勿为了观察进度另开
+attoDRY GUI 或 `attodry_test`，它们会竞争 COM 端口。完整限制见
+[`FILE_PROGRESS_MONITORS.md`](FILE_PROGRESS_MONITORS.md)。
+
 ## 中断和恢复
 
 `abort` 或硬故障会保留当前点的所有原始样本，尝试关闭 Full Temperature Control，

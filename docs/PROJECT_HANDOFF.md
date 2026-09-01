@@ -1171,6 +1171,12 @@ operator select one or more files and individual completed temperature condition
 Matching summary/CSV pairs are de-duplicated in favor of the summary; independently
 selected runs retain their source-file and temperature-index identity.
 
+The same browser now also accepts optional lower/upper bounds on the archived
+readback-derived RMS current. It retains only the intersection of those current
+bounds and the selected temperature conditions; the bounds are saved in the
+selection manifest. Every temperature I–V legend is positioned outside the plot
+frame on the right, so a long temperature list does not cover the curves.
+
 For each available XX/XY × h1/h2/h3 channel, analysis produces a separate R-amplitude
 figure and phase figure. Each actual formal-window mean temperature is a separate
 curve versus the archived readback-derived RMS current. Phase repeats use circular
@@ -1187,6 +1193,27 @@ repository root or its `notebooks` directory, it validates and prepends that
 checkout's `src` directory before importing `attodry_control`. Branch and worktree
 names are never used as Python package names. A clean-checkout execution without
 `PYTHONPATH` passed; this is analysis-only and performs no instrument I/O.
+
+## Current file-only monitoring update (2026-09-01)
+
+Two new terminal commands tail only the incremental JSONL files already produced by
+the scan process: `temperature_progress_monitor` shows temperature point/state, and
+`lockin_progress_monitor` shows the current sweep point, SINE OUT requested and
+`SLVL?` readback, readback-derived nominal current, frequency, harmonic, Vxx/Vxy
+R/phase and recorded status. They import only standard-library file-reading helpers:
+they do not load the attoDRY DLL, open COM5, open VISA/GPIB, query instruments, or
+consume status latches. They are therefore the required observation path while a
+temperature, Lock-in, or combined scan owns hardware resources.
+
+The combined scan now records a `lockin_point_ready` event immediately after its
+existing SINE OUT/frequency readbacks, followed by formal and completed-point events.
+The earlier absence of SINE OUT fields in live JSONL was only an event-context
+omission: no new GPIB operation was needed. New standalone SR830 sweeps also emit
+matching `*_lockin_<scan>_progress.jsonl` records. Existing JSONL and final summary
+formats remain readable; old events without point context deliberately render as
+unknown rather than being reconstructed from event count. Offline tests passed with
+fake/file-only inputs. No real DLL or VISA resource was opened and no hardware
+command was sent.
 
 ## Immediate next implementation tasks
 

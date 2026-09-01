@@ -1,6 +1,6 @@
 # Dual-SR830 实时状态显示
 
-`monitor-live` 是日常检查两台 SR830 当前状态的只读终端面板。它从同一份被 Git
+`monitor-live` 是**没有 sweep 运行时**检查两台 SR830 当前状态的只读终端面板。它从同一份被 Git
 忽略的 `config/hardware.local.toml` 读取 XX/XY 的语义地址和 VISA 超时；不需要填写
 电阻、量程、频率或写入授权参数。
 
@@ -42,6 +42,16 @@ python -m attodry_control.lockin_test monitor-live --samples 10 --interval-s 1 -
 与任何正在运行的 sweep、commissioning 或其他访问同一对 VISA 地址的程序并行运行。
 先停止写入/扫描命令，再启动监视；若面板出现 `UNLOCKED`、`OVERLOAD`、非零 error 或
 warnings，应停止后续测量并按前面板和接线手动核实。
+
+## 扫描期间请使用纯文件 monitor
+
+正在进行 `sweep-frequency`、`sweep-excitation`、`sweep-frequency-excitation` 或
+`temperature_excitation_scan` 时，不要启动本命令。即使不带
+`--consume-status-latches`，VISA 查询仍会与 acquisition 竞争同一资源并破坏可审计时序。
+
+改用 [`FILE_PROGRESS_MONITORS.md`](FILE_PROGRESS_MONITORS.md) 的
+`temperature_progress_monitor` 或 `lockin_progress_monitor`。它们只读取扫描已写入并
+flush 的 JSONL，不访问 COM/VISA，也不清除锁存位。
 
 ## 写入边界
 

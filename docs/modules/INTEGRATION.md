@@ -25,6 +25,12 @@ Lock-in device-only commissioning 解释为组合硬件验收；未来的 DLL/VI
 做带时间权重的实际测量窗口温度平均。后者才是 formal sample 的温度坐标，前者不能
 悄悄替代它。
 
+组合扫描运行时，温度和 Lock-in 状态必须分别通过纯文件 monitor 读取 parent JSONL。
+`lockin_point_ready` 在既有 SINE OUT/频率 readback 后立即归档 point index、
+SINE OUT target/readback 和名义电流；formal sample 继续归档 Vxx/Vxy phase/status。
+两个 monitor 不连接 DLL/COM/VISA，也不消费 SR830 锁存位，因此不会与 coordinator
+竞争资源。具体命令见 [`../FILE_PROGRESS_MONITORS.md`](../FILE_PROGRESS_MONITORS.md)。
+
 ## 前置输入
 
 开始合并前，每个模块必须提供：

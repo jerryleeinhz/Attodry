@@ -93,6 +93,8 @@ python -m attodry_control.attodry_test --help
 python -m attodry_control.temperature_test --help
 python -m attodry_control.temperature_run --help
 python -m attodry_control.temperature_scan --help
+python -m attodry_control.temperature_progress_monitor --help
+python -m attodry_control.lockin_progress_monitor --help
 python -m attodry_control.lockin_test --help
 ```
 
@@ -129,6 +131,19 @@ python -m attodry_control.temperature_excitation_scan `
 只接受完整结束的 temperature condition。恢复只能跳过连续完成的温度点，绝不从某个
 幅值或谐波中间续跑。完整合同、未来授权边界和分析约定见
 [`docs/TEMPERATURE_EXCITATION_SCAN_GUIDE.md`](docs/TEMPERATURE_EXCITATION_SCAN_GUIDE.md)。
+
+扫描运行期间，用纯文件 monitor 查看实时进度，而不要另开 COM/VISA 诊断：
+
+```powershell
+python -m attodry_control.temperature_progress_monitor `
+  --directory run_data\temperature_excitation_commissioning
+python -m attodry_control.lockin_progress_monitor `
+  --directory run_data\temperature_excitation_commissioning
+```
+
+两个命令只读取 JSONL，可同时运行；Lock-in 输出会保留当前 SINE OUT 请求值、`SLVL?`
+读回、名义电流、Vxx/Vxy 的 R/phase 和状态。说明、数据含义与旧记录兼容性见
+[`docs/FILE_PROGRESS_MONITORS.md`](docs/FILE_PROGRESS_MONITORS.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
 `config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别
@@ -168,15 +183,15 @@ XX/XY 谐波。每项可填 `[1, 3]`、`[2]` 或 `[]`；每类扫描至少选择
 继承 `excitation_*`。它按频率外层、幅值内层遍历两个配置区间，并将实际频率和 SINE
 OUT 读回值保存到同一个 JSON。
 
-在没有任何 sweep 或其他程序占用同一对 VISA 地址时，可用下面的只读面板实时查看
-XX/XY 的电压、相位、频率、量程和锁定状态：
+在没有任何 sweep 或其他程序占用同一对 VISA 地址时，才可用下面的独立只读面板即时
+查询 XX/XY 的电压、相位、频率、量程和锁定状态：
 
 ```powershell
 python -m attodry_control.lockin_test monitor-live --consume-status-latches
 ```
 
-该选项会读取并清除 `LIAS?`/`ERRS?` 锁存位；完整边界和停止方式见
-[`docs/LOCKIN_LIVE_MONITOR.md`](docs/LOCKIN_LIVE_MONITOR.md)。
+该选项会读取并清除 `LIAS?`/`ERRS?` 锁存位，不能与 scan 并行；扫描期间一律使用上面的
+纯文件 monitor。完整边界见 [`docs/LOCKIN_LIVE_MONITOR.md`](docs/LOCKIN_LIVE_MONITOR.md)。
 
 已完成的独立扫频和激励JSON可用
 [`notebooks/sr830_commissioning_sweeps.ipynb`](notebooks/sr830_commissioning_sweeps.ipynb)
@@ -187,10 +202,12 @@ unlock/overload/error 审计筛选。只选择一种扫描时，Notebook只画�
 进入默认曲线。
 
 同一 Notebook 也可从独立的 `TEMPERATURE_DATA_DIRECTORY` 浏览一个或多个
-temperature–excitation summary JSON / formal CSV。选择状态和温度 condition 后，它按
+temperature–excitation summary JSON / formal CSV。选择状态、温度 condition 和归档 RMS
+电流范围后，它只对两种筛选的交集作图，按
 Vxx/Vxy、h1/h2/h3 和幅值/相位分别作图；每张图把不同实际测量窗口平均温度的曲线叠加在
 一起，横轴使用记录中已保存的 `nominal_current_a_rms`。相位重复样本采用圆周均值与圆周
-标准差，并只为显示沿递增电流展开；原始相位不会被修改。默认仍只使用 `clean` 正式样本。
+标准差，并只为显示沿递增电流展开；原始相位不会被修改。图例位于画框右侧。默认仍只使用
+`clean` 正式样本。
 
 只查看频率扫描和幅值扫描中的 XY 信号时，使用
 [`notebooks/sr830_xy_sweeps.ipynb`](notebooks/sr830_xy_sweeps.ipynb)。

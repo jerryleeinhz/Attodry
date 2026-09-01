@@ -33,6 +33,7 @@ from .lockin_test import (
     _load_resource_manager_factory,
     _measurement_config_snapshot,
     _open_pair,
+    _sweep_point_progress_snapshot,
     prepare_configured_excitation_sweep,
 )
 from .models import CryostatState
@@ -349,6 +350,20 @@ def run(
                     target_k=target_k,
                     wall_time=wall_time,
                 )
+                on_point_ready = _lockin_point_progress_callback(
+                    writer,
+                    event="lockin_point_ready",
+                    temperature_index=temperature_index,
+                    target_k=target_k,
+                    wall_time=wall_time,
+                )
+                on_point_completed = _lockin_point_progress_callback(
+                    writer,
+                    event="lockin_point_completed",
+                    temperature_index=temperature_index,
+                    target_k=target_k,
+                    wall_time=wall_time,
+                )
                 excitation_record, excitation_failure = (
                     _execute_excitation_sweep_on_open_pair(
                         lockin_xx,
@@ -359,6 +374,8 @@ def run(
                         safety=excitation_safety,
                         measurement_context=measurement_context,
                         on_formal_sample_recorded=on_formal_sample,
+                        on_point_ready=on_point_ready,
+                        on_point_completed=on_point_completed,
                     )
                 )
                 condition["excitation"] = excitation_record
@@ -629,13 +646,43 @@ def _formal_sample_progress_callback(
         if isinstance(sample, dict):
             sample["measurement_window_temperature"] = statistics
             sample["measurement_temperature_k"] = statistics["mean_k"]
+        point = sample.get("sweep_point")
         writer.append(
             {
                 "event": "lockin_formal_sample",
                 "captured_unix_s": wall_time(),
+                "scan": "excitation",
                 "temperature_index": temperature_index,
                 "requested_temperature_k": target_k,
+                "sweep_point": (
+                    dict(point) if isinstance(point, Mapping) else {}
+                ),
                 "sample": sample,
+            }
+        )
+
+    return record
+
+
+def _lockin_point_progress_callback(
+    writer: _JsonlWriter,
+    *,
+    event: str,
+    temperature_index: int,
+    target_k: float,
+    wall_time: Callable[[], float],
+) -> Callable[[Mapping[str, object]], None]:
+    """Archive the current, already-read-back SR830 point without a new query."""
+
+    def record(point: Mapping[str, object]) -> None:
+        writer.append(
+            {
+                "event": event,
+                "captured_unix_s": wall_time(),
+                "scan": "excitation",
+                "temperature_index": temperature_index,
+                "requested_temperature_k": target_k,
+                "sweep_point": _sweep_point_progress_snapshot(point),
             }
         )
 

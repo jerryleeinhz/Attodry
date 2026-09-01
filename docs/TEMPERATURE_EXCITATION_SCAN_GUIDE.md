@@ -101,6 +101,25 @@ condition。它绝不从某个幅值或谐波中间继续；只要该温度点�
 温度后检查不完整，下次会从该温度点的稳定阶段重新开始。这样部分原始数据可审计，
 但不会伪装成完整条件。
 
+## 扫描期间的纯文件监控
+
+在另一个终端中，温度和 Lock-in 状态分别读取同一个 parent JSONL：
+
+```powershell
+python -m attodry_control.temperature_progress_monitor `
+  --progress "PATH_TO_temperature_excitation_progress.jsonl"
+python -m attodry_control.lockin_progress_monitor `
+  --progress "PATH_TO_temperature_excitation_progress.jsonl"
+```
+
+两者不连接 COM5 或 GPIB，也不读取/清除 SR830 锁存位。温度 monitor 显示当前温度
+点与 attoDRY 状态；Lock-in monitor 在每个点 `SLVL?` 已读回后显示当前 SINE OUT
+请求/读回、名义电流、频率、谐波、Vxx/Vxy 的 R/phase 和已归档的状态。它们只能显示
+扫描已经持久化的最新数据，不能替代实时硬件诊断。扫描期间不要运行 attoDRY GUI、
+`attodry_test` 或 SR830 `monitor-live`，避免争用 COM/VISA 或消费锁存位。
+
+详见 [`FILE_PROGRESS_MONITORS.md`](FILE_PROGRESS_MONITORS.md)。
+
 ## 异常与人工核验
 
 任何 preflight、锁定/过载/错误状态、读回或通信问题都会停止当前 condition。已经启动
@@ -119,14 +138,15 @@ last-confirmed state，再决定是否需要前面板或接线检查。正常完
 读取和叠图使用 `notebooks/sr830_commissioning_sweeps.ipynb` 顶部的
 `TEMPERATURE_DATA_DIRECTORY`，默认指向
 `run_data/temperature_excitation_commissioning`。刷新后可同时选择多个 summary JSON 或
-formal CSV，再按状态和具体 temperature condition 筛选。若同一次扫描的 summary 与 formal
+formal CSV，再按状态、具体 temperature condition 和归档 RMS 电流范围筛选；图与导出只使用
+温度和电流两种选择的交集。若同一次扫描的 summary 与 formal
 CSV 同时存在，目录发现优先使用 summary，避免同一数据重复计数；选择多个不同文件时则
 保留文件和 temperature index 身份，不会把相同温度的不同运行静默合并。
 
 每个可用的 `Vxx/Vxy × h1/h2/h3` 通道生成两张独立图：一张 `R` 幅值图和一张相位图。
 横轴是文件中归档的、由实际 SINE OUT readback 得到的 `nominal_current_a_rms`，不会用当前
 TOML 重新计算。每个实际 formal-window 条件平均温度是一条曲线，图例同时显示实测温度和
-请求 setpoint。幅值重复样本使用普通均值/样本标准差；相位使用圆周均值/圆周标准差，并
+请求 setpoint，且置于画框右侧。幅值重复样本使用普通均值/样本标准差；相位使用圆周均值/圆周标准差，并
 只在递增电流方向做显示展开。低幅值处即使锁定正常，相位也可能没有物理意义，因此应结合
 相位误差条、幅值和状态筛选判断，而不能只看展开后的线条。可选导出会保存选中样本、每张
 PNG/PDF 和包含输入文件、状态、temperature condition 与相位处理方式的 manifest。

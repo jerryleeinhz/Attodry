@@ -28,6 +28,12 @@
 `excitation_index`、实际频率与 SINE OUT 读回值构成完整二维审计；该命令沿用原有
 电流/电压安全边界、量程策略和 overload 判定。
 
+独立三类 sweep 现同时创建增量 `*_lockin_<scan>_progress.jsonl`。扫描期间只能由
+`lockin_progress_monitor` 读取该文件；它显示已归档的 SINE OUT request/`SLVL?`
+readback、名义电流、谐波、Vxx/Vxy R/phase 和状态，不打开 VISA 或清锁存。原有
+`monitor-live` 只保留给没有 scan 占用两台仪器时的独立诊断。日常命令和字段含义统一见
+[`../FILE_PROGRESS_MONITORS.md`](../FILE_PROGRESS_MONITORS.md)。
+
 这些是上次真实读回，不是对当前面板状态的持续保证。受版本控制的
 `hardware.example.toml` 模板已按操作者最新文件改为 XX 1 V、XY 10 mV、100/150 Ω
 电阻参数和分段扫幅网格；这不改变上面记录的历史真实读回。受版本控制的硬件和模拟

@@ -206,6 +206,11 @@ class TemperatureExcitationScanTests(unittest.TestCase):
 
         formal_samples: list[dict[str, object]] = []
         record: dict[str, object] = {
+            "point_index": 0,
+            "points_total": 2,
+            "source_v_rms": 0.004,
+            "source_readback_v_rms": 0.0039,
+            "nominal_current_a_rms": 3.88e-8,
             "samples": [],
             "harmonic_transition_status": [],
         }
@@ -235,6 +240,16 @@ class TemperatureExcitationScanTests(unittest.TestCase):
             "before": {"stage": "before"},
             "after": {"stage": "after"},
         })
+        self.assertEqual(
+            formal_samples[0]["sweep_point"],
+            {
+                "point_index": 0,
+                "points_total": 2,
+                "source_v_rms": 0.004,
+                "source_readback_v_rms": 0.0039,
+                "nominal_current_a_rms": 3.88e-8,
+            },
+        )
 
     def test_successful_small_scan_keeps_stability_and_formal_temperatures_distinct(
         self,
