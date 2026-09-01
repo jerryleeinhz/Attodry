@@ -655,9 +655,9 @@ writes remain uncommissioned and require separate explicit authorization.
 ## Stage 5 - gate SMUs and integrated acquisition
 
 Status: model-independent offline core and Three-SMU target-offline validation are
-complete. One bounded M4 read-only commissioning run passed for the current
-bottom-only active plan (updated 2026-09-01); other roles, status-queue consumption,
-all setting writes, and integration remain pending separate authorization.
+complete. Bounded read-only monitoring and one minimum bottom-gate write scan passed
+for the current bottom-only active plan (updated 2026-09-01); other roles and
+integration remain pending separate authorization.
 
 - Added an explicitly write-authorized, model-independent gate controller with
   configured absolute-voltage limit, current compliance, stepped ramps, voltage
@@ -789,6 +789,18 @@ all setting writes, and integration remain pending separate authorization.
   target's unused NI GPIB passport was disabled in favor of the installed Keithley
   KUSB passport, and one selective device clear recovered a previously stuck parser
   without `*RST` or source/output/compliance changes.
+- Target bottom-gate write commissioning (2026-09-01): Keithley 2400 firmware C32
+  does not permit `:READ?` or the protection-trip query while output is OFF. The
+  QCoDeS preflight/configuration/cleanup path now records confirmed output/setpoint
+  state without inventing V/I, enables only after a confirmed 0 V setpoint, and
+  takes its first V/I read after output is ON. The query-only monitor likewise shows
+  V/I/R/trip as unavailable while OFF and Ctrl+C exits without a traceback. After
+  draining errors left by the former illegal queries, the SNOM `gate_bottom`
+  Keithley 2400 serial 4029737 completed an authorized five-point -0.1 to +0.1 V
+  scan. All five formal samples were clean; run `20260901_110258_e2b23039` was
+  completed/accepted and cleanup independently confirmed 0 V, output OFF, and a
+  clean status queue. Forty-one focused tests and the complete 404-test offline
+  suite passed. Bias/top roles and integrated acquisition remain uncommissioned.
 
 ## Stage 6 - analysis and notebook migration
 
@@ -845,8 +857,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   wiring, phase preservation, settling, sensitivity transitions, latch handling,
   frequency tolerance, sequential pair reads, and cleanup. This is a planning
   and handoff deliverable only; it does not commission any new hardware writes.
-- Pending: remaining-role Three-SMU read-only commissioning, separately authorized
-  status-queue consumption and real-SMU setting writes, integration into
+- Pending: remaining-role Three-SMU read/write commissioning and integration into
   the main acquisition, frozen hardware wheelhouse, and offline-control-computer
   installation verification.
 

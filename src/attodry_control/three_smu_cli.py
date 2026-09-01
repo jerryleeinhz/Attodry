@@ -283,6 +283,9 @@ def _run_monitor_live(
                 sample_index += 1
                 if args.samples == 0 or sample_index < args.samples:
                     sleep(args.interval_s)
+    except KeyboardInterrupt:
+        print_fn("\nThree-SMU live monitor stopped.")
+        return 130
     finally:
         manager.close()
     return 1 if had_problem else 0

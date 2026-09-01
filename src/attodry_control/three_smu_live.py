@@ -135,7 +135,7 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
             f"{current:>13} "
             f"{resistance:>11} "
             f"{'ON' if reading.output_enabled else 'OFF':<7} "
-            f"{'TRIP' if reading.compliance_trip else 'clear':<6} "
+            f"{_format_trip(reading.compliance_trip):<6} "
             f"{'4W' if reading.four_wire else '2W'}"
         )
         measure_unit = "A" if reading.source_mode is SourceMode.VOLTAGE else "V"
@@ -147,8 +147,8 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
         )
         if not reading.output_enabled:
             lines.append(
-                f"  {role}: live V/I/R unavailable while output is OFF; "
-                ":READ? not sent"
+                f"  {role}: live V/I/R and trip state unavailable while output "
+                "is OFF; :READ? and protection-trip query not sent"
             )
     if snapshot.problems:
         lines.append("warnings:")
@@ -166,6 +166,12 @@ def _format_resistance(value: float | None) -> str:
 
 def _format_measurement(value: float | None, unit: str) -> str:
     return "n/a" if value is None else f"{value:.4e} {unit}"
+
+
+def _format_trip(value: bool | None) -> str:
+    if value is None:
+        return "n/a"
+    return "TRIP" if value else "clear"
 
 
 def _status_is_clean(status: str | None) -> bool:

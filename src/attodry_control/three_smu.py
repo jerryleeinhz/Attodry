@@ -178,21 +178,29 @@ class ThreeSmuSession:
                         f"{role} status queue was not explicitly queried"
                     )
                 elif not _status_is_clean(state.status):
-                    preflight_errors.append(f"{role} instrument status is not clean")
-                if state.voltage_v is None or not math.isfinite(state.voltage_v):
-                    preflight_errors.append(f"{role} voltage readback is unavailable")
-                elif abs(state.voltage_v) > config.max_abs_voltage_v:
                     preflight_errors.append(
-                        f"{role} voltage readback {state.voltage_v:g} V exceeds "
-                        f"max_abs_voltage_v {config.max_abs_voltage_v:g} V"
+                        f"{role} instrument status is not clean: {state.status}"
                     )
-                if state.current_a is None or not math.isfinite(state.current_a):
-                    preflight_errors.append(f"{role} current readback is unavailable")
-                elif abs(state.current_a) > config.max_abs_current_a:
-                    preflight_errors.append(
-                        f"{role} current readback {state.current_a:g} A exceeds "
-                        f"max_abs_current_a {config.max_abs_current_a:g} A"
-                    )
+                if state.voltage_v is not None:
+                    if not math.isfinite(state.voltage_v):
+                        preflight_errors.append(
+                            f"{role} voltage readback is not finite"
+                        )
+                    elif abs(state.voltage_v) > config.max_abs_voltage_v:
+                        preflight_errors.append(
+                            f"{role} voltage readback {state.voltage_v:g} V exceeds "
+                            f"max_abs_voltage_v {config.max_abs_voltage_v:g} V"
+                        )
+                if state.current_a is not None:
+                    if not math.isfinite(state.current_a):
+                        preflight_errors.append(
+                            f"{role} current readback is not finite"
+                        )
+                    elif abs(state.current_a) > config.max_abs_current_a:
+                        preflight_errors.append(
+                            f"{role} current readback {state.current_a:g} A exceeds "
+                            f"max_abs_current_a {config.max_abs_current_a:g} A"
+                        )
             if preflight_errors:
                 raise ThreeSmuSafetyError(
                     "Preflight rejected unsafe or unexpected instrument state; no "
@@ -330,21 +338,12 @@ class ThreeSmuSession:
             self._configured.add(role)
             adapter.zero_residual(self.preflight[role].source_mode)
             zero_state = adapter.preflight()
-            zero_problems: list[str] = []
-            if zero_state.output_enabled:
-                zero_problems.append("output became enabled")
-            if zero_state.voltage_v is None or not math.isfinite(zero_state.voltage_v):
-                zero_problems.append("voltage readback is unavailable")
-            elif abs(zero_state.voltage_v) > float(config.max_abs_voltage_v):
-                zero_problems.append("voltage readback exceeds max_abs_voltage_v")
-            if zero_state.current_a is None or not math.isfinite(zero_state.current_a):
-                zero_problems.append("current readback is unavailable")
-            elif abs(zero_state.current_a) > float(config.max_abs_current_a):
-                zero_problems.append("current readback exceeds max_abs_current_a")
-            if not zero_state.status_query_consumed or not _status_is_clean(
-                zero_state.status
-            ):
-                zero_problems.append("instrument status is unavailable or not clean")
+            zero_problems = self._preflight_problems(
+                role,
+                zero_state,
+                expected_output=False,
+                expected_source=0.0,
+            )
             if zero_problems:
                 recorder.event(
                     "preconfigure_zero_rejected",
@@ -365,18 +364,19 @@ class ThreeSmuSession:
             configuration = adapter.configure(config)
             adapter.set_source(0.0)
             self.last_commanded[role] = 0.0
-            reading = self._read_one(role)
-            problems = self._reading_problems(
+            configured_state = adapter.preflight()
+            problems = self._preflight_problems(
                 role,
-                reading.reading,
+                configured_state,
                 expected_output=False,
+                expected_source=0.0,
             )
             recorder.event(
                 "configure",
                 {
                     "role": role,
                     "configuration_readback": _jsonable(asdict(configuration)),
-                    "reading": _timed_reading_dict(reading),
+                    "state": _jsonable(asdict(configured_state)),
                     "problems": problems,
                 },
             )
@@ -500,6 +500,61 @@ class ThreeSmuSession:
             problems.append(f"{role} instrument error: {reading.status}")
         return problems
 
+    def _preflight_problems(
+        self,
+        role: str,
+        state: KeithleyPreflight,
+        *,
+        expected_output: bool,
+        expected_source: float | None = None,
+    ) -> list[str]:
+        config = self.hardware.require_role(role)
+        problems: list[str] = []
+        assert config.max_abs_voltage_v is not None
+        assert config.max_abs_current_a is not None
+        if state.output_enabled != expected_output:
+            problems.append(
+                f"{role} output readback is {state.output_enabled}, "
+                f"expected {expected_output}"
+            )
+        if state.source_mode is not config.source_mode:
+            problems.append(
+                f"{role} source mode is {state.source_mode.value}, expected "
+                f"{config.source_mode.value}"
+            )
+        if not math.isfinite(state.source_setpoint):
+            problems.append(f"{role} source setpoint readback is not finite")
+        elif expected_source is not None and state.source_setpoint != expected_source:
+            problems.append(
+                f"{role} source setpoint readback is {state.source_setpoint:g}, "
+                f"expected {expected_source:g}"
+            )
+        if state.voltage_v is None:
+            if state.output_enabled:
+                problems.append(f"{role} voltage readback is unavailable")
+        elif not math.isfinite(state.voltage_v):
+            problems.append(f"{role} voltage readback is not finite")
+        elif abs(state.voltage_v) > config.max_abs_voltage_v:
+            problems.append(
+                f"{role} voltage {state.voltage_v:g} V exceeds "
+                f"max_abs_voltage_v {config.max_abs_voltage_v:g} V"
+            )
+        if state.current_a is None:
+            if state.output_enabled:
+                problems.append(f"{role} current readback is unavailable")
+        elif not math.isfinite(state.current_a):
+            problems.append(f"{role} current readback is not finite")
+        elif abs(state.current_a) > config.max_abs_current_a:
+            problems.append(
+                f"{role} current {state.current_a:g} A exceeds "
+                f"max_abs_current_a {config.max_abs_current_a:g} A"
+            )
+        if not state.status_query_consumed:
+            problems.append(f"{role} status queue was not explicitly queried")
+        elif not _status_is_clean(state.status):
+            problems.append(f"{role} instrument error: {state.status}")
+        return problems
+
     def _validate_source_target(self, role: str, target: float) -> None:
         if not math.isfinite(target):
             raise ThreeSmuSafetyError(f"{role} source target must be finite")
@@ -526,21 +581,32 @@ class ThreeSmuSession:
             try:
                 self.adapters[role].set_source(0.0)
                 self.last_commanded[role] = 0.0
-                if self.plan.delay_s:
-                    self.sleep(self.plan.delay_s)
-                timed = self._read_one(role)
-                problems = self._reading_problems(
-                    role,
-                    timed.reading,
-                    expected_output=self.output_enabled[role],
-                )
+                if self.output_enabled[role]:
+                    if self.plan.delay_s:
+                        self.sleep(self.plan.delay_s)
+                    timed = self._read_one(role)
+                    problems = self._reading_problems(
+                        role,
+                        timed.reading,
+                        expected_output=True,
+                    )
+                    zero_payload = {"reading": _timed_reading_dict(timed)}
+                else:
+                    zero_state = self.adapters[role].preflight()
+                    problems = self._preflight_problems(
+                        role,
+                        zero_state,
+                        expected_output=False,
+                        expected_source=0.0,
+                    )
+                    zero_payload = {"state": _jsonable(asdict(zero_state))}
                 zero_readback_recorded = not problems
                 recorder.event(
                     "cleanup_zero",
                     {
                         "role": role,
                         "target": 0.0,
-                        "reading": _timed_reading_dict(timed),
+                        **zero_payload,
                         "problems": problems,
                     },
                 )
@@ -556,14 +622,16 @@ class ThreeSmuSession:
                     }
                 )
             output_off_confirmed = False
+            disabled_state: KeithleyPreflight | None = None
             try:
                 self.adapters[role].set_output(False)
                 self.output_enabled[role] = False
-                timed = self._read_one(role)
-                problems = self._reading_problems(
+                disabled_state = self.adapters[role].preflight()
+                problems = self._preflight_problems(
                     role,
-                    timed.reading,
+                    disabled_state,
                     expected_output=False,
+                    expected_source=0.0,
                 )
                 output_off_confirmed = not problems
                 if problems:
@@ -579,7 +647,7 @@ class ThreeSmuSession:
                     "cleanup_disable",
                     {
                         "role": role,
-                        "reading": _timed_reading_dict(timed),
+                        "state": _jsonable(asdict(disabled_state)),
                         "problems": problems,
                     },
                 )
@@ -601,6 +669,11 @@ class ThreeSmuSession:
                     "role": role,
                     "zero_readback_recorded": zero_readback_recorded,
                     "output_off_confirmed": output_off_confirmed,
+                    "final_state": (
+                        None
+                        if disabled_state is None
+                        else _jsonable(asdict(disabled_state))
+                    ),
                 }
             )
         result = {

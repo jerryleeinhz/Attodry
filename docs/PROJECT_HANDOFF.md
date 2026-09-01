@@ -653,11 +653,11 @@ The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; th
 fact remains diagnostic rather than being rewritten as stability. The commissioned
 0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Daily
 temperature operation uses the unified hardware TOML and dedicated command without
-additional authorization flags. Three-SMU target-offline validation and one bounded
-bottom-only read-only monitor sample are complete; remaining-role queries, all real SMU
-setting writes, integration of the independent SMU module into the main
-acquisition, other attoDRY setting writes, and real end-to-end acquisition still
-require staged authorization.
+additional authorization flags. Three-SMU target-offline validation, bounded
+bottom-only monitoring, and one authorized minimum bottom-gate write scan are
+complete; remaining-role queries/writes, integration of the independent SMU module
+into the main acquisition, other attoDRY setting writes, and real end-to-end
+acquisition still require staged authorization.
 
 Three-SMU direct-points follow-up (2026-08-26): the unified hardware TOML is now
 the only Three-SMU configuration entry. Each role keeps only independent
@@ -734,8 +734,25 @@ monitor now avoids `:READ?` while output is OFF, displays V/I/R as `n/a`, never 
 output on, and leaves `:SYST:ERR?` unconsumed by default. No setting write or `*RST`
 was sent. The target's unused NI GPIB passport was disabled while retaining the
 Keithley KUSB passport; one selective device clear recovered a stuck parser/output
-queue without changing source/output/compliance. Other roles, consumptive status
-queries, smallest writes, and integrated acquisition remain uncommissioned.
+queue without changing source/output/compliance. At that checkpoint other roles,
+consumptive status queries, smallest writes, and integration were uncommissioned;
+the bottom-gate write follow-up below supersedes only the smallest-write item.
+
+Three-SMU target bottom-gate write commissioning (2026-09-01): the Keithley 2400
+C32 firmware does not permit `:READ?` or the protection-trip query while output is
+OFF. QCoDeS preflight, configure confirmation, and cleanup now query output/source
+state without claiming unavailable V/I; the session confirms a 0 V setpoint before
+enabling output and obtains its first measurement only after output is ON. The raw
+VISA monitor follows the same OFF-state rule and handles Ctrl+C without a traceback.
+After consuming the backlog created by the former illegal queries, SNOM
+`gate_bottom` (Keithley 2400 serial 4029737) completed the explicitly authorized
+five-point -0.1, -0.05, 0, +0.05, +0.1 V scan. Run
+`data/three_smu/20260901_110258_e2b23039` contains five clean formal samples and is
+`completed`/`accepted`; structured cleanup confirms source setpoint 0 V, output OFF,
+status `0,"No error"`, and no manual verification requirement. A subsequent
+three-sample query-only monitor independently confirmed 0 V/OFF. Forty-one focused
+tests and the complete 404-test offline suite passed. Bias/top real commissioning
+and integrated acquisition remain pending.
 
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
@@ -1208,8 +1225,8 @@ error code zero, and a clean DLL disconnect. PID and heater settings were not wr
    PID values automatically.
 2. Perform staged attoDRY small-movement commissioning only after a new explicit
    write authorization and operator-selected smallest practical targets.
-3. Complete Three-SMU read-only commissioning for the remaining planned roles under
-   separate authorization. Status-queue consumption and any setting write still
-   require separate plan-specific authorization and front-panel safety review.
+3. Complete Three-SMU read/write commissioning for the remaining planned roles and
+   integrate the independent module only under separate plan-specific authorization
+   and front-panel safety review.
 4. Freeze and verify the complete hardware wheelhouse on the offline control
    computer after its Python/VISA environment is known.

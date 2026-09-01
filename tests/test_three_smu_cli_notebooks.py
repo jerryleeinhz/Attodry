@@ -241,7 +241,7 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             self.assertFalse(resources["FAKE::3"].closed)
             self.assertNotIn(":READ?", resources["FAKE::1"].queries)
             self.assertIn(
-                "live V/I/R unavailable while output is OFF", output.getvalue()
+                "live V/I/R and trip state unavailable", output.getvalue()
             )
             self.assertTrue(
                 all(":SYST:ERR?" not in resource.queries for resource in resources.values())
@@ -270,6 +270,38 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             )
             self.assertEqual(consuming_resources["FAKE::2"].queries, [])
             self.assertEqual(consuming_resources["FAKE::3"].queries, [])
+
+    def test_monitor_live_keyboard_interrupt_closes_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = Path(directory) / "hardware.local.toml"
+            config_path.write_text(OPERATION_TEXT, encoding="utf-8")
+            operation = three_smu_cli.load_three_smu_operation_config(config_path)
+            resource = FakeMonitorResource("KEITHLEY,2400,bias,1")
+            manager = FakeMonitorManager(
+                {
+                    "FAKE::1": resource,
+                    "FAKE::2": FakeMonitorResource("KEITHLEY,2400,top,1"),
+                    "FAKE::3": FakeMonitorResource("KEITHLEY,2400,bottom,1"),
+                }
+            )
+            output = io.StringIO()
+
+            def interrupt(_seconds: float) -> None:
+                raise KeyboardInterrupt()
+
+            with patch(
+                "attodry_control.three_smu_cli.load_three_smu_operation_config",
+                return_value=operation,
+            ), redirect_stdout(output):
+                result = run(
+                    ["monitor-live", "--samples", "2", "--interval-s", "0"],
+                    monitor_resource_manager_factory=lambda: manager,
+                    sleep=interrupt,
+                )
+            self.assertEqual(result, 130)
+            self.assertIn("Three-SMU live monitor stopped.", output.getvalue())
+            self.assertTrue(resource.closed)
+            self.assertTrue(manager.closed)
 
     def test_notebooks_are_clean_syntax_valid_and_obey_import_boundaries(self) -> None:
         live = PROJECT_ROOT / "notebooks" / "three_smu_live.ipynb"

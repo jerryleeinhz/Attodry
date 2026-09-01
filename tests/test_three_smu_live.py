@@ -93,12 +93,13 @@ class ThreeSmuLiveTests(unittest.TestCase):
                     output_enabled=False,
                     voltage_v=None,
                     current_a=None,
+                    compliance_trip=None,
                 )
             },
         )
         panel = format_live_three_smu_snapshot(snapshot)
         self.assertIn("n/a", panel)
-        self.assertIn("live V/I/R unavailable while output is OFF", panel)
+        self.assertIn("live V/I/R and trip state unavailable", panel)
         self.assertFalse(
             monitor_problems(
                 "smu_bias", smu("smu_bias"), snapshot.readings["smu_bias"]

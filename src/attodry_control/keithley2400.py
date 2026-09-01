@@ -64,7 +64,7 @@ class KeithleyMonitorReading:
     source_range: float
     measure_range: float
     four_wire: bool
-    compliance_trip: bool
+    compliance_trip: bool | None
     status: str | None
     status_queue_consumed: bool
 
@@ -147,11 +147,17 @@ class QcodesKeithley2400:
         mode = _parse_source_mode(self.ask(":SOUR:FUNC?"), self.role)
         setpoint = self._query_source(mode)
         output = _parse_bool(self.ask(":OUTP?"), f"{self.role} output")
-        values = _parse_float_list(self.ask(":READ?"))
-        if len(values) < 2 or not all(math.isfinite(value) for value in values[:2]):
-            raise Keithley2400Error(
-                f"{self.role} :READ? did not return finite voltage/current"
-            )
+        voltage_v: float | None = None
+        current_a: float | None = None
+        if output:
+            values = _parse_float_list(self.ask(":READ?"))
+            if len(values) < 2 or not all(
+                math.isfinite(value) for value in values[:2]
+            ):
+                raise Keithley2400Error(
+                    f"{self.role} :READ? did not return finite voltage/current"
+                )
+            voltage_v, current_a = values[:2]
         source_function = "VOLT" if mode is SourceMode.VOLTAGE else "CURR"
         measure_function = "CURR" if mode is SourceMode.VOLTAGE else "VOLT"
         compliance = self._query_float(
@@ -172,8 +178,8 @@ class QcodesKeithley2400:
             source_mode=mode,
             source_setpoint=setpoint,
             output_enabled=output,
-            voltage_v=values[0],
-            current_a=values[1],
+            voltage_v=voltage_v,
+            current_a=current_a,
             compliance_limit=compliance,
             source_range=source_range,
             measure_range=measure_range,
@@ -385,12 +391,16 @@ class VisaKeithley2400Monitor:
         four_wire = _parse_bool(
             self.ask(":SYST:RSEN?"), f"{self.role} remote sense"
         )
-        trip_command = (
-            "SENS:CURR:PROT:TRIP?"
-            if mode is SourceMode.VOLTAGE
-            else "SENS:VOLT:PROT:TRIP?"
-        )
-        trip = _parse_bool(self.ask(trip_command), f"{self.role} compliance trip")
+        trip: bool | None = None
+        if output:
+            trip_command = (
+                "SENS:CURR:PROT:TRIP?"
+                if mode is SourceMode.VOLTAGE
+                else "SENS:VOLT:PROT:TRIP?"
+            )
+            trip = _parse_bool(
+                self.ask(trip_command), f"{self.role} compliance trip"
+            )
         status = (
             self.ask(":SYST:ERR?").strip() or "0,No error"
             if consume_status_queue

@@ -113,21 +113,26 @@ class FakeAdapter:
 
     def preflight(self) -> KeithleyPreflight:
         self.log.append(("preflight", self.role))
+        voltage_v: float | None = None
+        current_a: float | None = None
+        if self.output:
+            voltage_v = (
+                self.source
+                if self.hardware_config.source_mode is SourceMode.VOLTAGE
+                else 0.0
+            )
+            current_a = (
+                self.source
+                if self.hardware_config.source_mode is SourceMode.CURRENT
+                else self.source * 1e-3 if self.role == "smu_bias" else 1e-9
+            )
         return KeithleyPreflight(
             self.identity,
             self.hardware_config.source_mode,
             self.source,
             self.output,
-            voltage_v=(
-                self.source
-                if self.hardware_config.source_mode is SourceMode.VOLTAGE
-                else 0.0
-            ),
-            current_a=(
-                self.source
-                if self.hardware_config.source_mode is SourceMode.CURRENT
-                else self.source * 1e-3 if self.role == "smu_bias" else 1e-9
-            ),
+            voltage_v=voltage_v,
+            current_a=current_a,
             status="0,No error",
             status_query_consumed=True,
         )
@@ -450,7 +455,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
-                    adapters["smu_bias"].trip_on_read = 3
+                    adapters["smu_bias"].trip_on_read = 2
                     list(session.run(output_dir=directory))
             csv_text = (session.last_run_dir / "data.csv").read_text(encoding="utf-8")
             self.assertIn("smu_bias compliance trip", csv_text)
@@ -486,7 +491,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
-                    adapters["smu_bias"].fail_on_read = 3
+                    adapters["smu_bias"].fail_on_read = 2
                     list(session.run(output_dir=directory))
             self.assertIn("smu_bias", session.last_confirmed)
             metadata = json.loads(
@@ -511,7 +516,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
-                    adapters["smu_bias"].fail_on_read = 4
+                    adapters["smu_bias"].fail_on_read = 3
                     list(session.run(output_dir=directory))
             metadata = json.loads(
                 (session.last_run_dir / "metadata.json").read_text(encoding="utf-8")
@@ -532,7 +537,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
                     adapter_factory=factory,
                     sleep=lambda _: None,
                 ) as session:
-                    adapters["smu_bias"].interrupt_on_read = 3
+                    adapters["smu_bias"].interrupt_on_read = 2
                     list(session.run(output_dir=directory))
             metadata = json.loads(
                 (session.last_run_dir / "metadata.json").read_text(encoding="utf-8")

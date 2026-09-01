@@ -233,8 +233,10 @@ python -m attodry_control.three_smu_cli monitor-live
 ```
 
 它只连接并显示 `fixed`/`sweep` 角色的 identity、source mode/setpoint、V/I/R、
-input/output 状态、compliance/trip、
-source/measurement range 和 2/4-wire。默认不消费 error queue；只有单独授权后才用：
+input/output 状态、compliance/trip、source/measurement range 和 2/4-wire。Keithley 2400 C32
+在 output OFF 时不接受 `:READ?` 或 protection-trip query，因此 monitor 保持 output OFF，且把
+V/I/R/trip 显示为 `n/a`；output ON 时才查询这些值。Ctrl+C 会关闭 VISA resource 并正常停止，
+不打印 traceback。默认不消费 error queue；只有单独授权后才用：
 
 ```powershell
 python -m attodry_control.three_smu_cli monitor-live --consume-status-queue
@@ -253,8 +255,9 @@ python -m attodry_control.three_smu_cli run
 `zero_disable`。
 
 正式点执行“每台直接写一次目标 → 等 `delay_s` → 读回并记录”，没有软件 ramp 和独立
-settle。cleanup 只对本次 active 角色执行“直接写 0 → 等 `delay_s` → 读回记录 →
-output off → 再读回”。通信失败时不能声称已经归零或关闭；本次 active
+settle。cleanup 只对本次 active 角色执行“直接写 0 → 等 `delay_s` → 在 output ON 时读回 V/I →
+output off → 查询确认 0 setpoint/output OFF”。关闭后的 V/I 明确为 unavailable，不会伪造读回。
+通信失败时不能声称已经归零或关闭；本次 active
 仪器必须查看前面板，off 角色始终保持“未连接/物理状态未知”。
 
 ## 数据与分析

@@ -141,6 +141,16 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertFalse(any(call[0] == "write" for call in instrument.calls))
         self.assertFalse(any(call[0] in {"volt", "curr", "output"} for call in instrument.calls))
 
+    def test_preflight_skips_read_when_output_is_off(self) -> None:
+        instrument = FakeQcodesInstrument()
+        instrument.responses[":OUTP?"] = "0"
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        state = adapter.preflight()
+        self.assertFalse(state.output_enabled)
+        self.assertIsNone(state.voltage_v)
+        self.assertIsNone(state.current_a)
+        self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
     def test_configuration_preserves_range_nplc_and_four_wire_settings(self) -> None:
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
@@ -205,8 +215,10 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertIsNone(reading.voltage_v)
         self.assertIsNone(reading.current_a)
         self.assertIsNone(reading.resistance_ohm)
+        self.assertIsNone(reading.compliance_trip)
         self.assertFalse(reading.output_enabled)
         self.assertNotIn(":READ?", resource.queries)
+        self.assertNotIn("SENS:CURR:PROT:TRIP?", resource.queries)
         self.assertFalse(reading.status_queue_consumed)
         self.assertNotIn(":SYST:ERR?", resource.queries)
         self.assertFalse(hasattr(resource, "write"))
@@ -218,7 +230,9 @@ class Keithley2400AdapterTests(unittest.TestCase):
         self.assertEqual(reading.voltage_v, 0.125)
         self.assertEqual(reading.current_a, 0.0000005)
         self.assertEqual(reading.resistance_ohm, 250000.0)
+        self.assertFalse(reading.compliance_trip)
         self.assertIn(":READ?", resource.queries)
+        self.assertIn("SENS:CURR:PROT:TRIP?", resource.queries)
 
     def test_live_monitor_status_queue_consumption_is_explicit(self) -> None:
         resource = FakeVisaResource()
