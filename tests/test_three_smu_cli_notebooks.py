@@ -2,6 +2,7 @@ import ast
 from contextlib import redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -257,20 +258,98 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             config = Path(directory) / "hardware.local.toml"
             config.write_text(OPERATION_TEXT, encoding="utf-8")
             output: list[str] = []
-            result = run(
-                ["run", "--config", str(config)],
-                input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
-                print_fn=output.append,
-                session_open=lambda *_args, **_kwargs: FakeSession(),
-            )
+            with patch(
+                "attodry_control.three_smu_cli.shutil.get_terminal_size",
+                return_value=os.terminal_size((120, 24)),
+            ):
+                result = run(
+                    ["run", "--config", str(config)],
+                    input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
+                    print_fn=output.append,
+                    session_open=lambda *_args, **_kwargs: FakeSession(),
+                )
         rendered = "\n".join(map(str, output))
         self.assertEqual(result, 0)
-        self.assertIn("[1/2] repeat 1/1; segment=time_trace", rendered)
-        self.assertIn("[2/2] repeat 1/1; segment=time_trace", rendered)
-        self.assertIn("source setpoint readback=0.1 V", rendered)
-        self.assertIn("V=0.1 V; I=5e-07 A; R=200000 ohm; output=ON", rendered)
+        self.assertEqual(rendered.count("Role        │ Setpoint rb"), 1)
+        self.assertIn("[1/2]  repeat 1/1 · segment time_trace", rendered)
+        self.assertIn("[2/2]  repeat 1/1 · segment time_trace", rendered)
+        self.assertIn("100 mV", rendered)
+        self.assertIn("500 nA", rendered)
+        self.assertIn("200 kΩ", rendered)
         self.assertIn("CLEAN", rendered)
         self.assertNotIn("status/error queue:", rendered)
+
+    def test_run_panel_compact_view_covers_all_active_roles(self) -> None:
+        operation_text = (
+            OPERATION_TEXT.replace('mode = "time_trace"', 'mode = "multi_smu_map"')
+            .replace(
+                'role = "fixed"\nbidirectional = false\nfixed = 0.1',
+                'role = "sweep"\nbidirectional = false\npoints = [0.1]',
+            )
+            .replace(
+                'role = "off"\nbidirectional = false\n\n[three_smu_run.gate_bottom]',
+                'role = "fixed"\nbidirectional = false\nfixed = 0.2\n\n'
+                '[three_smu_run.gate_bottom]',
+                1,
+            )
+            .replace(
+                'role = "off"\nbidirectional = false\n',
+                'role = "fixed"\nbidirectional = false\nfixed = 0.3\n',
+                1,
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(operation_text, encoding="utf-8")
+            operation = three_smu_cli.load_three_smu_operation_config(config)
+        sample = ThreeSmuSample(
+            point_index=0,
+            repeat_index=0,
+            segment="map",
+            elapsed_s=1.25,
+            coordinates={"smu_bias": 0.1, "gate_top": 0.2, "gate_bottom": 0.3},
+            readings={
+                role: TimedReading(
+                    "2026-09-01T00:00:00+00:00",
+                    KeithleyReading(
+                        voltage_v=value,
+                        current_a=value * 1e-6,
+                        source_setpoint=value,
+                        output_enabled=True,
+                        compliance_trip=False,
+                        status='0,"No error"',
+                        status_query_consumed=True,
+                    ),
+                )
+                for role, value in (
+                    ("smu_bias", 0.1),
+                    ("gate_top", 0.2),
+                    ("gate_bottom", 0.3),
+                )
+            },
+            clean=True,
+            problems=(),
+        )
+        output: list[str] = []
+        with patch(
+            "attodry_control.three_smu_cli.shutil.get_terminal_size",
+            return_value=os.terminal_size((80, 24)),
+        ):
+            three_smu_cli._print_run_sample(
+                sample,
+                sample_number=1,
+                total_samples=1,
+                hardware=operation.hardware,
+                plan=operation.plan,
+                show_table_header=True,
+                print_fn=output.append,
+            )
+        rendered = "\n".join(output)
+        self.assertIn("compact terminal view", rendered)
+        self.assertNotIn("Role        │ Setpoint rb", rendered)
+        self.assertIn("smu_bias: src=100 mV", rendered)
+        self.assertIn("gate_top: src=200 mV", rendered)
+        self.assertIn("gate_bottom: src=300 mV", rendered)
 
     def test_run_panel_displays_problem_status_from_queued_sample(self) -> None:
         problem_sample = ThreeSmuSample(

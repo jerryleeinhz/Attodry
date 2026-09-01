@@ -111,6 +111,9 @@ fail-closed/cleanup 顺序。
 `notebooks/three_smu_live.ipynb` 使用同一个回调将 formal samples 放入内存 FIFO；绘图只从该
 FIFO 消费，不独立访问硬件，也不建立第二条 session 或硬件读回路径。
 
+终端宽度至少 96 列时，CLI 的 FIFO 面板以一次表头和固定列宽追加 role 的 setpoint/V/I/R/output
+readback，使用工程单位；较窄终端自动使用紧凑每-role 行，避免换行破坏可读性。
+
 每个 run 保存 schema v5 `metadata.json`、`raw.jsonl` 和 `data.csv`。schema v5 保留 v4
 的 direct-point 契约，并新增 `active_roles`/`off_roles`；硬件快照只包含 active 角色。
 CSV 保留稳定列，off 角色字段为空。配置快照只含两条绝对边界，并记录 configure 后的 compliance/range
@@ -118,7 +121,7 @@ CSV 保留稳定列，off 角色字段为空。配置快照只含两条绝对边
 `completed + accepted + clean` formal samples；rejected/problem 需要显式 opt-in。
 
 本次 output-off/monitor/session 修复的 41 项聚焦测试通过；direct-run live-panel 的 26 项聚焦测试
-及完整离线回归 405 项（五项可选绘图 skip）通过。SNOM 当前仅启用
+和 terminal-table 的 11 项聚焦测试及完整离线回归 406 项（五项可选绘图 skip）通过。SNOM 当前仅启用
 `gate_bottom` 的真实五点写入验收已通过：Keithley 2400 serial 4029737 扫描
 `[-0.1, -0.05, 0, 0.05, 0.1] V`，五个 formal samples 全部 clean；
 `data/three_smu/20260901_110258_e2b23039` 为 completed/accepted。cleanup 与随后独立 monitor 均确认

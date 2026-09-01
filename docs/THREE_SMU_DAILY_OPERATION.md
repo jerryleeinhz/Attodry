@@ -268,6 +268,11 @@ python -m attodry_control.three_smu_cli run
 读取的 status/error queue 与问题说明；随后原有 cleanup 仍照常执行。正常 `CLEAN` 样本
 不显示 status/error queue。
 
+在宽度至少 96 列的终端中，首个样本会打印一次固定列宽表头，随后每个 sample 追加一条
+进度摘要和每个 active role 的读回行；单位自动使用工程前缀，例如 `100 mV`、`500 nA` 和
+`2.00 GΩ`。较窄的 PowerShell/SSH 终端自动改为每个 role 一行的紧凑格式，以避免折行破坏
+列对齐。两种格式都是同一内存样本，不改变记录、扫描或硬件访问。
+
 正式点执行“每台直接写一次目标 → 等 `delay_s` → 读回并记录”，没有软件 ramp 和独立
 settle。cleanup 只对本次 active 角色执行“直接写 0 → 等 `delay_s` → 在 output ON 时读回 V/I →
 output off → 查询确认 0 setpoint/output OFF”。关闭后的 V/I 明确为 unavailable，不会伪造读回。

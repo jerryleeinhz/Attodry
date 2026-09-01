@@ -768,6 +768,15 @@ Notebook tests and the complete 405-test offline suite passed (five optional plo
 skips). This follow-up opened no real resource and sent, queried, or consumed no
 real hardware command/status entry.
 
+Three-SMU terminal-table follow-up (2026-09-01): the FIFO-backed direct-run panel
+now renders a single fixed-width table header in terminals at least 96 columns wide,
+then appends each sample's progress and active-role setpoint/V/I/R/output readback
+with engineering units. Narrow terminals use compact per-role lines instead of
+wrapping the table. `PROBLEM` status/error details remain conditional and the
+renderer has no hardware access. Eleven focused fake CLI/Notebook tests passed;
+the complete 406-test offline suite passed with five optional plotting skips. No
+real resource was opened, queried, consumed, or written.
+
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
 `resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state

@@ -5,8 +5,10 @@ from contextlib import ExitStack
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 from queue import SimpleQueue
+import shutil
 import time
 from typing import Any, Callable, Sequence
 
@@ -31,6 +33,8 @@ from .three_smu_live import (
 
 
 DEFAULT_CONFIG_PATH = Path("config/hardware.local.toml")
+_WIDE_RUN_TABLE_MIN_COLUMNS = 96
+_WIDE_RUN_TABLE_SEPARATOR = "─" * 94
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -122,6 +126,7 @@ def run(
                 total_samples=total_samples,
                 hardware=hardware,
                 plan=plan,
+                show_table_header=displayed_samples == 1,
                 print_fn=print_fn,
             )
 
@@ -247,36 +252,35 @@ def _print_run_sample(
     total_samples: int,
     hardware: ThreeSmuHardwareConfig,
     plan: ThreeSmuScanPlan,
+    show_table_header: bool,
     print_fn: Callable[..., None],
 ) -> None:
     """Render a formal sample without querying or changing an instrument."""
 
-    outcome = "CLEAN" if sample.clean else "PROBLEM"
-    print_fn(
-        f"[{sample_number}/{total_samples}] repeat "
-        f"{sample.repeat_index + 1}/{plan.samples_per_point}; "
-        f"segment={sample.segment}; elapsed={sample.elapsed_s:.3f} s; {outcome}"
-    )
-    for role in active_smu_roles(plan):
-        timed_reading = sample.readings.get(role)
-        if timed_reading is None:
-            print_fn(f"  {role}: formal reading unavailable")
-            continue
-        reading = timed_reading.reading
-        source_unit = (
-            "V" if hardware.require_role(role).source_mode.value == "voltage" else "A"
+    terminal_columns = shutil.get_terminal_size(fallback=(120, 24)).columns
+    if terminal_columns < _WIDE_RUN_TABLE_MIN_COLUMNS:
+        _print_compact_run_sample(
+            sample,
+            sample_number=sample_number,
+            total_samples=total_samples,
+            hardware=hardware,
+            plan=plan,
+            show_table_header=show_table_header,
+            print_fn=print_fn,
         )
-        resistance = reading.resistance_ohm
-        resistance_text = "n/a" if resistance is None else f"{resistance:.6g} ohm"
-        output_text = "ON" if reading.output_enabled else "OFF"
-        print_fn(
-            f"  {role}: source setpoint readback="
-            f"{reading.source_setpoint:.6g} {source_unit}; "
-            f"V={reading.voltage_v:.6g} V; I={reading.current_a:.6g} A; "
-            f"R={resistance_text}; output={output_text}"
+    else:
+        _print_wide_run_sample(
+            sample,
+            sample_number=sample_number,
+            total_samples=total_samples,
+            hardware=hardware,
+            plan=plan,
+            show_table_header=show_table_header,
+            print_fn=print_fn,
         )
     if sample.clean:
         return
+    print_fn("! PROBLEM details (recorded formal sample; cleanup follows):")
     print_fn("  status/error queue:")
     for role in active_smu_roles(plan):
         timed_reading = sample.readings.get(role)
@@ -293,6 +297,129 @@ def _print_run_sample(
     print_fn("  problems:")
     for problem in sample.problems:
         print_fn(f"    - {problem}")
+
+
+def _print_wide_run_sample(
+    sample: ThreeSmuSample,
+    *,
+    sample_number: int,
+    total_samples: int,
+    hardware: ThreeSmuHardwareConfig,
+    plan: ThreeSmuScanPlan,
+    show_table_header: bool,
+    print_fn: Callable[..., None],
+) -> None:
+    if show_table_header:
+        print_fn("Three-SMU formal sample readbacks (memory FIFO; no extra queries):")
+        print_fn(
+            "Role        │ Setpoint rb    │ Voltage        │ Current        │ "
+            "Resistance     │ Output"
+        )
+        print_fn(_WIDE_RUN_TABLE_SEPARATOR)
+    print_fn(_run_sample_summary(sample, sample_number, total_samples, plan))
+    for role in active_smu_roles(plan):
+        timed_reading = sample.readings.get(role)
+        if timed_reading is None:
+            print_fn(_wide_run_table_row(role, "n/a", "n/a", "n/a", "n/a", "n/a"))
+            continue
+        reading = timed_reading.reading
+        source_unit = _source_unit(hardware, role)
+        print_fn(
+            _wide_run_table_row(
+                role,
+                _format_engineering(reading.source_setpoint, source_unit),
+                _format_engineering(reading.voltage_v, "V"),
+                _format_engineering(reading.current_a, "A"),
+                _format_engineering(reading.resistance_ohm, "Ω"),
+                "ON" if reading.output_enabled else "OFF",
+            )
+        )
+    print_fn(_WIDE_RUN_TABLE_SEPARATOR)
+
+
+def _print_compact_run_sample(
+    sample: ThreeSmuSample,
+    *,
+    sample_number: int,
+    total_samples: int,
+    hardware: ThreeSmuHardwareConfig,
+    plan: ThreeSmuScanPlan,
+    show_table_header: bool,
+    print_fn: Callable[..., None],
+) -> None:
+    if show_table_header:
+        print_fn("Three-SMU formal sample readbacks (compact terminal view):")
+    print_fn(_run_sample_summary(sample, sample_number, total_samples, plan))
+    for role in active_smu_roles(plan):
+        timed_reading = sample.readings.get(role)
+        if timed_reading is None:
+            print_fn(f"  {role}: formal reading unavailable")
+            continue
+        reading = timed_reading.reading
+        source_unit = _source_unit(hardware, role)
+        print_fn(
+            f"  {role}: src={_format_engineering(reading.source_setpoint, source_unit)}; "
+            f"V={_format_engineering(reading.voltage_v, 'V')}; "
+            f"I={_format_engineering(reading.current_a, 'A')}; "
+            f"R={_format_engineering(reading.resistance_ohm, 'Ω')}; "
+            f"{'ON' if reading.output_enabled else 'OFF'}"
+        )
+
+
+def _run_sample_summary(
+    sample: ThreeSmuSample,
+    sample_number: int,
+    total_samples: int,
+    plan: ThreeSmuScanPlan,
+) -> str:
+    outcome = "CLEAN" if sample.clean else "PROBLEM"
+    return (
+        f"[{sample_number}/{total_samples}]  repeat {sample.repeat_index + 1}/"
+        f"{plan.samples_per_point} · segment {sample.segment} · "
+        f"elapsed {sample.elapsed_s:.3f} s · {outcome}"
+    )
+
+
+def _wide_run_table_row(
+    role: str,
+    setpoint: str,
+    voltage: str,
+    current: str,
+    resistance: str,
+    output: str,
+) -> str:
+    return (
+        f"{role:<11} │ {setpoint:>14} │ {voltage:>14} │ {current:>14} │ "
+        f"{resistance:>14} │ {output:^6}"
+    )
+
+
+def _source_unit(hardware: ThreeSmuHardwareConfig, role: str) -> str:
+    return "V" if hardware.require_role(role).source_mode.value == "voltage" else "A"
+
+
+def _format_engineering(value: float | None, unit: str) -> str:
+    """Format a finite readback in a compact, copy-friendly engineering unit."""
+
+    if value is None:
+        return "n/a"
+    if not math.isfinite(value):
+        return str(value)
+    if value == 0:
+        return f"0 {unit}"
+    for scale, prefix in (
+        (1e9, "G"),
+        (1e6, "M"),
+        (1e3, "k"),
+        (1.0, ""),
+        (1e-3, "m"),
+        (1e-6, "µ"),
+        (1e-9, "n"),
+        (1e-12, "p"),
+    ):
+        if abs(value) >= scale:
+            return f"{value / scale:.5g} {prefix}{unit}"
+    return f"{value:.3e} {unit}"
 
 
 def _read_confirmation(input_fn: Callable[[str], str], prompt: str) -> str:

@@ -814,6 +814,14 @@ integration remain pending separate authorization.
   CLI/Notebook tests and the complete 405-test offline suite passed (five optional
   plotting skips); no real resource was opened, queried, consumed, or written
   during this follow-up.
+- Terminal-table follow-up (2026-09-01): the direct-run panel now prints a single
+  fixed-width table header in terminals at least 96 columns wide, then appends each
+  formal sample's progress line and active-role setpoint/V/I/R/output readback in
+  engineering units. Narrow terminals use compact per-role lines rather than wrap
+  the table. Problem status/error details remain conditional on `PROBLEM`, and the
+  renderer still only reads the in-process FIFO. Eleven focused CLI/Notebook fake
+  tests and the complete 406-test offline suite passed (five optional plotting
+  skips); no real resource was opened, queried, consumed, or written.
 
 ## Stage 6 - analysis and notebook migration
 
