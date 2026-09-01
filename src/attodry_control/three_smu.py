@@ -250,7 +250,14 @@ class ThreeSmuSession:
         run_name: str = "",
         note: str = "",
         config_path: str | Path | None = None,
+        on_sample: Callable[[ThreeSmuSample], None] | None = None,
     ) -> Generator[ThreeSmuSample, None, None]:
+        """Yield formal samples and optionally publish each recorded sample.
+
+        ``on_sample`` runs after the sample has been durably recorded but before a
+        problem sample raises its fail-closed safety error.  It is intended for
+        in-process presentation consumers only; it must not issue hardware I/O.
+        """
         if self._closed:
             raise ThreeSmuError("Session is closed")
         if self._run_active or self._recorder is not None:
@@ -278,6 +285,8 @@ class ThreeSmuSession:
                 for repeat_index in range(self.plan.samples_per_point):
                     sample = self._formal_sample(point, repeat_index, started, recorder)
                     recorder.sample(sample)
+                    if on_sample is not None:
+                        on_sample(sample)
                     if not sample.clean:
                         raise ThreeSmuSafetyError("; ".join(sample.problems))
                     yield sample

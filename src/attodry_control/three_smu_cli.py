@@ -6,11 +6,12 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from queue import SimpleQueue
 import time
 from typing import Any, Callable, Sequence
 
 from .keithley2400 import open_keithley2400_monitor
-from .three_smu import ThreeSmuSession
+from .three_smu import ThreeSmuSample, ThreeSmuSession
 from .three_smu_config import (
     FinishAction,
     SEMANTIC_ROLES,
@@ -98,28 +99,51 @@ def run(
             sleep=sleep,
         )
 
-    _confirm_scan_run(
+    _print_scan_run_summary(
         operation,
         hardware,
         plan,
         points,
         output_dir,
-        input_fn=input_fn,
         print_fn=print_fn,
     )
+    _confirm_hold_outputs(plan, input_fn=input_fn)
+    sample_queue: SimpleQueue[ThreeSmuSample] = SimpleQueue()
+    displayed_samples = 0
+    total_samples = len(points) * plan.samples_per_point
+
+    def display_pending_samples() -> None:
+        nonlocal displayed_samples
+        while not sample_queue.empty():
+            displayed_samples += 1
+            _print_run_sample(
+                sample_queue.get(),
+                sample_number=displayed_samples,
+                total_samples=total_samples,
+                hardware=hardware,
+                plan=plan,
+                print_fn=print_fn,
+            )
+
     with session_open(
         hardware,
         plan,
         authorize_writes=True,
         authorize_status_consumption=True,
     ) as session:
-        for _sample in session.run(
-            output_dir=output_dir,
-            run_name="" if operation is None else operation.run_name,
-            note="" if operation is None else operation.note,
-            config_path=None if operation is None else operation.config_path,
-        ):
-            pass
+        try:
+            for _sample in session.run(
+                output_dir=output_dir,
+                run_name="" if operation is None else operation.run_name,
+                note="" if operation is None else operation.note,
+                config_path=None if operation is None else operation.config_path,
+                on_sample=sample_queue.put,
+            ):
+                display_pending_samples()
+        finally:
+            # The generator invokes the callback before raising for an unsafe
+            # formal sample, so this also displays that retained problem sample.
+            display_pending_samples()
         print_fn(session.last_run_dir)
     return 0
 
@@ -166,17 +190,16 @@ def _print_description(
     )
 
 
-def _confirm_scan_run(
+def _print_scan_run_summary(
     operation: ThreeSmuOperationConfig | None,
     hardware: ThreeSmuHardwareConfig,
     plan: ThreeSmuScanPlan,
     points: Sequence[ScanPoint],
     output_dir: Path,
     *,
-    input_fn: Callable[[str], str],
     print_fn: Callable[..., None],
 ) -> None:
-    """Require exact, per-run human consent before QCoDeS/VISA is opened."""
+    """Show the direct-run plan before the session opens any instrument."""
 
     print_fn("Three-SMU scan plan (no instrument has been opened):")
     print_fn(f"  config: {operation.config_path if operation else 'unknown'}")
@@ -197,11 +220,15 @@ def _confirm_scan_run(
         "This will connect the active SMUs, send setting writes, and consume their "
         ":SYST:ERR? error queues."
     )
-    confirmation = _read_confirmation(input_fn, "Type RUN THREE SMU to continue: ")
-    if confirmation != "RUN THREE SMU":
-        raise SystemExit(
-            "Three-SMU scan was not authorized; no QCoDeS/VISA resource was opened"
-        )
+
+
+def _confirm_hold_outputs(
+    plan: ThreeSmuScanPlan,
+    *,
+    input_fn: Callable[[str], str],
+) -> None:
+    """Keep the separate confirmation for the exceptional hold-output cleanup."""
+
     if plan.finish_action is FinishAction.HOLD:
         hold_confirmation = _read_confirmation(
             input_fn,
@@ -211,6 +238,61 @@ def _confirm_scan_run(
             raise SystemExit(
                 "Hold was not authorized; no QCoDeS/VISA resource was opened"
             )
+
+
+def _print_run_sample(
+    sample: ThreeSmuSample,
+    *,
+    sample_number: int,
+    total_samples: int,
+    hardware: ThreeSmuHardwareConfig,
+    plan: ThreeSmuScanPlan,
+    print_fn: Callable[..., None],
+) -> None:
+    """Render a formal sample without querying or changing an instrument."""
+
+    outcome = "CLEAN" if sample.clean else "PROBLEM"
+    print_fn(
+        f"[{sample_number}/{total_samples}] repeat "
+        f"{sample.repeat_index + 1}/{plan.samples_per_point}; "
+        f"segment={sample.segment}; elapsed={sample.elapsed_s:.3f} s; {outcome}"
+    )
+    for role in active_smu_roles(plan):
+        timed_reading = sample.readings.get(role)
+        if timed_reading is None:
+            print_fn(f"  {role}: formal reading unavailable")
+            continue
+        reading = timed_reading.reading
+        source_unit = (
+            "V" if hardware.require_role(role).source_mode.value == "voltage" else "A"
+        )
+        resistance = reading.resistance_ohm
+        resistance_text = "n/a" if resistance is None else f"{resistance:.6g} ohm"
+        output_text = "ON" if reading.output_enabled else "OFF"
+        print_fn(
+            f"  {role}: source setpoint readback="
+            f"{reading.source_setpoint:.6g} {source_unit}; "
+            f"V={reading.voltage_v:.6g} V; I={reading.current_a:.6g} A; "
+            f"R={resistance_text}; output={output_text}"
+        )
+    if sample.clean:
+        return
+    print_fn("  status/error queue:")
+    for role in active_smu_roles(plan):
+        timed_reading = sample.readings.get(role)
+        if timed_reading is None:
+            print_fn(f"    {role}: formal reading unavailable")
+            continue
+        reading = timed_reading.reading
+        status = (
+            reading.status
+            if reading.status_query_consumed and reading.status is not None
+            else "not consumed or unavailable"
+        )
+        print_fn(f"    {role}: {status}")
+    print_fn("  problems:")
+    for problem in sample.problems:
+        print_fn(f"    - {problem}")
 
 
 def _read_confirmation(input_fn: Callable[[str], str], prompt: str) -> str:

@@ -97,8 +97,19 @@ python -m attodry_control.three_smu_cli run
 `describe` 完全离线。`monitor-live` 只有获得真实查询授权后才能使用；默认不消费
 `:SYST:ERR?`，`--consume-status-queue` 仍需单独授权。monitor 仅在仪器 output 已经 ON 时发送
 `:READ?` 和 protection-trip query；output OFF 时保持 OFF 并把 V/I/R/trip 显示为 `n/a`。Ctrl+C
-正常关闭 VISA resource 并以退出码 130 结束，不打印 traceback。`run` 无需长授权参数，但会在打开硬件前
-要求精确输入 `RUN THREE SMU`。
+正常关闭 VISA resource 并以退出码 130 结束，不打印 traceback。`run` 无需长授权参数，也不再要求
+每次输入 `RUN THREE SMU`；配置通过后直接以单次 Three-SMU session 运行。只有异常的
+`finish_action = "hold"` 仍要求精确输入 `HOLD OUTPUTS`，因为它会让输出保持开启。
+
+`run` 的内嵌终端面板只消费会话已经产生的内存 FIFO 样本，不做额外 VISA/QCoDeS 查询或写入。
+每个正式样本显示当前序号/总数、repeat、segment、运行时间，以及每个 active SMU 的 source
+setpoint readback、V、I、R 和 output 状态，并用 `CLEAN` 或 `PROBLEM` 标记结果。只有
+`PROBLEM` 样本导致 fail-closed 中止时，才额外显示该样本已读取的 status/error-queue 结果与
+问题说明。问题样本在抛出安全异常前已经写入审计记录并放入 FIFO，因此不会因终端显示而改变
+fail-closed/cleanup 顺序。
+
+`notebooks/three_smu_live.ipynb` 使用同一个回调将 formal samples 放入内存 FIFO；绘图只从该
+FIFO 消费，不独立访问硬件，也不建立第二条 session 或硬件读回路径。
 
 每个 run 保存 schema v5 `metadata.json`、`raw.jsonl` 和 `data.csv`。schema v5 保留 v4
 的 direct-point 契约，并新增 `active_roles`/`off_roles`；硬件快照只包含 active 角色。
@@ -106,7 +117,8 @@ CSV 保留稳定列，off 角色字段为空。配置快照只含两条绝对边
 读回事件。requested source 与实际 setpoint/V/I 分开保存。默认分析只加载
 `completed + accepted + clean` formal samples；rejected/problem 需要显式 opt-in。
 
-本次 output-off/monitor/session 修复的 41 项聚焦测试通过；完整离线回归 404 项通过。SNOM 当前仅启用
+本次 output-off/monitor/session 修复的 41 项聚焦测试通过；direct-run live-panel 的 26 项聚焦测试
+及完整离线回归 405 项（五项可选绘图 skip）通过。SNOM 当前仅启用
 `gate_bottom` 的真实五点写入验收已通过：Keithley 2400 serial 4029737 扫描
 `[-0.1, -0.05, 0, 0.05, 0.1] V`，五个 formal samples 全部 clean；
 `data/three_smu/20260901_110258_e2b23039` 为 completed/accepted。cleanup 与随后独立 monitor 均确认

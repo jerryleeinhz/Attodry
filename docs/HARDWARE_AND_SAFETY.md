@@ -121,6 +121,13 @@ readback, and disables output. A communication failure never proves 0 V or
 output-off; the last confirmed state is retained and the instrument must be
 checked manually.
 
+The Three-SMU `run` terminal panel and live Notebook may display a formal sample
+only after the session has recorded it and placed it in an in-process memory FIFO.
+Those presentation consumers must not issue a second hardware read, write, or
+status-queue query. If a formal sample is unsafe, it is published before the
+session raises its fail-closed error so its existing readback/status evidence can
+be displayed and retained without changing cleanup order.
+
 The legacy model-independent simulation gate controller retains its own ramp and
 leakage test fixtures; those fields are not part of the real Three-SMU daily
 hardware TOML.

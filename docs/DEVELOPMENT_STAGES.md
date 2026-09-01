@@ -801,6 +801,19 @@ integration remain pending separate authorization.
   completed/accepted and cleanup independently confirmed 0 V, output OFF, and a
   clean status queue. Forty-one focused tests and the complete 404-test offline
   suite passed. Bias/top roles and integrated acquisition remain uncommissioned.
+- Direct-run live-panel follow-up (2026-09-01): normal `three_smu_cli run` no
+  longer requires a per-run `RUN THREE SMU` prompt; `finish_action = "hold"`
+  retains the separate exact `HOLD OUTPUTS` confirmation. `ThreeSmuSession.run`
+  now publishes each already-recorded formal sample to an optional in-process
+  callback before a problem sample triggers its fail-closed exception. The CLI
+  consumes that FIFO in the same single session and prints only sample progress,
+  repeat, segment, elapsed time, source-setpoint readback, V/I/R, output state,
+  and `CLEAN`/`PROBLEM`; status/error queue evidence and problem reasons print
+  only for a retained problem sample. The live Notebook uses the same FIFO and
+  makes no separate hardware query. Twenty-six focused fake-instrument/session/
+  CLI/Notebook tests and the complete 405-test offline suite passed (five optional
+  plotting skips); no real resource was opened, queried, consumed, or written
+  during this follow-up.
 
 ## Stage 6 - analysis and notebook migration
 

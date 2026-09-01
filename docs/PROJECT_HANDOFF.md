@@ -754,6 +754,20 @@ three-sample query-only monitor independently confirmed 0 V/OFF. Forty-one focus
 tests and the complete 404-test offline suite passed. Bias/top real commissioning
 and integrated acquisition remain pending.
 
+Three-SMU direct-run live-panel follow-up (2026-09-01): routine `python -m
+attodry_control.three_smu_cli run` now starts after its printed validated-plan
+summary without `RUN THREE SMU`; only `finish_action = "hold"` still requires
+the separate exact `HOLD OUTPUTS` confirmation. One session remains the sole
+hardware path. After each formal sample is durably recorded, the session publishes
+it to an in-process FIFO before rejecting an unsafe sample; the CLI prints sample
+number/total, repeat, segment, elapsed time, source-setpoint readback, V/I/R, output and
+`CLEAN`/`PROBLEM` from that FIFO. It prints the already-read status/error queue and
+reason only for a problem sample. The live Notebook plots the same FIFO rather than
+making any independent SMU query. Twenty-six focused fake-instrument/session/CLI/
+Notebook tests and the complete 405-test offline suite passed (five optional plotting
+skips). This follow-up opened no real resource and sent, queried, or consumed no
+real hardware command/status entry.
+
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
 `resume_recheck_s` (default 30 s). `continue` performs one automatic safe-state

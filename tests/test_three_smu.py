@@ -11,6 +11,7 @@ from attodry_control.keithley2400 import (
 )
 from attodry_control.three_smu import (
     ThreeSmuSafetyError,
+    ThreeSmuSample,
     ThreeSmuSession,
     ThreeSmuWriteNotAuthorized,
     UnknownActiveOutput,
@@ -445,6 +446,7 @@ class ThreeSmuSessionTests(unittest.TestCase):
 
     def test_compliance_trip_formal_sample_is_retained_as_problem(self) -> None:
         adapters, _log, factory = factory_set()
+        published: list[ThreeSmuSample] = []
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(ThreeSmuSafetyError, "compliance trip"):
                 with ThreeSmuSession.open(
@@ -456,9 +458,12 @@ class ThreeSmuSessionTests(unittest.TestCase):
                     sleep=lambda _: None,
                 ) as session:
                     adapters["smu_bias"].trip_on_read = 2
-                    list(session.run(output_dir=directory))
+                    list(session.run(output_dir=directory, on_sample=published.append))
             csv_text = (session.last_run_dir / "data.csv").read_text(encoding="utf-8")
             self.assertIn("smu_bias compliance trip", csv_text)
+        self.assertEqual(len(published), 1)
+        self.assertFalse(published[0].clean)
+        self.assertIn("smu_bias compliance trip", published[0].problems)
 
     def test_source_readback_difference_is_recorded_without_tolerance_rejection(self) -> None:
         adapters, _log, factory = factory_set()

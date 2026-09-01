@@ -1,7 +1,8 @@
 # Three-SMU 独立日常操作
 
 本模块可在不配合 Lock-in、冷台和磁场的情况下独立配置、测试和（commissioning 后）运行。
-当前仍是 `S0 offline complete`：真实 SMU 连接、查询和写入尚未授权。
+当前软件路径已完成 target-offline 验证；仅 `gate_bottom` 的一次有界读写验收已完成。
+`smu_bias`、`gate_top` 及任何新的真实运行仍需要各自的明确授权和前面板确认。
 
 ## 每日入口
 
@@ -250,9 +251,22 @@ commissioning 后的短运行命令为：
 python -m attodry_control.three_smu_cli run
 ```
 
-它自动读取 `config/hardware.local.toml`，在打开资源前打印摘要并要求精确输入
-`RUN THREE SMU`。`finish_action="hold"` 另要求 `HOLD OUTPUTS`；日常默认应为
-`zero_disable`。
+它自动读取 `config/hardware.local.toml`，在打开资源前打印摘要后直接开始单次 session，
+不再要求输入 `RUN THREE SMU`。`finish_action="hold"` 仍要求精确输入 `HOLD OUTPUTS`；
+日常默认应为 `zero_disable`。
+
+### `run` 内嵌实时面板
+
+每个正式样本完成后，终端立即显示：
+
+- 当前样本序号/总数、repeat、segment 和累计运行时间；
+- 每台 active SMU 的 source setpoint readback、V、I、R 和 output ON/OFF；
+- `CLEAN` 或 `PROBLEM`。
+
+这是已记录 formal sample 的内存 FIFO 展示，不增加任何硬件查询、写入、状态队列消费或
+第二个 SMU session。若 `PROBLEM` 样本触发 fail-closed 中止，终端才会额外显示该样本已经
+读取的 status/error queue 与问题说明；随后原有 cleanup 仍照常执行。正常 `CLEAN` 样本
+不显示 status/error queue。
 
 正式点执行“每台直接写一次目标 → 等 `delay_s` → 读回并记录”，没有软件 ramp 和独立
 settle。cleanup 只对本次 active 角色执行“直接写 0 → 等 `delay_s` → 在 output ON 时读回 V/I →
@@ -270,7 +284,8 @@ trip、output 状态或错误队列问题仍会拒绝。
 
 `notebooks/three_smu_analysis.ipynb` 默认只读取 completed/accepted/clean formal samples；原始
 rejected/problem 记录只能显式 opt-in 审计。`notebooks/three_smu_live.ipynb` 调用同一 session
-generator，不是另一套写路径，且授权开关默认必须保持 `False`。
+generator，不是另一套写路径，且授权开关默认必须保持 `False`。它的实时图只从 session 回调
+填入的内存 FIFO 消费 formal samples，不直接访问硬件。
 
 ## 常见停止原因
 

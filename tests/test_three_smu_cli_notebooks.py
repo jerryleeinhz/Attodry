@@ -8,6 +8,12 @@ import unittest
 from unittest.mock import patch
 
 from attodry_control import three_smu_cli
+from attodry_control.keithley2400 import KeithleyReading
+from attodry_control.three_smu import (
+    ThreeSmuSafetyError,
+    ThreeSmuSample,
+    TimedReading,
+)
 from attodry_control.three_smu_cli import run
 
 
@@ -140,14 +146,7 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             self.assertEqual(document["active_roles"], ["smu_bias"])
             self.assertEqual(document["off_roles"], ["gate_top", "gate_bottom"])
 
-    def test_run_without_exact_confirmation_stops_before_driver_import(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            config = Path(directory) / "hardware.local.toml"
-            config.write_text(OPERATION_TEXT, encoding="utf-8")
-            with self.assertRaisesRegex(SystemExit, "was not authorized"):
-                run(["run", "--config", str(config)], input_fn=lambda _prompt: "")
-
-    def test_hold_requires_a_second_exact_confirmation(self) -> None:
+    def test_hold_requires_exact_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "hardware.local.toml"
             config.write_text(
@@ -156,7 +155,7 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            responses = iter(("RUN THREE SMU", "not holding"))
+            responses = iter(("not holding",))
             with self.assertRaisesRegex(SystemExit, "Hold was not authorized"):
                 run(
                     ["run", "--config", str(config)],
@@ -178,7 +177,9 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
             loader.assert_called_once_with(three_smu_cli.DEFAULT_CONFIG_PATH)
             self.assertIn('"hardware_opened": false', output.getvalue())
 
-    def test_confirmed_run_passes_internal_authorizations_to_session(self) -> None:
+    def test_run_starts_without_confirmation_and_passes_internal_authorizations(
+        self,
+    ) -> None:
         class FakeSession:
             last_run_dir = Path("fake-run")
 
@@ -203,7 +204,7 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
 
             result = run(
                 ["run", "--config", str(config)],
-                input_fn=lambda _prompt: "RUN THREE SMU",
+                input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
                 session_open=fake_session_open,
             )
             self.assertEqual(result, 0)
@@ -211,6 +212,121 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
                 opened["kwargs"],
                 {"authorize_writes": True, "authorize_status_consumption": True},
             )
+
+    def test_run_panel_displays_queued_clean_samples_without_status_queue(self) -> None:
+        def sample(point_index: int) -> ThreeSmuSample:
+            return ThreeSmuSample(
+                point_index=point_index,
+                repeat_index=0,
+                segment="time_trace",
+                elapsed_s=0.25 * (point_index + 1),
+                coordinates={"smu_bias": 0.1},
+                readings={
+                    "smu_bias": TimedReading(
+                        "2026-09-01T00:00:00+00:00",
+                        KeithleyReading(
+                            voltage_v=0.1,
+                            current_a=5e-7,
+                            source_setpoint=0.1,
+                            output_enabled=True,
+                            compliance_trip=False,
+                            status='0,"No error"',
+                            status_query_consumed=True,
+                        ),
+                    )
+                },
+                clean=True,
+                problems=(),
+            )
+
+        class FakeSession:
+            last_run_dir = Path("fake-run")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def run(self, **kwargs):
+                for item in (sample(0), sample(1)):
+                    kwargs["on_sample"](item)
+                    yield item
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(OPERATION_TEXT, encoding="utf-8")
+            output: list[str] = []
+            result = run(
+                ["run", "--config", str(config)],
+                input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
+                print_fn=output.append,
+                session_open=lambda *_args, **_kwargs: FakeSession(),
+            )
+        rendered = "\n".join(map(str, output))
+        self.assertEqual(result, 0)
+        self.assertIn("[1/2] repeat 1/1; segment=time_trace", rendered)
+        self.assertIn("[2/2] repeat 1/1; segment=time_trace", rendered)
+        self.assertIn("source setpoint readback=0.1 V", rendered)
+        self.assertIn("V=0.1 V; I=5e-07 A; R=200000 ohm; output=ON", rendered)
+        self.assertIn("CLEAN", rendered)
+        self.assertNotIn("status/error queue:", rendered)
+
+    def test_run_panel_displays_problem_status_from_queued_sample(self) -> None:
+        problem_sample = ThreeSmuSample(
+            point_index=0,
+            repeat_index=0,
+            segment="time_trace",
+            elapsed_s=0.25,
+            coordinates={"smu_bias": 0.1},
+            readings={
+                "smu_bias": TimedReading(
+                    "2026-09-01T00:00:00+00:00",
+                    KeithleyReading(
+                        voltage_v=0.1,
+                        current_a=5e-7,
+                        source_setpoint=0.1,
+                        output_enabled=True,
+                        compliance_trip=True,
+                        status='-200,"Execution error"',
+                        status_query_consumed=True,
+                    ),
+                )
+            },
+            clean=False,
+            problems=("smu_bias compliance trip",),
+        )
+
+        class FakeSession:
+            last_run_dir = Path("fake-run")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def run(self, **kwargs):
+                kwargs["on_sample"](problem_sample)
+                raise ThreeSmuSafetyError("smu_bias compliance trip")
+                yield problem_sample
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "hardware.local.toml"
+            config.write_text(OPERATION_TEXT, encoding="utf-8")
+            output: list[str] = []
+            with self.assertRaisesRegex(ThreeSmuSafetyError, "compliance trip"):
+                run(
+                    ["run", "--config", str(config)],
+                    input_fn=lambda _prompt: self.fail("zero-disable must not prompt"),
+                    print_fn=output.append,
+                    session_open=lambda *_args, **_kwargs: FakeSession(),
+                )
+        rendered = "\n".join(output)
+        self.assertIn("PROBLEM", rendered)
+        self.assertIn("status/error queue:", rendered)
+        self.assertIn('-200,"Execution error"', rendered)
+        self.assertIn("smu_bias compliance trip", rendered)
 
     def test_monitor_live_uses_only_queries_and_skips_error_queue_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -330,6 +446,8 @@ class ThreeSmuCliNotebookTests(unittest.TestCase):
         )
         self.assertNotIn("qcodes", live_code.lower())
         self.assertIn("session.run", live_code)
+        self.assertIn("on_sample=sample_queue.put", live_code)
+        self.assertIn("display_queued_samples", live_code)
         self.assertNotIn("from attodry_control.three_smu import", analysis_code)
         self.assertIn("attodry_control.three_smu_analysis", analysis_code)
 
