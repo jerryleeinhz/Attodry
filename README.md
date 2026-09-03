@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 SMU 连接/写入、Three-SMU 主 acquisition 集成、其它 attoDRY 设置写入和端到端硬件路径仍需分阶段显式授权。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。新增的 standalone magnetic-field 模块只完成了本机 fake-DLL 的 M0–M2 所需实现与验证；M2 的 `LK_setup`/`lyr` target-offline 运行尚未执行，M3–M5 真实读写均未授权。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 magnetic-field、SMU 连接/写入、独立模块的主 acquisition 集成和端到端硬件路径仍需分阶段显式授权。
 
 ## 已确认硬件
 
@@ -56,7 +56,9 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
 - [`Lock-in`](docs/modules/LOCKIN.md)：双 SR830 配置、相位、量程、自动量程和
   已完成实验的经验规则；
 - [`Temperature`](docs/modules/TEMPERATURE.md)：attoDRY 温度读回、控制和稳定；
-- [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：X/Z 矢量场、3 T 限制和归零；
+- [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：本地 fake-DLL 的 X/Z
+  单目标/有序点列、3 T 限制、canonical JSONL、文件 monitor 和 monitored cleanup；
+  target-offline 与真实 M3–M5 仍待分别验收；
 - [`Three-SMU`](docs/modules/THREE_SMU.md)：三台 Keithley、双栅极与 bias 的
   QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
   [`THREE_SMU_DAILY_OPERATION.md`](docs/THREE_SMU_DAILY_OPERATION.md)；
@@ -88,6 +90,10 @@ python -m attodry_control.attodry_test --help
 python -m attodry_control.temperature_test --help
 python -m attodry_control.temperature_run --help
 python -m attodry_control.temperature_scan --help
+python -m attodry_control.magnetic_field_cli --help
+python -m attodry_control.magnetic_field_cli single-target --help
+python -m attodry_control.magnetic_field_cli scan --help
+python -m attodry_control.magnetic_field_monitor --help
 python -m attodry_control.lockin_test --help
 ```
 
@@ -107,6 +113,62 @@ python -m attodry_control.lockin_test --help
 `[temperature_run]` 的安全/中断参数。新命令当前只完成离线验证，真实多点写入仍需
 单独确认并带 `--authorize-temperature-scan`；操作、实时 JSONL 和断点恢复说明见
 [`docs/TEMPERATURE_SCAN_GUIDE.md`](docs/TEMPERATURE_SCAN_GUIDE.md)。
+
+## Standalone X/Z 磁场模块
+
+`[magnetic_field_run].points` 是一个非空的显式点列，按 TOML 中的原顺序执行并保留
+重复项；它不会排序、去重或生成 Cartesian grid。每个 target、生成的 zero-detour
+setpoint waypoint，以及 X 分量先写、Z 分量后写时的 mixed setpoint 都要通过
+`sqrt(Bx^2 + Bz^2) <= 3 T` 和分量边界检查，包括 DLL 接收的 float32 command
+values。`max_step_t` 必须大于 1e-5 T acknowledgement resolution，且只约束离散请求
+setpoint 的间距；starting setpoint、内部 waypoint、显式 target 和 cleanup zero 都要求
+setpoint/actual field 的稳定读回。当前离线实现仍没有测量 vendor controller 在相邻稳定
+waypoint 之间的连续运动，因此不声明 physical path、constant angle、constant magnitude
+或实际 ramp rate。
+
+下面的 help 和 JSONL monitor 都不会连接硬件：
+
+```powershell
+python -m attodry_control.magnetic_field_cli single-target --help
+python -m attodry_control.magnetic_field_cli scan --help
+python -m attodry_control.magnetic_field_monitor --progress PATH_TO_PROGRESS.jsonl
+```
+
+未来 M3 当前 revision 的真实只读验收使用下面的既有 write-disabled 命令；它仍未执行，
+命令不包含任何 write authorization，只有获得新的 connection authorization 后才能运行：
+
+```powershell
+python -m attodry_control.attodry_test `
+  --config config/hardware.local.toml `
+  --samples 10 `
+  --interval-s 1 `
+  --authorize-connection
+```
+
+M3–M5 运行前必须让 vendor GUI 和其它 attoDRY controller process 断开。
+
+`single-target` 真实执行要求 `points` 恰有一个 entry，并同时提供
+`--authorize-connection` 与 `--authorize-field-writes`；正常结束始终 monitored zero。
+`scan` 还要求 `--authorize-ordered-field-scan`，授权范围包含列出的每一个点和重复点；
+正常结束按 `[cleanup].normal_end_field_policy` hold 或 zero；hold 仍会复核 final
+setpoint、actual field/tolerance、control 和 error；exact-zero target 还检查 magnitude。
+异常与 `Ctrl+C` 都进入 best-effort monitored-zero cleanup；normal zero 失败或被中断时，
+cleanup 会独立重试 monitored zero。通信不确定、非有限读回、zero/close/audit 未确认或
+没有完整最终状态时不会声称零场，并要求人工查看 attoDRY/APS100。当前 cleanup 不关闭
+field control：
+zero 时保持 control enabled at zero，hold 时保持 control enabled at final target，随后
+断开 DLL session。OFF→ON takeover 还要求 actual field 与 latent setpoint 在 configured
+（且不大于 1 mT）tolerance 内相符，并验证两种可能的 mixed corners 均不超过 3 T。
+
+每次运行只有一个 canonical JSONL；每个事件 append 后都会 flush/`fsync`，partial、
+rejected、interrupted、stability、cleanup 和 terminal evidence 不删除。field monitor
+只读取这个文件，不导入 DLL/driver，也不查询仪器；它会把 torn、integrity failure 或
+缺少 terminal event 的 stream 标记为 incomplete/manual-verification，也会拒绝要求 zero
+却未验证 zero 或缺少 final confirmed state 的矛盾 completed record，而不会推断控制进程
+仍在运行。当前 JSONL 还没有 M4 所需的 exact float32 toggle/component
+command-attempt/result 列表。所有新功能只在本机 fake DLL 验证；M2 target-offline 和
+M3–M5 真实阶段仍待完成。完整边界见
+[`docs/modules/MAGNETIC_FIELD.md`](docs/modules/MAGNETIC_FIELD.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的
 `config\hardware.local.toml` 的 `[lockin_sweep]` 中。XX 与 XY 的量程模式则分别
@@ -188,6 +250,7 @@ python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo
 python -m attodry_control.simulate --database run_data/demo.sqlite --run-id demo --resume
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --csv analysis_output/run.csv
 python -m attodry_control.analysis --database PATH --run-id RUN_ID --publication-dir analysis_output/RUN_ID --format png --format pdf
+python -m attodry_control.magnetic_field_monitor --progress PATH_TO_PROGRESS.jsonl
 python -m attodry_control.three_smu_cli describe
 python -m attodry_control.three_smu_cli monitor-live --help
 python -m attodry_control.three_smu_cli run --help

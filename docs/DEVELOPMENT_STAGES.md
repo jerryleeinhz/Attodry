@@ -437,18 +437,22 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 ## Stage 4 - attoDRY real driver
 
 Status: Temperature operation operator-accepted; target-computer DLL ABI preflight
-and real read-only connection validation complete (2026-08-21). Magnetic-field
-writes remain uncommissioned and require separate explicit authorization.
+and real read-only connection validation complete (2026-08-21). The standalone
+magnetic-field M0--M2 implementation has local fake-DLL evidence (2026-09-03),
+but M2 target-host verification has not run. Magnetic-field M3--M5 remain
+uncommissioned and separately gated.
 
 - Added safe 64-bit vendor DLL loading and explicit function signatures.
 - Added separately authorized COM connection and initialization timeout.
 - Added temperature, VTI, X/Z field, setpoint, control, and error readback with
   last-confirmed-state preservation.
 - Added read-before-toggle idempotent temperature/field-control operations.
-- Added project-limit validation, safe zero-detour coordinated vector setpoints,
-  rolling stable waits, and monitored verified zeroing.
-- Added fake-DLL return-code, timeout, write-authorization, path, stability, and
-  vector-path contract tests before laboratory use.
+- Added project-limit validation, zero-detour setpoint planning, rolling stable
+  waits, and monitored verified zeroing. These discrete requested/read-back
+  setpoints do not establish the continuous physical trajectory, constant angle,
+  constant magnitude, or physical ramp rate between setpoints.
+- Added fake-DLL return-code, timeout, write-authorization, setpoint-planning,
+  stability, and vector-limit contract tests before laboratory use.
 - Target-computer preflight confirmed 64-bit Python, an AMD64 PE32+ vendor DLL
   version 2.0, and all 21 required exports without calling begin/connect. The
   operator-confirmed station-local COM port and DLL path are stored only in the
@@ -652,6 +656,88 @@ writes remain uncommissioned and require separate explicit authorization.
   Git, unittest, and compileall ran; the vendor DLL was not loaded and no
   `begin/connect` or hardware command was issued. The temporary clone was removed.
 
+### Stage 4 follow-up - standalone X/Z magnetic-field module
+
+Status: local M0--M2 implementation and fake-DLL evidence complete (2026-09-03).
+M2 target-offline acceptance is pending because this commit has not been tested on
+`LK_setup`; M3 real read-only, M4 smallest single-axis movement, and M5 ordered X/Z
+scan remain uncommissioned and require new, stage-specific authorization.
+
+- Added a module-specific strict loader for `[magnetic_field_run]`, reusing only
+  the required project, cryostat, magnet, and cleanup tables. The explicit nonempty
+  X/Z `points` list is neither sorted nor deduplicated and is never expanded into
+  a Cartesian grid; duplicate entries retain their own point indices and events.
+- Added pure planning and standalone execution for one target or an ordered point
+  list. Every target, generated zero-detour setpoint waypoint, and the mixed
+  X-first/Z-second setpoint is prevalidated against component limits and
+  `sqrt(Bx^2 + Bz^2) <= 3 T`, including the exact float32 values passed to the
+  DLL. `max_step_t` must exceed the 1e-5 T acknowledgement resolution. The plan
+  is recalculated from the last confirmed setpoint after connection/control
+  acknowledgement and before setting writes.
+- `max_step_t` constrains requested setpoint-waypoint spacing only. The module does
+  require setpoint acknowledgement and actual-field stability at every internal
+  waypoint, explicit target, and cleanup zero. It still does not observe or
+  control the vendor controller's continuous motion between stable waypoints and
+  therefore makes no physical-path, constant-angle,
+  constant-magnitude, straight-line, or ramp-rate claim.
+- Field control remains read-before-toggle and now receives bounded full-state
+  acknowledgement. Initialization and control flags are strict 0/1. Before an
+  OFF→ON takeover, actual field must match the latent setpoint within the
+  configured field tolerance (at most 1 mT), and both possible mixed corners must
+  satisfy the 3 T invariant; otherwise no toggle is sent. Changed X and Z
+  components are written separately and each receives a bounded complete setpoint
+  readback. Actual field must be stable at the starting setpoint and every
+  waypoint before a subsequent setting write. A disabled-control interval resets
+  the dwell window; final point readiness is owned by one explicit-target dwell.
+  The first post-toggle acknowledgement read uses measured elapsed time and enforces
+  the deadline. The retained sample just before a jittered dwell cutoff participates
+  in both tolerance and rolling-range qualification, not only time coverage.
+- Added `attodry-magnetic-field single-target` with separate connection and field-
+  write gates. It accepts exactly one configured point and always performs
+  monitored zero on normal completion. `scan` requires an additional ordered-scan
+  gate, preserves every listed point, and applies the configured normal `hold` or
+  `zero` policy. Both routes require exception policy `zero`.
+- Normal zero and failure/`Ctrl+C` cleanup wait for a zero setpoint acknowledgement
+  and actual-field stability within the configured tolerance. Communication
+  uncertainty is never reclassified as verified zero even if a later cleanup read
+  appears safe. If the normal-zero path fails or is interrupted, cleanup makes an
+  independent monitored-zero retry. Failed/unknown zero, close, connection, audit,
+  non-finite readback, or last-state evidence sets `manual_verification_required`
+  and retains the last confirmed state. Cleanup does not disable field control: it
+  disconnects with control confirmed enabled at zero, or at the final target for a
+  normal `hold` scan.
+- Added one canonical per-run JSONL audit stream. Every event carries schema/run/
+  index/time metadata and each append is flushed and fsynced. The start record
+  includes config hash, source provenance, interface, authorizations, full
+  stability/driver protocol, limits, points, and cleanup policy. Partial, rejected,
+  interrupted, setpoint-transition, stability, cleanup, disconnect, and terminal
+  events remain in that stream; no secondary final JSON/CSV is treated as truth.
+  An audit-write/`fsync` failure is latched as rejection but cannot interrupt an
+  otherwise possible zero cleanup. The writer best-effort rolls back an uncertain
+  append, so a failed terminal `fsync` cannot leave a certified completion.
+- Added `attodry-field-monitor`, which reads only a supplied JSONL file. It imports
+  no attoDRY driver, opens no DLL/controller, validates stream/terminal integrity,
+  and reports a torn/no-terminal/inconsistent stream as incomplete and requiring
+  manual verification. It also rejects a contradictory completed record when zero
+  was required but not verified or when the final confirmed state is missing.
+- Final focused safety/stability/config/attoDRY/magnetic/monitor command passed all
+  182 tests in 6.533 s. The full suite passed all 450 tests in 14.373 s with 5
+  optional-matplotlib skips;
+  `python -m compileall -q src tests`, both magnetic CLI `--help` commands, and
+  `git diff --check` passed (diff check emitted only CRLF warnings). All execution
+  used local fakes only: no real DLL load, `begin/connect`, field-control toggle,
+  setpoint, sweep-to-zero, or other hardware command occurred.
+- M2 still requires an isolated `LK_setup`/`lyr` run with exact Python and import
+  path recorded. The earlier generic 10-second attoDRY read-only record is not
+  evidence for this module revision and does not advance M2 or M3.
+- M3 remains unexecuted. Its exact current-revision write-disabled command is
+  `python -m attodry_control.attodry_test --config config/hardware.local.toml
+  --samples 10 --interval-s 1 --authorize-connection`. It requires a new connection
+  authorization and has no write authorization.
+- M4 remains additionally blocked on exact float32 toggle/component command-attempt/
+  result events, which the current JSONL does not yet provide. M3--M5 must run with
+  the vendor GUI and every competing attoDRY controller process disconnected.
+
 ## Stage 5 - gate SMUs and integrated acquisition
 
 Status: model-independent offline core and the independent Three-SMU QCoDeS S0
@@ -765,12 +851,14 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   minimum-output, small-movement, zero-bias, and failure-injection checkpoints.
 - Added `attodry-simulate`, including deliberate first-attempt unlock injection,
   raw rejection retention, retry, accepted completion, and monitor verification.
-- The merged main/Lock-in/Temperature/Three-SMU offline suite passes all 385
-  tests in the minimal environment, with five optional matplotlib rendering
-  tests skipped; source compilation passes. All merge validation was hardware-free.
-- Built and import-checked the local project wheel without downloading
-  dependencies; the final filename and SHA-256 are recorded in
-  `PROJECT_HANDOFF.md`.
+- The current source-based main/Lock-in/Temperature/Magnetic-field/Three-SMU
+  suite passes all 450 tests in 14.373 s, with five optional matplotlib rendering
+  skips; source/test compilation and magnetic CLI help checks pass. All validation
+  was hardware-free.
+- The previously built local project wheel was built and import-checked without
+  downloading dependencies; its filename and SHA-256 are recorded in
+  `PROJECT_HANDOFF.md`. It predates the standalone magnetic-field module, so a
+  new wheel and frozen wheelhouse remain pending.
 - Added `docs/modules/` work packages for independent Lock-in, Temperature,
   Magnetic-field, and Integration Chat follow-up. Each package records its
   current real-hardware boundary, goals/non-goals, staged acceptance criteria,
@@ -779,10 +867,11 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   wiring, phase preservation, settling, sensitivity transitions, latch handling,
   frequency tolerance, sequential pair reads, and cleanup. This is a planning
   and handoff deliverable only; it does not commission any new hardware writes.
-- Pending: Three-SMU target-`lyr` offline checks, operator-filled local safety
-  configuration, separately authorized real-SMU commissioning, integration into
-  the main acquisition, frozen hardware wheelhouse, and offline-control-computer
-  installation verification.
+- Pending: Magnetic-field M2 target-`lyr` offline checks and separately gated
+  M3--M5 commissioning; Three-SMU target-`lyr` offline checks, operator-filled
+  local safety configuration, separately authorized real-SMU commissioning,
+  integration into the main acquisition, frozen hardware wheelhouse, and
+  offline-control-computer installation verification.
 
 ## Stage 7 follow-up - Lock-in safety policy and sweep readback robustness
 

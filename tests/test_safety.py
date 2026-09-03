@@ -29,6 +29,16 @@ class MagnetSafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(SafetyViolation, "Bx"):
             validate_vector_field(VectorField(1.1, 0.0), limits)
 
+    def test_direct_limits_cannot_raise_project_invariant_above_three_tesla(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(ValueError, "confirmed 3 T"):
+            MagnetLimits(
+                hardware_x_max_t=3.0,
+                hardware_z_max_t=9.0,
+                experiment_vector_max_t=4.0,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

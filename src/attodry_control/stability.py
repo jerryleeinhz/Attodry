@@ -65,7 +65,17 @@ def _evaluate_window(
     if coverage_start is None or latest_time - coverage_start.elapsed_s < criteria.dwell_s:
         return False
 
-    values = [sample.value for sample in window]
+    # A retained sample immediately before the cutoff is what proves that the
+    # sampled dwell spans the full requested duration under poll jitter.  It
+    # must therefore satisfy the same tolerance/range criteria as the samples
+    # at or after the cutoff; otherwise an out-of-band predecessor could lend
+    # time coverage to a shorter in-band interval.
+    qualification_window = (
+        window
+        if coverage_start is window[0]
+        else [coverage_start, *window]
+    )
+    values = [sample.value for sample in qualification_window]
     if setpoint is not None:
         if criteria.tolerance is None:
             raise ValueError("target stability requires a temperature tolerance.")
