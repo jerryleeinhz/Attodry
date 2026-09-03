@@ -225,7 +225,11 @@ def plot_gate_leakage(rows: Sequence[ThreeSmuAnalysisRow]):
     axis.set_ylabel("|Gate leakage| (A)")
     axis.set_yscale("log")
     axis.grid(True, alpha=0.25)
-    axis.legend()
+    axis.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+    )
     return figure
 
 

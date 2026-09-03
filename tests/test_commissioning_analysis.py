@@ -20,6 +20,7 @@ from attodry_control.commissioning_analysis import (
     load_sweep_sample_files,
     load_sweep_samples,
     aggregate_frequency_excitation_iv,
+    plot_harmonic_scaling_fit,
     plot_role_harmonic_sweep,
     plot_six_role_harmonic_sweeps,
 )
@@ -411,6 +412,31 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(fit.phase_slope_deg_per_decade or 0.0, 0.0, places=6)
         self.assertLessEqual(fit.delta_aicc_fixed_minus_free or 0.0, 2.0)
 
+    def test_harmonic_scaling_plot_uses_right_side_model_legend(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        fit = fit_harmonic_scaling(
+            self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=0.0),
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        figure = plot_harmonic_scaling_fit(fit)
+        self.addCleanup(plt.close, figure)
+
+        axis = figure.axes[0]
+        legend = axis.get_legend()
+        self.assertIsNotNone(legend)
+        assert legend is not None
+        anchor = legend.get_bbox_to_anchor().transformed(axis.transAxes.inverted())
+        self.assertGreater(anchor.x0, 1.0)
+        self.assertFalse(figure.texts)
+        self.assertIn("log fixed order", [item.get_text() for item in legend.texts])
+
     def test_harmonic_scaling_rejects_a_distinct_exponent(self) -> None:
         path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
         rows = self._scaling_rows(exponent=1.25, phase_slope_deg_per_decade=0.0)
@@ -655,9 +681,13 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("plot_harmonic_scaling_fit", code)
         self.assertIn("'harmonic_scaling_rules': asdict(SCALING_RULES)", code)
         self.assertIn("'harmonic_scaling_results':", code)
-        self.assertIn("scalar_R_verdict", code)
         self.assertIn("if frequency_rows", code)
         self.assertIn("if excitation_rows", code)
+        self.assertNotIn("display([result.as_dict()", code)
+        self.assertNotIn("Fitted formulas", code)
+        self.assertNotIn("prints all numerical verdicts", code)
+        self.assertNotIn("current_calibration", code)
+        self.assertNotIn("catalog = discover_commissioning_records", code)
         self.assertNotIn("browse_and_load_commissioning_file", code)
         self.assertNotIn("A completed frequency record is missing", code)
         self.assertNotIn("A completed excitation record is missing", code)

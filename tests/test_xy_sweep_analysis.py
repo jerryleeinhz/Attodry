@@ -60,6 +60,11 @@ class XYSweepAnalysisTests(unittest.TestCase):
         _, labels = axis.get_legend_handles_labels()
         self.assertEqual(labels, ["XY · h1"])
         self.assertEqual(axis.get_title(), "SR830 XY h1 frequency sweep")
+        legend = axis.get_legend()
+        self.assertIsNotNone(legend)
+        assert legend is not None
+        anchor = legend.get_bbox_to_anchor().transformed(axis.transAxes.inverted())
+        self.assertGreater(anchor.x0, 1.0)
 
     def test_excitation_current_plot_uses_recorded_path_by_default(self) -> None:
         try:

@@ -102,7 +102,11 @@ def plot_xy_sweep(
     )
     axis.set_title(f"SR830 XY h{harmonic} {scan_type} sweep")
     axis.grid(True, alpha=0.25)
-    axis.legend()
+    axis.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+    )
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure

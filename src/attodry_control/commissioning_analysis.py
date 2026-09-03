@@ -1136,11 +1136,10 @@ def plot_harmonic_scaling_fit(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
     figure, (axis, residual_axis) = plt.subplots(
-        2, 1, figsize=(10.5, 7.2), sharex=True,
+        2, 1, figsize=(10.8, 7.2), sharex=True,
         gridspec_kw={"height_ratios": (3, 1)},
-        constrained_layout=False,
+        constrained_layout=True,
     )
-    figure.subplots_adjust(left=0.09, right=0.64, top=0.84, bottom=0.11, hspace=0.08)
     included = tuple(point for point in fit.points if point.included)
     excluded = tuple(point for point in fit.points if not point.included)
     selected_complex_model = next(
@@ -1189,11 +1188,7 @@ def plot_harmonic_scaling_fit(
                 ],
                 color="tab:orange",
                 linestyle="--",
-                label=_log_formula(
-                    fit.fixed_intercept_log,
-                    float(fit.expected_order),
-                    prefix="log fixed",
-                ),
+                label="log fixed order",
             )
         if fit.free_intercept_log is not None and fit.exponent is not None:
             axis.plot(
@@ -1203,11 +1198,7 @@ def plot_harmonic_scaling_fit(
                     for value in x_values
                 ],
                 color="tab:green",
-                label=_log_formula(
-                    fit.free_intercept_log,
-                    fit.exponent,
-                    prefix="log free",
-                ),
+                label="log free order",
             )
         if selected_scalar_model is not None:
             scalar_predictions = [
@@ -1219,7 +1210,7 @@ def plot_harmonic_scaling_fit(
                 scalar_predictions,
                 color="tab:red",
                 linewidth=1.6,
-                label=_scalar_formula(selected_scalar_model, prefix="scalar fixed"),
+                label="scalar fixed order",
             )
             residual_values.extend(
                 (
@@ -1244,10 +1235,7 @@ def plot_harmonic_scaling_fit(
                 color="tab:pink",
                 linewidth=1.3,
                 linestyle=":",
-                label=_scalar_formula(
-                    selected_scalar_free_model,
-                    prefix="scalar free",
-                ),
+                label="scalar free order",
             )
         if selected_complex_model is not None:
             complex_predictions = [
@@ -1259,7 +1247,7 @@ def plot_harmonic_scaling_fit(
                 [math.hypot(predicted_x, predicted_y) for predicted_x, predicted_y in complex_predictions],
                 color="tab:purple",
                 linewidth=1.6,
-                label=_complex_formula(selected_complex_model, prefix="complex fixed"),
+                label="complex fixed order",
             )
             residual_values.extend(
                 (
@@ -1289,10 +1277,7 @@ def plot_harmonic_scaling_fit(
                 color="tab:purple",
                 linewidth=1.3,
                 linestyle=":",
-                label=_complex_formula(
-                    selected_complex_free_model,
-                    prefix="complex free",
-                ),
+                label="complex free order",
             )
         if fit.fixed_intercept_log is not None:
             for point in included:
@@ -1344,105 +1329,22 @@ def plot_harmonic_scaling_fit(
         f"complex={fit.complex_power_law_verdict} "
         f"({fit.complex_selected_model or 'unavailable'})"
     )
-    formula_lines = [
-        "Fitted formulas (R in V RMS, I in A RMS):",
-        _log_formula(
-            fit.fixed_intercept_log,
-            float(fit.expected_order),
-            prefix="log fixed",
-        ),
-        _log_formula(
-            fit.free_intercept_log,
-            fit.exponent,
-            prefix="log free",
-        ),
-    ]
-    formula_lines.extend(
-        f"{model.name}: {_scalar_formula(model)}; AICc={_format_fit_number(model.aicc)}; "
-        f"RMSE={_format_fit_number(model.relative_rmse)}"
-        for model in fit.scalar_models
-    )
-    formula_lines.extend(
-        f"{model.name}: {_complex_formula(model)}; AICc={_format_fit_number(model.aicc)}; "
-        f"RMSE={_format_fit_number(model.relative_rmse)}"
-        for model in fit.complex_models
-    )
-    figure.text(
-        0.66,
-        0.97,
-        "\n".join(formula_lines),
-        va="top",
-        ha="left",
-        fontsize=7.0,
-        family="monospace",
-        bbox={
-            "boxstyle": "round,pad=0.45",
-            "facecolor": "white",
-            "edgecolor": "0.65",
-            "alpha": 0.95,
-        },
-    )
     axis.grid(True, which="both", alpha=0.2)
     residual_axis.grid(True, which="both", alpha=0.2)
-    axis.legend()
+    axis.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+    )
     if residual_values:
-        residual_axis.legend()
+        residual_axis.legend(
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0.0,
+        )
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure
-
-
-def _format_fit_number(value: float | None) -> str:
-    return "n/a" if value is None or not math.isfinite(value) else f"{value:.3g}"
-
-
-def _log_formula(
-    intercept: float | None,
-    exponent: float | None,
-    *,
-    prefix: str,
-) -> str:
-    if intercept is None or exponent is None:
-        return f"{prefix}: unavailable"
-    coefficient = math.exp(intercept)
-    return f"{prefix}: R={_format_fit_number(coefficient)}·I^{_format_fit_number(exponent)}"
-
-
-def _scalar_formula(
-    model: ScalarHarmonicScalingModel,
-    *,
-    prefix: str | None = None,
-) -> str:
-    label = f"{prefix}: " if prefix else ""
-    background = (
-        f"{_format_fit_number(model.background_v)}+"
-        if model.includes_background
-        else ""
-    )
-    return (
-        f"{label}R={background}{_format_fit_number(model.response_v_at_reference_current)}·"
-        f"(I/{_format_fit_number(model.current_reference_a_rms)})^"
-        f"{_format_fit_number(model.exponent)}"
-    )
-
-
-def _complex_formula(
-    model: ComplexHarmonicScalingModel,
-    *,
-    prefix: str | None = None,
-) -> str:
-    label = f"{prefix}: " if prefix else ""
-    background = (
-        f"({_format_fit_number(model.background_x_v)}+i{_format_fit_number(model.background_y_v)})+"
-        if model.includes_background
-        else ""
-    )
-    return (
-        f"{label}Z={background}({_format_fit_number(model.response_x_v_at_reference_current)}+"
-        f"i{_format_fit_number(model.response_y_v_at_reference_current)})·"
-        f"(I/{_format_fit_number(model.current_reference_a_rms)})^"
-        f"{_format_fit_number(model.exponent)}"
-    )
 
 
 def _scalar_model_prediction(
@@ -2846,7 +2748,11 @@ def plot_commissioning_sweep(
     )
     axis.set_title(f"SR830 {scan_type} sweep")
     axis.grid(True, alpha=0.25)
-    axis.legend()
+    axis.legend(
+        loc="upper left",
+        bbox_to_anchor=(1.02, 1.0),
+        borderaxespad=0.0,
+    )
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure
@@ -2989,7 +2895,13 @@ def plot_role_harmonic_sweep(
     left_handles, left_labels = voltage_axis.get_legend_handles_labels()
     right_handles, right_labels = phase_axis.get_legend_handles_labels()
     if left_handles or right_handles:
-        voltage_axis.legend(left_handles + right_handles, left_labels + right_labels)
+        voltage_axis.legend(
+            left_handles + right_handles,
+            left_labels + right_labels,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0.0,
+        )
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure
@@ -3050,7 +2962,12 @@ def plot_multi_frequency_iv_curves(
     axis.set_title(f"Combined sweep · I–V{role} · h{harmonic}")
     axis.grid(True, alpha=0.25)
     if frequencies:
-        axis.legend(title="Actual frequency")
+        axis.legend(
+            title="Actual frequency",
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0.0,
+        )
     if destination is not None:
         figure.savefig(destination, dpi=200)
     return figure

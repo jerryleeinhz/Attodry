@@ -286,7 +286,13 @@ class _PublicationSuite:
             axis.set_title(title)
             axis.grid(True, alpha=0.2)
             if len(series) > 1:
-                axis.legend(fontsize=7, frameon=False)
+                axis.legend(
+                    fontsize=7,
+                    frameon=False,
+                    loc="upper left",
+                    bbox_to_anchor=(1.02, 1.0),
+                    borderaxespad=0.0,
+                )
             self._save(key, figure)
 
     def _field_dependence(self) -> None:
@@ -353,7 +359,13 @@ class _PublicationSuite:
                 axis.set_xlabel("|I|² (A²)" if axis is axes[0] else "|I|³ (A³)")
                 axis.set_ylabel("|X| (V)")
                 axis.grid(True, alpha=0.2)
-                axis.legend(fontsize=7, frameon=False)
+                axis.legend(
+                    fontsize=7,
+                    frameon=False,
+                    loc="upper left",
+                    bbox_to_anchor=(1.02, 1.0),
+                    borderaxespad=0.0,
+                )
             axes[0].set_title("Second harmonic scaling")
             axes[1].set_title("Third harmonic scaling")
             self._save("harmonic_scaling", figure)

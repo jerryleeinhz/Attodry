@@ -209,6 +209,9 @@ Vxx/Vxy、h1/h2/h3 和幅值/相位分别作图；每张图把不同实际测量
 标准差，并只为显示沿递增电流展开；原始相位不会被修改。图例位于画框右侧。默认仍只使用
 `clean` 正式样本。
 
+所有分析图的图例均位于画框右侧。作图单元只显示曲线和图例，不输出原始拟合数值、公式或
+结果表；需要审计这些数值时，在可选导出的 `selection_manifest.json` 中查看。
+
 只查看频率扫描和幅值扫描中的 XY 信号时，使用
 [`notebooks/sr830_xy_sweeps.ipynb`](notebooks/sr830_xy_sweeps.ipynb)。
 该 Notebook 在读取阶段丢弃 XX，保留 completed/clean 和 Browse 筛选，

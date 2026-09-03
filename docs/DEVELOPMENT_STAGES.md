@@ -901,10 +901,11 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   background-aware complex fits, while the summary displays all three verdicts.
   Synthetic phase-rotation tests and notebook compilation pass; no hardware
   resource was opened or written.
-- Updated harmonic-scaling figures (2026-08-25): each exported fit plot now
-  includes a formula panel listing every log/scalar/complex model with fitted
-  coefficients, exponent, AICc, and relative RMSE; overlaid curves use matching
-  formula labels. This is read-only presentation logic and introduces no
+- Updated harmonic-scaling figures (2026-09-03): all plot legends are outside
+  the axes on the right. The displayed fitting curves use concise model names,
+  while numerical coefficients, verdicts, AICc, and residual metrics are kept
+  in the optional selection manifest rather than rendered as a formula panel or
+  Notebook output. This is read-only presentation logic and introduces no
   hardware path.
 - Added frequency×excitation matrix sweeps (2026-08-25): the new
   `sweep-frequency-excitation` command traverses the configured frequency grid
@@ -1055,6 +1056,11 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   temperature conditions, records both bounds in the selection manifest, and places
   each temperature legend outside the plot frame on the right. This remains
   analysis-only; no instrument path is imported.
+- Unified the remaining analysis plots with that presentation: legends are
+  outside the right-hand edge, and the commissioning Notebook renders figures
+  without printing its raw fitting records. The optional export manifest retains
+  all numerical results for audit. This remains analysis-only; no instrument
+  path is imported.
 - Corrected direct Notebook execution from a source checkout (2026-09-01). Before
   importing `attodry_control`, the first cell now resolves a repository root when
   Jupyter starts in either the root or `notebooks`, verifies `src/attodry_control`,

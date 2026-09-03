@@ -978,10 +978,10 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   in the fit export. Figures overlay log-space, scalar-R, and complex curves,
   and the notebook summary presents all three verdicts. Offline phase-rotation
   and wrong-order tests pass; no hardware resource was opened or written.
-- Harmonic-scaling figures now include a right-hand formula panel listing every
-  log/scalar/complex model and its fitted coefficients, exponent, AICc, and
-  relative RMSE. Curve legends use the corresponding numerical formula, making
-  the model comparison directly readable without inspecting the JSON.
+- Harmonic-scaling figures keep their legends outside the axes on the right and
+  use concise model labels. Numerical coefficients, verdicts, AICc, and residual
+  metrics remain in the optional `selection_manifest.json`; the Notebook no
+  longer renders raw fit-result tables or a formula panel.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`
@@ -1176,6 +1176,10 @@ readback-derived RMS current. It retains only the intersection of those current
 bounds and the selected temperature conditions; the bounds are saved in the
 selection manifest. Every temperature I–V legend is positioned outside the plot
 frame on the right, so a long temperature list does not cover the curves.
+
+All other analysis plotting functions follow the same right-side legend layout.
+The commissioning Notebook displays figures only; raw numerical fit records are
+preserved for optional export rather than emitted during plotting.
 
 For each available XX/XY × h1/h2/h3 channel, analysis produces a separate R-amplitude
 figure and phase figure. Each actual formal-window mean temperature is a separate
