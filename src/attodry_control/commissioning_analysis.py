@@ -38,6 +38,7 @@ SWEEP_X_AXES = frozenset(
 )
 PLOT_ROLES = ("xx", "xy")
 PLOT_HARMONICS = (1, 2, 3)
+HARMONIC_SCALING_PLOT_METHODS = ("log", "scalar", "complex")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1137,9 +1138,10 @@ def fit_harmonic_scalings(
 def plot_harmonic_scaling_fit(
     fit: HarmonicScalingFit,
     *,
+    methods: Iterable[str] = HARMONIC_SCALING_PLOT_METHODS,
     destination: str | Path | None = None,
 ):
-    """Plot all three scaling views and their relative residuals."""
+    """Plot selected scaling views without changing the underlying fit results."""
 
     try:
         import matplotlib.pyplot as plt
@@ -1147,6 +1149,7 @@ def plot_harmonic_scaling_fit(
         raise RuntimeError(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
+    selected_methods = _validate_harmonic_scaling_plot_methods(methods)
     figure, (axis, residual_axis) = plt.subplots(
         2, 1, figsize=PUBLICATION_STACKED_FIGSIZE, sharex=True,
         gridspec_kw={"height_ratios": (3, 1)},
@@ -1204,7 +1207,7 @@ def plot_harmonic_scaling_fit(
             elinewidth=0.8,
             label="observed mean ± sample SD",
         )
-        if fit.fixed_intercept_log is not None:
+        if "log" in selected_methods and fit.fixed_intercept_log is not None:
             axis.plot(
                 x_values,
                 [
@@ -1220,7 +1223,11 @@ def plot_harmonic_scaling_fit(
                     free_exponent=False,
                 ),
             )
-        if fit.free_intercept_log is not None and fit.exponent is not None:
+        if (
+            "log" in selected_methods
+            and fit.free_intercept_log is not None
+            and fit.exponent is not None
+        ):
             axis.plot(
                 x_values,
                 [
@@ -1236,7 +1243,7 @@ def plot_harmonic_scaling_fit(
                     free_exponent=True,
                 ),
             )
-        if selected_scalar_model is not None:
+        if "scalar" in selected_methods and selected_scalar_model is not None:
             scalar_predictions = [
                 _scalar_model_prediction(selected_scalar_model, point.current_a_rms)
                 for point in included
@@ -1258,7 +1265,7 @@ def plot_harmonic_scaling_fit(
                 )
                 for point, predicted in zip(included, scalar_predictions)
             )
-        if selected_scalar_free_model is not None:
+        if "scalar" in selected_methods and selected_scalar_free_model is not None:
             scalar_free_predictions = [
                 _scalar_model_prediction(
                     selected_scalar_free_model, point.current_a_rms
@@ -1273,7 +1280,7 @@ def plot_harmonic_scaling_fit(
                 linestyle="--",
                 label=_format_scalar_fit_legend_label(selected_scalar_free_model),
             )
-        if selected_complex_model is not None:
+        if "complex" in selected_methods and selected_complex_model is not None:
             complex_predictions = [
                 _complex_model_prediction(selected_complex_model, point.current_a_rms)
                 for point in included
@@ -1297,7 +1304,7 @@ def plot_harmonic_scaling_fit(
                     included, complex_predictions
                 )
             )
-        if selected_complex_free_model is not None:
+        if "complex" in selected_methods and selected_complex_free_model is not None:
             complex_free_predictions = [
                 _complex_model_prediction(
                     selected_complex_free_model, point.current_a_rms
@@ -1315,7 +1322,7 @@ def plot_harmonic_scaling_fit(
                 linestyle="--",
                 label=_format_complex_fit_legend_label(selected_complex_free_model),
             )
-        if fit.fixed_intercept_log is not None:
+        if "log" in selected_methods and fit.fixed_intercept_log is not None:
             for point in included:
                 predicted = (
                     math.exp(fit.fixed_intercept_log)
@@ -1369,7 +1376,7 @@ def plot_harmonic_scaling_fit(
     style_axis(residual_axis)
     outside_legend(
         axis,
-        title=_format_harmonic_scaling_legend_title(fit),
+        title=_format_harmonic_scaling_legend_title(fit, selected_methods),
         fontsize=7.0,
         title_fontsize=7.5,
     )
@@ -1399,17 +1406,45 @@ def _complex_model_prediction(
     )
 
 
-def _format_harmonic_scaling_legend_title(fit: HarmonicScalingFit) -> str:
+def _validate_harmonic_scaling_plot_methods(
+    methods: Iterable[str],
+) -> tuple[str, ...]:
+    """Return a non-empty, unique sequence of supported display methods."""
+
+    selected = tuple(methods)
+    if not selected:
+        raise ValueError("At least one harmonic-scaling plot method is required.")
+    unsupported = tuple(
+        method for method in selected if method not in HARMONIC_SCALING_PLOT_METHODS
+    )
+    if unsupported:
+        allowed = ", ".join(HARMONIC_SCALING_PLOT_METHODS)
+        raise ValueError(
+            f"Unsupported harmonic-scaling plot method(s): {unsupported!r}; "
+            f"choose from {allowed}."
+        )
+    if len(set(selected)) != len(selected):
+        raise ValueError("Harmonic-scaling plot methods must not contain duplicates.")
+    return selected
+
+
+def _format_harmonic_scaling_legend_title(
+    fit: HarmonicScalingFit,
+    methods: Sequence[str],
+) -> str:
     """Summarize the auditable fit decisions above the equation legend."""
 
-    return "\n".join(
-        (
-            "Data and fitted equations",
-            f"log/scalar: {fit.amplitude_verdict}/{fit.scalar_power_law_verdict}",
+    verdicts = []
+    if "log" in methods:
+        verdicts.append(f"log: {fit.amplitude_verdict}")
+    if "scalar" in methods:
+        verdicts.append(f"scalar: {fit.scalar_power_law_verdict}")
+    if "complex" in methods:
+        verdicts.append(
             "phase/complex: "
-            f"{fit.complex_response_verdict}/{fit.complex_power_law_verdict}",
+            f"{fit.complex_response_verdict}/{fit.complex_power_law_verdict}"
         )
-    )
+    return "\n".join(("Data and fitted equations", *verdicts))
 
 
 def _format_log_fit_legend_label(

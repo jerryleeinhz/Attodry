@@ -181,13 +181,22 @@ for the log, scalar-R, and complex fixed-order curves
 measured-amplitude space, so they are useful for choosing among methods; they
 are descriptive cross-validation errors, not additional safety gates.
 
+The first Notebook cell also exposes `SCALING_PLOT_METHODS`. Its default
+`("log", "scalar", "complex")` draws all three views for model comparison.
+After choosing a method, use a one-item tuple such as `("scalar",)`, `("log",)`,
+or `("complex",)`. `scalar` means the phase-blind R fit in linear voltage
+coordinates; it does not force the fitted exponent to one. This switch changes
+only the curves, equations, verdicts, and residuals shown in the figure. All
+three fits are still computed and retained in the export manifest.
+
 The optional export records the exact `SCALING_RULES` values and every fit
-result in `selection_manifest.json`, alongside one PNG/PDF/SVG fit figure per
+result in `selection_manifest.json`, plus the active
+`harmonic_scaling_plot_methods`, alongside one PNG/PDF/SVG fit figure per
 available channel. Fit figures show observed means with sample-SD error bars,
-the fitted curves, and aligned relative residuals. The right-side legend gives
-each drawn fit its numerically substituted, current-normalized equation,
+the selected fitted curves, and their aligned relative residuals. The right-side
+legend gives each drawn fit its numerically substituted, current-normalized equation,
 exponent (and available interval), R², relative RMSE, and AICc or log-model
-ΔAICc; it also states the four verdicts in its title. Scalar equations use
+ΔAICc; it states only the selected methods' verdicts in its title. Scalar equations use
 `R(I)`, while complex equations preserve phase-bearing `Z(I)=X(I)+iY(I)`
 coefficients. Full-precision values remain in the manifest, and the Notebook
 does not print raw result tables or a separate formula panel. This makes results

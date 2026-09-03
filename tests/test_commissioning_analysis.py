@@ -452,7 +452,72 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("I /", legend_text)
         self.assertIn("rRMSE=", legend_text)
         self.assertIn("AICc=", legend_text)
-        self.assertIn("log/scalar:", legend.get_title().get_text())
+        legend_title = legend.get_title().get_text()
+        self.assertIn("log:", legend_title)
+        self.assertIn("scalar:", legend_title)
+        self.assertIn("phase/complex:", legend_title)
+
+    def test_harmonic_scaling_plot_can_show_one_method_at_a_time(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        fit = fit_harmonic_scaling(
+            self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=0.0),
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        expectations = {
+            "log": ("Log fixed", "log fixed residual", ("Scalar", "Z(I) =")),
+            "scalar": ("Scalar fixed", "scalar R residual", ("Log fixed", "Z(I) =")),
+            "complex": ("Complex fixed", "complex residual", ("Log fixed", "R(I) =")),
+        }
+        for method, (expected, expected_residual, absent) in expectations.items():
+            with self.subTest(method=method):
+                figure = plot_harmonic_scaling_fit(fit, methods=(method,))
+                self.addCleanup(plt.close, figure)
+                fit_legend = figure.axes[0].get_legend()
+                residual_legend = figure.axes[1].get_legend()
+                self.assertIsNotNone(fit_legend)
+                self.assertIsNotNone(residual_legend)
+                assert fit_legend is not None
+                assert residual_legend is not None
+                fit_text = "\n".join(item.get_text() for item in fit_legend.texts)
+                residual_text = "\n".join(
+                    item.get_text() for item in residual_legend.texts
+                )
+                self.assertIn(expected, fit_text)
+                self.assertEqual(residual_text, expected_residual)
+                for unexpected in absent:
+                    self.assertNotIn(unexpected, fit_text)
+                title = fit_legend.get_title().get_text()
+                self.assertIn(f"{method}:", title)
+                for other in {"log", "scalar", "complex"} - {method}:
+                    label = "phase/complex:" if other == "complex" else f"{other}:"
+                    self.assertNotIn(label, title)
+
+    def test_harmonic_scaling_plot_rejects_invalid_method_selection(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        fit = fit_harmonic_scaling(
+            self._scaling_rows(exponent=2.0, phase_slope_deg_per_decade=0.0),
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        with self.assertRaisesRegex(ValueError, "At least one"):
+            plot_harmonic_scaling_fit(fit, methods=())
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            plot_harmonic_scaling_fit(fit, methods=("linear",))
+        with self.assertRaisesRegex(ValueError, "must not contain duplicates"):
+            plot_harmonic_scaling_fit(fit, methods=("scalar", "scalar"))
 
     def test_harmonic_scaling_legend_preserves_complex_background_terms(self) -> None:
         try:
@@ -720,15 +785,25 @@ class CommissioningAnalysisTests(unittest.TestCase):
             code,
         )
         self.assertIn("SCALING_RULES = HarmonicScalingRules", code)
+        self.assertIn(
+            'SCALING_PLOT_METHODS = ("log", "scalar", "complex")', code
+        )
+        self.assertIn('# SCALING_PLOT_METHODS = ("scalar",)', code)
+        self.assertIn('# SCALING_PLOT_METHODS = ("log",)', code)
+        self.assertIn('# SCALING_PLOT_METHODS = ("complex",)', code)
         self.assertIn("scalar_background_mode='auto'", code)
         self.assertIn("minimum_current_decades=1.0", code)
         self.assertIn("complex_background_mode='auto'", code)
         self.assertIn("complex_free_exponent_min=0.05", code)
         self.assertIn("fit_harmonic_scalings", code)
         self.assertIn("plot_harmonic_scaling_fit", code)
+        self.assertIn("methods=SCALING_PLOT_METHODS", code)
         self.assertIn("export_publication_figure_set", code)
         self.assertNotIn("dpi=200", code)
         self.assertIn("'harmonic_scaling_rules': asdict(SCALING_RULES)", code)
+        self.assertIn(
+            "'harmonic_scaling_plot_methods': list(SCALING_PLOT_METHODS)", code
+        )
         self.assertIn("'harmonic_scaling_results':", code)
         self.assertIn("if frequency_rows", code)
         self.assertIn("if excitation_rows", code)

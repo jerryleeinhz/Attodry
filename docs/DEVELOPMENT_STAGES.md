@@ -909,6 +909,14 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   precision remains in the optional selection manifest, while the Notebook does
   not render raw fit-result tables or a separate formula panel. This is
   read-only presentation logic and introduces no hardware path.
+- Added an explicit harmonic-scaling display selector (2026-09-04). The Notebook
+  initially draws log, scalar-R, and complex methods for comparison, then accepts
+  a one-item tuple to show only the selected method's curves, equations, verdicts,
+  and residuals. Commented examples cover all three choices and clarify that
+  `scalar` is a linear-coordinate R fit, not a forced unit exponent. All methods
+  remain computed and exported; the manifest records the active display choice.
+  Offline API, Notebook-source, compile, and Matplotlib-render tests passed; no
+  hardware resource was opened or written.
 - Added frequency×excitation matrix sweeps (2026-08-25): the new
   `sweep-frequency-excitation` command traverses the configured frequency grid
   outside and the ascending SINE OUT grid inside, returning to 4 mVrms before

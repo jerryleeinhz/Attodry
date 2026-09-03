@@ -985,6 +985,14 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   log/scalar/phase/complex verdicts. Full precision remains in the optional
   `selection_manifest.json`; the Notebook does not render raw fit-result tables
   or a separate formula panel.
+- The first Notebook cell now exposes `SCALING_PLOT_METHODS`. Its default draws
+  log, scalar-R, and complex fits together for comparison; changing it to
+  `("scalar",)`, `("log",)`, or `("complex",)` limits the fit curves, equations,
+  verdicts, and residuals shown without changing any computed fit. The selection
+  is archived as `harmonic_scaling_plot_methods`, while full results for all
+  methods remain in `selection_manifest.json`. Commented one-method examples are
+  included beside the setting; `scalar` means a linear-coordinate R fit and does
+  not force exponent one. This is analysis-only and opens no hardware path.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`
