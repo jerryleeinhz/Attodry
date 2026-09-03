@@ -187,7 +187,9 @@ class TemperatureExcitationAnalysisTests(unittest.TestCase):
         self.assertEqual(amplitude.axes[0].get_xlabel(), "SINE OUT current (A RMS)")
         self.assertEqual(amplitude.axes[0].get_ylabel(), "Vxx R (V RMS)")
         self.assertEqual(phase.axes[0].get_ylabel(), "Vxx phase (degree)")
-        self.assertEqual(len(amplitude.axes[0].get_legend_handles_labels()[1]), 2)
+        amplitude_labels = amplitude.axes[0].get_legend_handles_labels()[1]
+        self.assertEqual(amplitude_labels, ["1.775 K", "2.025 K"])
+        self.assertTrue(all("set" not in label.lower() for label in amplitude_labels))
         self.assertEqual(len(phase.axes[0].get_legend_handles_labels()[1]), 2)
         amplitude.canvas.draw()
         legend = amplitude.axes[0].get_legend()

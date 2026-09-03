@@ -236,7 +236,7 @@ def plot_temperature_iv_curves(
     colormap = plt.get_cmap("viridis")
     denominator = max(len(curve_keys) - 1, 1)
     for index, curve_key in enumerate(curve_keys):
-        source_path, temperature_index, requested_k, measured_k = curve_key
+        source_path, temperature_index, _, measured_k = curve_key
         selected = [
             item
             for item in statistics
@@ -252,7 +252,7 @@ def plot_temperature_iv_curves(
         y_values = [item.mean for item in selected]
         if metric == "phase_deg":
             y_values = _unwrap_degrees(y_values)
-        label = f"{measured_k:.6g} K measured (set {requested_k:.6g} K)"
+        label = f"{measured_k:.6g} K"
         if measured_k in duplicate_temperatures:
             label += f" · {Path(source_path).stem} · T#{temperature_index}"
         axis.errorbar(

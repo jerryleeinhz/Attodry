@@ -1054,8 +1054,9 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
 - The temperature–excitation browser also accepts optional lower/upper archived
   RMS-current bounds. It plots and exports only their intersection with selected
   temperature conditions, records both bounds in the selection manifest, and places
-  each temperature legend outside the plot frame on the right. This remains
-  analysis-only; no instrument path is imported.
+  each temperature legend outside the plot frame on the right. Legend labels show
+  only the actual formal-window mean temperature and omit the requested setpoint.
+  This remains analysis-only; no instrument path is imported.
 - Unified the remaining analysis plots with that presentation: legends are
   outside the right-hand edge, and the commissioning Notebook renders figures
   without printing its raw fitting records. The optional export manifest retains

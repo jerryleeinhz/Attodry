@@ -1175,7 +1175,8 @@ The same browser now also accepts optional lower/upper bounds on the archived
 readback-derived RMS current. It retains only the intersection of those current
 bounds and the selected temperature conditions; the bounds are saved in the
 selection manifest. Every temperature I–V legend is positioned outside the plot
-frame on the right, so a long temperature list does not cover the curves.
+frame on the right, so a long temperature list does not cover the curves. Its labels
+show only the actual formal-window mean temperature and omit the requested setpoint.
 
 All other analysis plotting functions follow the same right-side legend layout.
 The commissioning Notebook displays figures only; raw numerical fit records are
