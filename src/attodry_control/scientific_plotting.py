@@ -85,16 +85,21 @@ def publication_plot(
     return wrapped
 
 
-def ordered_series_style(index: int, count: int) -> dict[str, Any]:
-    """Return an ordered color plus redundant marker and line encodings."""
+def ordered_series_style(
+    index: int,
+    count: int,
+    *,
+    colormap_name: str = "cividis",
+) -> dict[str, Any]:
+    """Return a colormap-ordered color plus redundant marker and line encodings."""
 
     import matplotlib as mpl
 
     denominator = max(count - 1, 1)
     fraction = index / denominator if count > 1 else 0.35
-    color_position = 0.05 + 0.70 * fraction
+    color_position = 0.08 + 0.70 * fraction
     return {
-        "color": mpl.colormaps["cividis"](color_position),
+        "color": mpl.colormaps[colormap_name](color_position),
         "marker": SERIES_MARKERS[index % len(SERIES_MARKERS)],
         "linestyle": SERIES_LINESTYLES[
             (index // len(SERIES_MARKERS)) % len(SERIES_LINESTYLES)

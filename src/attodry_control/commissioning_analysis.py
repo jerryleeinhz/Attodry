@@ -3205,7 +3205,11 @@ def plot_multi_frequency_iv_curves(
             [item.current_a_rms for item in selected],
             [item.mean for item in selected],
             yerr=[item.standard_deviation for item in selected],
-            **ordered_series_style(index, len(frequencies)),
+            **ordered_series_style(
+                index,
+                len(frequencies),
+                colormap_name="viridis",
+            ),
             linewidth=1.35,
             markersize=4.5,
             markeredgewidth=0.7,

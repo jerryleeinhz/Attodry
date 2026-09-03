@@ -1199,6 +1199,9 @@ uses redundant color/marker/line encodings, and explicitly names sample-SD versu
 circular-sample-SD error bars. Optional export now writes 600 dpi PNG, PDF, and
 editable-text SVG. These are general manuscript defaults, not journal-specific
 compliance, and they do not change any data, filter, scale, or fit result.
+Temperature I–V figures now use a brighter warm `plasma` sequence, whereas
+multi-frequency I–V figures use a separate cool `viridis` sequence. Marker and
+line-style redundancy remains in both plot families for grayscale accessibility.
 
 For each available XX/XY × h1/h2/h3 channel, analysis produces a separate R-amplitude
 figure and phase figure. Each actual formal-window mean temperature is a separate

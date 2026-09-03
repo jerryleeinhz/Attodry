@@ -74,6 +74,9 @@ major grids, inward ticks, and redundant color/marker/line-style encodings.
 Error-bar legends identify ordinary or circular sample standard deviation. The
 style is a general manuscript starting point, not a claim of compliance with a
 specific journal. Optional export writes 600 dpi PNG plus PDF and SVG vectors.
+Temperature-stacked I--V curves use a bright warm `plasma` sequence, while
+multi-frequency I--V curves use a distinct cool `viridis` sequence. Both retain
+marker and line-style redundancy, so series identity never depends on color alone.
 
 For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
 `amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency

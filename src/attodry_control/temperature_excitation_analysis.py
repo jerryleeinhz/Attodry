@@ -268,7 +268,11 @@ def plot_temperature_iv_curves(
             [item.current_a_rms for item in selected],
             y_values,
             yerr=[item.standard_deviation for item in selected],
-            **ordered_series_style(index, len(curve_keys)),
+            **ordered_series_style(
+                index,
+                len(curve_keys),
+                colormap_name="plasma",
+            ),
             linewidth=1.35,
             markersize=4.5,
             markeredgewidth=0.7,

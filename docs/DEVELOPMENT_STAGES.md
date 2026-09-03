@@ -1078,6 +1078,10 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   or circular-sample-SD legend text, 600 dpi PNG, PDF, and editable-text SVG
   export. Data selection, filtering, aggregation, scales, and fits are unchanged;
   the style does not claim compliance with a specific journal.
+- Refined ordered I–V colors (2026-09-04): temperature-stacked curves use the
+  brighter warm `plasma` sequence and multi-frequency curves use the distinct cool
+  `viridis` sequence. Existing marker/line redundancy, data, filters, fits, and
+  instrument paths are unchanged.
 - Corrected direct Notebook execution from a source checkout (2026-09-01). Before
   importing `attodry_control`, the first cell now resolves a repository root when
   Jupyter starts in either the root or `notebooks`, verifies `src/attodry_control`,
