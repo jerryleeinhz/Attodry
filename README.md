@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。新增的 standalone magnetic-field 模块只完成了本机 fake-DLL 的 M0–M2 所需实现与验证；M2 的 `LK_setup`/`lyr` target-offline 运行尚未执行，M3–M5 真实读写均未授权。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 magnetic-field、SMU 连接/写入、独立模块的主 acquisition 集成和端到端硬件路径仍需分阶段显式授权。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。新增 standalone magnetic-field 模块的 M0–M2 已完成，包括本机 fake-DLL 实现/验证和 commit `e0924f1` 在 `LK_setup`/`lyr` 的 DLL-free target-offline 验证；M3 真实只读和 M4–M5 写入仍未授权。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 magnetic-field、SMU 连接/写入、独立模块的主 acquisition 集成和端到端硬件路径仍需分阶段显式授权。
 
 ## 已确认硬件
 
@@ -58,7 +58,7 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
 - [`Temperature`](docs/modules/TEMPERATURE.md)：attoDRY 温度读回、控制和稳定；
 - [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：本地 fake-DLL 的 X/Z
   单目标/有序点列、3 T 限制、canonical JSONL、文件 monitor 和 monitored cleanup；
-  target-offline 与真实 M3–M5 仍待分别验收；
+  M2 target-offline 已完成，真实 M3–M5 仍待分别授权和验收；
 - [`Three-SMU`](docs/modules/THREE_SMU.md)：三台 Keithley、双栅极与 bias 的
   QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
   [`THREE_SMU_DAILY_OPERATION.md`](docs/THREE_SMU_DAILY_OPERATION.md)；
@@ -166,8 +166,11 @@ rejected、interrupted、stability、cleanup 和 terminal evidence 不删除。f
 缺少 terminal event 的 stream 标记为 incomplete/manual-verification，也会拒绝要求 zero
 却未验证 zero 或缺少 final confirmed state 的矛盾 completed record，而不会推断控制进程
 仍在运行。当前 JSONL 还没有 M4 所需的 exact float32 toggle/component
-command-attempt/result 列表。所有新功能只在本机 fake DLL 验证；M2 target-offline 和
-M3–M5 真实阶段仍待完成。完整边界见
+command-attempt/result 列表。本机最终证据为 182 focused tests（6.533 s）和 450 full
+tests（14.373 s，5 optional-matplotlib skips）；commit `e0924f1` 的 M2 DLL-free target
+snapshot 又通过 182 focused tests（4.675 s）和 450 full tests（20.299 s，无 skip
+reported）。M2 archive/path/hash 和 import-isolation 证据见模块文档。M3–M5 真实阶段
+仍待完成。完整边界见
 [`docs/modules/MAGNETIC_FIELD.md`](docs/modules/MAGNETIC_FIELD.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的

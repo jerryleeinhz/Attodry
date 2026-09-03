@@ -438,9 +438,9 @@ Status: integrated 1/2/3-harmonic laboratory validation complete (2026-08-20).
 
 Status: Temperature operation operator-accepted; target-computer DLL ABI preflight
 and real read-only connection validation complete (2026-08-21). The standalone
-magnetic-field M0--M2 implementation has local fake-DLL evidence (2026-09-03),
-but M2 target-host verification has not run. Magnetic-field M3--M5 remain
-uncommissioned and separately gated.
+magnetic-field M0--M2 implementation and DLL-free `LK_setup` target-offline
+validation are complete (2026-09-03). Magnetic-field M3--M5 remain uncommissioned
+and separately gated.
 
 - Added safe 64-bit vendor DLL loading and explicit function signatures.
 - Added separately authorized COM connection and initialization timeout.
@@ -658,10 +658,10 @@ uncommissioned and separately gated.
 
 ### Stage 4 follow-up - standalone X/Z magnetic-field module
 
-Status: local M0--M2 implementation and fake-DLL evidence complete (2026-09-03).
-M2 target-offline acceptance is pending because this commit has not been tested on
-`LK_setup`; M3 real read-only, M4 smallest single-axis movement, and M5 ordered X/Z
-scan remain uncommissioned and require new, stage-specific authorization.
+Status: M0--M2 complete (2026-09-03): local fake-DLL implementation/evidence plus
+DLL-free target-offline validation on `LK_setup`. M3 real read-only, M4 smallest
+single-axis movement, and M5 ordered X/Z scan remain uncommissioned and require
+new, stage-specific authorization.
 
 - Added a module-specific strict loader for `[magnetic_field_run]`, reusing only
   the required project, cryostat, magnet, and cleanup tables. The explicit nonempty
@@ -727,9 +727,25 @@ scan remain uncommissioned and require new, stage-specific authorization.
   `git diff --check` passed (diff check emitted only CRLF warnings). All execution
   used local fakes only: no real DLL load, `begin/connect`, field-control toggle,
   setpoint, sweep-to-zero, or other hardware command occurred.
-- M2 still requires an isolated `LK_setup`/`lyr` run with exact Python and import
-  path recorded. The earlier generic 10-second attoDRY read-only record is not
-  evidence for this module revision and does not advance M2 or M3.
+- Completed M2 target-offline validation for implementation commit
+  `e0924f1666b8e1b0b8e6e0c08daad2ab9f9ac4c4` (short `e0924f1`). The exact source
+  archive `attodry_m2_e0924f1.zip` is 482705 bytes with SHA-256
+  `231F649FA8A77B6139F67239F4E322275AA06B0BA3B4F0E628DEAFBFD32569F1`.
+  It was copied to `C:\Users\LK_Setup\attodry_m2_e0924f1.zip` and extracted as
+  `C:\Users\LK_Setup\attodry_m2_e0924f1` on `LK_setup`.
+- The target used Conda environment `lyr` with exact interpreter
+  `C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe`, Python 3.12.13, 64-bit.
+  The archive explicitly excluded `vendor/`; the target snapshot had no `vendor/`
+  and recursively contained 0 DLLs. A dedicated file-monitor import-isolation
+  check imported the monitor from the snapshot without importing the attoDRY driver.
+- Target compileall and both magnetic CLI `--help` checks passed. The same focused
+  safety/stability/config/attoDRY/magnetic/monitor selection passed 182 tests in
+  4.675 s; the full discovery suite passed all 450 tests in 20.299 s with no skips
+  reported. The target-validation shell did not invoke a hardware-execution CLI or
+  supply authorization flags; authorization-path unit tests used injected fakes.
+  No DLL was loaded, and no hardware was connected or operated. This
+  completes M2 only; the earlier generic 10-second attoDRY record still does not
+  replace M3.
 - M3 remains unexecuted. Its exact current-revision write-disabled command is
   `python -m attodry_control.attodry_test --config config/hardware.local.toml
   --samples 10 --interval-s 1 --authorize-connection`. It requires a new connection
@@ -867,11 +883,11 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   wiring, phase preservation, settling, sensitivity transitions, latch handling,
   frequency tolerance, sequential pair reads, and cleanup. This is a planning
   and handoff deliverable only; it does not commission any new hardware writes.
-- Pending: Magnetic-field M2 target-`lyr` offline checks and separately gated
-  M3--M5 commissioning; Three-SMU target-`lyr` offline checks, operator-filled
-  local safety configuration, separately authorized real-SMU commissioning,
-  integration into the main acquisition, frozen hardware wheelhouse, and
-  offline-control-computer installation verification.
+- Pending: separately gated Magnetic-field M3--M5 commissioning; Three-SMU
+  target-`lyr` offline checks, operator-filled local safety configuration,
+  separately authorized real-SMU commissioning, integration into the main
+  acquisition, frozen hardware wheelhouse, and offline-control-computer
+  installation verification.
 
 ## Stage 7 follow-up - Lock-in safety policy and sweep readback robustness
 

@@ -2,17 +2,17 @@
 
 ## 当前状态
 
-Standalone attoDRY X/Z 磁场模块的 M0--M2 所需实现和本地证据已经完成：严格的
+Standalone attoDRY X/Z 磁场模块的 M0--M2 已完成：严格的
 `[magnetic_field_run]` 配置、纯 setpoint 计划、fake-DLL adapter 行为、单目标/有序
-扫描 CLI、逐事件 fsync 的 canonical JSONL 和只读文件 monitor 均已实现。这里的
-“本地证据”只来自本机 fake DLL；没有加载真实 vendor DLL，没有调用真实
-`begin/connect`，也没有向 attoDRY 或磁体发送命令。
+扫描 CLI、逐事件 fsync 的 canonical JSONL 和只读文件 monitor 均已在本地实现并测试，
+随后通过 M2 target-offline 验证。本地证据只来自 fake DLL；M2 snapshot 则明确不含
+vendor 内容或 DLL。两个阶段都没有加载真实 vendor DLL，没有调用真实 `begin/connect`，
+也没有向 attoDRY 或磁体发送命令。
 
-M2 按本文件原定义还要求在 `LK_setup` 的 `lyr` 环境完成 target-offline 验证；该步骤
-尚未执行，所以当前不能标记为 `target offline complete`。M3 真实只读、M4 最小单轴
-运动和 M5 有序 X/Z 扫描仍分别受新的明确授权 gate 约束。项目早期 10 秒
-`attodry_test` 只读记录只说明当时通用 driver 能读到零场状态，不能替代本模块的
-M2 或 M3 验收。
+M2 已在 `LK_setup` 的 exact `lyr` Python 和隔离 snapshot 中完成。M3 真实只读、M4
+最小单轴运动和 M5 有序 X/Z 扫描仍分别受新的明确授权 gate 约束。项目早期 10 秒
+`attodry_test` 只读记录只说明当时通用 driver 能读到零场状态，不能替代当前 revision
+的 M3 验收。
 
 本次最终本地证据为：
 
@@ -28,6 +28,33 @@ M2 或 M3 验收。
   均为 optional matplotlib）；
 - `python -m compileall -q src tests`、两个 magnetic CLI 的 `--help` 和
   `git diff --check`：通过（diff check 只有 CRLF warnings）。
+
+M2 target-offline evidence（2026-09-03）：
+
+- tested implementation commit：
+  `e0924f1666b8e1b0b8e6e0c08daad2ab9f9ac4c4`（short `e0924f1`）；
+- source archive：`attodry_m2_e0924f1.zip`，482705 bytes，SHA-256
+  `231F649FA8A77B6139F67239F4E322275AA06B0BA3B4F0E628DEAFBFD32569F1`；复制到
+  `C:\Users\LK_Setup\attodry_m2_e0924f1.zip`，解压 snapshot 为
+  `C:\Users\LK_Setup\attodry_m2_e0924f1`；
+- target：`LK_setup`，Conda environment `lyr`，exact interpreter
+  `C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe`，Python 3.12.13，64-bit；
+- archive 明确排除了 `vendor/`；target snapshot 确认 `vendor/` 不存在，递归 DLL count
+  为 0。单独的 monitor import-isolation 检查从该 snapshot 导入 monitor，且没有导入
+  `attodry_control.attodry` driver；
+- `python -m compileall -q src tests` 和两个 magnetic CLI `--help` 检查通过；
+- focused target 命令：
+
+  ```powershell
+  python -m unittest -v tests.test_safety tests.test_stability tests.test_config tests.test_attodry tests.test_magnetic_field tests.test_magnetic_field_monitor
+  ```
+
+  182 tests，4.675 s，OK；
+- `python -m unittest discover -s tests -v`：450 tests，20.299 s，OK；target output
+  未报告 skip；
+- target-validation shell 没有使用 authorization flag 调用 hardware-execution CLI；
+  suite 内的 authorization-path tests 只使用 injected fakes。未加载 DLL，也未连接或
+  操作硬件。
 
 ## 已实现的独立入口
 
@@ -200,13 +227,16 @@ output_directory = "../run_data/magnetic_field_commissioning"
 - focused 与完整 suite 的最终本地 count 见“当前状态”。
 - 没有真实 DLL load、connection 或 hardware command。
 
-### M2 - target offline validation（当前：pending）
+### M2 - target offline validation（当前：complete，2026-09-03）
 
-- M2 所需 loader、CLI、fake DLL、monitor 和本地测试 evidence 已实现；但尚未在
-  `LK_setup` 的 exact `lyr` Python、隔离 import path 下执行。
-- 完成仍要求记录 commit、Python 路径、import path、focused/full tests 和 CLI help，
-  并证明未加载 vendor DLL、未调用 `begin/connect`。在此之前不能写
-  `target offline complete`。
+- Commit `e0924f1` 的 DLL-free source snapshot 已在 `LK_setup` 的 exact 64-bit Python
+  3.12.13 `lyr` interpreter 下通过 compileall、两个 magnetic CLI help、182 focused
+  tests 和全部 450 tests；exact archive、path、hash、timing 和 module-import 证据见
+  “当前状态”。
+- snapshot 递归包含 0 个 DLL；单独的 monitor import-isolation check 未导入 attoDRY
+  driver。target-validation shell 未向 hardware-execution CLI 提供 authorization flag，
+  authorization-path tests 仅使用 injected fakes；没有 DLL load、真实 `begin/connect` 或
+  hardware operation。M2 只证明 target-offline 可复现性，不授权或替代 M3--M5。
 
 ### M3 - real read-only commissioning（当前：gated / 未授权）
 
@@ -268,9 +298,10 @@ output_directory = "../run_data/magnetic_field_commissioning"
 ```text
 请负责 Magnetic-field 模块。先按 AGENTS.md 顺序完整阅读五份必读文档，再阅读
 docs/modules/README.md 和 docs/modules/MAGNETIC_FIELD.md。检查 git status 和当前
-提交，从最早未完成阶段开始。M0--M2 只有本机 fake-DLL 实现/证据，M2 的
-LK_setup/lyr target-offline 验证仍待执行；M3--M5 分别需要新授权。必须保持
+提交，从最早未完成阶段开始。M0--M2 已完成，包括 commit e0924f1 在
+LK_setup/lyr 的 DLL-free target-offline 验证；M3--M5 分别需要新授权。必须保持
 sqrt(Bx^2+Bz^2)<=3 T，通信失败不得推断零场，也不得把离散 setpoint 计划描述为
 continuous physical path、constant angle 或 constant magnitude。默认不加载真实 DLL、
-不连接或写真实 attoDRY。结束时按模块交付格式报告。
+不连接或写真实 attoDRY。当前 JSONL 仍缺 M4 所需的 exact float32 command-attempt/
+result evidence。结束时按模块交付格式报告。
 ```

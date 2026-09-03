@@ -440,9 +440,9 @@ Completed in Stage 3:
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. The
-standalone magnetic-field M0--M2 implementation has local fake-DLL evidence, but
-M2 target-host verification has not run. Magnetic-field M3--M5 remain
-uncommissioned and separately gated.
+standalone magnetic-field M0--M2 implementation, local fake-DLL evidence, and
+DLL-free `LK_setup` target-offline validation are complete. Magnetic-field M3--M5
+remain uncommissioned and separately gated.
 
 Completed offline in Stage 4:
 
@@ -653,9 +653,9 @@ Current standalone magnetic-field module update (2026-09-03):
 - Completed the local implementation and fake-DLL evidence needed across M0--M2:
   a module-specific strict `[magnetic_field_run]` loader, pure setpoint planning,
   standalone executor/CLI, canonical durable JSONL audit, and file-only monitor.
-  M2 itself is not `target offline complete`: this revision has not been run on
-  `LK_setup` in `lyr`. M3 real read-only, M4 smallest single-axis movement, and
-  M5 ordered X/Z scan remain separately gated and uncommissioned.
+  M2 target-offline is now also complete for the exact implementation revision
+  described below. M3 real read-only, M4 smallest single-axis movement, and M5
+  ordered X/Z scan remain separately gated and uncommissioned.
 - The explicit nonempty `points` array is executed exactly as written: order and
   duplicate entries are preserved, with no sorting, deduplication, or Cartesian
   expansion. `single-target` requires exactly one entry plus separate connection
@@ -712,9 +712,30 @@ Current standalone magnetic-field module update (2026-09-03):
   `--help` commands, and `git diff --check` passed (diff check emitted only CRLF
   warnings). No real vendor DLL was loaded, no `begin/connect` occurred, and no
   real toggle, setpoint, sweep-to-zero, or other hardware command was sent.
+- Completed M2 on `LK_setup` against implementation commit
+  `e0924f1666b8e1b0b8e6e0c08daad2ab9f9ac4c4` (short `e0924f1`). The exact
+  `attodry_m2_e0924f1.zip` archive is 482705 bytes with SHA-256
+  `231F649FA8A77B6139F67239F4E322275AA06B0BA3B4F0E628DEAFBFD32569F1`.
+  It was copied to `C:\Users\LK_Setup\attodry_m2_e0924f1.zip`; the target snapshot
+  was `C:\Users\LK_Setup\attodry_m2_e0924f1`.
+- The target used Conda `lyr` with exact interpreter
+  `C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe`, Python 3.12.13, 64-bit.
+  The source archive explicitly excluded `vendor/`; the snapshot verified
+  `vendor/` absent and recursively 0 DLLs. A dedicated file-monitor import-isolation
+  check imported the monitor from that snapshot without importing the attoDRY
+  driver. Compileall and both magnetic CLI
+  `--help` checks passed.
+- The target focused safety/stability/config/attoDRY/magnetic/monitor command ran
+  182 tests in 4.675 s, OK. Full unittest discovery ran 450 tests in 20.299 s, OK,
+  with no skips reported. The target-validation shell did not invoke a
+  hardware-execution CLI or supply authorization flags; authorization-path unit
+  tests used injected fakes. No DLL was loaded, and no hardware was connected or
+  operated.
+  This evidence completes M2 only and grants no M3--M5 authorization.
 - The tracked example deliberately contains only a zero target. Real COM/DLL paths,
-  real targets, and run data remain ignored/local. The next permitted step is M2
-  target-offline verification; it does not authorize M3--M5.
+  real targets, and run data remain ignored/local. M3 is the next defined stage,
+  but it remains unexecuted and requires new connection authorization; M4 and M5
+  remain separately gated.
 - M3 remains unexecuted. Its exact current-revision write-disabled command is
   `python -m attodry_control.attodry_test --config config/hardware.local.toml
   --samples 10 --interval-s 1 --authorize-connection`. It requires a new connection
@@ -725,20 +746,21 @@ Current standalone magnetic-field module update (2026-09-03):
   M4-ready.
 
 Current boundary: all hardware-free work through Stage 7, the standalone
-magnetic-field M0--M2 local implementation/fake evidence, integrated dual-SR830
-harmonic validation, the independent Three-SMU QCoDeS S0 module plus query-only
-monitor, and the earlier generic attoDRY read-only connection are complete. The
-magnetic M2 target-host run has not occurred and M3--M5 remain gated. The first
-attoDRY temperature setpoint/control actions, control-first ordering, actual sensor
-recording, and heater-driven warming are operator-accepted for this experiment.
+magnetic-field M0--M2 local implementation/fake evidence and target-offline
+validation, integrated dual-SR830 harmonic validation, the independent Three-SMU
+QCoDeS S0 module plus query-only monitor, and the earlier generic attoDRY read-only
+connection are complete. The magnetic M3--M5 stages remain gated. The first
+attoDRY temperature setpoint/control
+actions, control-first ordering, actual sensor recording, and heater-driven warming
+are operator-accepted for this experiment.
 The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; that
 fact remains diagnostic rather than being rewritten as stability. The commissioned
 0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Daily
 temperature operation uses the unified hardware TOML and dedicated command without
-additional authorization flags. Magnetic target-offline/read-only/write stages,
-Three-SMU target-computer validation, all real SMU connections/writes, integration
-of the independent device modules into the main acquisition, other attoDRY setting
-writes, and real end-to-end acquisition still require staged authorization.
+additional authorization flags. Magnetic read-only/write stages, Three-SMU
+target-computer validation, all real SMU connections/writes, integration of the
+independent device modules into the main acquisition, other attoDRY setting writes,
+and real end-to-end acquisition still require staged authorization.
 
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
@@ -789,8 +811,9 @@ follow-up:
 - `MAGNETIC_FIELD.md` now documents the standalone local fake-DLL implementation,
   exact ordered/duplicate point semantics, separate single-target/write/scan
   gates, canonical fsynced JSONL, file-only monitoring, and monitored cleanup.
-  It leaves M2 target-host verification and M3--M5 hardware commissioning pending
-  and does not convert discrete setpoints into a physical-path claim.
+  It records M2 target-host verification complete while leaving M3--M5 hardware
+  commissioning pending, and does not convert discrete setpoints into a
+  physical-path claim.
 - `THREE_SMU.md` now records the three-Keithley QCoDeS S0 module as offline
   complete: semantic bias/top-gate/bottom-gate roles, one shared CLI/Notebook
   generator, retained scan modes, strict operator-filled safety configuration,
@@ -1214,10 +1237,11 @@ error code zero, and a clean DLL disconnect. PID and heater settings were not wr
 1. Integrate `measurement_temperature_k` into the downstream measurement coordinator
    and hardware-test the interruption/resume path separately; do not infer or alter
    PID values automatically.
-2. Run the standalone magnetic-field M2 target-offline checks on `LK_setup` in
-   `lyr` without loading the DLL or connecting. M3 read-only and M4/M5 writes
-   each remain separate later gates; the first movement also needs an
-   operator-selected smallest practical target and explicit write authorization.
+2. Keep standalone magnetic-field M3--M5 gated. M3 may use only the exact
+   write-disabled command documented above after new connection authorization.
+   Before any physical M4 attempt, add exact float32 toggle/component command-
+   attempt/result evidence to the canonical JSONL; the first movement also needs
+   an operator-selected smallest practical target and explicit write authorization.
 3. Run Three-SMU S1 target-offline validation in `LK_setup` `lyr`, then fill
    the ignored local addresses and safety values. Any real connection or setting
    write still requires a separate plan-specific authorization.
