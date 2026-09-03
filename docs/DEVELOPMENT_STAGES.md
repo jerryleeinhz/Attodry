@@ -1062,6 +1062,12 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   without printing its raw fitting records. The optional export manifest retains
   all numerical results for audit. This remains analysis-only; no instrument
   path is imported.
+- Added a general publication-style plotting layer (2026-09-03). Notebook figures
+  now use scoped Matplotlib settings, aligned shared-x magnitude/phase panels in
+  place of twin y axes, redundant color/marker/line encodings, explicit sample-SD
+  or circular-sample-SD legend text, 600 dpi PNG, PDF, and editable-text SVG
+  export. Data selection, filtering, aggregation, scales, and fits are unchanged;
+  the style does not claim compliance with a specific journal.
 - Corrected direct Notebook execution from a source checkout (2026-09-01). Before
   importing `attodry_control`, the first cell now resolves a repository root when
   Jupyter starts in either the root or `notebooks`, verifies `src/attodry_control`,

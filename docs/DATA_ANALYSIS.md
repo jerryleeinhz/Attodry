@@ -50,7 +50,7 @@ scan points with coordinate, selected-row count, and available role/harmonic
 channels. Select a suspect point, click `Apply point exclusions`, and rerun the
 plot cell; clearing the selections and applying restores all automatically
 retained points. The final optional export writes `selection_manifest.json`
-alongside the CSV/PNG/PDF outputs so the selected files, filters, and manual
+alongside the CSV/PNG/PDF/SVG outputs so the selected files, filters, and manual
 exclusions are reproducible. The manifest also records the exact
 `PHASE_MINIMUM_AMPLITUDE_V` and
 `PHASE_MAXIMUM_STANDARD_DEVIATION_DEG` values used for the exported figures, so
@@ -60,11 +60,20 @@ Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
 opened automatically.
 
 The notebook creates six frequency figures and six current--voltage figures:
-separate Vxx/Vxy figures for h1, h2, and h3. Each uses SR830 `R` (voltage
-magnitude) on the left axis and measured phase on the right axis. Frequency is
-logarithmic and its title states the calibrated RMS current. Current--voltage
-plots use the same SINE OUT-derived RMS current on the x axis. A missing harmonic
-is labeled as missing rather than interpolated or combined with another order.
+separate Vxx/Vxy figures for h1, h2, and h3. Each uses aligned, shared-x panels
+for SR830 `R` (voltage magnitude) and measured phase; it does not use potentially
+misleading dual y axes. Frequency is logarithmic and its title states the
+calibrated RMS current. Current--voltage plots use the same SINE OUT-derived RMS
+current on the x axis. A missing harmonic is labeled as missing rather than
+interpolated or combined with another order.
+
+All commissioning and temperature figures use a scoped publication style that
+does not alter the user's global Matplotlib settings. The style uses editable
+Type 42 PDF fonts, editable SVG text, an opaque white background, restrained
+major grids, inward ticks, and redundant color/marker/line-style encodings.
+Error-bar legends identify ordinary or circular sample standard deviation. The
+style is a general manuscript starting point, not a claim of compliance with a
+specific journal. Optional export writes 600 dpi PNG plus PDF and SVG vectors.
 
 For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
 `amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency
@@ -173,11 +182,12 @@ measured-amplitude space, so they are useful for choosing among methods; they
 are descriptive cross-validation errors, not additional safety gates.
 
 The optional export records the exact `SCALING_RULES` values and every fit
-result in `selection_manifest.json`, alongside one PNG/PDF fit figure per
-available channel. Each fit figure includes a formula panel with the numerical
-coefficients, exponent, AICc, and relative RMSE for every log/scalar/complex
-model; the plotted curves are identified in the legend. This makes results
-produced with different judgment rules reproducible and distinguishable.
+result in `selection_manifest.json`, alongside one PNG/PDF/SVG fit figure per
+available channel. Fit figures show observed means with sample-SD error bars,
+the fitted curves, and aligned relative residuals. Numerical coefficients,
+exponents, AICc, and relative RMSE remain in the manifest rather than crowding
+the figure. This makes results produced with different judgment rules
+reproducible and distinguishable.
 
 The daily source of truth for the variable path values is the ignored
 `config/hardware.local.toml` `[lockin_sweep]` table:
@@ -206,9 +216,14 @@ unwrapped across the ±180-degree boundary, but never across an omitted point.
 This prevents a low-amplitude or internally unstable phase from looking like a
 physical discontinuity while leaving every raw phase value available for audit.
 Set the amplitude control to `0.0` and the standard-deviation control to `None`
-to display all raw phase points. CSV, PNG, and PDF export is disabled by default
+to display all raw phase points. CSV, PNG, PDF, and SVG export is disabled by default
 and writes only beneath `analysis_output/sr830_commissioning` when explicitly
 enabled.
+
+The general figure workflow was informed by Timothy Kassis, Vinayak Agarwal,
+Yuhuan He, Darshil Patel, and Aubrey M. Brueckner (2026),
+[Scientific Agent Skills: A Library of Procedural Knowledge for Research
+Agents](https://doi.org/10.48550/arXiv.2609.00065).
 
 ## XY-only frequency and amplitude sweeps
 

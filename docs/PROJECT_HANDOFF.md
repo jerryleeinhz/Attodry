@@ -1,6 +1,6 @@
 # Project handoff
 
-Last updated: 2026-09-01
+Last updated: 2026-09-03
 
 ## Current stage
 
@@ -1182,11 +1182,18 @@ All other analysis plotting functions follow the same right-side legend layout.
 The commissioning Notebook displays figures only; raw numerical fit records are
 preserved for optional export rather than emitted during plotting.
 
+The 2026-09-03 publication-style pass replaces lock-in twin y axes with aligned
+shared-x magnitude/phase panels, adds scoped typography and vector-font settings,
+uses redundant color/marker/line encodings, and explicitly names sample-SD versus
+circular-sample-SD error bars. Optional export now writes 600 dpi PNG, PDF, and
+editable-text SVG. These are general manuscript defaults, not journal-specific
+compliance, and they do not change any data, filter, scale, or fit result.
+
 For each available XX/XY × h1/h2/h3 channel, analysis produces a separate R-amplitude
 figure and phase figure. Each actual formal-window mean temperature is a separate
 curve versus the archived readback-derived RMS current. Phase repeats use circular
 mean/standard deviation and are unwrapped along increasing current only for display;
-the raw record is never changed. Optional CSV/PNG/PDF export records the selected
+the raw record is never changed. Optional CSV/PNG/PDF/SVG export records the selected
 files, statuses, temperature conditions, and phase treatment in its manifest.
 Synthetic summary and formal-CSV loading, status filters, multi-run identity,
 circular phase, Notebook compilation, and actual Matplotlib rendering were tested.

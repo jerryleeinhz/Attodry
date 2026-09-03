@@ -15,6 +15,14 @@ from .commissioning_analysis import (
     SAMPLE_STATUSES,
     load_commissioning_file,
 )
+from .scientific_plotting import (
+    PUBLICATION_WIDE_FIGSIZE,
+    ordered_series_style,
+    outside_legend,
+    publication_plot,
+    save_publication_figure,
+    style_axis,
+)
 
 
 TEMPERATURE_IV_METRICS = ("amplitude_v", "phase_deg")
@@ -197,6 +205,7 @@ def aggregate_temperature_iv(
     return tuple(statistics)
 
 
+@publication_plot
 def plot_temperature_iv_curves(
     rows: Sequence[TemperatureExcitationSample],
     *,
@@ -216,7 +225,9 @@ def plot_temperature_iv_curves(
         raise RuntimeError(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
-    figure, axis = plt.subplots(figsize=(9.6, 4.8), constrained_layout=True)
+    figure, axis = plt.subplots(
+        figsize=PUBLICATION_WIDE_FIGSIZE, constrained_layout=True
+    )
     curve_keys = sorted(
         {
             (
@@ -233,8 +244,6 @@ def plot_temperature_iv_curves(
     duplicate_temperatures = {
         value for value in temperatures if temperatures.count(value) > 1
     }
-    colormap = plt.get_cmap("viridis")
-    denominator = max(len(curve_keys) - 1, 1)
     for index, curve_key in enumerate(curve_keys):
         source_path, temperature_index, _, measured_k = curve_key
         selected = [
@@ -259,10 +268,12 @@ def plot_temperature_iv_curves(
             [item.current_a_rms for item in selected],
             y_values,
             yerr=[item.standard_deviation for item in selected],
-            marker="o",
-            linewidth=1.2,
-            capsize=3,
-            color=colormap(index / denominator),
+            **ordered_series_style(index, len(curve_keys)),
+            linewidth=1.35,
+            markersize=4.5,
+            markeredgewidth=0.7,
+            capsize=2.5,
+            elinewidth=0.8,
             label=label,
         )
     if statistics and all(item.current_a_rms > 0.0 for item in statistics):
@@ -278,15 +289,16 @@ def plot_temperature_iv_curves(
     axis.set_title(
         f"Temperature–excitation · {signal_name} {metric_name} · h{harmonic}"
     )
-    axis.grid(True, alpha=0.25)
-    axis.legend(
-        title="Actual formal-window temperature",
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
-        borderaxespad=0.0,
+    style_axis(axis)
+    uncertainty = (
+        "circular sample SD" if metric == "phase_deg" else "sample SD"
+    )
+    outside_legend(
+        axis,
+        title=f"Actual mean temperature\nError bars: {uncertainty}",
     )
     if destination is not None:
-        figure.savefig(destination, dpi=200)
+        save_publication_figure(figure, destination)
     return figure
 
 

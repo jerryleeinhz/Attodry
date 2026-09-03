@@ -190,7 +190,19 @@ class TemperatureExcitationAnalysisTests(unittest.TestCase):
         amplitude_labels = amplitude.axes[0].get_legend_handles_labels()[1]
         self.assertEqual(amplitude_labels, ["1.775 K", "2.025 K"])
         self.assertTrue(all("set" not in label.lower() for label in amplitude_labels))
+        self.assertEqual(
+            [
+                line.get_marker()
+                for line in amplitude.axes[0].get_lines()
+                if line.get_marker() in {"o", "s"}
+            ],
+            ["o", "s"],
+        )
         self.assertEqual(len(phase.axes[0].get_legend_handles_labels()[1]), 2)
+        self.assertIn(
+            "Error bars: sample SD",
+            amplitude.axes[0].get_legend().get_title().get_text(),
+        )
         amplitude.canvas.draw()
         legend = amplitude.axes[0].get_legend()
         self.assertIsNotNone(legend)

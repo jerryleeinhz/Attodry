@@ -309,9 +309,14 @@ class CommissioningAnalysisTests(unittest.TestCase):
         figure = plot_role_harmonic_sweep(rows, role="xx", harmonic=1)
         self.addCleanup(plt.close, figure)
         self.assertEqual(len(figure.axes), 2)
+        self.assertTrue(
+            figure.axes[0].get_shared_x_axes().joined(
+                figure.axes[0], figure.axes[1]
+            )
+        )
         self.assertIn("I_RMS = 39.78 nA", figure.axes[0].get_title())
         self.assertEqual(figure.axes[0].get_ylabel(), "Vxx R (V RMS)")
-        self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (degree)")
+        self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (°)")
 
         figures = plot_six_role_harmonic_sweeps(rows)
         self.addCleanup(lambda: [plt.close(item) for item in figures.values()])
@@ -393,7 +398,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertTrue(math.isnan(float(phase_values[0])))
         self.assertAlmostEqual(float(phase_values[1]), 180.0)
         self.assertAlmostEqual(float(phase_values[2]), 182.0)
-        self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (degree)")
+        self.assertEqual(figure.axes[1].get_ylabel(), "Unwrapped phase (°)")
 
     def test_harmonic_scaling_recovers_expected_order_and_phase(self) -> None:
         path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
@@ -435,6 +440,11 @@ class CommissioningAnalysisTests(unittest.TestCase):
         anchor = legend.get_bbox_to_anchor().transformed(axis.transAxes.inverted())
         self.assertGreater(anchor.x0, 1.0)
         self.assertFalse(figure.texts)
+        self.assertEqual(axis.get_title(), "Vxy h2 harmonic-scaling fits")
+        self.assertIn(
+            "observed mean ± sample SD",
+            [item.get_text() for item in legend.texts],
+        )
         self.assertIn("log fixed order", [item.get_text() for item in legend.texts])
 
     def test_harmonic_scaling_rejects_a_distinct_exponent(self) -> None:
@@ -679,6 +689,8 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("complex_free_exponent_min=0.05", code)
         self.assertIn("fit_harmonic_scalings", code)
         self.assertIn("plot_harmonic_scaling_fit", code)
+        self.assertIn("export_publication_figure_set", code)
+        self.assertNotIn("dpi=200", code)
         self.assertIn("'harmonic_scaling_rules': asdict(SCALING_RULES)", code)
         self.assertIn("'harmonic_scaling_results':", code)
         self.assertIn("if frequency_rows", code)

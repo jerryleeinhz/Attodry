@@ -8,6 +8,17 @@ from pathlib import Path
 from statistics import NormalDist, fmean, stdev
 from typing import Callable, Iterable, Mapping, Sequence
 
+from .scientific_plotting import (
+    OKABE_ITO_ON_WHITE,
+    PUBLICATION_SINGLE_FIGSIZE,
+    PUBLICATION_STACKED_FIGSIZE,
+    ordered_series_style,
+    outside_legend,
+    publication_plot,
+    save_publication_figure,
+    style_axis,
+)
+
 
 RECORD_STATUSES = frozenset(
     {"completed", "rejected", "diagnostic", "other", "invalid"}
@@ -1122,6 +1133,7 @@ def fit_harmonic_scalings(
     }
 
 
+@publication_plot
 def plot_harmonic_scaling_fit(
     fit: HarmonicScalingFit,
     *,
@@ -1136,10 +1148,13 @@ def plot_harmonic_scaling_fit(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
     figure, (axis, residual_axis) = plt.subplots(
-        2, 1, figsize=(10.8, 7.2), sharex=True,
+        2, 1, figsize=PUBLICATION_STACKED_FIGSIZE, sharex=True,
         gridspec_kw={"height_ratios": (3, 1)},
         constrained_layout=True,
     )
+    log_color = OKABE_ITO_ON_WHITE[0]
+    scalar_color = OKABE_ITO_ON_WHITE[1]
+    complex_color = OKABE_ITO_ON_WHITE[2]
     included = tuple(point for point in fit.points if point.included)
     excluded = tuple(point for point in fit.points if not point.included)
     selected_complex_model = next(
@@ -1178,7 +1193,17 @@ def plot_harmonic_scaling_fit(
     if included:
         x_values = [point.current_a_rms for point in included]
         y_values = [point.amplitude_v for point in included]
-        axis.scatter(x_values, y_values, color="tab:blue", label="included")
+        axis.errorbar(
+            x_values,
+            y_values,
+            yerr=[point.amplitude_standard_deviation_v for point in included],
+            color=OKABE_ITO_ON_WHITE[4],
+            marker="o",
+            linestyle="none",
+            capsize=2.5,
+            elinewidth=0.8,
+            label="observed mean ± sample SD",
+        )
         if fit.fixed_intercept_log is not None:
             axis.plot(
                 x_values,
@@ -1186,7 +1211,7 @@ def plot_harmonic_scaling_fit(
                     math.exp(fit.fixed_intercept_log) * value ** fit.expected_order
                     for value in x_values
                 ],
-                color="tab:orange",
+                color=log_color,
                 linestyle="--",
                 label="log fixed order",
             )
@@ -1197,7 +1222,8 @@ def plot_harmonic_scaling_fit(
                     math.exp(fit.free_intercept_log) * value ** fit.exponent
                     for value in x_values
                 ],
-                color="tab:green",
+                color=log_color,
+                linestyle="-",
                 label="log free order",
             )
         if selected_scalar_model is not None:
@@ -1208,7 +1234,7 @@ def plot_harmonic_scaling_fit(
             axis.plot(
                 x_values,
                 scalar_predictions,
-                color="tab:red",
+                color=scalar_color,
                 linewidth=1.6,
                 label="scalar fixed order",
             )
@@ -1217,7 +1243,7 @@ def plot_harmonic_scaling_fit(
                     point.current_a_rms,
                     (point.amplitude_v - predicted)
                     / max(abs(predicted), 1e-30),
-                    "tab:red",
+                    scalar_color,
                     "scalar R residual",
                 )
                 for point, predicted in zip(included, scalar_predictions)
@@ -1232,9 +1258,9 @@ def plot_harmonic_scaling_fit(
             axis.plot(
                 x_values,
                 scalar_free_predictions,
-                color="tab:pink",
+                color=scalar_color,
                 linewidth=1.3,
-                linestyle=":",
+                linestyle="--",
                 label="scalar free order",
             )
         if selected_complex_model is not None:
@@ -1245,7 +1271,7 @@ def plot_harmonic_scaling_fit(
             axis.plot(
                 x_values,
                 [math.hypot(predicted_x, predicted_y) for predicted_x, predicted_y in complex_predictions],
-                color="tab:purple",
+                color=complex_color,
                 linewidth=1.6,
                 label="complex fixed order",
             )
@@ -1254,7 +1280,7 @@ def plot_harmonic_scaling_fit(
                     point.current_a_rms,
                     math.hypot(point.x_v - predicted_x, point.y_v - predicted_y)
                     / max(math.hypot(predicted_x, predicted_y), 1e-30),
-                    "tab:purple",
+                    complex_color,
                     "complex residual",
                 )
                 for point, (predicted_x, predicted_y) in zip(
@@ -1274,9 +1300,9 @@ def plot_harmonic_scaling_fit(
                     math.hypot(predicted_x, predicted_y)
                     for predicted_x, predicted_y in complex_free_predictions
                 ],
-                color="tab:purple",
+                color=complex_color,
                 linewidth=1.3,
-                linestyle=":",
+                linestyle="--",
                 label="complex free order",
             )
         if fit.fixed_intercept_log is not None:
@@ -1289,14 +1315,19 @@ def plot_harmonic_scaling_fit(
                     (
                         point.current_a_rms,
                         (point.amplitude_v - predicted) / max(abs(predicted), 1e-30),
-                        "tab:orange",
+                        log_color,
                         "log fixed residual",
                     )
                 )
         if residual_values:
             residual_axis.axhline(0.0, color="0.25", linewidth=0.8)
             seen_labels: set[str] = set()
-            for color in ("tab:orange", "tab:red", "tab:purple"):
+            residual_markers = {
+                log_color: "s",
+                scalar_color: "^",
+                complex_color: "D",
+            }
+            for color in (log_color, scalar_color, complex_color):
                 items = [item for item in residual_values if item[2] == color]
                 if not items:
                     continue
@@ -1305,6 +1336,7 @@ def plot_harmonic_scaling_fit(
                     [item[0] for item in items],
                     [item[1] for item in items],
                     color=color,
+                    marker=residual_markers[color],
                     label=label if label not in seen_labels else None,
                 )
                 seen_labels.add(label)
@@ -1313,7 +1345,7 @@ def plot_harmonic_scaling_fit(
             [point.current_a_rms for point in excluded],
             [point.amplitude_v for point in excluded],
             marker="x",
-            color="tab:red",
+            color="#767676",
             label="excluded",
         )
     axis.set_xscale("log")
@@ -1321,29 +1353,15 @@ def plot_harmonic_scaling_fit(
     residual_axis.set_xscale("log")
     residual_axis.set_xlabel("SINE OUT current (A RMS)")
     axis.set_ylabel(f"V{fit.role} h{fit.harmonic} R (V RMS)")
-    residual_axis.set_ylabel("relative residual")
-    axis.set_title(
-        f"V{fit.role} h{fit.harmonic} scaling · "
-        f"log={fit.amplitude_verdict}, scalar R={fit.scalar_power_law_verdict}, "
-        f"raw phase={fit.complex_response_verdict}\n"
-        f"complex={fit.complex_power_law_verdict} "
-        f"({fit.complex_selected_model or 'unavailable'})"
-    )
-    axis.grid(True, which="both", alpha=0.2)
-    residual_axis.grid(True, which="both", alpha=0.2)
-    axis.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
-        borderaxespad=0.0,
-    )
+    residual_axis.set_ylabel("Relative residual")
+    axis.set_title(f"V{fit.role} h{fit.harmonic} harmonic-scaling fits")
+    style_axis(axis)
+    style_axis(residual_axis)
+    outside_legend(axis, title="Observed data and models")
     if residual_values:
-        residual_axis.legend(
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0,
-        )
+        outside_legend(residual_axis, title="Fit residuals")
     if destination is not None:
-        figure.savefig(destination, dpi=200)
+        save_publication_figure(figure, destination)
     return figure
 
 
@@ -2688,6 +2706,7 @@ def _amplitude_scaling_verdict(
     return "ambiguous", tuple(reasons)
 
 
+@publication_plot
 def plot_commissioning_sweep(
     rows: Sequence[CommissioningSample],
     *,
@@ -2712,8 +2731,10 @@ def plot_commissioning_sweep(
         raise RuntimeError(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
-    figure, axis = plt.subplots(figsize=(6.6, 4.4), constrained_layout=True)
-    for role in ("xx", "xy"):
+    figure, axis = plt.subplots(
+        figsize=PUBLICATION_SINGLE_FIGSIZE, constrained_layout=True
+    )
+    for role_index, role in enumerate(("xx", "xy")):
         selected = [item for item in statistics if item.role == role]
         if not selected:
             continue
@@ -2721,9 +2742,12 @@ def plot_commissioning_sweep(
             [item.x_value for item in selected],
             [item.mean for item in selected],
             yerr=[item.standard_deviation for item in selected],
-            marker="o",
-            linewidth=1.2,
-            capsize=3,
+            color=OKABE_ITO_ON_WHITE[role_index],
+            marker=("o", "s")[role_index],
+            linestyle=("-", "--")[role_index],
+            linewidth=1.35,
+            capsize=2.5,
+            elinewidth=0.8,
             label=role.upper(),
         )
     use_log_x = log_x if log_x is not None else scan_type == "frequency"
@@ -2747,17 +2771,18 @@ def plot_commissioning_sweep(
         }[metric]
     )
     axis.set_title(f"SR830 {scan_type} sweep")
-    axis.grid(True, alpha=0.25)
-    axis.legend(
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
-        borderaxespad=0.0,
+    style_axis(axis)
+    uncertainty = "circular sample SD" if metric == "phase_deg" else "sample SD"
+    outside_legend(
+        axis,
+        title=f"Signal\nError bars: {uncertainty}",
     )
     if destination is not None:
-        figure.savefig(destination, dpi=200)
+        save_publication_figure(figure, destination)
     return figure
 
 
+@publication_plot
 def plot_role_harmonic_sweep(
     rows: Sequence[CommissioningSample],
     *,
@@ -2810,8 +2835,14 @@ def plot_role_harmonic_sweep(
         raise RuntimeError(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
-    figure, voltage_axis = plt.subplots(figsize=(6.6, 4.4), constrained_layout=True)
-    phase_axis = voltage_axis.twinx()
+    figure, (voltage_axis, phase_axis) = plt.subplots(
+        2,
+        1,
+        figsize=PUBLICATION_STACKED_FIGSIZE,
+        sharex=True,
+        gridspec_kw={"height_ratios": (3, 2)},
+        constrained_layout=True,
+    )
     signal_name = f"V{role}"
     if selected:
         voltage_statistics = aggregate_sweep_samples(
@@ -2831,9 +2862,11 @@ def plot_role_harmonic_sweep(
             [item.mean for item in voltage_statistics],
             yerr=[item.standard_deviation for item in voltage_statistics],
             marker="o",
-            linewidth=1.2,
-            capsize=3,
-            color="tab:blue",
+            linestyle="-",
+            linewidth=1.35,
+            capsize=2.5,
+            elinewidth=0.8,
+            color=OKABE_ITO_ON_WHITE[0],
             label=f"{signal_name} R",
         )
         (
@@ -2858,8 +2891,9 @@ def plot_role_harmonic_sweep(
             phase_x_values,
             phase_values,
             marker="s",
-            linewidth=1.2,
-            color="tab:orange",
+            linestyle="--",
+            linewidth=1.35,
+            color=OKABE_ITO_ON_WHITE[1],
             label=phase_label,
         )
         if qualified_phase_x_values:
@@ -2868,8 +2902,9 @@ def plot_role_harmonic_sweep(
                 qualified_phase_values,
                 yerr=qualified_phase_spreads,
                 fmt="none",
-                capsize=3,
-                color="tab:orange",
+                capsize=2.5,
+                elinewidth=0.8,
+                color=OKABE_ITO_ON_WHITE[1],
             )
     else:
         voltage_axis.text(
@@ -2882,31 +2917,30 @@ def plot_role_harmonic_sweep(
         )
     if scan_type == "frequency":
         voltage_axis.set_xscale("log")
-        voltage_axis.set_xlabel("Frequency (Hz)")
+        phase_axis.set_xlabel("Frequency (Hz)")
         title_prefix = _current_summary(selected, excitation_path)
-        title = f"Frequency sweep · {signal_name} / phase · h{harmonic} · {title_prefix}"
-    else:
-        voltage_axis.set_xlabel("SINE OUT current (A RMS)")
-        title = f"Current–voltage sweep · {signal_name} / phase · h{harmonic}"
-    voltage_axis.set_ylabel(f"{signal_name} R (V RMS)")
-    phase_axis.set_ylabel("Unwrapped phase (degree)")
-    voltage_axis.set_title(title)
-    voltage_axis.grid(True, alpha=0.25)
-    left_handles, left_labels = voltage_axis.get_legend_handles_labels()
-    right_handles, right_labels = phase_axis.get_legend_handles_labels()
-    if left_handles or right_handles:
-        voltage_axis.legend(
-            left_handles + right_handles,
-            left_labels + right_labels,
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0,
+        title = (
+            f"Frequency sweep · {signal_name} · h{harmonic}\n"
+            f"{title_prefix}"
         )
+    else:
+        phase_axis.set_xlabel("SINE OUT current (A RMS)")
+        title = f"Current–voltage sweep · {signal_name} · h{harmonic}"
+    voltage_axis.set_ylabel(f"{signal_name} R (V RMS)")
+    phase_axis.set_ylabel("Unwrapped phase (°)")
+    voltage_axis.set_title(title)
+    style_axis(voltage_axis)
+    style_axis(phase_axis)
+    if voltage_axis.get_legend_handles_labels()[0]:
+        outside_legend(voltage_axis, title="Mean ± sample SD")
+    if phase_axis.get_legend_handles_labels()[0]:
+        outside_legend(phase_axis, title="Mean ± circular sample SD")
     if destination is not None:
-        figure.savefig(destination, dpi=200)
+        save_publication_figure(figure, destination)
     return figure
 
 
+@publication_plot
 def plot_multi_frequency_iv_curves(
     rows: Sequence[CommissioningSample],
     *,
@@ -2931,21 +2965,22 @@ def plot_multi_frequency_iv_curves(
         raise RuntimeError(
             "Plotting requires: python -m pip install -e '.[analysis]'"
         ) from exc
-    figure, axis = plt.subplots(figsize=(7.0, 4.8), constrained_layout=True)
+    figure, axis = plt.subplots(
+        figsize=PUBLICATION_SINGLE_FIGSIZE, constrained_layout=True
+    )
     frequencies = sorted({item.frequency_hz for item in statistics})
-    colormap = plt.get_cmap("viridis")
-    denominator = max(len(frequencies) - 1, 1)
     for index, frequency_hz in enumerate(frequencies):
         selected = [item for item in statistics if item.frequency_hz == frequency_hz]
-        color = colormap(index / denominator)
         axis.errorbar(
             [item.current_a_rms for item in selected],
             [item.mean for item in selected],
             yerr=[item.standard_deviation for item in selected],
-            marker="o",
-            linewidth=1.2,
-            capsize=3,
-            color=color,
+            **ordered_series_style(index, len(frequencies)),
+            linewidth=1.35,
+            markersize=4.5,
+            markeredgewidth=0.7,
+            capsize=2.5,
+            elinewidth=0.8,
             label=f"{frequency_hz:.7g} Hz",
         )
     if statistics and all(item.current_a_rms > 0.0 for item in statistics):
@@ -2960,16 +2995,17 @@ def plot_multi_frequency_iv_curves(
         }[metric]
     )
     axis.set_title(f"Combined sweep · I–V{role} · h{harmonic}")
-    axis.grid(True, alpha=0.25)
+    style_axis(axis)
     if frequencies:
-        axis.legend(
-            title="Actual frequency",
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0,
+        uncertainty = (
+            "circular sample SD" if metric == "phase_deg" else "sample SD"
+        )
+        outside_legend(
+            axis,
+            title=f"Actual frequency\nError bars: {uncertainty}",
         )
     if destination is not None:
-        figure.savefig(destination, dpi=200)
+        save_publication_figure(figure, destination)
     return figure
 
 
