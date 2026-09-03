@@ -184,10 +184,14 @@ are descriptive cross-validation errors, not additional safety gates.
 The optional export records the exact `SCALING_RULES` values and every fit
 result in `selection_manifest.json`, alongside one PNG/PDF/SVG fit figure per
 available channel. Fit figures show observed means with sample-SD error bars,
-the fitted curves, and aligned relative residuals. Numerical coefficients,
-exponents, AICc, and relative RMSE remain in the manifest rather than crowding
-the figure. This makes results produced with different judgment rules
-reproducible and distinguishable.
+the fitted curves, and aligned relative residuals. The right-side legend gives
+each drawn fit its numerically substituted, current-normalized equation,
+exponent (and available interval), R², relative RMSE, and AICc or log-model
+ΔAICc; it also states the four verdicts in its title. Scalar equations use
+`R(I)`, while complex equations preserve phase-bearing `Z(I)=X(I)+iY(I)`
+coefficients. Full-precision values remain in the manifest, and the Notebook
+does not print raw result tables or a separate formula panel. This makes results
+produced with different judgment rules reproducible and distinguishable.
 
 The daily source of truth for the variable path values is the ignored
 `config/hardware.local.toml` `[lockin_sweep]` table:

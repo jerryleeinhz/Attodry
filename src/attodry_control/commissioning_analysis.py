@@ -1213,7 +1213,12 @@ def plot_harmonic_scaling_fit(
                 ],
                 color=log_color,
                 linestyle="--",
-                label="log fixed order",
+                label=_format_log_fit_legend_label(
+                    fit,
+                    intercept_log=fit.fixed_intercept_log,
+                    exponent=float(fit.expected_order),
+                    free_exponent=False,
+                ),
             )
         if fit.free_intercept_log is not None and fit.exponent is not None:
             axis.plot(
@@ -1224,7 +1229,12 @@ def plot_harmonic_scaling_fit(
                 ],
                 color=log_color,
                 linestyle="-",
-                label="log free order",
+                label=_format_log_fit_legend_label(
+                    fit,
+                    intercept_log=fit.free_intercept_log,
+                    exponent=fit.exponent,
+                    free_exponent=True,
+                ),
             )
         if selected_scalar_model is not None:
             scalar_predictions = [
@@ -1236,7 +1246,7 @@ def plot_harmonic_scaling_fit(
                 scalar_predictions,
                 color=scalar_color,
                 linewidth=1.6,
-                label="scalar fixed order",
+                label=_format_scalar_fit_legend_label(selected_scalar_model),
             )
             residual_values.extend(
                 (
@@ -1261,7 +1271,7 @@ def plot_harmonic_scaling_fit(
                 color=scalar_color,
                 linewidth=1.3,
                 linestyle="--",
-                label="scalar free order",
+                label=_format_scalar_fit_legend_label(selected_scalar_free_model),
             )
         if selected_complex_model is not None:
             complex_predictions = [
@@ -1273,7 +1283,7 @@ def plot_harmonic_scaling_fit(
                 [math.hypot(predicted_x, predicted_y) for predicted_x, predicted_y in complex_predictions],
                 color=complex_color,
                 linewidth=1.6,
-                label="complex fixed order",
+                label=_format_complex_fit_legend_label(selected_complex_model),
             )
             residual_values.extend(
                 (
@@ -1303,7 +1313,7 @@ def plot_harmonic_scaling_fit(
                 color=complex_color,
                 linewidth=1.3,
                 linestyle="--",
-                label="complex free order",
+                label=_format_complex_fit_legend_label(selected_complex_free_model),
             )
         if fit.fixed_intercept_log is not None:
             for point in included:
@@ -1357,7 +1367,12 @@ def plot_harmonic_scaling_fit(
     axis.set_title(f"V{fit.role} h{fit.harmonic} harmonic-scaling fits")
     style_axis(axis)
     style_axis(residual_axis)
-    outside_legend(axis, title="Observed data and models")
+    outside_legend(
+        axis,
+        title=_format_harmonic_scaling_legend_title(fit),
+        fontsize=7.0,
+        title_fontsize=7.5,
+    )
     if residual_values:
         outside_legend(residual_axis, title="Fit residuals")
     if destination is not None:
@@ -1382,6 +1397,186 @@ def _complex_model_prediction(
         model.background_x_v + model.response_x_v_at_reference_current * scale,
         model.background_y_v + model.response_y_v_at_reference_current * scale,
     )
+
+
+def _format_harmonic_scaling_legend_title(fit: HarmonicScalingFit) -> str:
+    """Summarize the auditable fit decisions above the equation legend."""
+
+    return "\n".join(
+        (
+            "Data and fitted equations",
+            f"log/scalar: {fit.amplitude_verdict}/{fit.scalar_power_law_verdict}",
+            "phase/complex: "
+            f"{fit.complex_response_verdict}/{fit.complex_power_law_verdict}",
+        )
+    )
+
+
+def _format_log_fit_legend_label(
+    fit: HarmonicScalingFit,
+    *,
+    intercept_log: float,
+    exponent: float,
+    free_exponent: bool,
+) -> str:
+    """Return an equivalent, current-normalized log-fit equation for a legend."""
+
+    current_reference = _log_fit_current_reference(fit)
+    heading = "Log free" if free_exponent else "Log fixed"
+    exponent_text = _format_free_exponent(
+        exponent,
+        fit.exponent_ci_low if free_exponent else None,
+        fit.exponent_ci_high if free_exponent else None,
+        symbol="p" if free_exponent else "n",
+    )
+    if current_reference is None:
+        equation = "R(I) unavailable"
+    else:
+        response_at_reference = math.exp(intercept_log) * current_reference**exponent
+        equation = _format_scalar_power_law_equation(
+            background_v=0.0,
+            response_v=response_at_reference,
+            current_reference_a_rms=current_reference,
+            exponent=exponent,
+            includes_background=False,
+            response_symbol="R",
+        )
+    metrics = _format_fit_metrics(
+        r_squared=fit.free_r_squared if free_exponent else fit.fixed_r_squared,
+        relative_rmse=(
+            fit.free_relative_rmse if free_exponent else fit.fixed_relative_rmse
+        ),
+        aicc_delta=(fit.delta_aicc_fixed_minus_free if free_exponent else None),
+    )
+    return "\n".join((f"{heading}, {exponent_text}", equation, metrics))
+
+
+def _format_scalar_fit_legend_label(model: ScalarHarmonicScalingModel) -> str:
+    """Format an amplitude-only model and its fitted numerical equation."""
+
+    heading = "Scalar free" if model.free_exponent else "Scalar fixed"
+    exponent_text = _format_free_exponent(
+        model.exponent,
+        model.exponent_ci_low if model.free_exponent else None,
+        model.exponent_ci_high if model.free_exponent else None,
+        symbol="p" if model.free_exponent else "n",
+    )
+    equation = _format_scalar_power_law_equation(
+        background_v=model.background_v,
+        response_v=model.response_v_at_reference_current,
+        current_reference_a_rms=model.current_reference_a_rms,
+        exponent=model.exponent,
+        includes_background=model.includes_background,
+        response_symbol="R",
+    )
+    metrics = _format_fit_metrics(
+        r_squared=model.r_squared,
+        relative_rmse=model.relative_rmse,
+        aicc=model.aicc,
+    )
+    return "\n".join((f"{heading}, {exponent_text}", equation, metrics))
+
+
+def _format_complex_fit_legend_label(model: ComplexHarmonicScalingModel) -> str:
+    """Format a complex X+iY model without discarding phase-bearing terms."""
+
+    heading = "Complex free" if model.free_exponent else "Complex fixed"
+    exponent_text = _format_free_exponent(
+        model.exponent,
+        model.exponent_ci_low if model.free_exponent else None,
+        model.exponent_ci_high if model.free_exponent else None,
+        symbol="p" if model.free_exponent else "n",
+    )
+    response = _format_complex_voltage(
+        model.response_x_v_at_reference_current,
+        model.response_y_v_at_reference_current,
+    )
+    current = _format_engineering(model.current_reference_a_rms, "A")
+    scale = f"(I / {current})^{model.exponent:.3g}"
+    if model.includes_background:
+        background = _format_complex_voltage(
+            model.background_x_v,
+            model.background_y_v,
+        )
+        equation = f"Z(I) = {background} + {response} {scale}"
+    else:
+        equation = f"Z(I) = {response} {scale}"
+    metrics = _format_fit_metrics(
+        r_squared=model.r_squared,
+        relative_rmse=model.relative_rmse,
+        aicc=model.aicc,
+    )
+    return "\n".join((f"{heading}, {exponent_text}", equation, metrics))
+
+
+def _log_fit_current_reference(fit: HarmonicScalingFit) -> float | None:
+    if (
+        fit.current_min_a_rms is None
+        or fit.current_max_a_rms is None
+        or fit.current_min_a_rms <= 0.0
+        or fit.current_max_a_rms <= 0.0
+    ):
+        return None
+    return math.sqrt(fit.current_min_a_rms * fit.current_max_a_rms)
+
+
+def _format_scalar_power_law_equation(
+    *,
+    background_v: float,
+    response_v: float,
+    current_reference_a_rms: float,
+    exponent: float,
+    includes_background: bool,
+    response_symbol: str,
+) -> str:
+    response = _format_engineering(response_v, "V")
+    current = _format_engineering(current_reference_a_rms, "A")
+    scaled_current = f"(I / {current})^{exponent:.3g}"
+    if includes_background:
+        return (
+            f"{response_symbol}(I) = {_format_engineering(background_v, 'V')} "
+            f"+ {response} {scaled_current}"
+        )
+    return f"{response_symbol}(I) = {response} {scaled_current}"
+
+
+def _format_complex_voltage(x_v: float, y_v: float) -> str:
+    sign = "+" if y_v >= 0.0 else "−"
+    return (
+        f"({_format_engineering(x_v, 'V')} {sign} i "
+        f"{_format_engineering(abs(y_v), 'V')})"
+    )
+
+
+def _format_free_exponent(
+    exponent: float,
+    ci_low: float | None,
+    ci_high: float | None,
+    *,
+    symbol: str,
+) -> str:
+    if ci_low is None or ci_high is None:
+        return f"{symbol}={exponent:.3g}"
+    return f"{symbol}={exponent:.3g} [{ci_low:.3g}, {ci_high:.3g}]"
+
+
+def _format_fit_metrics(
+    *,
+    r_squared: float | None,
+    relative_rmse: float | None,
+    aicc: float | None = None,
+    aicc_delta: float | None = None,
+) -> str:
+    values: list[str] = []
+    if r_squared is not None:
+        values.append(f"R²={r_squared:.3g}")
+    if relative_rmse is not None:
+        values.append(f"rRMSE={relative_rmse * 100.0:.3g}%")
+    if aicc is not None:
+        values.append(f"AICc={aicc:.3g}")
+    if aicc_delta is not None:
+        values.append(f"ΔAICc(fixed−free)={aicc_delta:.3g}")
+    return "; ".join(values) or "fit metrics unavailable"
 
 
 def _harmonic_scaling_points(
@@ -3363,8 +3558,10 @@ def _current_summary(
 
 
 def _format_engineering(value: float, unit: str) -> str:
+    if value == 0.0:
+        return f"0 {unit}"
     for scale, prefix in ((1.0, ""), (1e-3, "m"), (1e-6, "µ"), (1e-9, "n"), (1e-12, "p")):
-        if value >= scale or scale == 1e-12:
+        if abs(value) >= scale or scale == 1e-12:
             return f"{value / scale:.4g} {prefix}{unit}"
     raise AssertionError("Unreachable engineering-format scale.")
 

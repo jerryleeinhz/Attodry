@@ -902,11 +902,13 @@ Status: offline implementation complete (2026-08-23); no hardware was opened.
   Synthetic phase-rotation tests and notebook compilation pass; no hardware
   resource was opened or written.
 - Updated harmonic-scaling figures (2026-09-03): all plot legends are outside
-  the axes on the right. The displayed fitting curves use concise model names,
-  while numerical coefficients, verdicts, AICc, and residual metrics are kept
-  in the optional selection manifest rather than rendered as a formula panel or
-  Notebook output. This is read-only presentation logic and introduces no
-  hardware path.
+  the axes on the right. Every fitted curve carries its substituted,
+  current-normalized scalar `R(I)` or phase-preserving complex `Z(I)` equation,
+  exponent/available interval, R², relative RMSE, and AICc (or log-model
+  ΔAICc); the legend title retains the log/scalar/phase/complex verdicts. Full
+  precision remains in the optional selection manifest, while the Notebook does
+  not render raw fit-result tables or a separate formula panel. This is
+  read-only presentation logic and introduces no hardware path.
 - Added frequency×excitation matrix sweeps (2026-08-25): the new
   `sweep-frequency-excitation` command traverses the configured frequency grid
   outside and the ascending SINE OUT grid inside, returning to 4 mVrms before

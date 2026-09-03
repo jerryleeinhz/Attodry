@@ -445,7 +445,44 @@ class CommissioningAnalysisTests(unittest.TestCase):
             "observed mean ± sample SD",
             [item.get_text() for item in legend.texts],
         )
-        self.assertIn("log fixed order", [item.get_text() for item in legend.texts])
+        legend_text = "\n".join(item.get_text() for item in legend.texts)
+        self.assertIn("Log fixed, n=2", legend_text)
+        self.assertIn("R(I) =", legend_text)
+        self.assertIn("Z(I) =", legend_text)
+        self.assertIn("I /", legend_text)
+        self.assertIn("rRMSE=", legend_text)
+        self.assertIn("AICc=", legend_text)
+        self.assertIn("log/scalar:", legend.get_title().get_text())
+
+    def test_harmonic_scaling_legend_preserves_complex_background_terms(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        path = ExcitationPathResistance(100_000.0, 50.0, 500.0)
+        fit = fit_harmonic_scaling(
+            self._complex_scaling_rows(
+                exponent=2.0,
+                background_x_v=1.0e-6,
+                background_y_v=-0.5e-6,
+                response_x_v_at_reference_current=2.0e-8,
+                response_y_v_at_reference_current=1.0e-8,
+            ),
+            role="xy",
+            harmonic=2,
+            excitation_path=path,
+        )
+
+        figure = plot_harmonic_scaling_fit(fit)
+        self.addCleanup(plt.close, figure)
+
+        legend = figure.axes[0].get_legend()
+        self.assertIsNotNone(legend)
+        assert legend is not None
+        legend_text = "\n".join(item.get_text() for item in legend.texts)
+        self.assertIn("Z(I) = (", legend_text)
+        self.assertIn("− i", legend_text)
+        self.assertIn("(I /", legend_text)
 
     def test_harmonic_scaling_rejects_a_distinct_exponent(self) -> None:
         path = ExcitationPathResistance(100_000.0, 50.0, 500.0)

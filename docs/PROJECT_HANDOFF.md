@@ -978,10 +978,13 @@ Current Lock-in safety-policy follow-up (2026-08-23):
   in the fit export. Figures overlay log-space, scalar-R, and complex curves,
   and the notebook summary presents all three verdicts. Offline phase-rotation
   and wrong-order tests pass; no hardware resource was opened or written.
-- Harmonic-scaling figures keep their legends outside the axes on the right and
-  use concise model labels. Numerical coefficients, verdicts, AICc, and residual
-  metrics remain in the optional `selection_manifest.json`; the Notebook no
-  longer renders raw fit-result tables or a formula panel.
+- Harmonic-scaling figures keep their legends outside the axes on the right.
+  Every fitted curve includes a substituted, current-normalized scalar `R(I)` or
+  phase-preserving complex `Z(I)` equation plus exponent/available interval,
+  R², relative RMSE, and AICc (or log-model ΔAICc); the legend title records the
+  log/scalar/phase/complex verdicts. Full precision remains in the optional
+  `selection_manifest.json`; the Notebook does not render raw fit-result tables
+  or a separate formula panel.
 - Sweep grids now also accept named, non-overlapping linear or logarithmic range
   segments. Linear segments use inclusive `min`/`max` plus exactly one of `step` or
   `points`; logarithmic segments use `min`/`max`/`points`. Optional `xx_full_scale_v`
