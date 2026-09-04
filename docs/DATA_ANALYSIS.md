@@ -78,6 +78,16 @@ Temperature-stacked I--V curves use a bright warm `plasma` sequence, while
 multi-frequency I--V curves use a distinct cool `viridis` sequence. Both retain
 marker and line-style redundancy, so series identity never depends on color alone.
 
+The final Notebook section provides a separate condensed report figure without
+changing the channel-by-channel analysis. `REPORT_AMPLITUDE_CHANNELS` accepts any
+available `("xx" | "xy", 1 | 2 | 3)` combinations. `REPORT_PHASE_MODE="right"`
+adds the selected `REPORT_PHASE_CHANNELS` to a separately labelled right y axis;
+use `"none"` with an empty phase tuple for an amplitude-only figure. Each amplitude
+channel displays only fit-qualified points and one `scalar_selected_free_model`
+curve over the measured current range. Its right-side legend gives the fitted
+`R(I) = b + A(I/Iref)^p` equation, exponent confidence interval, R-squared, and
+relative RMSE. Optional PNG/PDF/SVG export also writes a JSON report manifest.
+
 For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
 `amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency
 readback. This keeps frequency-dependent I--V curves separate and makes any

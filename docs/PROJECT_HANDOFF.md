@@ -1203,6 +1203,16 @@ Temperature I–V figures now use a brighter warm `plasma` sequence, whereas
 multi-frequency I–V figures use a separate cool `viridis` sequence. Marker and
 line-style redundancy remains in both plot families for grayscale accessibility.
 
+A new independent condensed-report cell and `report_plotting` module combine any
+selected Vxx/Vxy h1/h2/h3 amplitudes in one I–V figure. Optional selected phases
+use an explicit right y axis; amplitude-only mode creates no second axis. For each
+amplitude channel the report shows fit-qualified observations and exactly one
+`scalar_selected_free_model` curve, with its numerical equation and fit metrics in
+the outside legend. The curve is restricted to the measured fit-current range.
+Optional vector/raster export records channels, source files, phase treatment,
+model parameters, and excluded-point counts in a companion JSON manifest. Existing
+per-channel figures and three-method fit comparison behavior are unchanged.
+
 For each available XX/XY × h1/h2/h3 channel, analysis produces a separate R-amplitude
 figure and phase figure. Each actual formal-window mean temperature is a separate
 curve versus the archived readback-derived RMS current. Phase repeats use circular

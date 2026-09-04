@@ -1082,6 +1082,13 @@ temperature/SR830 run has occurred and real integration remains uncommissioned.
   brighter warm `plasma` sequence and multi-frequency curves use the distinct cool
   `viridis` sequence. Existing marker/line redundancy, data, filters, fits, and
   instrument paths are unchanged.
+- Added a condensed read-only I–V report figure (2026-09-04). A separate Notebook
+  cell selects arbitrary Vxx/Vxy h1/h2/h3 amplitudes and optional phases. Amplitudes
+  share the left axis; phase is either absent or placed on an explicit right axis.
+  Each amplitude channel has exactly one final selected free-exponent scalar-R
+  curve, limited to the measured fit range, with its equation and fit metrics in
+  the outside legend. Optional export includes a provenance manifest. Existing
+  detailed plots and fit comparisons remain unchanged; no hardware path is used.
 - Corrected direct Notebook execution from a source checkout (2026-09-01). Before
   importing `attodry_control`, the first cell now resolves a repository root when
   Jupyter starts in either the root or `notebooks`, verifies `src/attodry_control`,
