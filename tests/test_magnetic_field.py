@@ -30,8 +30,10 @@ from attodry_control.magnetic_field_cli import (
 from attodry_control.magnetic_field_monitor import read_progress_snapshot
 from attodry_control.models import CryostatState, VectorField
 from attodry_control.safety import (
+    FieldTransitionPolicy,
     MagnetLimits,
     SafetyViolation,
+    float32_field,
     plan_ordered_zero_detours,
     plan_zero_detour,
     validate_vector_field,
@@ -114,6 +116,7 @@ class _MagneticConfigFixture:
         points: tuple[tuple[float, float], ...],
         *,
         normal_end_policy: str = "hold",
+        transition_policy: str = "via_zero",
         max_step_t: float = 0.5,
         field_tolerance_t: float = 0.001,
         extra_run: str = "",
@@ -154,6 +157,7 @@ exception_field_policy = "zero"
 
 [magnetic_field_run]
 points = [{rendered_points}]
+transition_policy = "{transition_policy}"
 max_step_t = {max_step_t!r}
 run_name = "ordered_fields"
 note = "Offline fake-DLL magnetic regression."
@@ -184,6 +188,7 @@ class MagneticFieldConfigTests(_MagneticConfigFixture, unittest.TestCase):
                 VectorField(1.0, 0.0),
             ),
         )
+        self.assertEqual(config.run.transition_policy, FieldTransitionPolicy.VIA_ZERO)
         self.assertEqual(config.run.max_step_t, 0.5)
         self.assertEqual(config.run.run_name, "ordered_fields")
         self.assertEqual(config.run.note, "Offline fake-DLL magnetic regression.")
@@ -197,6 +202,29 @@ class MagneticFieldConfigTests(_MagneticConfigFixture, unittest.TestCase):
         unknown = self.write_config(((0.1, 0.0),), extra_run="unknown = true")
         with self.assertRaisesRegex(ConfigError, "unknown"):
             load_magnetic_field_operation_config(unknown)
+
+    def test_transition_policy_is_required_and_strict(self) -> None:
+        direct = self.write_config(((0.1, 0.0),), transition_policy="direct")
+        self.assertEqual(
+            load_magnetic_field_operation_config(direct).run.transition_policy,
+            FieldTransitionPolicy.DIRECT,
+        )
+
+        invalid = self.write_config(
+            ((0.1, 0.0),), transition_policy="implicit_zero"
+        )
+        with self.assertRaisesRegex(ConfigError, "transition_policy"):
+            load_magnetic_field_operation_config(invalid)
+
+        missing = self.write_config(((0.1, 0.0),))
+        missing.write_text(
+            missing.read_text(encoding="utf-8").replace(
+                'transition_policy = "via_zero"\n', ""
+            ),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(ConfigError, "transition_policy"):
+            load_magnetic_field_operation_config(missing)
 
     def test_unrelated_incomplete_instrument_tables_are_not_parsed(self) -> None:
         path = self.write_config(
@@ -279,7 +307,7 @@ class MagneticFieldExecutorTests(unittest.TestCase):
 
         self.assertEqual(driver.control_requests, [True])
         self.assertEqual(driver.targets, [target])
-        self.assertEqual(driver.wait_targets, [target])
+        self.assertEqual(driver.wait_targets, [float32_field(target)])
         self.assertEqual(driver.connect_calls, 0)
         self.assertEqual(driver.close_calls, 0)
 
@@ -301,7 +329,7 @@ class MagneticFieldExecutorTests(unittest.TestCase):
         )
 
         self.assertEqual(driver.targets, list(points))
-        self.assertEqual(driver.wait_targets, list(points))
+        self.assertEqual(driver.wait_targets, [float32_field(point) for point in points])
         self.assertEqual(driver.connect_calls, 0)
         self.assertEqual(driver.close_calls, 0)
 
@@ -621,8 +649,108 @@ class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
         )
         self.assertEqual(started["field_stability"]["minimum_samples"], 3)
         self.assertEqual(started["driver_field_protocol"]["command_ack_timeout_s"], 30.0)
+        self.assertEqual(started["transition_policy"], "via_zero")
+        self.assertEqual(
+            started["field_command_audit"],
+            {
+                "protocol": "attempt-result-v1",
+                "required": True,
+                "float32_encoding": "ieee754-binary32-bits-hex",
+            },
+        )
         self.assertTrue(started["authorization_scope"]["connection"])
         self.assertEqual(started["cryostat_interface"]["com_port"], "COM_TEST")
+        attempts = [
+            event for event in events if event["event"] == "field_command_attempt"
+        ]
+        results = [
+            event for event in events if event["event"] == "field_command_result"
+        ]
+        self.assertEqual(summary["field_command_attempt_count"], len(attempts))
+        self.assertEqual(summary["field_command_result_count"], len(results))
+        self.assertTrue(summary["field_command_audit_complete"])
+        self.assertEqual(
+            [event["command_index"] for event in attempts], list(range(len(attempts)))
+        )
+        self.assertEqual(
+            [event["command_index"] for event in results],
+            [event["command_index"] for event in attempts],
+        )
+        components = [
+            event
+            for event in attempts
+            if event["command_kind"] == "set_field_component"
+        ]
+        self.assertTrue(components)
+        self.assertTrue(
+            all(
+                "float32_ieee754_bits_hex" in event
+                and "float32_value_t" in event
+                for event in components
+            )
+        )
+        self.assertTrue(
+            all(
+                event["acknowledgement"] == "confirmed"
+                and event["dll_return_code"] == 0
+                for event in results
+            )
+        )
+        self.assertTrue(
+            any(event["event"] == "field_waypoint_execution" for event in events)
+        )
+        snapshot = read_progress_snapshot(progress_path)
+        self.assertEqual(snapshot["outcome"], "completed")
+        self.assertTrue(snapshot["audit_complete"])
+        self.assertEqual(snapshot["integrity_errors"], [])
+
+    def test_direct_scan_audits_a_direct_path_without_a_hidden_zero_waypoint(
+        self,
+    ) -> None:
+        points = ((0.25, 0.0), (0.0, 0.25))
+        path = self.write_config(
+            points,
+            normal_end_policy="hold",
+            transition_policy="direct",
+        )
+        dll = FakeAttoDryDll()
+
+        with redirect_stdout(io.StringIO()):
+            exit_code = run_magnetic_field(
+                [
+                    "scan",
+                    "--config",
+                    str(path),
+                    "--authorize-connection",
+                    "--authorize-field-writes",
+                    "--authorize-ordered-field-scan",
+                ],
+                dll_loader=lambda _: dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("sweep_zero", dll.events)
+        progress_path = next((path.parent / "field-output").glob("*.jsonl"))
+        events, trailing_line_incomplete = read_jsonl_events(progress_path)
+        self.assertFalse(trailing_line_incomplete)
+        started = events[0]
+        self.assertEqual(started["transition_policy"], "direct")
+        point_starts = [event for event in events if event["event"] == "point_started"]
+        self.assertEqual(len(point_starts), 2)
+        second_plan = point_starts[1]["execution_plan"]
+        self.assertEqual(second_plan["transition_policy"], "direct")
+        self.assertEqual(len(second_plan["waypoints"]), 1)
+        self.assertNotEqual(
+            second_plan["waypoints"][0]["command_field"],
+            {
+                "bx_t": 0.0,
+                "bz_t": 0.0,
+                "bx_t_float32_bits_hex": "00000000",
+                "bz_t_float32_bits_hex": "00000000",
+            },
+        )
 
     def test_ordered_scan_holds_normally_and_retains_duplicate_point_events(self) -> None:
         points = ((0.25, 0.0), (0.0, 0.25), (0.25, 0.0), (0.25, 0.0))
@@ -754,17 +882,25 @@ class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
                 dll_loader=lambda _: dll,
                 monotonic=StepClock(),
                 sleeper=lambda _: None,
-            )
+        )
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(dll.events.count("set_field_x"), 4)
         progress_path = next((path.parent / "field-output").glob("*.jsonl"))
         events, trailing_line_incomplete = read_jsonl_events(progress_path)
         self.assertFalse(trailing_line_incomplete)
+        x_attempts = [
+            event
+            for event in events
+            if event["event"] == "field_command_attempt"
+            and event["command_kind"] == "set_field_component"
+            and event["axis"] == "x"
+        ]
+        self.assertEqual(dll.events.count("set_field_x"), len(x_attempts))
+        self.assertEqual(len(x_attempts), 5)
         completed = [
             event for event in events if event["event"] == "point_completed"
         ]
-        self.assertEqual([event["waypoint_count"] for event in completed], [2, 2])
+        self.assertEqual([event["waypoint_count"] for event in completed], [2, 3])
 
     def test_component_write_failure_attempts_zero_and_preserves_uncertainty(
         self,
@@ -798,6 +934,29 @@ class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
             terminal["last_confirmed_state"]["field_setpoint"],
             {"bx_t": 0.0, "bz_t": 0.0},
         )
+        failed_component = next(
+            event
+            for event in events
+            if event["event"] == "field_command_result"
+            and event["command_kind"] == "set_field_component"
+        )
+        self.assertFalse(failed_component["success"])
+        self.assertEqual(failed_component["acknowledgement"], "not_attempted")
+        self.assertEqual(failed_component["dll_return_code"], 7)
+        cleanup_zero = next(
+            event
+            for event in events
+            if event["event"] == "field_command_result"
+            and event["command_kind"] == "sweep_field_to_zero"
+        )
+        self.assertEqual(cleanup_zero["phase"], "exception_zero_cleanup")
+        self.assertTrue(cleanup_zero["success"])
+        self.assertEqual(cleanup_zero["acknowledgement"], "confirmed")
+        self.assertTrue(terminal["field_command_audit_complete"])
+        snapshot = read_progress_snapshot(progress_path)
+        self.assertEqual(snapshot["outcome"], "rejected")
+        self.assertTrue(snapshot["audit_complete"])
+        self.assertEqual(snapshot["integrity_errors"], [])
 
     def test_nonzero_field_stability_timeout_attempts_uncredited_zero(self) -> None:
         path = self.write_config(((0.25, 0.0),))
@@ -863,6 +1022,61 @@ class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
         self.assertFalse(summary["audit_complete"])
         self.assertTrue(summary["manual_verification_required"])
 
+    def test_component_attempt_audit_failure_prevents_that_write_but_not_cleanup(
+        self,
+    ) -> None:
+        path = self.write_config(((0.25, 0.0),))
+        dll = FakeAttoDryDll()
+        output = io.StringIO()
+        real_fsync = os.fsync
+        component_attempt_failure_injected = False
+
+        def fail_component_attempt_fsync(file_descriptor: int) -> None:
+            nonlocal component_attempt_failure_injected
+            progress_files = list((path.parent / "field-output").glob("*.jsonl"))
+            if progress_files and not component_attempt_failure_injected:
+                last_line = progress_files[0].read_bytes().splitlines()[-1]
+                if (
+                    b'"event":"field_command_attempt"' in last_line
+                    and b'"command_kind":"set_field_component"' in last_line
+                ):
+                    component_attempt_failure_injected = True
+                    raise OSError("injected component-attempt fsync failure")
+            real_fsync(file_descriptor)
+
+        with (
+            patch(
+                "attodry_control.field_audit.os.fsync",
+                fail_component_attempt_fsync,
+            ),
+            redirect_stdout(output),
+            self.assertRaisesRegex(OSError, "component-attempt"),
+        ):
+            run_magnetic_field(
+                [
+                    "single-target",
+                    "--config",
+                    str(path),
+                    "--authorize-connection",
+                    "--authorize-field-writes",
+                ],
+                dll_loader=lambda _: dll,
+                monotonic=StepClock(),
+                sleeper=lambda _: None,
+            )
+
+        self.assertTrue(component_attempt_failure_injected)
+        self.assertNotIn("set_field_x", dll.events)
+        self.assertNotIn("set_field_z", dll.events)
+        self.assertEqual(dll.events.count("sweep_zero"), 1)
+        self.assertEqual(dll.events.count("disconnect"), 1)
+        summary = json.loads(output.getvalue())
+        self.assertFalse(summary["audit_complete"])
+        self.assertFalse(summary["field_command_audit_complete"])
+        self.assertTrue(summary["manual_verification_required"])
+        progress_path = next((path.parent / "field-output").glob("*.jsonl"))
+        self.assertEqual(read_progress_snapshot(progress_path)["outcome"], "incomplete")
+
     def test_terminal_fsync_failure_cannot_leave_certified_completion(self) -> None:
         path = self.write_config(((0.25, 0.0),))
         dll = FakeAttoDryDll()
@@ -901,6 +1115,7 @@ class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
         self.assertTrue(terminal_failure_injected)
         summary = json.loads(output.getvalue())
         self.assertFalse(summary["audit_complete"])
+        self.assertFalse(summary["field_command_audit_complete"])
         self.assertTrue(summary["manual_verification_required"])
         progress_path = next((path.parent / "field-output").glob("*.jsonl"))
         snapshot = read_progress_snapshot(progress_path)

@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,155 @@ from unittest.mock import patch
 
 from attodry_control.field_audit import JsonlEventWriter, read_jsonl_events
 from attodry_control.magnetic_field_monitor import read_progress_snapshot, run
+
+
+_FIELD_COMMAND_AUDIT_DECLARATION = {
+    "protocol": "attempt-result-v1",
+    "required": True,
+    "float32_encoding": "ieee754-binary32-bits-hex",
+}
+
+
+def _float32_field(bx_t: float, bz_t: float) -> dict[str, float | str]:
+    bx = struct.unpack("<f", struct.pack("<f", bx_t))[0]
+    bz = struct.unpack("<f", struct.pack("<f", bz_t))[0]
+    return {
+        "bx_t": bx,
+        "bz_t": bz,
+        "bx_t_float32_bits_hex": struct.pack("<f", bx).hex(),
+        "bz_t_float32_bits_hex": struct.pack("<f", bz).hex(),
+    }
+
+
+def _write_declared_completed_command_audit(path: Path) -> None:
+    zero = _float32_field(0.0, 0.0)
+    target = _float32_field(0.25, 0.0)
+    requested_target = {"bx_t": 0.25, "bz_t": 0.0}
+    attempt_context = {
+        "phase": "operation",
+        "transition_policy": "direct",
+        "point_index": 0,
+        "waypoint_index": 0,
+        "axis_order": "x_then_z",
+        "axis_order_index": 0,
+        "axis": "x",
+        "requested_value_t": 0.25,
+        "float32_value_t": target["bx_t"],
+        "float32_ieee754_bits_hex": target["bx_t_float32_bits_hex"],
+        "previous_setpoint": zero,
+        "expected_setpoint": target,
+    }
+    final_state = {
+        "field": {"bx_t": 0.25, "bz_t": 0.0},
+        "field_setpoint": {"bx_t": 0.25, "bz_t": 0.0},
+        "field_control_enabled": True,
+        "error_code": 0,
+    }
+    with JsonlEventWriter(path, create=True) as writer:
+        writer.append(
+            {
+                "event": "run_started",
+                "command": "scan",
+                "normal_end_field_policy": "hold",
+                "ordered_points": [requested_target],
+                "transition_policy": "direct",
+                "field_command_audit": _FIELD_COMMAND_AUDIT_DECLARATION,
+            }
+        )
+        writer.append(
+            {
+                "event": "point_started",
+                "point_index": 0,
+                "requested_field": requested_target,
+                "transition_policy": "direct",
+                "execution_plan": {
+                    "transition_policy": "direct",
+                    "requested_target": requested_target,
+                    "start_command": zero,
+                    "target_command": target,
+                    "waypoints": [
+                        {
+                            "requested_field": requested_target,
+                            "command_field": target,
+                            "x_then_z_mixed_corner": target,
+                            "z_then_x_mixed_corner": zero,
+                            "axis_order": "x_then_z",
+                        }
+                    ],
+                },
+            }
+        )
+        writer.append(
+            {
+                "event": "field_waypoint_execution",
+                "phase": "operation",
+                "transition_policy": "direct",
+                "point_index": 0,
+                "waypoint_index": 0,
+                "planned_requested_field": requested_target,
+                "confirmed_predecessor": zero,
+                "command_field": target,
+                "x_then_z_mixed_corner": target,
+                "z_then_x_mixed_corner": zero,
+                "axis_order": "x_then_z",
+            }
+        )
+        writer.append(
+            {
+                "event": "field_command_attempt",
+                "command_index": 0,
+                "command_kind": "set_field_component",
+                "dll_symbol": "AttoDRY_Interface_setUserMagneticFieldX",
+                **attempt_context,
+            }
+        )
+        writer.append(
+            {
+                "event": "field_command_result",
+                "command_index": 0,
+                "command_kind": "set_field_component",
+                "dll_symbol": "AttoDRY_Interface_setUserMagneticFieldX",
+                **attempt_context,
+                "success": True,
+                "dll_return_code": 0,
+                "acknowledgement": "confirmed",
+                "state": final_state,
+            }
+        )
+        writer.append(
+            {
+                "event": "point_completed",
+                "point_index": 0,
+                "requested_field": requested_target,
+            }
+        )
+        writer.append(
+            {
+                "event": "run_finished",
+                "outcome": "completed",
+                "completed": True,
+                "completed_points": 1,
+                "requested_points": 1,
+                "zero_verified": False,
+                "manual_verification_required": False,
+                "disconnected": True,
+                "audit_complete": True,
+                "field_command_attempt_count": 1,
+                "field_command_result_count": 1,
+                "field_command_audit_complete": True,
+                "last_confirmed_state": final_state,
+            }
+        )
+
+
+def _rewrite_jsonl(path: Path, mutate: object) -> None:
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert callable(mutate)
+    mutate(records)
+    path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
 
 
 class MagneticFieldMonitorTests(unittest.TestCase):
@@ -40,6 +190,111 @@ class MagneticFieldMonitorTests(unittest.TestCase):
             self.assertEqual(events[0]["note"], "offline")
             self.assertTrue(path.read_bytes().endswith(b"\n"))
             self.assertGreaterEqual(fsync.call_count, 2)
+
+    def test_declared_command_audit_accepts_exact_complete_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "declared-command-audit.jsonl"
+            _write_declared_completed_command_audit(path)
+
+            snapshot = read_progress_snapshot(path)
+
+        self.assertEqual(snapshot["outcome"], "completed")
+        self.assertTrue(snapshot["audit_complete"])
+        self.assertEqual(snapshot["integrity_errors"], [])
+
+    def test_declared_command_audit_rejects_nonexact_float32_component(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inexact-component.jsonl"
+            _write_declared_completed_command_audit(path)
+
+            def make_component_inexact(records: list[dict[str, object]]) -> None:
+                for record in records:
+                    if record.get("event") in {
+                        "field_command_attempt",
+                        "field_command_result",
+                    }:
+                        record["float32_value_t"] = 0.25000001
+
+            _rewrite_jsonl(path, make_component_inexact)
+            snapshot = read_progress_snapshot(path)
+
+        self.assertEqual(snapshot["outcome"], "incomplete")
+        self.assertIn(
+            "field_command_attempt at record 3 float32 command is not an exact finite float32 value",
+            snapshot["integrity_errors"],
+        )
+
+    def test_declared_command_audit_requires_waypoint_execution_for_completion(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing-waypoint.jsonl"
+            _write_declared_completed_command_audit(path)
+
+            def hide_waypoint_execution(records: list[dict[str, object]]) -> None:
+                next(
+                    record
+                    for record in records
+                    if record.get("event") == "field_waypoint_execution"
+                )["event"] = "field_sample"
+
+            _rewrite_jsonl(path, hide_waypoint_execution)
+            snapshot = read_progress_snapshot(path)
+
+        self.assertEqual(snapshot["outcome"], "incomplete")
+        self.assertIn(
+            "point_started execution_plan waypoint has no field_waypoint_execution record",
+            snapshot["integrity_errors"],
+        )
+        self.assertIn(
+            "field_command_attempt at record 3 has no matching field_waypoint_execution",
+            snapshot["integrity_errors"],
+        )
+
+    def test_declared_command_audit_requires_a_result_for_every_attempt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing-result.jsonl"
+            _write_declared_completed_command_audit(path)
+
+            def hide_command_result(records: list[dict[str, object]]) -> None:
+                next(
+                    record
+                    for record in records
+                    if record.get("event") == "field_command_result"
+                )["event"] = "field_sample"
+
+            _rewrite_jsonl(path, hide_command_result)
+            snapshot = read_progress_snapshot(path)
+
+        self.assertEqual(snapshot["outcome"], "incomplete")
+        self.assertIn(
+            "field command attempt has no result record",
+            snapshot["integrity_errors"],
+        )
+        self.assertIn(
+            "run_finished field_command_result_count disagrees with the stream",
+            snapshot["integrity_errors"],
+        )
+
+    def test_declared_command_audit_rejects_invalid_declaration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid-declaration.jsonl"
+            _write_declared_completed_command_audit(path)
+
+            def change_protocol(records: list[dict[str, object]]) -> None:
+                started = records[0]
+                declaration = started["field_command_audit"]
+                assert isinstance(declaration, dict)
+                declaration["protocol"] = "attempt-result-v0"
+
+            _rewrite_jsonl(path, change_protocol)
+            snapshot = read_progress_snapshot(path)
+
+        self.assertEqual(snapshot["outcome"], "incomplete")
+        self.assertIn(
+            "run_started field_command_audit declaration is invalid",
+            snapshot["integrity_errors"],
+        )
 
     def test_reader_preserves_order_and_duplicate_requested_points(self) -> None:
         points = (

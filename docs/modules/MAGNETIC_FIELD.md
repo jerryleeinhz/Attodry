@@ -14,6 +14,11 @@ M2 已在 `LK_setup` 的 exact `lyr` Python 和隔离 snapshot 中完成。M3 �
 `attodry_test` 只读记录只说明当时通用 driver 能读到零场状态，不能替代当前 revision
 的 M3 验收。
 
+本文件还记录随后扩展的离线 transition/audit contract：它只使用 pure policy 和 fake
+DLL，未加载真实 DLL、未连接设备，也不把历史 `e0924f1` snapshot 误写成后续 revision
+的 target-offline 证据。任何后续 revision 若要声称 M2 target-offline complete，必须以
+该 revision 重新完成 DLL-free target validation；无论如何都不授权 M3--M5。
+
 本次最终本地证据为：
 
 - 以下 focused safety/stability/config/attoDRY/magnetic/monitor 命令：182 tests，
@@ -115,6 +120,7 @@ state，一律报告 `outcome="incomplete"`、`audit_complete=false` 和需要�
 points = [
   { bx_t = 0.0, bz_t = 0.0 },
 ]
+transition_policy = "via_zero"
 max_step_t = 0.05
 run_name = "magnetic_field_offline_example"
 note = "Replace only after staged magnetic-field commissioning approval."
@@ -124,17 +130,23 @@ output_directory = "../run_data/magnetic_field_commissioning"
 - `points` 是非空、显式、按书写顺序执行的 X/Z 点列；不排序、不去重，也不展开为
   Cartesian grid。重复点仍保留独立 point index、point events 和稳定性确认；若
   setpoint readback 已在 acknowledgement tolerance 内，则该点不发送多余 component
-  write 或 zero detour，但仍重新进行 target stability measurement。
-- 每个 `bx_t`/`bz_t`、每个生成的 setpoint waypoint，以及 X 先写、Z 后写时出现的
-  mixed setpoint 都必须满足硬件分量限制和
-  `sqrt(Bx^2 + Bz^2) <= 3 T`，否则在 setting write 前失败。校验也覆盖 DLL 实际
-  接收的 float32 command values，避免边界值因量化越过 3 T。
+  write，但仍重新进行 target stability measurement。
+- `transition_policy` 是必填枚举：`direct` 将每一对相邻 confirmed/requested vector
+  endpoints 分段为不超过 `max_step_t` 的离散 waypoint；`via_zero` 明确选择从起点到
+  zero、再从 zero 到 target 的保守序列。不得根据目标值、日志或 GUI 状态偷偷改选另一
+  策略，也不得透明插入 zero detour。
+- 每个 `bx_t`/`bz_t`、每个生成的 float32 setpoint waypoint，以及两种可能的 X→Z / Z→X
+  mixed setpoint 都必须满足硬件分量限制和 `sqrt(Bx^2 + Bz^2) <= 3 T`，否则在 setting
+  write 前失败。校验使用 DLL 实际接收的 IEEE-754 binary32 values，避免边界值因量化
+  越过 3 T；每个 waypoint 只在两个 mixed corners 都已经验证后，才根据安全角点选择
+  实际 axis order。
 - `max_step_t` 只限制相邻**请求 setpoint waypoints** 的矢量间距。实现会为不同目标
-  生成经过零点的保守 setpoint 序列，并逐分量等待 setpoint readback acknowledgement。
-  每个内部 waypoint 随后也按 field stability contract 等待 actual Bx/Bz 收敛；显式
-  target 和 cleanup zero 同样需要稳定读回。实现仍不测量或控制 vendor controller 在
-  相邻稳定 waypoint 之间的连续物理轨迹，因此不能据此宣称 constant-angle、
-  constant-magnitude、直线轨迹、实际 ramp rate 或任意其它 physical-path 性质。
+  按已选 `transition_policy` 生成并逐分量等待 setpoint readback acknowledgement。每个
+  内部 waypoint 随后也按 field stability contract 等待 actual Bx/Bz 收敛；显式 target
+  和 cleanup zero 同样需要稳定读回。`direct` 只描述已验证的离散 command endpoints，
+  而不是 vendor controller 的连续直线运动；实现仍不测量或控制相邻稳定 waypoint 之间的
+  continuous physical path，因此不能据此宣称 constant-angle、constant-magnitude、实际
+  straight-line trajectory、ramp rate 或任意其它 physical-path 性质。
 - `max_step_t` 必须大于 1e-5 T 的 setpoint acknowledgement resolution；配置的
   `field_tolerance_t` 不得超过已确认的 1 mT 上限。
 - tracked `hardware.example.toml` 故意只给零场点；它不是首次真实运动参数。
@@ -145,8 +157,9 @@ output_directory = "../run_data/magnetic_field_commissioning"
 
 ## 运行、安全与审计行为
 
-1. 配置、全部显式目标及从零开始的静态 setpoint 计划在 DLL load 前校验；缺少对应
-   authorization 时也在 DLL load 和输出目录创建前停止。
+1. 配置、全部显式目标、`transition_policy` 及相应的静态 setpoint 计划在 DLL load
+   前校验；缺少对应 authorization 时也在 DLL load 和输出目录创建前停止。`direct`
+   和 `via_zero` 是记录在配置、point event 与 plan 中的两个不同请求，不能相互替代。
 2. 连接初始化状态只接受严格的 0/1。连接后读取完整状态，拒绝非零 error、超限
    actual field 或超限 setpoint。field control 使用 read-before-toggle；执行 OFF→ON
    takeover 前，actual field 必须在 configured（且不大于 1 mT）tolerance 内匹配 latent
@@ -155,26 +168,35 @@ output_directory = "../run_data/magnetic_field_commissioning"
    elapsed 使用真实计时并受 acknowledgement timeout 约束，不能固定记为零或越过 deadline。
 3. 在第一条 component-setting write 前，从实际初始 setpoint 重新计划；control
    acknowledgement 后再从最新确认 setpoint 重算一次，并先确认 actual field 已在
-   starting setpoint 稳定。
-4. 每个 waypoint 按 X 后 Z 写入，只对改变的分量写命令；每次分量写后等待完整 setpoint
-   readback 确认，然后在前往下一 waypoint 前按 `[magnet]` 的 tolerance、stable range、
-   dwell、polling 和 timeout 确认该 waypoint 的 actual Bx/Bz 稳定。显式 target 也保留
-   自己的 point-level 稳定确认。为覆盖 polling jitter 而保留的 dwell cutoff 前一条样本
-   也参与 target-tolerance 与 rolling-range 判定；它若不合格，不能只凭后续样本提前通过。
-   control 暂时关闭会清空连续稳定窗口；状态错误、setpoint 改变或超限读回均 fail
-   closed。稳定 waypoint 仍只是离散证据，不能证明 waypoint 之间的 continuous
-   physical path。
+   starting setpoint 稳定。每个重算的 float32 endpoint、相邻步长和两个 mixed corners
+   都必须再次通过 safety validation；无法确定安全 order 时停止而不是猜测。
+4. 每个 waypoint 都从已确认前一个 setpoint 动态选择已验证的 X→Z 或 Z→X order，只对
+   改变的分量写命令；该 selected order、两种 corners、float32 endpoint、前驱和完整
+   executed waypoint/path 都要审计。每次分量写后等待完整 setpoint readback 确认，然后
+   在前往下一 waypoint 前按 `[magnet]` 的 tolerance、stable range、dwell、polling 和
+   timeout 确认该 waypoint 的 actual Bx/Bz 稳定。显式 target 也保留自己的 point-level
+   稳定确认。为覆盖 polling jitter 而保留的 dwell cutoff 前一条样本也参与
+   target-tolerance 与 rolling-range 判定；它若不合格，不能只凭后续样本提前通过。control
+   暂时关闭会清空连续稳定窗口；状态错误、setpoint 改变或超限读回均 fail closed。稳定
+   waypoint 仍只是离散证据，不能证明 waypoint 之间的 continuous physical path。
 5. JSONL 每行带 `schema_version`、`run_id`、单调 `event_index` 和 capture time；每次
    append 都 flush 并 `fsync`。起始 metadata 还保存 config SHA-256、source provenance、
    interface/config、authorization scope、完整 field-stability criteria（包括
-   `minimum_samples`）、driver acknowledgement protocol、limits、points 和 cleanup policy。
-   preflight、计划、control/setpoint acknowledgement、field samples、point completion、
-   failure、zero、disconnect 和 terminal outcome 均进入同一 canonical stream。
-   rejected/interrupted/partial 事件不删除；audit append/`fsync` failure 会锁存为拒绝
-   原因。不确定的 append 会尽力回滚，因此失败的 terminal `fsync` 不能留下已认证的
-   completion；这些审计故障都不得中断仍可执行的 monitored-zero cleanup。
+   `minimum_samples`）、driver acknowledgement protocol、limits、points、transition policy、
+   cleanup policy 以及 required exact-field-command audit descriptor。每个实际
+   field-control toggle、X/Z component command 与 sweep-to-zero command 都先记录 durable
+   attempt（command index、symbol、context 和 IEEE-754 binary32 component bits），再记录
+   DLL return code 与 post-command full-state/readback acknowledgement result；失败也保留
+   result，不能用后续日志补写为成功。preflight、计划、control/setpoint acknowledgement、
+   field samples、point completion、failure、zero、disconnect 和 terminal outcome 均进入
+   同一 canonical stream。rejected/interrupted/partial 事件不删除；audit append/`fsync`
+   failure 会锁存为拒绝原因并阻止正常继续写入，但这些审计故障都不得中断仍可执行的
+   best-effort monitored-zero cleanup。不确定的 append 会尽力回滚，因此失败的 terminal
+   `fsync` 不能留下已认证的 completion。
 6. 单目标正常完成后必须执行 vendor sweep-to-zero，并同时确认零 setpoint、实际场在
-   configured tolerance 内、连续稳定窗口和最终完整状态。scan 的 normal `hold` 也要
+   configured tolerance 内、enabled field control、clear error、连续稳定窗口和最终完整
+   状态。`isZeroingField`、vendor action/error message 和 vendor log 只能附加为 diagnostic，
+   不能替代这些 zero 判据。scan 的 normal `hold` 也要
    再读状态并确认 final setpoint、actual Bx/Bz 在 target tolerance 内、control 与
    error；若 final target 恰为 zero，还要通过 magnitude criterion。`hold` 本身不是
    zero。当前 cleanup 不会把 field control toggle 为 disabled：verified zero 后保持
@@ -218,12 +240,14 @@ output_directory = "../run_data/magnetic_field_commissioning"
 ### M1 - offline safety and failure tests（当前：local complete）
 
 - 本地 pure/fake-DLL coverage 包括边界/超限、非有限输入与读回、ordered duplicate points、
-  strict initialization flags、safe field-control takeover、X-first mixed setpoint、
-  float32 boundary/step validation、component-write failure、delayed acknowledgement、
-  control loss、stable starting setpoint/waypoints/targets、zero-vector magnitude hold、
-  first-post-toggle elapsed/timeout、acknowledgement/zero timeout、jitter-cutoff sample
-  qualification、communication failure、异常与 normal-zero retry cleanup、audit-write/
-  terminal-fsync failure，以及 contradictory-terminal stream-integrity validation。
+  `direct`/`via_zero` policy、ascending/descending/reverse X/Z transitions、strict
+  initialization flags、safe field-control takeover、两种 mixed setpoint order、float32
+  endpoint/corner/step validation、component-write failure、delayed acknowledgement、control
+  loss、stable starting setpoint/waypoints/targets、zero-vector magnitude hold、first-post-
+  toggle elapsed/timeout、acknowledgement/zero timeout、jitter-cutoff sample qualification、
+  communication failure、异常与 normal-zero retry cleanup、audit-write/terminal-fsync
+  failure，以及 exact command-attempt/result 和 contradictory-terminal stream-integrity
+  validation。
 - focused 与完整 suite 的最终本地 count 见“当前状态”。
 - 没有真实 DLL load、connection 或 hardware command。
 
@@ -266,8 +290,10 @@ output_directory = "../run_data/magnetic_field_commissioning"
 - 一次只验收一个轴和一个小目标；使用 `single-target`，正常结束必须 monitored zero；
   不与温度、Lock-in 或 SMU 组合。
 - 完成需要原始 canonical JSONL、目标/zero 完整读回、人工核验，以及每条实际发出的
-  float32 toggle/component command attempt/result。当前 JSONL 尚未记录完整的 exact
-  command-attempt/result 列表，因此当前实现本身不满足 M4 验收，不能据此申请日常运行。
+  float32 toggle/component command attempt/result。离线 writer/monitor 已要求并验证此
+  transcript contract；它只是 M4 的必要审计前提，不能替代 M3 read-only、用户选择的
+  最小目标、connection/write authorization 或一次真实 M4 证据，因此当前仍不能申请日常
+  运行。
 
 ### M5 - ordered X/Z scan（当前：gated / 未授权）
 
@@ -298,10 +324,14 @@ output_directory = "../run_data/magnetic_field_commissioning"
 ```text
 请负责 Magnetic-field 模块。先按 AGENTS.md 顺序完整阅读五份必读文档，再阅读
 docs/modules/README.md 和 docs/modules/MAGNETIC_FIELD.md。检查 git status 和当前
-提交，从最早未完成阶段开始。M0--M2 已完成，包括 commit e0924f1 在
-LK_setup/lyr 的 DLL-free target-offline 验证；M3--M5 分别需要新授权。必须保持
-sqrt(Bx^2+Bz^2)<=3 T，通信失败不得推断零场，也不得把离散 setpoint 计划描述为
-continuous physical path、constant angle 或 constant magnitude。默认不加载真实 DLL、
-不连接或写真实 attoDRY。当前 JSONL 仍缺 M4 所需的 exact float32 command-attempt/
-result evidence。结束时按模块交付格式报告。
+提交，从最早未完成阶段开始。M0--M2 已完成，包括历史 commit e0924f1 在
+LK_setup/lyr 的 DLL-free target-offline 验证；后续 revision 必须重新取得自己的 target-
+offline evidence。M3--M5 分别需要新授权。必须保持 sqrt(Bx^2+Bz^2)<=3 T，通信失败
+不得推断零场，也不得把离散 setpoint 计划描述为 continuous physical path、constant
+angle 或 constant magnitude。默认不加载真实 DLL、不连接或写真实 attoDRY。
+`transition_policy` 必须明确为 `direct` 或 `via_zero`；验证 float32 endpoints 和两种
+mixed corners 后再选择 axis order，并保存 complete execution waypoint/path。JSONL 必须
+含每次 toggle/component/zero command 的 attempt/result evidence，以及每条 component
+command 的 exact float32 payload；vendor zero/action/error diagnostics 不得当作 zero
+proof。结束时按模块交付格式报告。
 ```

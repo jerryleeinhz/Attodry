@@ -11,7 +11,14 @@ from .attodry import (
     AttoDryError,
 )
 from .models import CryostatState, VectorField
-from .safety import plan_ordered_zero_detours, validate_vector_field
+from .safety import (
+    FieldTransitionPlan,
+    FieldTransitionPolicy,
+    FieldWaypoint,
+    plan_ordered_field_transitions,
+    serialize_float32_field,
+    validate_vector_field,
+)
 
 
 FieldEventSink = Callable[[dict[str, object]], None]
@@ -31,6 +38,7 @@ def execute_field_target(
     max_step_t: float,
     *,
     point_index: int = 0,
+    transition_policy: FieldTransitionPolicy = FieldTransitionPolicy.VIA_ZERO,
     on_event: FieldEventSink | None = None,
     monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
@@ -45,6 +53,7 @@ def execute_field_target(
         (target,),
         max_step_t,
         first_point_index=point_index,
+        transition_policy=transition_policy,
         on_event=on_event,
         monotonic=monotonic,
         sleeper=sleeper,
@@ -58,6 +67,7 @@ def execute_ordered_field_points(
     max_step_t: float,
     *,
     first_point_index: int = 0,
+    transition_policy: FieldTransitionPolicy = FieldTransitionPolicy.VIA_ZERO,
     on_event: FieldEventSink | None = None,
     monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
@@ -74,6 +84,11 @@ def execute_ordered_field_points(
     ):
         raise ValueError("first_point_index must be a non-negative integer.")
 
+    try:
+        policy = FieldTransitionPolicy(transition_policy)
+    except ValueError as exc:
+        raise ValueError("transition_policy must be 'direct' or 'via_zero'.") from exc
+
     initial_state = driver.read_state()
     _emit(
         on_event,
@@ -81,13 +96,19 @@ def execute_ordered_field_points(
         state=asdict(initial_state),
     )
     _validate_state(driver, initial_state)
-    paths = plan_ordered_zero_detours(
-        _normalize_planning_start(initial_state.field_setpoint, targets[0]),
+    plans = plan_ordered_field_transitions(
+        initial_state.field_setpoint,
         targets,
         max_step_t,
+        policy,
         driver.limits,
     )
-    _emit(on_event, "field_plan_validated", paths=_serialize_paths(paths))
+    _emit(
+        on_event,
+        "field_plan_validated",
+        transition_policy=policy.value,
+        transitions=_serialize_transition_plans(plans),
+    )
 
     def control_sample(
         state: CryostatState,
@@ -110,6 +131,11 @@ def execute_ordered_field_points(
         monotonic=monotonic,
         sleeper=sleeper,
         on_sample=control_sample,
+        on_command=on_event,
+        command_context={
+            "phase": "field_control_enable",
+            "transition_policy": policy.value,
+        },
     )
     control_state = driver.last_confirmed_state or driver.read_state()
     _validate_state(driver, control_state, require_control=True)
@@ -117,28 +143,30 @@ def execute_ordered_field_points(
 
     # Revalidate the whole setpoint plan after the control acknowledgement and
     # before the first component setting write.
-    paths = plan_ordered_zero_detours(
-        _normalize_planning_start(control_state.field_setpoint, targets[0]),
+    plans = plan_ordered_field_transitions(
+        control_state.field_setpoint,
         targets,
         max_step_t,
+        policy,
         driver.limits,
     )
-    _emit(on_event, "field_plan_revalidated", paths=_serialize_paths(paths))
+    _emit(
+        on_event,
+        "field_plan_revalidated",
+        transition_policy=policy.value,
+        transitions=_serialize_transition_plans(plans),
+    )
 
     results: list[FieldPointResult] = []
-    for offset, (target, path) in enumerate(zip(targets, paths)):
+    for offset, (target, plan) in enumerate(zip(targets, plans)):
         point_index = first_point_index + offset
-        planning_start = (
-            _normalize_planning_start(control_state.field_setpoint, target)
-            if offset == 0
-            else targets[offset - 1]
-        )
         _emit(
             on_event,
             "point_started",
             point_index=point_index,
             requested_field=asdict(target),
-            planned_waypoints=[asdict(point) for point in path],
+            transition_policy=policy.value,
+            execution_plan=_serialize_transition_plan(plan),
         )
 
         def setpoint_sample(
@@ -162,22 +190,31 @@ def execute_ordered_field_points(
         setpoint_state = driver.set_vector_field(
             target,
             max_step_t=max_step_t,
-            planning_start=planning_start,
+            planning_start=plan.start_command,
+            transition_plan=plan,
+            transition_policy=policy,
             monotonic=monotonic,
             sleeper=sleeper,
             on_sample=setpoint_sample,
+            on_command=on_event,
+            command_context={
+                "phase": "operation",
+                "transition_policy": policy.value,
+                "point_index": point_index,
+            },
         )
         _validate_state(
             driver,
             setpoint_state,
             require_control=True,
-            expected_setpoint=target,
+            expected_setpoint=plan.target_command,
         )
         _emit(
             on_event,
             "setpoint_confirmed",
             point_index=point_index,
             requested_field=asdict(target),
+            command_field=serialize_float32_field(plan.target_command),
             state=asdict(setpoint_state),
         )
 
@@ -200,11 +237,11 @@ def execute_ordered_field_points(
             _validate_state(
                 driver,
                 state,
-                expected_setpoint=target,
+                expected_setpoint=plan.target_command,
             )
 
         final_state = driver.wait_for_field(
-            target,
+            plan.target_command,
             monotonic=monotonic,
             sleeper=sleeper,
             on_sample=stability_sample,
@@ -213,12 +250,12 @@ def execute_ordered_field_points(
             driver,
             final_state,
             require_control=True,
-            expected_setpoint=target,
+            expected_setpoint=plan.target_command,
         )
         result = FieldPointResult(
             point_index=point_index,
             requested_field=target,
-            waypoint_count=len(path),
+            waypoint_count=len(plan.waypoints),
             final_state=final_state,
         )
         results.append(result)
@@ -227,7 +264,8 @@ def execute_ordered_field_points(
             "point_completed",
             point_index=point_index,
             requested_field=asdict(target),
-            waypoint_count=len(path),
+            command_field=serialize_float32_field(plan.target_command),
+            waypoint_count=len(plan.waypoints),
             final_state=asdict(final_state),
         )
     return tuple(results)
@@ -266,20 +304,34 @@ def _field_matches(actual: VectorField, expected: VectorField) -> bool:
     )
 
 
-def _normalize_planning_start(
-    actual_setpoint: VectorField, first_target: VectorField
-) -> VectorField:
-    return (
-        first_target
-        if _field_matches(actual_setpoint, first_target)
-        else actual_setpoint
-    )
+def _serialize_transition_plans(
+    plans: tuple[FieldTransitionPlan, ...],
+) -> list[dict[str, object]]:
+    return [_serialize_transition_plan(plan) for plan in plans]
 
 
-def _serialize_paths(
-    paths: tuple[tuple[VectorField, ...], ...],
-) -> list[list[dict[str, float]]]:
-    return [[asdict(point) for point in path] for path in paths]
+def _serialize_transition_plan(plan: FieldTransitionPlan) -> dict[str, object]:
+    return {
+        "transition_policy": plan.transition_policy.value,
+        "requested_target": asdict(plan.requested_target),
+        "start_command": serialize_float32_field(plan.start_command),
+        "target_command": serialize_float32_field(plan.target_command),
+        "waypoints": [_serialize_waypoint(waypoint) for waypoint in plan.waypoints],
+    }
+
+
+def _serialize_waypoint(waypoint: FieldWaypoint) -> dict[str, object]:
+    return {
+        "requested_field": asdict(waypoint.requested_field),
+        "command_field": serialize_float32_field(waypoint.command_field),
+        "x_then_z_mixed_corner": serialize_float32_field(
+            waypoint.x_then_z_mixed_corner
+        ),
+        "z_then_x_mixed_corner": serialize_float32_field(
+            waypoint.z_then_x_mixed_corner
+        ),
+        "axis_order": waypoint.axis_order.value,
+    }
 
 
 def _emit_state_sample(

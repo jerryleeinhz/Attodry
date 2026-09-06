@@ -13,8 +13,9 @@ from .safety import (
     CONFIRMED_EXPERIMENT_VECTOR_MAX_T,
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
+    FieldTransitionPolicy,
     MagnetLimits,
-    plan_ordered_zero_detours,
+    plan_ordered_field_transitions,
 )
 from .scans import temperature_scan_points
 from .sr830_settings import (
@@ -129,6 +130,7 @@ class MagnetConfig:
 @dataclass(frozen=True, slots=True)
 class MagneticFieldRunConfig:
     points: tuple[VectorField, ...]
+    transition_policy: FieldTransitionPolicy
     max_step_t: float
     run_name: str
     note: str
@@ -768,7 +770,14 @@ def _parse_magnetic_field_run(
     _strict_keys(
         table,
         name,
-        {"points", "max_step_t", "run_name", "note", "output_directory"},
+        {
+            "points",
+            "transition_policy",
+            "max_step_t",
+            "run_name",
+            "note",
+            "output_directory",
+        },
     )
     raw_points = table["points"]
     if not isinstance(raw_points, list) or not raw_points:
@@ -794,19 +803,27 @@ def _parse_magnetic_field_run(
             f"{FIELD_SETPOINT_READBACK_TOLERANCE_T:g} T setpoint-readback "
             "acknowledgement tolerance."
         )
+    transition_policy = _enum_value(
+        FieldTransitionPolicy,
+        table["transition_policy"],
+        f"{name}.transition_policy",
+    )
     try:
         # A zero start makes static validation independent of any real station
-        # state while still checking every target, waypoint, and X-first mix.
-        plan_ordered_zero_detours(
+        # state while still checking every target, exact float32 waypoint, and
+        # both component-write mixed corners for the selected transition policy.
+        plan_ordered_field_transitions(
             VectorField(0.0, 0.0),
             points,
             max_step_t,
+            transition_policy,
             limits,
         )
     except ValueError as exc:
         raise ConfigError(f"Invalid magnetic_field_run path: {exc}") from exc
     return MagneticFieldRunConfig(
         points=tuple(points),
+        transition_policy=transition_policy,
         max_step_t=max_step_t,
         run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
         note=_sweep_note(table["note"], f"{name}.note"),

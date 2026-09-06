@@ -117,14 +117,17 @@ python -m attodry_control.lockin_test --help
 ## Standalone X/Z 磁场模块
 
 `[magnetic_field_run].points` 是一个非空的显式点列，按 TOML 中的原顺序执行并保留
-重复项；它不会排序、去重或生成 Cartesian grid。每个 target、生成的 zero-detour
-setpoint waypoint，以及 X 分量先写、Z 分量后写时的 mixed setpoint 都要通过
-`sqrt(Bx^2 + Bz^2) <= 3 T` 和分量边界检查，包括 DLL 接收的 float32 command
-values。`max_step_t` 必须大于 1e-5 T acknowledgement resolution，且只约束离散请求
-setpoint 的间距；starting setpoint、内部 waypoint、显式 target 和 cleanup zero 都要求
-setpoint/actual field 的稳定读回。当前离线实现仍没有测量 vendor controller 在相邻稳定
-waypoint 之间的连续运动，因此不声明 physical path、constant angle、constant magnitude
-或实际 ramp rate。
+重复项；它不会排序、去重或生成 Cartesian grid。`transition_policy` 是必填且显式的：
+`direct` 将相邻 X/Z 向量分段为已验证的离散 waypoint，`via_zero` 才会请求保守的
+经零场路径；程序绝不静默插入零场绕行。每个 target、float32 command waypoint，以及
+两种可能的 X→Z / Z→X mixed corner 都要通过 `sqrt(Bx^2 + Bz^2) <= 3 T` 和分量边界
+检查。每个 waypoint 从已确认 setpoint 重新选择一个已验证的轴写入顺序，并把计划及
+实际执行的完整 waypoint/path 写入审计；不能假定固定 X-first。`max_step_t` 必须大于
+1e-5 T acknowledgement resolution，且只约束离散请求 setpoint 的间距；starting
+setpoint、内部 waypoint、显式 target 和 cleanup zero 都要求 setpoint/actual field 的
+稳定读回。即使选择 `direct`，这些只是离散命令端点：当前离线实现仍没有测量 vendor
+controller 在端点之间的连续运动，因此不声明 physical path、constant angle、constant
+magnitude 或实际 ramp rate。
 
 下面的 help 和 JSONL monitor 都不会连接硬件：
 
@@ -165,12 +168,16 @@ rejected、interrupted、stability、cleanup 和 terminal evidence 不删除。f
 只读取这个文件，不导入 DLL/driver，也不查询仪器；它会把 torn、integrity failure 或
 缺少 terminal event 的 stream 标记为 incomplete/manual-verification，也会拒绝要求 zero
 却未验证 zero 或缺少 final confirmed state 的矛盾 completed record，而不会推断控制进程
-仍在运行。当前 JSONL 还没有 M4 所需的 exact float32 toggle/component
-command-attempt/result 列表。本机最终证据为 182 focused tests（6.533 s）和 450 full
-tests（14.373 s，5 optional-matplotlib skips）；commit `e0924f1` 的 M2 DLL-free target
-snapshot 又通过 182 focused tests（4.675 s）和 450 full tests（20.299 s，无 skip
-reported）。M2 archive/path/hash 和 import-isolation 证据见模块文档。M3–M5 真实阶段
-仍待完成。完整边界见
+仍在运行。开始记录声明 exact float32 field-command audit contract；每个实际 field-control
+toggle、X/Z component command 和 sweep-to-zero command 都有 attempt 事件及 DLL return /
+post-command readback acknowledgement result，且每个 component command 含 IEEE-754
+binary32 bit pattern。写入审计
+不能完成时，正常写路径 fail closed，cleanup 仍以 best-effort 方式留下可用证据。vendor
+`isZeroingField`、action/error messages 和日志只是 optional diagnostics；zero 仍只由
+setpoint、actual Bx/Bz、control/error 和 dwell 证实。此前 `e0924f1` 的 M2 DLL-free target
+snapshot 通过 182 focused tests（4.675 s）和 450 full tests（20.299 s，无 skip reported），
+但它只验证该历史 revision；后续 implementation revision 必须单独完成 target-offline
+validation，才可引用新的 M2 target evidence。M3–M5 真实阶段仍待完成。完整边界见
 [`docs/modules/MAGNETIC_FIELD.md`](docs/modules/MAGNETIC_FIELD.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的

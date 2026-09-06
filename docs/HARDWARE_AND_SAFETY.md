@@ -34,11 +34,27 @@ The legacy attoDRY interface uses a USB virtual COM port and a vendor `attoDRYxy
 - wait for device initialization with a timeout;
 - read current field, setpoint, control state, and error state before any write;
 - implement idempotent `ensure_field_control(enabled)` by read-then-toggle only when required;
-- validate the full target vector before setting either component;
-- record both component setpoints and readbacks;
+- require an explicit field-transition policy: `direct` segments the adjacent
+  vector transition, while `via_zero` requests the conservative zero detour;
+  software must never insert a zero detour transparently;
+- convert every command endpoint to IEEE-754 binary32 before validating it, and
+  validate the endpoint plus both possible X-then-Z and Z-then-X mixed corners
+  against the component limits and `sqrt(Bx^2 + Bz^2) <= 3 T`;
+- choose only a verified mixed-corner write order for each waypoint, and retain
+  the complete planned and executed waypoint path rather than assuming X-first;
+- record both component setpoints and readbacks, with a durable pre-command
+  attempt and post-acknowledgement result for each field-control toggle, changed
+  X/Z component command, and sweep-to-zero command; every component command must
+  include its exact float32 bits;
 - never infer zero after a failed read.
 
 Changing both components may produce a transient path that differs from the requested direction. Constant-direction or constant-magnitude ramps therefore require coordinated intermediate vector points and readback verification; setting X and Z independently once is not sufficient to promise the path.
+
+`isZeroingField`, vendor action/error strings, and vendor logs may be retained as
+optional diagnostics only. Verified zero requires the project checks on the
+confirmed zero setpoint, actual Bx/Bz, enabled control, clear error state, and the
+configured dwell; a diagnostic flag or log message cannot substitute for any of
+those checks.
 
 ## Temperature stability
 

@@ -20,7 +20,13 @@ from attodry_control.attodry import (
 from attodry_control.attodry_test import run as run_attodry_test
 from attodry_control.config import load_config
 from attodry_control.models import VectorField
-from attodry_control.safety import SafetyViolation, validate_vector_field
+from attodry_control.safety import (
+    FieldTransitionPolicy,
+    SafetyViolation,
+    float32_bits_hex,
+    float32_field,
+    validate_vector_field,
+)
 from attodry_control.temperature_test import run as run_temperature_test
 from attodry_control.temperature_run import run as run_temperature_operation
 from attodry_control.temperature_scan import run as run_temperature_scan
@@ -456,7 +462,136 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertAlmostEqual(self.dll.setpoint_z_t, 3.0)
         self.assertGreater(self.dll.events.count("set_field_x"), 2)
 
-    def test_vector_plan_prevalidates_mixed_transient_before_first_write(self) -> None:
+    def test_direct_rotation_uses_the_only_safe_component_order_at_three_tesla(
+        self,
+    ) -> None:
+        self.connect()
+        self.dll.bx_t = self.dll.setpoint_x_t = 3.0
+        self.dll.bz_t = self.dll.setpoint_z_t = 0.0
+        self.dll.field_control = 1
+
+        self.driver.set_vector_field(
+            VectorField(0.0, 3.0),
+            max_step_t=5.0,
+            transition_policy=FieldTransitionPolicy.DIRECT,
+            monotonic=StepClock(step_s=5.0),
+            sleeper=lambda _: None,
+        )
+        self.driver.set_vector_field(
+            VectorField(3.0, 0.0),
+            max_step_t=5.0,
+            transition_policy=FieldTransitionPolicy.DIRECT,
+            monotonic=StepClock(step_s=5.0),
+            sleeper=lambda _: None,
+        )
+
+        writes = [
+            event
+            for event in self.dll.events
+            if event in {"set_field_x", "set_field_z"}
+        ]
+        self.assertEqual(writes, ["set_field_x", "set_field_z", "set_field_z", "set_field_x"])
+        self.assertNotIn("sweep_zero", self.dll.events)
+
+    def test_field_command_audit_records_attempt_result_pairs_and_float32_bits(
+        self,
+    ) -> None:
+        self.connect()
+        events: list[dict[str, object]] = []
+
+        self.driver.ensure_field_control(True, on_command=events.append)
+        self.driver.set_vector_field(
+            VectorField(0.1, 0.0),
+            max_step_t=0.1,
+            transition_policy=FieldTransitionPolicy.DIRECT,
+            on_command=events.append,
+            monotonic=StepClock(step_s=5.0),
+            sleeper=lambda _: None,
+        )
+        self.driver.request_zero_field(
+            on_command=events.append,
+            monotonic=StepClock(step_s=5.0),
+            sleeper=lambda _: None,
+        )
+
+        attempts = [event for event in events if event["event"] == "field_command_attempt"]
+        results = [event for event in events if event["event"] == "field_command_result"]
+        self.assertEqual([event["command_index"] for event in attempts], list(range(len(attempts))))
+        self.assertEqual(
+            [event["command_index"] for event in results],
+            [event["command_index"] for event in attempts],
+        )
+        self.assertTrue(all(event["success"] is True for event in results))
+        self.assertTrue(all(event["acknowledgement"] == "confirmed" for event in results))
+        component = next(
+            event
+            for event in attempts
+            if event["command_kind"] == "set_field_component" and event["axis"] == "x"
+        )
+        self.assertEqual(component["float32_value_t"], float32_field(VectorField(0.1, 0.0)).bx_t)
+        self.assertEqual(
+            component["float32_ieee754_bits_hex"],
+            float32_bits_hex(float(component["float32_value_t"])),
+        )
+        self.assertIn("toggle_field_control", [event["command_kind"] for event in attempts])
+        self.assertIn("sweep_field_to_zero", [event["command_kind"] for event in attempts])
+
+    def test_field_command_attempt_audit_failure_prevents_the_component_write(self) -> None:
+        self.connect()
+        self.dll.field_control = 1
+
+        def fail_attempt(event: dict[str, object]) -> None:
+            if event["event"] == "field_command_attempt":
+                raise OSError("injected command-audit failure")
+
+        with self.assertRaisesRegex(OSError, "command-audit"):
+            self.driver.set_vector_field(
+                VectorField(0.1, 0.0),
+                max_step_t=0.1,
+                transition_policy=FieldTransitionPolicy.DIRECT,
+                on_command=fail_attempt,
+                monotonic=StepClock(step_s=5.0),
+                sleeper=lambda _: None,
+            )
+
+        self.assertNotIn("set_field_x", self.dll.events)
+        self.assertNotIn("set_field_z", self.dll.events)
+
+    def test_field_command_audit_records_a_dll_failure_result(self) -> None:
+        self.connect()
+        self.dll.field_control = 1
+        self.dll.return_codes["set_field_x"] = 7
+        events: list[dict[str, object]] = []
+
+        with self.assertRaises(AttoDryDllError):
+            self.driver.set_vector_field(
+                VectorField(0.1, 0.0),
+                max_step_t=0.1,
+                transition_policy=FieldTransitionPolicy.DIRECT,
+                on_command=events.append,
+                monotonic=StepClock(step_s=5.0),
+                sleeper=lambda _: None,
+            )
+
+        component_attempt = next(
+            event
+            for event in events
+            if event["event"] == "field_command_attempt"
+            and event["command_kind"] == "set_field_component"
+        )
+        component_result = next(
+            event
+            for event in events
+            if event["event"] == "field_command_result"
+            and event["command_index"] == component_attempt["command_index"]
+        )
+        self.assertFalse(component_result["success"])
+        self.assertEqual(component_result["acknowledgement"], "not_attempted")
+        self.assertEqual(component_result["dll_return_code"], 7)
+
+    def test_vector_plan_uses_the_other_verified_order_when_one_corner_is_unsafe(
+        self,
+    ) -> None:
         self.connect()
         self.dll.field_control = 1
         mixed_transient = VectorField(0.3, 0.2)
@@ -467,7 +602,7 @@ class AttoDryDriverTests(unittest.TestCase):
                 "set_field_z"
             )
             observed.append((target, writes))
-            if target == mixed_transient:
+            if target == float32_field(mixed_transient):
                 raise SafetyViolation("injected mixed X/Z transient rejection")
             return validate_vector_field(target, limits)
 
@@ -476,16 +611,21 @@ class AttoDryDriverTests(unittest.TestCase):
                 "attodry_control.safety.validate_vector_field",
                 side_effect=reject_mixed_transient,
             ),
-            self.assertRaisesRegex(SafetyViolation, "mixed X/Z transient"),
         ):
             self.driver.set_vector_field(
                 VectorField(0.3, 0.4),
                 max_step_t=0.25,
             )
 
-        self.assertIn((mixed_transient, 0), observed)
-        self.assertNotIn("set_field_x", self.dll.events)
-        self.assertNotIn("set_field_z", self.dll.events)
+        self.assertIn((float32_field(mixed_transient), 0), observed)
+        self.assertEqual(
+            [
+                event
+                for event in self.dll.events
+                if event in {"set_field_x", "set_field_z"}
+            ],
+            ["set_field_x", "set_field_z", "set_field_z", "set_field_x"],
+        )
 
     def test_vector_plan_rejects_float32_rounding_outside_three_tesla(self) -> None:
         self.connect()
@@ -555,7 +695,7 @@ class AttoDryDriverTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(written_axes, ["x", "z"] * 3)
+        self.assertEqual(written_axes, ["z", "x"] * 3)
         self.assertEqual(len(sleeps), 12)
         self.assertEqual(
             [sample[3] for sample in samples if sample[2] == "waypoint_confirmed"],

@@ -138,10 +138,13 @@ def run(
     )
     writer = JsonlEventWriter(progress_path, create=True, wall_time=wall_time)
     completed_points = 0
+    field_command_attempt_count = 0
+    field_command_result_count = 0
     audit_failure: BaseException | None = None
 
     def emit(event: dict[str, object]) -> None:
         nonlocal audit_failure, completed_points
+        nonlocal field_command_attempt_count, field_command_result_count
         try:
             writer.append(event)
         except BaseException as exc:
@@ -150,6 +153,10 @@ def run(
             raise
         if event.get("event") == "point_completed":
             completed_points += 1
+        elif event.get("event") == "field_command_attempt":
+            field_command_attempt_count += 1
+        elif event.get("event") == "field_command_result":
+            field_command_result_count += 1
 
     stability = config.magnet.stability
     try:
@@ -179,6 +186,7 @@ def run(
                     "connection_timeout_s": cryostat.connection_timeout_s,
                 },
                 "ordered_points": [asdict(point) for point in points],
+                "transition_policy": config.run.transition_policy.value,
                 "max_step_t": config.run.max_step_t,
                 "limits": asdict(config.magnet.limits),
                 "field_stability": {
@@ -194,6 +202,11 @@ def run(
                         FIELD_SETPOINT_READBACK_TOLERANCE_T
                     ),
                     "command_ack_timeout_s": FIELD_COMMAND_ACK_TIMEOUT_S,
+                },
+                "field_command_audit": {
+                    "protocol": "attempt-result-v1",
+                    "required": True,
+                    "float32_encoding": "ieee754-binary32-bits-hex",
                 },
                 "normal_end_field_policy": (
                     config.cleanup.normal_end_field_policy.value
@@ -242,6 +255,7 @@ def run(
             driver,
             points,
             config.run.max_step_t,
+            transition_policy=config.run.transition_policy,
             on_event=emit,
             monotonic=monotonic,
             sleeper=sleeper,
@@ -258,6 +272,8 @@ def run(
                 emit=emit,
                 monotonic=monotonic,
                 sleeper=sleeper,
+                phase="normal_zero_cleanup",
+                transition_policy=config.run.transition_policy.value,
             )
             zero_verified = True
             _emit_best_effort(
@@ -298,6 +314,8 @@ def run(
                     emit=emit,
                     monotonic=monotonic,
                     sleeper=sleeper,
+                    phase="exception_zero_cleanup",
+                    transition_policy=config.run.transition_policy.value,
                 )
                 zero_verified = not communication_uncertain
                 _emit_best_effort(
@@ -402,6 +420,12 @@ def run(
         "last_confirmed_state": last_confirmed_state,
         "progress_jsonl": str(progress_path),
         "audit_complete": audit_failure is None,
+        "field_command_attempt_count": field_command_attempt_count,
+        "field_command_result_count": field_command_result_count,
+        "field_command_audit_complete": (
+            audit_failure is None
+            and field_command_attempt_count == field_command_result_count
+        ),
     }
     if primary_error is not None:
         summary["error_type"] = type(primary_error).__name__
@@ -417,6 +441,7 @@ def run(
                     "completed": False,
                     "manual_verification_required": True,
                     "audit_complete": False,
+                    "field_command_audit_complete": False,
                     "error_type": type(audit_error).__name__,
                     "error": str(audit_error),
                 }
@@ -424,6 +449,7 @@ def run(
         else:
             primary_error.add_note(f"Terminal audit append also failed: {audit_error}")
             summary["audit_complete"] = False
+            summary["field_command_audit_complete"] = False
     finally:
         writer.close()
     print(json.dumps(summary, ensure_ascii=False), flush=True)
@@ -438,6 +464,8 @@ def _request_monitored_zero(
     emit: Callable[[dict[str, object]], None],
     monotonic: Callable[[], float],
     sleeper: Callable[[float], None],
+    phase: str,
+    transition_policy: str,
 ) -> CryostatState:
     # Audit I/O must never interrupt a safety cleanup after it has begun.  The
     # caller's emitter latches the first failure so the run is still rejected.
@@ -461,16 +489,29 @@ def _request_monitored_zero(
             },
         )
 
+    def command(event: dict[str, object]) -> None:
+        _emit_best_effort(emit, event)
+
     driver.ensure_field_control(
         True,
         monotonic=monotonic,
         sleeper=sleeper,
         on_sample=sample,
+        on_command=command,
+        command_context={
+            "phase": phase,
+            "transition_policy": transition_policy,
+        },
     )
     state = driver.request_zero_field(
         monotonic=monotonic,
         sleeper=sleeper,
         on_sample=sample,
+        on_command=command,
+        command_context={
+            "phase": phase,
+            "transition_policy": transition_policy,
+        },
     )
     tolerance = driver.field_stability.criteria.tolerance
     if tolerance is None or tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T:

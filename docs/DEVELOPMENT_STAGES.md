@@ -447,10 +447,13 @@ and separately gated.
 - Added temperature, VTI, X/Z field, setpoint, control, and error readback with
   last-confirmed-state preservation.
 - Added read-before-toggle idempotent temperature/field-control operations.
-- Added project-limit validation, zero-detour setpoint planning, rolling stable
-  waits, and monitored verified zeroing. These discrete requested/read-back
-  setpoints do not establish the continuous physical trajectory, constant angle,
-  constant magnitude, or physical ramp rate between setpoints.
+- Added project-limit validation, explicit `direct`/`via_zero` setpoint planning,
+  rolling stable waits, and monitored verified zeroing. `direct` is segmented
+  adjacent-vector planning, whereas `via_zero` is the explicit conservative
+  detour; software never silently substitutes one for the other. These discrete
+  requested/read-back setpoints do not establish the continuous physical
+  trajectory, constant angle, constant magnitude, or physical ramp rate between
+  setpoints.
 - Added fake-DLL return-code, timeout, write-authorization, setpoint-planning,
   stability, and vector-limit contract tests before laboratory use.
 - Target-computer preflight confirmed 64-bit Python, an AMD64 PE32+ vendor DLL
@@ -668,12 +671,14 @@ new, stage-specific authorization.
   X/Z `points` list is neither sorted nor deduplicated and is never expanded into
   a Cartesian grid; duplicate entries retain their own point indices and events.
 - Added pure planning and standalone execution for one target or an ordered point
-  list. Every target, generated zero-detour setpoint waypoint, and the mixed
-  X-first/Z-second setpoint is prevalidated against component limits and
-  `sqrt(Bx^2 + Bz^2) <= 3 T`, including the exact float32 values passed to the
-  DLL. `max_step_t` must exceed the 1e-5 T acknowledgement resolution. The plan
-  is recalculated from the last confirmed setpoint after connection/control
-  acknowledgement and before setting writes.
+  list. `transition_policy` is explicit and required: `direct` segments adjacent
+  vector endpoints while `via_zero` chooses the conservative zero detour. Every
+  target, generated float32 setpoint waypoint, and both X→Z / Z→X mixed corners
+  are prevalidated against component limits and `sqrt(Bx^2 + Bz^2) <= 3 T`.
+  A waypoint is executed only with a dynamically selected verified axis order;
+  there is no fixed X-first assumption. `max_step_t` must exceed the 1e-5 T
+  acknowledgement resolution. The plan is recalculated from the last confirmed
+  setpoint after connection/control acknowledgement and before setting writes.
 - `max_step_t` constrains requested setpoint-waypoint spacing only. The module does
   require setpoint acknowledgement and actual-field stability at every internal
   waypoint, explicit target, and cleanup zero. It still does not observe or
@@ -697,24 +702,32 @@ new, stage-specific authorization.
   monitored zero on normal completion. `scan` requires an additional ordered-scan
   gate, preserves every listed point, and applies the configured normal `hold` or
   `zero` policy. Both routes require exception policy `zero`.
-- Normal zero and failure/`Ctrl+C` cleanup wait for a zero setpoint acknowledgement
-  and actual-field stability within the configured tolerance. Communication
-  uncertainty is never reclassified as verified zero even if a later cleanup read
-  appears safe. If the normal-zero path fails or is interrupted, cleanup makes an
-  independent monitored-zero retry. Failed/unknown zero, close, connection, audit,
-  non-finite readback, or last-state evidence sets `manual_verification_required`
-  and retains the last confirmed state. Cleanup does not disable field control: it
-  disconnects with control confirmed enabled at zero, or at the final target for a
-  normal `hold` scan.
+- Normal zero and failure/`Ctrl+C` cleanup wait for a zero setpoint acknowledgement,
+  actual-field stability within the configured tolerance, enabled field control,
+  and clear error state. `isZeroingField`, vendor action/error messages, and vendor
+  logs are optional diagnostics, never zero proof. Communication uncertainty is
+  never reclassified as verified zero even if a later cleanup read appears safe. If
+  the normal-zero path fails or is interrupted, cleanup makes an independent
+  monitored-zero retry. Failed/unknown zero, close, connection, audit, non-finite
+  readback, or last-state evidence sets `manual_verification_required` and retains
+  the last confirmed state. Cleanup does not disable field control: it disconnects
+  with control confirmed enabled at zero, or at the final target for a normal `hold`
+  scan.
 - Added one canonical per-run JSONL audit stream. Every event carries schema/run/
   index/time metadata and each append is flushed and fsynced. The start record
   includes config hash, source provenance, interface, authorizations, full
-  stability/driver protocol, limits, points, and cleanup policy. Partial, rejected,
-  interrupted, setpoint-transition, stability, cleanup, disconnect, and terminal
-  events remain in that stream; no secondary final JSON/CSV is treated as truth.
-  An audit-write/`fsync` failure is latched as rejection but cannot interrupt an
-  otherwise possible zero cleanup. The writer best-effort rolls back an uncertain
-  append, so a failed terminal `fsync` cannot leave a certified completion.
+  stability/driver protocol, limits, points, transition policy, cleanup policy,
+  and the required exact-field-command audit descriptor. Every field-control
+  toggle, X/Z component command, and sweep-to-zero command records a durable
+  pre-command attempt plus a DLL-return/post-acknowledgement result, including
+  IEEE-754 binary32 component bits and command context. Planned and executed
+  waypoint/path evidence is retained. Partial, rejected, interrupted,
+  setpoint-transition, stability, cleanup, disconnect, and terminal events remain
+  in that stream; no secondary final JSON/CSV is treated as truth. An audit-write/
+  `fsync` failure is latched as rejection and stops the normal write path but cannot
+  interrupt an otherwise possible best-effort zero cleanup. The writer best-effort
+  rolls back an uncertain append, so a failed terminal `fsync` cannot leave a
+  certified completion.
 - Added `attodry-field-monitor`, which reads only a supplied JSONL file. It imports
   no attoDRY driver, opens no DLL/controller, validates stream/terminal integrity,
   and reports a torn/no-terminal/inconsistent stream as incomplete and requiring
@@ -746,13 +759,24 @@ new, stage-specific authorization.
   No DLL was loaded, and no hardware was connected or operated. This
   completes M2 only; the earlier generic 10-second attoDRY record still does not
   replace M3.
+- The subsequent local-only transition/audit-contract extension keeps that stage
+  boundary intact: it adds required `direct`/`via_zero` policy selection, exact
+  float32 endpoint/corner verification, dynamic verified axis order, complete
+  execution-waypoint/path evidence, and command attempt/result transcript checks
+  against pure/fake DLLs. It loaded no real DLL and made no connection or hardware
+  command. The historical `e0924f1` target snapshot must not be cited as target-
+  offline validation of this later revision; a later M2 target claim needs a fresh
+  DLL-free target run.
 - M3 remains unexecuted. Its exact current-revision write-disabled command is
   `python -m attodry_control.attodry_test --config config/hardware.local.toml
   --samples 10 --interval-s 1 --authorize-connection`. It requires a new connection
   authorization and has no write authorization.
-- M4 remains additionally blocked on exact float32 toggle/component command-attempt/
-  result events, which the current JSONL does not yet provide. M3--M5 must run with
-  the vendor GUI and every competing attoDRY controller process disconnected.
+- The exact float32 toggle/component command-attempt/result transcript is now an
+  offline M4 prerequisite rather than a missing feature. M4 nevertheless remains
+  gated by M3 read-only commissioning, fresh user-selected smallest-movement and
+  connection/write authorization, real evidence, and the vendor GUI plus every
+  competing attoDRY controller process being disconnected. M3--M5 remain
+  uncommissioned.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 

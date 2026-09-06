@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from collections import deque
 import ctypes
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
 from pathlib import Path
 import time
-from typing import Callable
+from typing import Callable, Mapping
 
 from .config import (
     ControlConfig,
@@ -16,10 +16,17 @@ from .config import (
 )
 from .models import CryostatState, VectorField
 from .safety import (
+    AxisWriteOrder,
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
+    FieldTransitionPlan,
+    FieldTransitionPolicy,
     MagnetLimits,
-    plan_zero_detour,
+    float32_bits_hex,
+    float32_field,
+    plan_field_transition,
+    plan_field_waypoint,
+    serialize_float32_field,
     validate_vector_field,
 )
 from .stability import (
@@ -35,6 +42,7 @@ FieldSampleCallback = Callable[
     [CryostatState, float, str, int | None],
     None,
 ]
+FieldCommandCallback = Callable[[dict[str, object]], None]
 
 
 class AttoDryError(RuntimeError):
@@ -42,7 +50,9 @@ class AttoDryError(RuntimeError):
 
 
 class AttoDryDllError(AttoDryError):
-    pass
+    def __init__(self, message: str, *, return_code: int | None = None) -> None:
+        super().__init__(message)
+        self.return_code = return_code
 
 
 class AttoDryTimeout(AttoDryError):
@@ -57,6 +67,17 @@ class AttoDryAuthorizationError(AttoDryError):
 class HeaterPowerState:
     sample_w: float
     vti_w: float
+
+
+@dataclass(frozen=True, slots=True)
+class _FieldCommandRecord:
+    """Private correlation data for one durable field-command transcript pair."""
+
+    command_index: int
+    command_kind: str
+    dll_symbol: str
+    callback: FieldCommandCallback
+    payload: dict[str, object]
 
 
 def load_attodry_dll(path: str | Path) -> object:
@@ -196,6 +217,7 @@ class AttoDryDriver:
         self.writes_authorized = writes_authorized
         self.connected = False
         self.last_confirmed_state: CryostatState | None = None
+        self._next_field_command_index = 0
 
     @classmethod
     def from_config(
@@ -423,6 +445,8 @@ class AttoDryDriver:
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: FieldSampleCallback | None = None,
+        on_command: FieldCommandCallback | None = None,
+        command_context: Mapping[str, object] | None = None,
     ) -> None:
         def record(state: CryostatState, elapsed_s: float) -> None:
             if on_sample is not None:
@@ -474,6 +498,11 @@ class AttoDryDriver:
             sleeper=sleeper,
             on_sample=record,
             before_toggle=validate_safe_takeover,
+            field_command_callback=on_command,
+            field_command_context=command_context,
+            field_command_kind=(
+                "toggle_field_control" if on_command is not None else None
+            ),
         )
 
     def set_vector_field(
@@ -482,9 +511,13 @@ class AttoDryDriver:
         *,
         max_step_t: float = 0.05,
         planning_start: VectorField | None = None,
+        transition_plan: FieldTransitionPlan | None = None,
+        transition_policy: FieldTransitionPolicy = FieldTransitionPolicy.VIA_ZERO,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: FieldSampleCallback | None = None,
+        on_command: FieldCommandCallback | None = None,
+        command_context: Mapping[str, object] | None = None,
     ) -> CryostatState:
         self._require_write_authorized()
         if (
@@ -497,6 +530,10 @@ class AttoDryDriver:
                 "acknowledgement tolerance."
             )
         checked = validate_vector_field(target, self.limits)
+        try:
+            policy = FieldTransitionPolicy(transition_policy)
+        except ValueError as exc:
+            raise ValueError("transition_policy must be 'direct' or 'via_zero'.") from exc
         state = self.read_state()
         if on_sample is not None:
             on_sample(state, 0.0, "setpoint_preflight", None)
@@ -508,7 +545,37 @@ class AttoDryDriver:
                 raise AttoDryError(
                     "Confirmed setpoint does not match the supplied planning start."
                 )
-        if self._field_matches(state.field_setpoint, checked):
+        if transition_plan is None:
+            plan = plan_field_transition(
+                plan_start,
+                checked,
+                max_step_t,
+                policy,
+                self.limits,
+            )
+        else:
+            plan = transition_plan
+            if plan.transition_policy is not policy:
+                raise AttoDryError(
+                    "Supplied transition plan policy does not match the requested "
+                    "transition policy."
+                )
+            if plan.requested_target != checked:
+                raise AttoDryError(
+                    "Supplied transition plan target does not match the requested field."
+                )
+            if not self._field_matches(plan.start_command, plan_start):
+                raise AttoDryError(
+                    "Supplied transition plan start does not match the planning start."
+                )
+            if not self._field_matches(
+                plan.target_command, float32_field(checked)
+            ):
+                raise AttoDryError(
+                    "Supplied transition plan target is not the exact float32 command."
+                )
+
+        if self._field_matches(state.field_setpoint, plan.target_command):
             if on_sample is not None:
                 on_sample(state, 0.0, "setpoint_already_confirmed", None)
             return state
@@ -540,110 +607,182 @@ class AttoDryDriver:
                 on_sample=stability_sample,
             )
 
-        # Planning validates the complete waypoint sequence and every X-first
-        # mixed transient before the first setting write is issued.
-        waypoints = plan_zero_detour(
-            plan_start,
-            checked,
-            max_step_t,
-            self.limits,
-        )
         # Do not begin a new setpoint path while the actual field is still
         # converging toward the confirmed starting setpoint.
         current_state = wait_at_setpoint(
-            plan_start,
+            plan.start_command,
             phase="planning_start_stability",
             waypoint_index=None,
         )
-        for waypoint_index, point in enumerate(waypoints):
-            previous_setpoint = current_state.field_setpoint
-            command_x = float(ctypes.c_float(point.bx_t).value)
-            after_x = VectorField(point.bx_t, previous_setpoint.bz_t)
-            validate_vector_field(
-                VectorField(command_x, previous_setpoint.bz_t), self.limits
-            )
-            if (
-                abs(command_x - previous_setpoint.bx_t)
-                > max_step_t + FIELD_SETPOINT_READBACK_TOLERANCE_T
+        for waypoint_index, planned_waypoint in enumerate(plan.waypoints):
+            if not self._field_matches(
+                current_state.field_setpoint,
+                plan.start_command
+                if waypoint_index == 0
+                else plan.waypoints[waypoint_index - 1].command_field,
             ):
                 raise AttoDryError(
-                    "Confirmed X setpoint fell behind the prevalidated path; "
-                    "refusing a component step larger than max_step_t."
+                    "Confirmed setpoint no longer matches the prevalidated field "
+                    "transition; refusing to infer a new path."
                 )
-            if not math.isclose(
-                previous_setpoint.bx_t,
-                point.bx_t,
-                rel_tol=0.0,
-                abs_tol=FIELD_SETPOINT_READBACK_TOLERANCE_T,
-            ):
-                self._call(
-                    "setUserMagneticFieldX",
-                    "AttoDRY_Interface_setUserMagneticFieldX",
-                    ctypes.c_float(command_x),
-                )
-                current_state = self._wait_for_field_setpoint(
-                    after_x,
-                    waypoint_index=waypoint_index,
-                    phase="setpoint_x_ack",
-                    monotonic=monotonic,
-                    sleeper=sleeper,
-                    on_sample=on_sample,
-                )
-            elif on_sample is not None:
-                on_sample(
-                    current_state,
-                    0.0,
-                    "setpoint_x_unchanged",
-                    waypoint_index,
-                )
-
-            command_z = float(ctypes.c_float(point.bz_t).value)
-            after_z = VectorField(current_state.field_setpoint.bx_t, point.bz_t)
-            validate_vector_field(
-                VectorField(current_state.field_setpoint.bx_t, command_z),
+            # Re-evaluate both mixed corners against the just-confirmed setpoint.
+            # Readback quantization or an external change must never cause the
+            # preplanned axis order to be trusted blindly.
+            execution_waypoint = plan_field_waypoint(
+                current_state.field_setpoint,
+                planned_waypoint.command_field,
+                max_step_t,
                 self.limits,
             )
-            if (
-                abs(command_z - current_state.field_setpoint.bz_t)
-                > max_step_t + FIELD_SETPOINT_READBACK_TOLERANCE_T
-            ):
-                raise AttoDryError(
-                    "Confirmed Z setpoint fell behind the prevalidated path; "
-                    "refusing a component step larger than max_step_t."
+            if on_command is not None:
+                on_command(
+                    {
+                        **dict(command_context or {}),
+                        "event": "field_waypoint_execution",
+                        "waypoint_index": waypoint_index,
+                        "planned_requested_field": asdict(
+                            planned_waypoint.requested_field
+                        ),
+                        "confirmed_predecessor": serialize_float32_field(
+                            current_state.field_setpoint
+                        ),
+                        "command_field": serialize_float32_field(
+                            execution_waypoint.command_field
+                        ),
+                        "x_then_z_mixed_corner": serialize_float32_field(
+                            execution_waypoint.x_then_z_mixed_corner
+                        ),
+                        "z_then_x_mixed_corner": serialize_float32_field(
+                            execution_waypoint.z_then_x_mixed_corner
+                        ),
+                        "axis_order": execution_waypoint.axis_order.value,
+                    }
                 )
-            if not math.isclose(
-                current_state.field_setpoint.bz_t,
-                point.bz_t,
-                rel_tol=0.0,
-                abs_tol=FIELD_SETPOINT_READBACK_TOLERANCE_T,
-            ):
-                self._call(
-                    "setUserMagneticFieldZ",
-                    "AttoDRY_Interface_setUserMagneticFieldZ",
-                    ctypes.c_float(command_z),
+
+            axis_sequence = (
+                ("x", "setUserMagneticFieldX", "AttoDRY_Interface_setUserMagneticFieldX")
+                if execution_waypoint.axis_order is AxisWriteOrder.X_THEN_Z
+                else ("z", "setUserMagneticFieldZ", "AttoDRY_Interface_setUserMagneticFieldZ"),
+                ("z", "setUserMagneticFieldZ", "AttoDRY_Interface_setUserMagneticFieldZ")
+                if execution_waypoint.axis_order is AxisWriteOrder.X_THEN_Z
+                else ("x", "setUserMagneticFieldX", "AttoDRY_Interface_setUserMagneticFieldX"),
+            )
+            for axis_order_index, (axis, label, symbol) in enumerate(axis_sequence):
+                previous_setpoint = current_state.field_setpoint
+                command_value = (
+                    execution_waypoint.command_field.bx_t
+                    if axis == "x"
+                    else execution_waypoint.command_field.bz_t
                 )
-                current_state = self._wait_for_field_setpoint(
-                    after_z,
-                    waypoint_index=waypoint_index,
-                    phase="setpoint_z_ack",
-                    monotonic=monotonic,
-                    sleeper=sleeper,
-                    on_sample=on_sample,
+                requested_value = (
+                    planned_waypoint.requested_field.bx_t
+                    if axis == "x"
+                    else planned_waypoint.requested_field.bz_t
                 )
-            elif on_sample is not None:
-                on_sample(
-                    current_state,
-                    0.0,
-                    "setpoint_z_unchanged",
-                    waypoint_index,
+                expected_setpoint = (
+                    VectorField(command_value, previous_setpoint.bz_t)
+                    if axis == "x"
+                    else VectorField(previous_setpoint.bx_t, command_value)
+                )
+                validate_vector_field(expected_setpoint, self.limits)
+                if (
+                    math.hypot(
+                        expected_setpoint.bx_t - previous_setpoint.bx_t,
+                        expected_setpoint.bz_t - previous_setpoint.bz_t,
+                    )
+                    > max_step_t + FIELD_SETPOINT_READBACK_TOLERANCE_T
+                ):
+                    raise AttoDryError(
+                        "Confirmed component setpoint fell behind the prevalidated "
+                        "path; refusing a step larger than max_step_t."
+                    )
+                command_payload = {
+                    **dict(command_context or {}),
+                    "waypoint_index": waypoint_index,
+                    "axis_order": execution_waypoint.axis_order.value,
+                    "axis_order_index": axis_order_index,
+                    "axis": axis,
+                    "requested_value_t": requested_value,
+                    "float32_value_t": command_value,
+                    "float32_ieee754_bits_hex": float32_bits_hex(command_value),
+                    "previous_setpoint": serialize_float32_field(previous_setpoint),
+                    "expected_setpoint": serialize_float32_field(expected_setpoint),
+                }
+                current_value = (
+                    previous_setpoint.bx_t if axis == "x" else previous_setpoint.bz_t
+                )
+                if math.isclose(
+                    current_value,
+                    command_value,
+                    rel_tol=0.0,
+                    abs_tol=FIELD_SETPOINT_READBACK_TOLERANCE_T,
+                ):
+                    if on_command is not None:
+                        on_command(
+                            {
+                                **command_payload,
+                                "event": "field_component_skipped",
+                                "reason": "already_within_setpoint_ack_tolerance",
+                            }
+                        )
+                    if on_sample is not None:
+                        on_sample(
+                            current_state,
+                            0.0,
+                            f"setpoint_{axis}_unchanged",
+                            waypoint_index,
+                        )
+                    continue
+                command = self._begin_field_command(
+                    command_kind="set_field_component",
+                    dll_symbol=symbol,
+                    callback=on_command,
+                    payload=command_payload,
+                )
+                try:
+                    return_code = self._call(
+                        label,
+                        symbol,
+                        ctypes.c_float(command_value),
+                    )
+                except BaseException as exc:
+                    self._record_field_command_failure(
+                        command,
+                        exc,
+                        acknowledgement="not_attempted",
+                    )
+                    raise
+                try:
+                    current_state = self._wait_for_field_setpoint(
+                        expected_setpoint,
+                        waypoint_index=waypoint_index,
+                        phase=f"setpoint_{axis}_ack",
+                        monotonic=monotonic,
+                        sleeper=sleeper,
+                        on_sample=on_sample,
+                    )
+                except BaseException as exc:
+                    self._record_field_command_failure(
+                        command,
+                        exc,
+                        acknowledgement="failed",
+                        dll_return_code=return_code,
+                    )
+                    raise
+                self._record_field_command_result(
+                    command,
+                    success=True,
+                    dll_return_code=return_code,
+                    acknowledgement="confirmed",
+                    state=current_state,
                 )
 
             # Intermediate waypoints must be reached and stable before another
             # component write.  The executor owns the final explicit-target
             # dwell so point completion has exactly one stability window.
-            if waypoint_index < len(waypoints) - 1:
+            if waypoint_index < len(plan.waypoints) - 1:
                 current_state = wait_at_setpoint(
-                    point,
+                    execution_waypoint.command_field,
                     phase="waypoint_stability",
                     waypoint_index=waypoint_index,
                 )
@@ -656,7 +795,7 @@ class AttoDryDriver:
                         waypoint_index,
                     )
 
-        if not self._field_matches(current_state.field_setpoint, checked):
+        if not self._field_matches(current_state.field_setpoint, plan.target_command):
             raise AttoDryError("Vector-field setpoint readback does not match target.")
         return current_state
 
@@ -803,38 +942,72 @@ class AttoDryDriver:
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: FieldSampleCallback | None = None,
+        on_command: FieldCommandCallback | None = None,
+        command_context: Mapping[str, object] | None = None,
     ) -> CryostatState:
         self._require_write_authorized()
         state = self.read_state()
         if on_sample is not None:
             on_sample(state, 0.0, "zero_preflight", None)
         self._validate_field_state(state, require_control=True)
-        self._call("sweepFieldToZero", "AttoDRY_Interface_sweepFieldToZero")
-        zero = VectorField(0.0, 0.0)
-        self._wait_for_field_setpoint(
-            zero,
-            waypoint_index=None,
-            phase="zero_setpoint_ack",
-            monotonic=monotonic,
-            sleeper=sleeper,
-            on_sample=on_sample,
+        command = self._begin_field_command(
+            command_kind="sweep_field_to_zero",
+            dll_symbol="AttoDRY_Interface_sweepFieldToZero",
+            callback=on_command,
+            payload=dict(command_context or {}),
         )
-        confirmed = self.wait_for_field(
-            zero,
-            monotonic=monotonic,
-            sleeper=sleeper,
-            on_sample=on_sample,
-        )
-        tolerance = self.field_stability.criteria.tolerance
-        if (
-            tolerance is None
-            or confirmed.field.magnitude_t > tolerance
-            or confirmed.field_setpoint.magnitude_t > tolerance
-        ):
-            raise AttoDryError(
-                "Zero-field actual or setpoint readback is outside the configured "
-                "field tolerance."
+        try:
+            return_code = self._call(
+                "sweepFieldToZero", "AttoDRY_Interface_sweepFieldToZero"
             )
+        except BaseException as exc:
+            self._record_field_command_failure(
+                command,
+                exc,
+                acknowledgement="not_attempted",
+            )
+            raise
+        zero = VectorField(0.0, 0.0)
+        try:
+            self._wait_for_field_setpoint(
+                zero,
+                waypoint_index=None,
+                phase="zero_setpoint_ack",
+                monotonic=monotonic,
+                sleeper=sleeper,
+                on_sample=on_sample,
+            )
+            confirmed = self.wait_for_field(
+                zero,
+                monotonic=monotonic,
+                sleeper=sleeper,
+                on_sample=on_sample,
+            )
+            tolerance = self.field_stability.criteria.tolerance
+            if (
+                tolerance is None
+                or confirmed.field.magnitude_t > tolerance
+                or confirmed.field_setpoint.magnitude_t > tolerance
+            ):
+                raise AttoDryError(
+                    "Zero-field actual or setpoint readback is outside the configured "
+                    "field tolerance."
+                )
+        except BaseException as exc:
+            self._record_field_command_failure(
+                command,
+                exc,
+                acknowledgement="failed",
+                dll_return_code=return_code,
+            )
+            raise
+        self._record_field_command_result(
+            command,
+            success=True,
+            dll_return_code=return_code,
+            acknowledgement="confirmed",
+            state=confirmed,
+        )
         return confirmed
 
     def close(self) -> None:
@@ -866,6 +1039,9 @@ class AttoDryDriver:
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: Callable[[CryostatState, float], None] | None = None,
         before_toggle: Callable[[CryostatState], None] | None = None,
+        field_command_callback: FieldCommandCallback | None = None,
+        field_command_context: Mapping[str, object] | None = None,
+        field_command_kind: str | None = None,
     ) -> None:
         state = self.read_state()
         if on_sample is not None:
@@ -876,34 +1052,72 @@ class AttoDryDriver:
         self._require_write_authorized()
         if before_toggle is not None:
             before_toggle(state)
-        self._call(toggle_label, toggle_symbol)
-        started = monotonic()
-        while True:
-            confirmed = self.read_state()
-            elapsed = monotonic() - started
-            if on_sample is not None:
-                on_sample(confirmed, elapsed)
-            self._require_clear_error(confirmed)
-            reached = bool(getattr(confirmed, state_attribute)) == enabled
-            if acknowledgment_timeout_s <= 0:
-                if reached:
-                    return
-                raise AttoDryError(
-                    f"{state_attribute} readback did not reach {enabled}."
-                )
-            if elapsed >= acknowledgment_timeout_s:
-                raise AttoDryTimeout(
-                    f"{state_attribute} readback did not reach {enabled} within "
-                    f"{acknowledgment_timeout_s:g} s."
-                )
-            if reached:
-                return
-            sleeper(
-                min(
-                    acknowledgment_poll_interval_s,
-                    acknowledgment_timeout_s - elapsed,
-                )
+        if (field_command_callback is None) != (field_command_kind is None):
+            raise ValueError(
+                "field-command callback and kind must be provided together."
             )
+        command = self._begin_field_command(
+            command_kind=field_command_kind,
+            dll_symbol=toggle_symbol,
+            callback=field_command_callback,
+            payload={
+                **dict(field_command_context or {}),
+                "requested_enabled": enabled,
+                "pre_state": asdict(state),
+            },
+        )
+        try:
+            return_code = self._call(toggle_label, toggle_symbol)
+        except BaseException as exc:
+            self._record_field_command_failure(
+                command,
+                exc,
+                acknowledgement="not_attempted",
+            )
+            raise
+        try:
+            started = monotonic()
+            while True:
+                confirmed = self.read_state()
+                elapsed = monotonic() - started
+                if on_sample is not None:
+                    on_sample(confirmed, elapsed)
+                self._require_clear_error(confirmed)
+                reached = bool(getattr(confirmed, state_attribute)) == enabled
+                if acknowledgment_timeout_s <= 0:
+                    if reached:
+                        break
+                    raise AttoDryError(
+                        f"{state_attribute} readback did not reach {enabled}."
+                    )
+                if elapsed >= acknowledgment_timeout_s:
+                    raise AttoDryTimeout(
+                        f"{state_attribute} readback did not reach {enabled} within "
+                        f"{acknowledgment_timeout_s:g} s."
+                    )
+                if reached:
+                    break
+                sleeper(
+                    min(
+                        acknowledgment_poll_interval_s,
+                        acknowledgment_timeout_s - elapsed,
+                    )
+                )
+        except BaseException as exc:
+            self._record_field_command_failure(
+                command,
+                exc,
+                acknowledgement="failed",
+                dll_return_code=return_code,
+            )
+            raise
+        self._record_field_command_result(
+            command,
+            success=True,
+            dll_return_code=return_code,
+            acknowledgement="confirmed",
+            state=confirmed,
+        )
 
     def _wait_for_field_setpoint(
         self,
@@ -1029,10 +1243,110 @@ class AttoDryDriver:
             raise AttoDryError(f"{label} returned invalid control state {value}.")
         return bool(value)
 
-    def _call(self, label: str, symbol: str, *args: object) -> None:
+    def _begin_field_command(
+        self,
+        *,
+        command_kind: str | None,
+        dll_symbol: str,
+        callback: FieldCommandCallback | None,
+        payload: Mapping[str, object],
+    ) -> _FieldCommandRecord | None:
+        if callback is None:
+            return None
+        if command_kind is None:
+            raise ValueError("A field-command audit callback requires a command kind.")
+        index = self._next_field_command_index
+        record = _FieldCommandRecord(
+            command_index=index,
+            command_kind=command_kind,
+            dll_symbol=dll_symbol,
+            callback=callback,
+            payload=dict(payload),
+        )
+        callback(
+            {
+                **record.payload,
+                "event": "field_command_attempt",
+                "command_index": record.command_index,
+                "command_kind": record.command_kind,
+                "dll_symbol": record.dll_symbol,
+            }
+        )
+        self._next_field_command_index += 1
+        return record
+
+    @staticmethod
+    def _field_command_error_payload(exc: BaseException) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        if isinstance(exc, AttoDryDllError) and exc.return_code is not None:
+            payload["dll_return_code"] = exc.return_code
+        return payload
+
+    def _record_field_command_result(
+        self,
+        command: _FieldCommandRecord | None,
+        *,
+        success: bool,
+        dll_return_code: int | None,
+        acknowledgement: str,
+        state: CryostatState | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        if command is None:
+            return
+        event: dict[str, object] = {
+            **command.payload,
+            "event": "field_command_result",
+            "command_index": command.command_index,
+            "command_kind": command.command_kind,
+            "dll_symbol": command.dll_symbol,
+            "success": success,
+            "dll_return_code": dll_return_code,
+            "acknowledgement": acknowledgement,
+        }
+        if state is not None:
+            event["state"] = asdict(state)
+        if error is not None:
+            event.update(self._field_command_error_payload(error))
+        command.callback(event)
+
+    def _record_field_command_failure(
+        self,
+        command: _FieldCommandRecord | None,
+        exc: BaseException,
+        *,
+        acknowledgement: str,
+        dll_return_code: int | None = None,
+    ) -> None:
+        if command is None:
+            return
+        if dll_return_code is None and isinstance(exc, AttoDryDllError):
+            dll_return_code = exc.return_code
+        try:
+            self._record_field_command_result(
+                command,
+                success=False,
+                dll_return_code=dll_return_code,
+                acknowledgement=acknowledgement,
+                error=exc,
+            )
+        except BaseException as audit_error:
+            if audit_error is not exc:
+                exc.add_note(
+                    "Could not append field-command failure evidence: "
+                    f"{audit_error}"
+                )
+
+    def _call(self, label: str, symbol: str, *args: object) -> int:
         code = int(getattr(self.dll, symbol)(*args))
         if code != 0:
-            raise AttoDryDllError(f"{label} returned DLL error code {code}.")
+            raise AttoDryDllError(
+                f"{label} returned DLL error code {code}.", return_code=code
+            )
+        return code
 
     def _require_connected(self) -> None:
         if not self.connected:

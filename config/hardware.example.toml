@@ -30,6 +30,8 @@ wait_timeout_s = 7200.0
 
 # Standalone magnetic-field commissioning/scan input. The list is used exactly
 # as written: order and duplicates are preserved, and no Cartesian grid is made.
+# Each transition is explicit: `direct` uses validated adjacent vector steps;
+# `via_zero` uses the conservative zero detour selected by this tracked example.
 # The tracked example intentionally requests zero only. Select the first real
 # movement and max_step_t in ignored hardware.local.toml, then obtain the
 # separate connection/write/scan authorization required by the command.
@@ -37,6 +39,7 @@ wait_timeout_s = 7200.0
 points = [
   { bx_t = 0.0, bz_t = 0.0 },
 ]
+transition_policy = "via_zero"
 max_step_t = 0.05
 run_name = "magnetic_field_offline_example"
 note = "Replace only after staged magnetic-field commissioning approval."

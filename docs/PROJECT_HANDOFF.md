@@ -441,8 +441,11 @@ Completed in Stage 3:
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
 DLL ABI preflight and real read-only connection validation are complete. The
 standalone magnetic-field M0--M2 implementation, local fake-DLL evidence, and
-DLL-free `LK_setup` target-offline validation are complete. Magnetic-field M3--M5
-remain uncommissioned and separately gated.
+the historical DLL-free `LK_setup` target-offline validation are complete. A later
+offline-only extension adds explicit direct/via-zero transition policy and exact
+field-command transcript requirements; the historical target snapshot applies only
+to its pinned revision. Magnetic-field M3--M5 remain uncommissioned and separately
+gated.
 
 Completed offline in Stage 4:
 
@@ -452,10 +455,12 @@ Completed offline in Stage 4:
   `last_confirmed_state` rather than inferring a new field value.
 - Added full temperature/VTI/X/Z/setpoint/control/error state reads and
   read-before-toggle idempotent control operations.
-- Added zero-detour setpoint planning, rolling stable waits, and monitored vendor
-  sweep-to-zero behavior against a fake DLL. Discrete requested/read-back
-  setpoints do not establish the continuous physical trajectory, constant angle,
-  constant magnitude, or physical ramp rate between setpoints.
+- Added explicit `direct`/`via_zero` setpoint planning, rolling stable waits, and
+  monitored vendor sweep-to-zero behavior against a fake DLL. `direct` segments
+  adjacent vectors while `via_zero` is the explicit conservative detour; there is
+  no transparent zero insertion. Discrete requested/read-back setpoints do not
+  establish the continuous physical trajectory, constant angle, constant magnitude,
+  or physical ramp rate between setpoints.
 - Target preflight found vendor DLL version 2.0 and confirmed 64-bit AMD64 PE32+
   plus all 21 required exports without calling begin/connect. The confirmed
   station-local COM port and DLL path are stored only in the ignored local TOML.
@@ -648,7 +653,8 @@ Completed offline in Stage 4:
   loaded, no `begin/connect` or hardware command ran, and the temporary clone was
   removed after its absolute cleanup path was verified.
 
-Current standalone magnetic-field module update (2026-09-03):
+Current standalone magnetic-field module update (2026-09-06; offline contract
+extension, no real DLL/hardware):
 
 - Completed the local implementation and fake-DLL evidence needed across M0--M2:
   a module-specific strict `[magnetic_field_run]` loader, pure setpoint planning,
@@ -661,12 +667,15 @@ Current standalone magnetic-field module update (2026-09-03):
   expansion. `single-target` requires exactly one entry plus separate connection
   and field-write authorization. `scan` also requires its own ordered-scan
   authorization covering every listed entry.
-- Every target, generated zero-detour setpoint waypoint, and the X-first/Z-second
-  mixed setpoint is prevalidated against component limits and
-  `sqrt(Bx^2 + Bz^2) <= 3 T`, including the exact float32 command values sent
-  through the DLL. `max_step_t` must exceed the 1e-5 T acknowledgement resolution.
-  The plan is recalculated from confirmed device setpoints after connection/control
-  acknowledgement. Actual field must be stable at the starting setpoint and each
+- `transition_policy` is required and explicit: `direct` segments each adjacent
+  vector transition into validated discrete steps; `via_zero` requests the
+  conservative zero detour. Ordered points and duplicates remain literal, and no
+  policy transparently becomes the other. Every target, float32 waypoint, and both
+  possible X→Z / Z→X mixed corners is prevalidated against component limits and
+  `sqrt(Bx^2 + Bz^2) <= 3 T`. The driver dynamically selects only a verified axis
+  order from the latest confirmed setpoint, then records the full planned and
+  executed waypoint/path. `max_step_t` must exceed the 1e-5 T acknowledgement
+  resolution. Actual field must be stable at the starting setpoint and each
   internal waypoint before the next setting write; each explicit target and cleanup
   zero also has stability evidence. Continuous motion between stable waypoints
   remains unobserved, so no physical-path, constant-angle, constant-magnitude,
@@ -684,28 +693,34 @@ Current standalone magnetic-field module update (2026-09-03):
 - A normal single-target run always executes monitored zero. An ordered scan uses
   the configured normal `hold` or `zero` policy; every exception/`Ctrl+C` path
   requires best-effort monitored zero before close. Zero is verified only after
-  zero setpoint acknowledgement and actual-field stability inside the configured
-  tolerance. Normal hold rechecks actual field against the final target as well as
-  its setpoint/control/error state, including the magnitude criterion for an exact
-  zero target. If normal zero fails or is interrupted, cleanup independently retries
-  monitored zero. Communication uncertainty remains unverified even if a later
-  cleanup read appears zero, and any uncertain zero/connection/close/audit state,
-  non-finite readback, or missing last state requires manual attoDRY/APS100
+  zero setpoint acknowledgement, actual-field stability inside the configured
+  tolerance, enabled field control, and clear error state. `isZeroingField`, vendor
+  action/error messages, and vendor logs may be recorded as optional diagnostics but
+  cannot prove zero. Normal hold rechecks actual field against the final target as
+  well as its setpoint/control/error state, including the magnitude criterion for an
+  exact zero target. If normal zero fails or is interrupted, cleanup independently
+  retries monitored zero. Communication uncertainty remains unverified even if a
+  later cleanup read appears zero, and any uncertain zero/connection/close/audit
+  state, non-finite readback, or missing last state requires manual attoDRY/APS100
   verification with the last confirmed state retained. Cleanup does not disable
   field control: it disconnects with control confirmed enabled at zero, or at the
   final target for a normal `hold` scan.
 - One JSONL is the canonical run record. Its start event includes config hash,
   source provenance, interface/config, authorization scope, full stability and
-  acknowledgement protocol, limits, points, and cleanup policy. Every event is
-  appended, flushed, and fsynced; partial/rejected/interrupted/transition/stability/
-  cleanup/disconnect evidence remains together. Audit-write/`fsync` failure is
-  latched as rejection without interrupting a still-possible zero cleanup. An
-  uncertain append is rolled back best-effort, so a failed terminal `fsync` cannot
-  leave a certified completion. The separate file-only monitor validates schema/
-  run/index/point/terminal integrity and reports a torn, inconsistent, or no-terminal
-  stream as incomplete and requiring manual verification, never as proof that the
-  producer is alive. It rejects contradictory completed records when required zero
-  is not verified or the final confirmed state is missing.
+  acknowledgement protocol, limits, points, transition policy, cleanup policy, and
+  a required exact-field-command audit descriptor. Every field-control toggle,
+  changed X/Z component, and sweep-to-zero command writes an attempt event before
+  the DLL call and a result after the return/readback acknowledgement, with command
+  index, context, DLL return code, and IEEE-754 binary32 component bits. Audit
+  failure blocks normal writes but preserves best-effort zero cleanup evidence.
+  Every event is appended, flushed, and fsynced; partial/rejected/interrupted/
+  transition/stability/cleanup/disconnect evidence remains together. An uncertain
+  append is rolled back best-effort, so a failed terminal `fsync` cannot leave a
+  certified completion. The separate file-only monitor validates schema/run/index/
+  point/terminal and command-transcript integrity and reports a torn, inconsistent,
+  or no-terminal stream as incomplete and requiring manual verification, never as
+  proof that the producer is alive. It rejects contradictory completed records when
+  required zero is not verified or the final confirmed state is missing.
 - Final focused safety/stability/config/attoDRY/magnetic/monitor verification passed
   all 182 tests in 6.533 s. The full suite passed all 450 tests in 14.373 s with 5
   optional-matplotlib skips; `python -m compileall -q src tests`, both magnetic CLI
@@ -732,6 +747,14 @@ Current standalone magnetic-field module update (2026-09-03):
   tests used injected fakes. No DLL was loaded, and no hardware was connected or
   operated.
   This evidence completes M2 only and grants no M3--M5 authorization.
+- The later direct/via-zero and exact-command-audit extension is local fake-DLL
+  work only. It preserves literal ordered/duplicate points, validates float32
+  endpoints, adjacent steps, and both mixed corners, and fails closed if a safe
+  execution order or durable audit evidence cannot be established. It did not load
+  a real DLL, call `begin/connect`, or issue a hardware command. The `e0924f1`
+  target snapshot remains historical evidence for that commit only; a later revision
+  needs its own DLL-free target-offline validation before making a new M2 target
+  claim.
 - The tracked example deliberately contains only a zero target. Real COM/DLL paths,
   real targets, and run data remain ignored/local. M3 is the next defined stage,
   but it remains unexecuted and requires new connection authorization; M4 and M5
@@ -741,9 +764,12 @@ Current standalone magnetic-field module update (2026-09-03):
   --samples 10 --interval-s 1 --authorize-connection`. It requires a new connection
   authorization, has no write authorization, and must run without a competing GUI/
   controller client.
-- M4 also needs exact float32 toggle/component command-attempt/result evidence;
-  current JSONL does not yet provide that list, so the standalone writer is not
-  M4-ready.
+- The offline JSONL/monitor now require exact float32 toggle/component command-
+  attempt/result evidence, so that former audit-contract gap is closed only in
+  offline code. M4 is still not ready to operate hardware: it first needs the
+  separately authorized M3 read-only record, a user-selected smallest target,
+  fresh connection/write authorization, a real canonical record, and no competing
+  vendor GUI/controller client.
 
 Current boundary: all hardware-free work through Stage 7, the standalone
 magnetic-field M0--M2 local implementation/fake evidence and target-offline
@@ -1201,6 +1227,13 @@ Do not copy these defects:
 - one GUI field-control branch checks the temperature-control flag;
 - one X-field stability branch reads Z during its loop.
 
+The reference's `isZeroingField` state, GUI action/error strings, and vendor log
+output are retained only as optional diagnostics in the independent module's audit.
+They do not select a transition policy, schedule a command, or prove zero: this
+project requires confirmed setpoint, actual Bx/Bz, field-control/error state, and
+the configured dwell. The reference GUI/driver is not imported or copied into the
+active hardware path.
+
 ## Required cleanup semantics
 
 Caught acquisition exception or `Ctrl+C`:
@@ -1239,9 +1272,11 @@ error code zero, and a clean DLL disconnect. PID and heater settings were not wr
    PID values automatically.
 2. Keep standalone magnetic-field M3--M5 gated. M3 may use only the exact
    write-disabled command documented above after new connection authorization.
-   Before any physical M4 attempt, add exact float32 toggle/component command-
-   attempt/result evidence to the canonical JSONL; the first movement also needs
-   an operator-selected smallest practical target and explicit write authorization.
+   The offline JSONL now has the exact float32 toggle/component command-attempt/
+   result contract, but before any physical M4 attempt it still needs a fresh M3
+   read-only record, an operator-selected smallest practical target, explicit
+   connection/write authorization, and a disconnected vendor GUI/other controller
+   client.
 3. Run Three-SMU S1 target-offline validation in `LK_setup` `lyr`, then fill
    the ignored local addresses and safety values. Any real connection or setting
    write still requires a separate plan-specific authorization.
