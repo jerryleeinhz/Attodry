@@ -44,6 +44,10 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     commands = parser.add_subparsers(dest="command", required=True)
+    describe = commands.add_parser(
+        "describe", help="Expand and validate the configured points without loading the DLL.",
+    )
+    describe.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     single = commands.add_parser(
         "single-target",
         help="Run exactly one configured target and then verify monitored zero.",
@@ -105,9 +109,25 @@ def run(
     config_path = args.config.resolve()
     config = load_magnetic_field_operation_config(config_path)
     points = config.run.points
+    if args.command == "describe":
+        print(json.dumps({
+            "hardware_connected": False,
+            "point_count": len(points),
+            "ordered_points": [asdict(point) for point in points],
+            "segment_plan": config.run.segment_plan.metadata() if config.run.segment_plan else None,
+            "transition_policy": config.run.transition_policy.value,
+            "max_step_t": config.run.max_step_t,
+            "limits": asdict(config.magnet.limits),
+            "static_validation_start": {"bx_t": 0.0, "bz_t": 0.0},
+            "live_start_requires_revalidation": True,
+            "normal_scan_end_field_policy": config.cleanup.normal_end_field_policy.value,
+            "single_target_end_field_policy": "zero",
+            "field_stability": asdict(config.magnet.stability),
+        }, indent=2))
+        return 0
     if args.command == "single-target" and len(points) != 1:
         raise ValueError(
-            "single-target requires exactly one [magnetic_field_run].points entry."
+            "single-target requires exactly one expanded [magnetic_field_run] point."
         )
     if not args.authorize_connection:
         raise AttoDryAuthorizationError(
@@ -149,6 +169,17 @@ def run(
     def emit(event: dict[str, object]) -> None:
         nonlocal audit_failure, completed_points
         nonlocal field_command_attempt_count, field_command_result_count
+        point_index = event.get("point_index")
+        segment_plan = config.run.segment_plan
+        if (
+            segment_plan is not None and isinstance(point_index, int)
+            and not isinstance(point_index, bool) and 0 <= point_index < len(points)
+        ):
+            segment_index = segment_plan.point_segment_indices[point_index]
+            event = {
+                **event, "segment_index": segment_index,
+                "sweep_direction": segment_plan.segments[segment_index].direction,
+            }
         try:
             writer.append(event)
         except BaseException as exc:
@@ -190,6 +221,8 @@ def run(
                     "connection_timeout_s": cryostat.connection_timeout_s,
                 },
                 "ordered_points": [asdict(point) for point in points],
+                **({"segment_plan": config.run.segment_plan.metadata()}
+                   if config.run.segment_plan is not None else {}),
                 "transition_policy": config.run.transition_policy.value,
                 "max_step_t": config.run.max_step_t,
                 "limits": asdict(config.magnet.limits),

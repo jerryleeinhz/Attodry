@@ -2,6 +2,35 @@
 
 ## 当前状态
 
+### 2026-09-11 分段配置交付（优先于下方历史记录）
+
+已实现 `points` 与 `axis`+`segments` 互斥配置；X/Z 单轴分段支持 signed min/max、
+含端点的 points 或整除跨度的正 step，direction 为 ascending/descending。
+顺序及共享端点保留，分段最多展开 10000 点；现有安全执行器不变。
+`describe --config ...` 离线展示完整展开结果、段映射和策略，起点明确假设零场，
+不加载 DLL、不创建运行记录；实机连接后仍要根据实际状态重新校验。
+JSONL v1 新增可选 segment_plan 和点级 segment_index/sweep_direction；monitor
+使用归档限值重新展开比对，旧 points 记录兼容。没有自动反向、自动循环或角度网格。
+
+复制示例见 `config/hardware.example.toml` 的四个 BEGIN/END EXAMPLE 区块；只替换
+原 `[magnetic_field_run]` 中对应字段，其余 metadata、max_step_t 和 magnet 时序复用。
+M4 用单目标 +0.1 T；M5 示例不是默认获批计划。普通往返选择 direct，不能把
+via_zero 当成保留普通磁滞历史的替代。正式目标 step 不等于内部 max_step_t。
+scan 的正常结束仍由 cleanup.normal_end_field_policy 决定，默认例子为 hold；
+首次验收应明确确认 zero，程序不会因 segments 自动修改该策略。
+
+用户已确认电流线/联锁插接问题解决并允许 M4/M5 测试；该物理阻塞解除，
+但 M4/M5 尚未执行，时序和 M5 完整点列仍待确认。先完成目标机离线验证及写前
+只读复核，再按 M4 单目标回零、M5 有序扫描顺序验收。本次未连接真实设备。
+
+交付摘要：模块 Magnetic Field；入口 magnetic_field_cli describe/single-target/scan；
+分支 codex/magnetic-field-m0-m2，worktree C:/Users/liy56/.codex/worktrees/8fd7/Attocube_control；
+本地基线/上次远端核对 89591ce，本次未提交/push，LK_setup commit/dirty 未检查。
+修改 field_segments/config/CLI/monitor、测试、配置例子和阶段/交接文档；单一配置源
+仍为 local TOML，未修改本机地址或 local 配置。测试结果见 DEVELOPMENT_STAGES。
+实际硬件连接、状态消费和写命令：均未执行；实机原始记录：无；当前场状态未读取，
+不能假定零场。Integration 仍只消费明确展开点列和真实读回，不据此宣称连续轨迹。
+
 ### 2026-09-11 最新边界（优先于下方历史记录）
 
 - 用户确认纯 X 最高 +/-3 T、纯 Z 最高 +/-9 T；X/Z 同时非零时，才额外要求

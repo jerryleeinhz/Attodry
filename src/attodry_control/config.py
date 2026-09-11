@@ -8,6 +8,7 @@ import tomllib
 from typing import Any, Mapping
 
 from .lockin_autorange import AutorangePolicy
+from .field_segments import FieldSegmentPlan, expand_field_segments
 from .models import LockinRole, VectorField
 from .safety import (
     CONFIRMED_EXPERIMENT_VECTOR_MAX_T,
@@ -135,6 +136,7 @@ class MagneticFieldRunConfig:
     run_name: str
     note: str
     output_directory: Path
+    segment_plan: FieldSegmentPlan | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -770,35 +772,45 @@ def _parse_magnetic_field_run(
     table: Mapping[str, Any], limits: MagnetLimits
 ) -> MagneticFieldRunConfig:
     name = "magnetic_field_run"
-    _strict_keys(
+    _strict_keys_with_optional(
         table,
         name,
         {
-            "points",
             "transition_policy",
             "max_step_t",
             "run_name",
             "note",
             "output_directory",
         },
+        {"points", "segments", "axis"},
     )
-    raw_points = table["points"]
-    if not isinstance(raw_points, list) or not raw_points:
-        raise ConfigError(
-            "magnetic_field_run.points must be a non-empty ordered array of tables."
-        )
-    points: list[VectorField] = []
-    for index, raw_point in enumerate(raw_points):
-        point_name = f"{name}.points[{index}]"
-        if not isinstance(raw_point, dict):
-            raise ConfigError(f"{point_name} must be a TOML table.")
-        _strict_keys(raw_point, point_name, {"bx_t", "bz_t"})
-        points.append(
-            VectorField(
+    if ("points" in table) == ("segments" in table):
+        raise ConfigError(f"{name} requires exactly one of points or segments.")
+    segment_plan = None
+    if "segments" in table:
+        try:
+            segment_plan = expand_field_segments(table.get("axis"), table["segments"], limits)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        points = list(segment_plan.points)
+    else:
+        if "axis" in table:
+            raise ConfigError(f"{name}.axis is only allowed with segments.")
+        raw_points = table["points"]
+        if not isinstance(raw_points, list) or not raw_points:
+            raise ConfigError(
+                "magnetic_field_run.points must be a non-empty ordered array of tables."
+            )
+        points = []
+        for index, raw_point in enumerate(raw_points):
+            point_name = f"{name}.points[{index}]"
+            if not isinstance(raw_point, dict):
+                raise ConfigError(f"{point_name} must be a TOML table.")
+            _strict_keys(raw_point, point_name, {"bx_t", "bz_t"})
+            points.append(VectorField(
                 bx_t=_number(raw_point["bx_t"], f"{point_name}.bx_t"),
                 bz_t=_number(raw_point["bz_t"], f"{point_name}.bz_t"),
-            )
-        )
+            ))
     max_step_t = _positive_number(table["max_step_t"], f"{name}.max_step_t")
     if max_step_t <= FIELD_SETPOINT_READBACK_TOLERANCE_T:
         raise ConfigError(
@@ -826,6 +838,7 @@ def _parse_magnetic_field_run(
         raise ConfigError(f"Invalid magnetic_field_run path: {exc}") from exc
     return MagneticFieldRunConfig(
         points=tuple(points),
+        segment_plan=segment_plan,
         transition_policy=transition_policy,
         max_step_t=max_step_t,
         run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),

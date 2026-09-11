@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import json
 import math
 from pathlib import Path
@@ -9,6 +10,7 @@ import sys
 from typing import Sequence
 
 from .field_audit import SCHEMA_VERSION, read_jsonl_events
+from .field_segments import expand_field_segments
 from .models import VectorField
 from .safety import FIELD_LIMIT_POLICY, MagnetLimits, validate_vector_field
 
@@ -147,6 +149,8 @@ def _integrity_errors(
 
     if run_started_positions != [0]:
         errors.append("run_started must occur exactly once as the first record")
+    if "segment_plan" in events[0]:
+        errors.extend(_segment_plan_errors(events))
     if len(terminal_positions) > 1:
         errors.append("run_finished occurs more than once")
     if terminal_positions and terminal_positions[-1] != len(events) - 1:
@@ -241,6 +245,46 @@ def _integrity_errors(
         ):
             errors.append("completed zero-required run lacks verified zero")
         errors.extend(_field_command_audit_errors(events, started, terminal))
+    return errors
+
+
+def _segment_plan_errors(events: list[dict[str, object]]) -> list[str]:
+    started = events[0]
+    archived = started["segment_plan"]
+    if (
+        not isinstance(archived, dict)
+        or set(archived) != {"version", "axis", "segments", "point_segment_indices"}
+        or type(archived.get("version")) is not int or archived["version"] != 1
+        or started.get("field_limit_policy") != FIELD_LIMIT_POLICY
+    ):
+        return ["segment_plan declaration is invalid"]
+    try:
+        limits = MagnetLimits(**started["limits"])
+        plan = expand_field_segments(archived["axis"], archived["segments"], limits)
+    except (KeyError, TypeError, ValueError) as exc:
+        return [f"segment_plan is invalid: {exc}"]
+    indices = archived["point_segment_indices"]
+    if (
+        not isinstance(indices, list) or any(type(i) is not int for i in indices)
+        or indices != list(plan.point_segment_indices)
+        or started.get("ordered_points") != [asdict(point) for point in plan.points]
+    ):
+        return ["segment_plan expansion disagrees with archived ordered_points/indices"]
+    errors: list[str] = []
+    for event in events:
+        if event.get("event") not in {"point_started", "point_completed"}:
+            continue
+        point_index = event.get("point_index")
+        if type(point_index) is not int or not 0 <= point_index < len(plan.points):
+            errors.append("segment_plan point index is invalid")
+            continue
+        segment_index = plan.point_segment_indices[point_index]
+        if (
+            type(event.get("segment_index")) is not int
+            or event["segment_index"] != segment_index
+            or event.get("sweep_direction") != plan.segments[segment_index].direction
+        ):
+            errors.append("segment_plan point metadata disagrees with its segment")
     return errors
 
 

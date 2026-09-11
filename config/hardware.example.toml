@@ -38,15 +38,79 @@ wait_timeout_s = 7200.0
 # movement and max_step_t in ignored hardware.local.toml, then obtain the
 # separate connection/write/scan authorization required by the command.
 [magnetic_field_run]
+# 默认只请求零场。下面示例在本表内替换同名字段，不要追加第二个同名表/字段。
+# points 与 (axis + segments) 二选一；使用 segments 时删除/注释整个 points 数组。
+# 切回 points 时删除/注释 axis 和整个 segments 数组。
 points = [
   { bx_t = 0.0, bz_t = 0.0 },
 ]
 transition_policy = "via_zero"
+# direct: 相邻目标直接分步衔接；普通正反扫/磁滞回线使用此策略。
+# via_zero: 每个不同目标之间先经零场，再到目标；会改变磁场历史。
+# 两者均保留实际读回/稳定性检查；并不设定 APS100 的物理扫场速率。
+# max_step_t 是内部 setpoint 保护步长，不是 segments 的正式目标间距 step。
 max_step_t = 0.05
 run_name = "magnetic_field_offline_example"
 note = "Replace only after staged magnetic-field commissioning approval."
 # Relative to this TOML. One append/flush/fsync JSONL is the canonical record.
 output_directory = "../run_data/magnetic_field_commissioning"
+
+# 以下都是可复制的有效语法，但不是自动获批的实机运行参数。
+# 共用上方 max_step_t、note、output_directory 和 [magnet] 稳定性/超时设置。
+# M4 用 single-target，只允许一个目标，正常结束强制回零并验证。
+# BEGIN EXAMPLE M4_X
+# points = [{ bx_t = 0.1, bz_t = 0.0 }]
+# transition_policy = "direct"
+# run_name = "m4_x_0p1T"
+# END EXAMPLE M4_X
+
+# M5 多段正扫：axis 只允许 "x" / "z"，另一轴目标严格为零；单位全部为 T。
+# min < max；points >= 2 且含两端点，或 step > 0（两者只能填一个）。
+# step 必须整除 max-min，不会静默截断/补点。默认 direction = "ascending"。
+# 段落按书写顺序拼接，不排序、不去重；共享端点会再次等待稳定并记录。
+# 全部 segments 展开最多 10000 个正式目标；不支持 log/角度/自动循环。
+# BEGIN EXAMPLE M5_X_SEGMENTS
+# axis = "x"
+# segments = [
+#   { min = 0.004, max = 0.040, points = 11 },
+#   { min = 0.045, max = 0.095, step = 0.01 },
+# ]
+# transition_policy = "direct"
+# run_name = "m5_x_segments"
+# END EXAMPLE M5_X_SEGMENTS
+
+# M5 往返回线：负场 -> 零附近加密 -> 正场 -> 反扫回负场。
+# descending 仍填写 min < max、正 step；只反转该段，不能自动反转前面所有段。
+# BEGIN EXAMPLE M5_X_HYSTERESIS
+# axis = "x"
+# segments = [
+#   { min = -0.10, max = -0.02, step = 0.02 },
+#   { min = -0.02, max =  0.02, points = 9 },
+#   { min =  0.02, max =  0.10, step = 0.02 },
+#   { min = -0.10, max =  0.10, points = 21, direction = "descending" },
+# ]
+# transition_policy = "direct"
+# run_name = "m5_x_hysteresis"
+# END EXAMPLE M5_X_HYSTERESIS
+
+# 较大范围仅演示纯 Z 语法，不是首次 M5 建议或本次高场授权。
+# 原 0.45 -> 5.0 / 0.5 无法整除；此例用 4.95。要含 5.0 可改用 points。
+# 纯 X 上限 3 T，纯 Z 上限 9 T；双轴非零仍须合场 <= 3 T。
+# BEGIN EXAMPLE Z_SEGMENTS_SYNTAX_ONLY
+# axis = "z"
+# segments = [
+#   { min = 0.004, max = 0.400, points = 11 },
+#   { min = 0.45, max = 4.95, step = 0.5 },
+# ]
+# transition_policy = "direct"
+# run_name = "z_segments_syntax_only"
+# END EXAMPLE Z_SEGMENTS_SYNTAX_ONLY
+
+# 复制后先离线预览（不加载 DLL、不创建运行数据）：
+# python -m attodry_control.magnetic_field_cli describe --config config/hardware.local.toml
+# M5 正常结束由 [cleanup].normal_end_field_policy 决定；首次验收应确认 zero。
+# 该字段当前示例仍为 hold，不会因选择 segments 自动改变，请在原表中修改。
+# 异常/中断仍尝试回零；通信失败不能保证零场，须人工核验。
 
 [temperature_stability]
 acceptance_mode = "stable-readback"

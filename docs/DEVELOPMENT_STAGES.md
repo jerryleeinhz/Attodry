@@ -2,6 +2,26 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Current magnetic-field update - composable segments (2026-09-11)
+
+- Implemented exclusive explicit-points / axis+segments configuration, signed X/Z
+  linear ranges, inclusive count or exact-dividing positive step, per-segment
+  ascending/descending order and preserved shared endpoints. Expansion is bounded
+  to 10000 segment points before allocation; all existing safety/path checks remain.
+- Added offline `magnetic_field_cli describe` and optional JSONL v1 `segment_plan`
+  plus segment/direction point metadata; monitor verifies archived expansion.
+- Added copyable commented M4/M5/return-branch/pure-Z examples with direct/via_zero
+  explanations, strict endpoint semantics and normal hold/zero caveats. Active
+  tracked target remains zero; local hardware config and APS100 rates are unchanged.
+- Operator confirmed current-lead/interlock issue resolved and permits M4/M5 tests
+  in principle. No real test ran; exact timing/M5 path remain to be selected and M4
+  must precede M5. Current revision still needs target-offline and live preflight.
+- Validation: new 10-test segment/config/CLI/fake-DLL/monitor suite passed (0.534 s);
+  full unittest discovery ran 491 tests in 36.501 s, OK with 5 optional skips
+  (486 passed). Final magnetic-focused rerun passed all 223 tests in 29.238 s.
+  Compileall, CLI help, default-example offline describe and diff check passed.
+  No real DLL, connection or hardware writes. Local changes remain uncommitted.
+
 ## Current magnetic-field update - axis-dependent limits (2026-09-11)
 
 This update supersedes historical universal-3-T and M3-pending statements below.

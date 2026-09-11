@@ -4,6 +4,31 @@ Last updated: 2026-09-11
 
 ## Current stage
 
+### Latest magnetic segment configuration update (2026-09-11)
+
+Supersedes earlier target-pending and cable/interlock-blocked statements: the
+operator selected M4 X=+0.1 T/Z=0 T and confirmed the cable/interlock issue resolved,
+allowing M4/M5 testing in principle. This change performs no hardware operation;
+M4/M5 are not commissioned. Timing/transition parameters and the exact M5 point
+list still need confirmation, with M4 evidence preceding M5 and fresh target
+offline/read-only checks before writes. No reboot or cabling action was taken.
+
+`magnetic_field_run` accepts exactly one of explicit `points` or `axis`+`segments`.
+Single-axis linear segments use min<max and exactly one of inclusive points>=2
+or positive step that divides the span; direction is ascending (default) or
+descending. Input segment order and shared endpoints are retained, with at most
+10000 expanded segment points. Axis x/z explicitly sets the other target to zero.
+Existing limit, waypoint, acknowledgement, stability and cleanup checks are reused.
+No angle generator, continuous-path assertion, ramp-rate change or Lock-in readout.
+`magnetic_field_cli describe` expands the same config offline without DLL loading
+or run-data creation; it identifies its assumed zero start and need for live revalidation.
+JSONL v1 adds optional `segment_plan` plus per-point segment/direction metadata;
+the file monitor regenerates and cross-checks it, while old explicit-point records
+remain compatible. Copyable M4, M5 ascending, M5 hysteresis and pure-Z syntax-only
+examples are commented in `config/hardware.example.toml`; active default stays zero.
+Local validation is recorded in DEVELOPMENT_STAGES. Baseline is 89591ce; these
+changes have not been committed/pushed or synchronized to LK_setup.
+
 ### Latest magnetic-field safety update (2026-09-11)
 
 This entry supersedes older universal-3-T and M3-pending statements below.

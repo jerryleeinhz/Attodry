@@ -126,6 +126,27 @@ python -m attodry_control.lockin_test --help
 
 ## Standalone X/Z 磁场模块
 
+可直接复制的 M4 单目标、M5 多段正扫/往返和纯 Z 语法示例均在
+[`config/hardware.example.toml`](config/hardware.example.toml) 的 `[magnetic_field_run]`
+注释区。在原表内替换同名字段，不要重复追加表；`points` 与 `axis`+`segments`
+二选一。分段使用 T，`min < max`，`points`（含两端点）或正 `step` 二选一；
+step 必须整除跨度。`direction` 为 `ascending`（默认）或 `descending`，按段顺序
+拼接且保留重复端点，最多展开 10000 个目标。X/Z 单轴之外仍使用显式点列。
+普通往返回线使用 `direct`；`via_zero` 会在目标之间经零场，改变磁场历史。
+分段 step 是正式目标间距，`max_step_t` 是独立的内部安全 waypoint 步长。
+
+修改本机 TOML 后先离线预览（不加载 DLL、不创建运行数据）：
+
+```powershell
+python -m attodry_control.magnetic_field_cli describe --config config/hardware.local.toml
+```
+
+输出完整点列、段编号、方向、限值及清理策略。静态路径以零场为起点，不代替连接后的
+实际状态复核。新 JSONL 保存 `segment_plan` 和每个点的段编号/方向；文件 monitor
+重新展开并校验，未声明分段的旧记录仍按旧格式读取。
+用户已确认电流线/联锁问题解决、允许进入 M4/M5 测试准备；当前尚无 M4/M5 完成证据，
+仍需确认时序/扫描点，先验收 X=+0.1 T 单目标回零，再进入完整 M5。
+
 `[magnetic_field_run].points` 是一个非空的显式点列，按 TOML 中的原顺序执行并保留
 重复项；它不会排序、去重或生成 Cartesian grid。`transition_policy` 是必填且显式的：
 `direct` 将相邻 X/Z 向量分段为已验证的离散 waypoint，`via_zero` 才会请求保守的
