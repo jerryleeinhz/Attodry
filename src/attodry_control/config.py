@@ -498,17 +498,20 @@ def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
     if experiment_limit > CONFIRMED_EXPERIMENT_VECTOR_MAX_T:
         raise ConfigError(
             "magnet.experiment_vector_max_t cannot exceed the confirmed 3 T "
-            "project limit."
+            "dual-axis project limit."
         )
-    limits = MagnetLimits(
-        hardware_x_max_t=_positive_number(
-            table["hardware_x_max_t"], f"{name}.hardware_x_max_t"
-        ),
-        hardware_z_max_t=_positive_number(
-            table["hardware_z_max_t"], f"{name}.hardware_z_max_t"
-        ),
-        experiment_vector_max_t=experiment_limit,
-    )
+    try:
+        limits = MagnetLimits(
+            hardware_x_max_t=_positive_number(
+                table["hardware_x_max_t"], f"{name}.hardware_x_max_t"
+            ),
+            hardware_z_max_t=_positive_number(
+                table["hardware_z_max_t"], f"{name}.hardware_z_max_t"
+            ),
+            experiment_vector_max_t=experiment_limit,
+        )
+    except ValueError as exc:
+        raise ConfigError(f"Invalid magnet limits: {exc}") from exc
     stability = _parse_stability(table, name, value_prefix="field_")
     tolerance = stability.criteria.tolerance
     if tolerance is None or tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T:

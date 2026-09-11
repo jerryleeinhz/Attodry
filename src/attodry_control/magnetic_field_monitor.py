@@ -9,6 +9,8 @@ import sys
 from typing import Sequence
 
 from .field_audit import SCHEMA_VERSION, read_jsonl_events
+from .models import VectorField
+from .safety import FIELD_LIMIT_POLICY, MagnetLimits, validate_vector_field
 
 
 _FIELD_COMMAND_AUDIT_DECLARATION = {
@@ -252,13 +254,43 @@ def _field_command_audit_errors(
     The outer JSONL schema deliberately remains at version 1.  A producer opts
     into the stronger command-evidence contract by declaring it in ``run_started``;
     old M0--M2 files lack that declaration and must retain their original monitor
-    semantics.
+    semantics. The separate field_limit_policy declaration selects the new
+    single-axis/dual-axis envelope without reinterpreting historical records.
     """
 
-    if "field_command_audit" not in started:
-        return []
-
     errors: list[str] = []
+    limits = None
+    if "field_limit_policy" in started:
+        if started["field_limit_policy"] != FIELD_LIMIT_POLICY:
+            return ["run_started field_limit_policy is invalid"]
+        recorded = started.get("limits")
+        if (
+            not isinstance(recorded, dict)
+            or set(recorded) != {
+                "hardware_x_max_t", "hardware_z_max_t", "experiment_vector_max_t"
+            }
+            or not all(_finite_number(value) for value in recorded.values())
+        ):
+            return ["run_started limits are invalid"]
+        try:
+            limits = MagnetLimits(**recorded)
+        except ValueError as exc:
+            return [f"run_started limits are invalid: {exc}"]
+        if "field_command_audit" not in started:
+            return ["field_limit_policy requires field_command_audit"]
+        if terminal.get("outcome") == "completed":
+            state = terminal.get("last_confirmed_state")
+            for key in ("field", "field_setpoint"):
+                _require_safe_field(
+                    _finite_vector(
+                        state.get(key) if isinstance(state, dict) else None,
+                        f"run_finished {key}", errors,
+                    ),
+                    f"run_finished {key}", errors, limits,
+                )
+    if "field_command_audit" not in started:
+        return errors
+
     declaration = started.get("field_command_audit")
     if declaration != _FIELD_COMMAND_AUDIT_DECLARATION:
         errors.append("run_started field_command_audit declaration is invalid")
@@ -273,12 +305,14 @@ def _field_command_audit_errors(
         events,
         transition_policy,
         errors,
+        limits,
     )
     executed_waypoints = _executed_waypoints(
         events,
         transition_policy,
         planned_waypoints,
         errors,
+        limits,
     )
     if terminal.get("outcome") == "completed":
         for key in planned_waypoints:
@@ -323,6 +357,7 @@ def _field_command_audit_errors(
                 transition_policy,
                 executed_waypoints,
                 errors,
+                limits,
             )
         elif event_type == "field_command_result":
             result_count += 1
@@ -377,6 +412,7 @@ def _planned_waypoints(
     events: list[dict[str, object]],
     transition_policy: object,
     errors: list[str],
+    limits: MagnetLimits | None,
 ) -> dict[tuple[int, int], dict[str, object]]:
     planned: dict[tuple[int, int], dict[str, object]] = {}
     seen_points: set[int] = set()
@@ -414,7 +450,7 @@ def _planned_waypoints(
         )
         if requested is not None and planned_target is not None and requested != planned_target:
             errors.append("execution_plan requested_target disagrees with point_started")
-        _exact_float32_field(
+        start_command = _exact_float32_field(
             execution_plan.get("start_command"),
             "execution_plan start_command",
             errors,
@@ -424,6 +460,12 @@ def _planned_waypoints(
             "execution_plan target_command",
             errors,
         )
+        if limits is not None:
+            for value, label in (
+                (requested, "requested_field"), (planned_target, "requested_target"),
+                (start_command, "start_command"), (target_command, "target_command"),
+            ):
+                _require_safe_field(value, f"execution_plan {label}", errors, limits)
         if planned_target is not None and target_command is not None:
             _require_float32_matches_requested(
                 target_command,
@@ -469,9 +511,13 @@ def _planned_waypoints(
                     f"{label} command_field",
                     errors,
                 )
-            _require_safe_field(command_field, f"{label} command_field", errors)
-            _require_safe_field(x_then_z, f"{label} x_then_z_mixed_corner", errors)
-            _require_safe_field(z_then_x, f"{label} z_then_x_mixed_corner", errors)
+            _require_safe_field(command_field, f"{label} command_field", errors, limits)
+            # Both candidates are recorded, but only the chosen corner is sent.
+            # Historical records retain their original all-corners check.
+            if limits is None or waypoint.get("axis_order") == "x_then_z":
+                _require_safe_field(x_then_z, f"{label} x_then_z_mixed_corner", errors, limits)
+            if limits is None or waypoint.get("axis_order") == "z_then_x":
+                _require_safe_field(z_then_x, f"{label} z_then_x_mixed_corner", errors, limits)
             planned[(point_index, waypoint_index)] = waypoint
     return planned
 
@@ -481,6 +527,7 @@ def _executed_waypoints(
     transition_policy: object,
     planned: dict[tuple[int, int], dict[str, object]],
     errors: list[str],
+    limits: MagnetLimits | None,
 ) -> dict[tuple[int, int], dict[str, object]]:
     executed: dict[tuple[int, int], dict[str, object]] = {}
     for position, event in enumerate(events):
@@ -560,17 +607,17 @@ def _executed_waypoints(
         axis_order = event.get("axis_order")
         if axis_order not in _FIELD_AXIS_ORDERS:
             errors.append("field_waypoint_execution has an invalid axis_order")
-        _require_safe_field(command, "field_waypoint_execution command_field", errors)
-        _require_safe_field(
-            x_then_z,
-            "field_waypoint_execution x_then_z_mixed_corner",
-            errors,
-        )
-        _require_safe_field(
-            z_then_x,
-            "field_waypoint_execution z_then_x_mixed_corner",
-            errors,
-        )
+        _require_safe_field(command, "field_waypoint_execution command_field", errors, limits)
+        if limits is not None:
+            _require_safe_field(predecessor, "field_waypoint_execution predecessor", errors, limits)
+        if limits is None or axis_order == "x_then_z":
+            _require_safe_field(
+                x_then_z, "field_waypoint_execution x_then_z_mixed_corner", errors, limits,
+            )
+        if limits is None or axis_order == "z_then_x":
+            _require_safe_field(
+                z_then_x, "field_waypoint_execution z_then_x_mixed_corner", errors, limits,
+            )
         if (
             predecessor is not None
             and command is not None
@@ -596,6 +643,7 @@ def _validate_field_command_attempt(
     transition_policy: object,
     executed_waypoints: dict[tuple[int, int], dict[str, object]],
     errors: list[str],
+    limits: MagnetLimits | None,
 ) -> None:
     label = f"field_command_attempt at record {position}"
     command_kind = event.get("command_kind")
@@ -616,6 +664,7 @@ def _validate_field_command_attempt(
             label,
             executed_waypoints,
             errors,
+            limits,
         )
         return
     expected_symbol = _FIELD_COMMAND_SYMBOLS[command_kind]
@@ -632,6 +681,7 @@ def _validate_component_attempt(
     label: str,
     executed_waypoints: dict[tuple[int, int], dict[str, object]],
     errors: list[str],
+    limits: MagnetLimits | None,
 ) -> None:
     axis = event.get("axis")
     if axis not in _FIELD_COMPONENT_SYMBOLS:
@@ -672,7 +722,7 @@ def _validate_component_attempt(
         f"{label} expected_setpoint",
         errors,
     )
-    _require_safe_field(expected, f"{label} expected_setpoint", errors)
+    _require_safe_field(expected, f"{label} expected_setpoint", errors, limits)
     if exact_value is not None and previous is not None and expected is not None:
         if axis == "x":
             valid_expected = (
@@ -877,8 +927,16 @@ def _require_safe_field(
     field: dict[str, float] | None,
     label: str,
     errors: list[str],
+    limits: MagnetLimits | None,
 ) -> None:
-    if field is not None and math.hypot(field["bx_t"], field["bz_t"]) > 3.0:
+    if field is None:
+        return
+    if limits is not None:
+        try:
+            validate_vector_field(VectorField(field["bx_t"], field["bz_t"]), limits)
+        except ValueError as exc:
+            errors.append(f"{label} violates recorded field limits: {exc}")
+    elif math.hypot(field["bx_t"], field["bz_t"]) > 3.0:
         errors.append(f"{label} exceeds the 3 T project vector limit")
 
 

@@ -8,14 +8,31 @@ The active software coordinate system is X/Z:
 - X is the 3 T transverse coil called Y in the factory system sheet.
 - No mechanical rotator is controlled.
 
-The hardware ratings are retained as metadata, but every experiment command is constrained by the user-confirmed project limit:
+The operator approved this replacement envelope on 2026-09-11. It supersedes the
+former universal 3 T cap, but does not authorize real hardware execution:
 
 ```text
-Bmag = sqrt(Bx^2 + Bz^2)
-Bmag <= 3 T
+abs(Bx) <= 3 T
+abs(Bz) <= 9 T
+if Bx != 0 and Bz != 0: sqrt(Bx^2 + Bz^2) <= 3 T
 ```
 
-This means a pure-Z command is also limited to 3 T in this project even though the Z coil hardware rating is 9 T. Raising the project limit requires a deliberate user-approved change to configuration, documentation, and tests.
+Pure X permits +/-3 T; pure Z permits +/-9 T. Only exact zero (including signed
+zero) selects the single-axis envelope. Small nonzero requests or residual
+readbacks remain dual-axis even below acknowledgement/stability tolerance.
+Apply the same rule to requested values, exact float32 commands and readbacks.
+`[magnet].experiment_vector_max_t` now limits dual-axis fields only (maximum 3 T).
+Axis limits may be reduced, never raised above factory X 3 T / Z 9 T. To restrict
+pure-axis operation, lower its axis limit, not `experiment_vector_max_t`.
+
+The envelope is not convex: high pure Z to a dual-axis target can have unsafe
+direct intermediate points despite valid endpoints. Reject the plan, never
+silently switch to `via_zero`. Setpoint acknowledgement does not prove the other
+coil has ramped down: before a changed component write, also validate that
+component against the other axis's latest actual readback. Residual cross-axis
+field blocks high-Z operation rather than widening a zero tolerance. Magnet
+temperature/readiness and factory charging parameters still apply; this change
+does not alter APS100 sweep rates or establish a continuous physical trajectory.
 
 Angle is reported relative to +Z:
 
@@ -39,7 +56,8 @@ The legacy attoDRY interface uses a USB virtual COM port and a vendor `attoDRYxy
   software must never insert a zero detour transparently;
 - convert every command endpoint to IEEE-754 binary32 before validating it, and
   validate the endpoint plus both possible X-then-Z and Z-then-X mixed corners
-  against the component limits and `sqrt(Bx^2 + Bz^2) <= 3 T`;
+  against the single-axis/dual-axis envelope above; check both candidates and
+  execute only an order whose intermediate corner is safe;
 - choose only a verified mixed-corner write order for each waypoint, and retain
   the complete planned and executed waypoint path rather than assuming X-first;
 - record both component setpoints and readbacks, with a durable pre-command

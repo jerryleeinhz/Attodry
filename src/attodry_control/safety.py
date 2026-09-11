@@ -16,6 +16,9 @@ FIELD_SETPOINT_READBACK_TOLERANCE_T = 1e-5
 # 1 mT as the widest acceptable field-to-target (and zero-field) tolerance.
 CONFIRMED_FIELD_TOLERANCE_MAX_T = 0.001
 CONFIRMED_EXPERIMENT_VECTOR_MAX_T = 3.0
+CONFIRMED_HARDWARE_X_MAX_T = 3.0
+CONFIRMED_HARDWARE_Z_MAX_T = 9.0
+FIELD_LIMIT_POLICY = "single-axis-hardware_combined-vector-v1"
 
 
 class SafetyViolation(ValueError):
@@ -60,6 +63,8 @@ class FieldTransitionPlan:
 
 @dataclass(frozen=True, slots=True)
 class MagnetLimits:
+    """Axis ceilings always apply; the resultant ceiling applies to dual-axis fields."""
+
     hardware_x_max_t: float = 3.0
     hardware_z_max_t: float = 9.0
     experiment_vector_max_t: float = 3.0
@@ -72,10 +77,15 @@ class MagnetLimits:
         )
         if any(not math.isfinite(value) or value <= 0 for value in values):
             raise ValueError("All magnet limits must be finite and positive.")
+        if (
+            self.hardware_x_max_t > CONFIRMED_HARDWARE_X_MAX_T
+            or self.hardware_z_max_t > CONFIRMED_HARDWARE_Z_MAX_T
+        ):
+            raise ValueError("Axis limits cannot exceed the confirmed X 3 T / Z 9 T ratings.")
         if self.experiment_vector_max_t > CONFIRMED_EXPERIMENT_VECTOR_MAX_T:
             raise ValueError(
                 "The experiment vector limit cannot exceed the confirmed 3 T "
-                "project invariant."
+                "dual-axis project limit."
             )
         if self.experiment_vector_max_t > math.hypot(
             self.hardware_x_max_t, self.hardware_z_max_t
@@ -97,9 +107,15 @@ def validate_vector_field(
         raise SafetyViolation(
             f"|Bz|={abs(target.bz_t):g} T exceeds {limits.hardware_z_max_t:g} T."
         )
-    if target.magnitude_t > limits.experiment_vector_max_t:
+    # Exact zeros only: neither a small requested component nor a residual
+    # readback may bypass the dual-axis ceiling through a tolerance band.
+    if (
+        target.bx_t != 0.0
+        and target.bz_t != 0.0
+        and target.magnitude_t > limits.experiment_vector_max_t
+    ):
         raise SafetyViolation(
-            f"|B|={target.magnitude_t:g} T exceeds the project limit "
+            f"Dual-axis |B|={target.magnitude_t:g} T exceeds the project limit "
             f"{limits.experiment_vector_max_t:g} T."
         )
     return target
@@ -156,6 +172,7 @@ def plan_field_waypoint(
     """
 
     previous = float32_field(validate_vector_field(previous_command, limits))
+    validate_vector_field(previous, limits)
     requested = validate_vector_field(requested_field, limits)
     command = float32_field(requested)
     validate_vector_field(command, limits)

@@ -155,7 +155,14 @@ class FakeAttoDryDll:
         return self._code("set_field_z")
 
     def _assert_safe_intermediate(self) -> None:
-        if math.hypot(self.setpoint_x_t, self.setpoint_z_t) > 3.000001:
+        if (
+            abs(self.setpoint_x_t) > 3.0
+            or abs(self.setpoint_z_t) > 9.0
+            or (
+                self.setpoint_x_t != 0.0 and self.setpoint_z_t != 0.0
+                and math.hypot(self.setpoint_x_t, self.setpoint_z_t) > 3.0
+            )
+        ):
             raise AssertionError("unsafe intermediate vector sent to fake DLL")
 
     def AttoDRY_Interface_toggleFullTemperatureControl(self):
@@ -461,6 +468,42 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertAlmostEqual(self.dll.setpoint_x_t, 0.0)
         self.assertAlmostEqual(self.dll.setpoint_z_t, 3.0)
         self.assertGreater(self.dll.events.count("set_field_x"), 2)
+
+    def test_high_z_enable_rejects_tiny_cross_axis_readback(self) -> None:
+        self.connect()
+        self.dll.bz_t = self.dll.setpoint_z_t = 9.0
+        self.dll.bx_t = 1e-6
+        with self.assertRaises(SafetyViolation):
+            self.driver.ensure_field_control(True)
+        self.assertNotIn("toggle_field_control", self.dll.events)
+
+    def test_axis_switch_does_not_trust_setpoint_ack_over_actual_high_z(self) -> None:
+        self.connect()
+        self.dll.bz_t = self.dll.setpoint_z_t = 9.0
+        self.dll.field_control = 1
+
+        def acknowledge_z_without_moving(value):
+            self.dll.setpoint_z_t = value.value
+            return self.dll._code("set_field_z")
+
+        self.dll.AttoDRY_Interface_setUserMagneticFieldZ = acknowledge_z_without_moving
+        with self.assertRaises(SafetyViolation):
+            self.driver.set_vector_field(
+                VectorField(3.0, 0.0), max_step_t=10.0,
+                transition_policy=FieldTransitionPolicy.DIRECT,
+                monotonic=StepClock(step_s=5.0), sleeper=lambda _: None,
+            )
+        self.assertEqual(self.dll.events.count("set_field_z"), 1)
+        self.assertNotIn("set_field_x", self.dll.events)
+        self.assertEqual(self.driver.last_confirmed_state.field, VectorField(0.0, 9.0))
+
+    def test_dual_axis_overlimit_target_is_rejected_even_if_float32_erases_tiny_x(self):
+        self.connect()
+        self.dll.field_control = 1
+        with self.assertRaises(SafetyViolation):
+            self.driver.set_vector_field(VectorField(math.ulp(0.0), 9.0))
+        self.assertNotIn("set_field_x", self.dll.events)
+        self.assertNotIn("set_field_z", self.dll.events)
 
     def test_direct_rotation_uses_the_only_safe_component_order_at_three_tesla(
         self,

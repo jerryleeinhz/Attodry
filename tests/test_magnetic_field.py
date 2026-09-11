@@ -30,6 +30,7 @@ from attodry_control.magnetic_field_cli import (
 from attodry_control.magnetic_field_monitor import read_progress_snapshot
 from attodry_control.models import CryostatState, VectorField
 from attodry_control.safety import (
+    FIELD_LIMIT_POLICY,
     FieldTransitionPolicy,
     MagnetLimits,
     SafetyViolation,
@@ -173,6 +174,15 @@ output_directory = "field-output"
 
 
 class MagneticFieldConfigTests(_MagneticConfigFixture, unittest.TestCase):
+    def test_new_limits_accept_single_axes_and_reject_combined_overlimit(self):
+        for point in ((0.0, 9.0), (0.0, -9.0), (3.0, 0.0), (-3.0, 0.0)):
+            with self.subTest(point=point):
+                config = load_magnetic_field_operation_config(self.write_config((point,)))
+                self.assertEqual(config.run.points, (VectorField(*point),))
+        for point in ((3.1, 0.0), (0.0, 9.1), (1e-12, 9.0), (1.0, 3.0)):
+            with self.subTest(point=point), self.assertRaises((ConfigError, SafetyViolation)):
+                load_magnetic_field_operation_config(self.write_config((point,)))
+
 
     def test_ordered_points_preserve_order_and_duplicates(self) -> None:
         path = self.write_config(((1.0, 0.0), (0.0, 2.0), (1.0, 0.0), (1.0, 0.0)))
@@ -335,6 +345,57 @@ class MagneticFieldExecutorTests(unittest.TestCase):
 
 
 class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
+    def test_high_z_single_target_returns_verified_zero_and_versions_limit_policy(self):
+        path = self.write_config(((0.0, 9.0),), max_step_t=3.0)
+        output = io.StringIO()
+        dll = FakeAttoDryDll()
+        with redirect_stdout(output):
+            code = run_magnetic_field(
+                ["single-target", "--config", str(path),
+                 "--authorize-connection", "--authorize-field-writes"],
+                dll_loader=lambda _: dll, monotonic=StepClock(), sleeper=lambda _: None,
+            )
+        summary = json.loads(output.getvalue())
+        progress = Path(summary["progress_jsonl"])
+        events, _ = read_jsonl_events(progress)
+        self.assertEqual(code, 0)
+        self.assertTrue(summary["zero_verified"])
+        self.assertEqual(events[0]["field_limit_policy"], FIELD_LIMIT_POLICY)
+        self.assertNotIn("set_field_x", dll.events)
+        snapshot = read_progress_snapshot(progress)
+        self.assertEqual(snapshot["integrity_errors"], [])
+        self.assertEqual(snapshot["outcome"], "completed")
+
+        # A record without the new declaration still uses the old 3 T cap.
+        events[0].pop("field_limit_policy")
+        progress.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+        legacy = read_progress_snapshot(progress)
+        self.assertEqual(legacy["outcome"], "incomplete")
+        self.assertTrue(any("3 T project vector limit" in e for e in legacy["integrity_errors"]))
+
+    def test_high_z_to_x_scan_audits_selected_safe_corner_only(self):
+        path = self.write_config(
+            ((0.0, 9.0), (3.0, 0.0)), max_step_t=10.0, transition_policy="direct",
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            run_magnetic_field(
+                ["scan", "--config", str(path), "--authorize-connection",
+                 "--authorize-field-writes", "--authorize-ordered-field-scan"],
+                dll_loader=lambda _: FakeAttoDryDll(),
+                monotonic=StepClock(), sleeper=lambda _: None,
+            )
+        progress = Path(json.loads(output.getvalue())["progress_jsonl"])
+        self.assertEqual(read_progress_snapshot(progress)["integrity_errors"], [])
+        events, _ = read_jsonl_events(progress)
+        for event in events:
+            if event["event"] == "field_waypoint_execution" and event["point_index"] == 1:
+                event["axis_order"] = "x_then_z"
+        progress.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+        invalid = read_progress_snapshot(progress)
+        self.assertEqual(invalid["outcome"], "incomplete")
+        self.assertTrue(any("violates recorded field limits" in e for e in invalid["integrity_errors"]))
+
     def test_zero_hold_uses_vector_magnitude_not_only_component_tolerance(
         self,
     ) -> None:

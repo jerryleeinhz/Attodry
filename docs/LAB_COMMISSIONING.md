@@ -116,7 +116,11 @@ limits:
 3. small pure-Z field and verified zero;
 4. small gate ramp on each gate independently and verified zero.
 
-At every vector point, enforce `sqrt(Bx^2 + Bz^2) <= 3 T`.
+At every requested/intermediate point and monitored readback, enforce the
+2026-09-11 operator-approved envelope: `abs(Bx) <= 3 T`, `abs(Bz) <= 9 T`;
+when both components are nonzero, also require `sqrt(Bx^2 + Bz^2) <= 3 T`.
+Only exact zero selects single-axis operation; no tolerance-based exemption.
+These ceilings are not the targets for the first small-movement test.
 
 For the temperature movement, first make the ignored, station-local parameter
 file. Its first table contains every per-attempt temperature parameter; it is

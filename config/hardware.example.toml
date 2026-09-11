@@ -20,7 +20,9 @@ temperature_max_k = 300.0
 # Controller X is the transverse coil called Y in the factory magnet table.
 hardware_x_max_t = 3.0
 hardware_z_max_t = 9.0
-# User-confirmed experiment limit, including pure-X and pure-Z commands.
+# Dual-axis resultant ceiling only (operator-approved 2026-09-11).
+# With the other component EXACTLY zero, use the X 3 T / Z 9 T ceilings above.
+# Small nonzero requests/readbacks are NOT rounded to zero for this rule.
 experiment_vector_max_t = 3.0
 field_tolerance_t = 0.001
 stable_range_t = 0.0005

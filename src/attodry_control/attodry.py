@@ -733,6 +733,15 @@ class AttoDryDriver:
                             waypoint_index,
                         )
                     continue
+                # A setpoint acknowledgement is not proof that the other coil
+                # has ramped down. Check the new component against its latest
+                # actual readback as well, before allowing a high-field axis switch.
+                validate_vector_field(
+                    VectorField(command_value, current_state.field.bz_t)
+                    if axis == "x"
+                    else VectorField(current_state.field.bx_t, command_value),
+                    self.limits,
+                )
                 command = self._begin_field_command(
                     command_kind="set_field_component",
                     dll_symbol=symbol,

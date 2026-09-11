@@ -82,7 +82,9 @@ Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU �
 
 ## 集成时重点测试
 
-- `sqrt(Bx^2 + Bz^2) <= 3 T` 对目标和全部中间路径成立。
+- 目标、执行中的中间状态和实际读回满足 2026-09-11 确认限值：纯 X 最高 3 T、
+  纯 Z 最高 9 T；双轴同时非零时 `sqrt(Bx^2 + Bz^2) <= 3 T`。严格零才算单轴，
+  不因容差忽略非零分量；离散读回仍不能证明连续物理轨迹。
 - Lock-in X/Y/R/phase/harmonic/frequency 及设置上下文完整保存。
 - 两台 SR830 顺序读取事实未丢失，转换样本不进入 accepted 曲线。
 - 温度/磁场稳定均要求控制状态、error、窗口、容差和 timeout。

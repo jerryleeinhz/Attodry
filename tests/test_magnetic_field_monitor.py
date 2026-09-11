@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from attodry_control.field_audit import JsonlEventWriter, read_jsonl_events
 from attodry_control.magnetic_field_monitor import read_progress_snapshot, run
+from attodry_control.safety import FIELD_LIMIT_POLICY
 
 
 _FIELD_COMMAND_AUDIT_DECLARATION = {
@@ -165,6 +166,37 @@ def _rewrite_jsonl(path: Path, mutate: object) -> None:
 
 
 class MagneticFieldMonitorTests(unittest.TestCase):
+    def test_new_limit_policy_rejects_unknown_or_missing_invalid_limits(self):
+        cases = (
+            {"field_limit_policy": "unknown"},
+            {"field_limit_policy": FIELD_LIMIT_POLICY},
+            {"field_limit_policy": FIELD_LIMIT_POLICY, "limits": {
+                "hardware_x_max_t": 9.0, "hardware_z_max_t": 9.0,
+                "experiment_vector_max_t": 3.0,
+            }},
+        )
+        for metadata in cases:
+            with self.subTest(metadata=metadata), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "audit.jsonl"
+                _write_declared_completed_command_audit(path)
+                _rewrite_jsonl(path, lambda records: records[0].update(metadata))
+                snapshot = read_progress_snapshot(path)
+                self.assertEqual(snapshot["outcome"], "incomplete")
+                self.assertTrue(snapshot["manual_verification_required"])
+
+    def test_new_limit_policy_checks_recorded_stricter_limits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audit.jsonl"
+            _write_declared_completed_command_audit(path)
+            _rewrite_jsonl(path, lambda records: records[0].update({
+                "field_limit_policy": FIELD_LIMIT_POLICY,
+                "limits": {"hardware_x_max_t": 0.2, "hardware_z_max_t": 9.0,
+                           "experiment_vector_max_t": 3.0},
+            }))
+            snapshot = read_progress_snapshot(path)
+            self.assertEqual(snapshot["outcome"], "incomplete")
+            self.assertTrue(any("violates recorded field limits" in e for e in snapshot["integrity_errors"]))
+
     def test_writer_adds_canonical_metadata_and_fsyncs_each_append(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "field_progress.jsonl"

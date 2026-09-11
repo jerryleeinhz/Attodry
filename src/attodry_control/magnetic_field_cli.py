@@ -25,7 +25,11 @@ from .config import FieldEndPolicy, load_magnetic_field_operation_config
 from .field_audit import JsonlEventWriter
 from .magnetic_field import execute_ordered_field_points
 from .models import CryostatState, VectorField
-from .safety import CONFIRMED_FIELD_TOLERANCE_MAX_T, validate_vector_field
+from .safety import (
+    CONFIRMED_FIELD_TOLERANCE_MAX_T,
+    FIELD_LIMIT_POLICY,
+    validate_vector_field,
+)
 
 
 DEFAULT_CONFIG_PATH = Path("config/hardware.local.toml")
@@ -189,6 +193,7 @@ def run(
                 "transition_policy": config.run.transition_policy.value,
                 "max_step_t": config.run.max_step_t,
                 "limits": asdict(config.magnet.limits),
+                "field_limit_policy": FIELD_LIMIT_POLICY,
                 "field_stability": {
                     "tolerance_t": stability.criteria.tolerance,
                     "stable_range_t": stability.criteria.stable_range,

@@ -29,6 +29,16 @@ LOCKIN_SAFETY_CONFIG = PROJECT_ROOT / "config" / "lockin_safety.toml"
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_magnet_axis_limits_cannot_exceed_factory_ratings(self) -> None:
+        for field, old, new in (
+            ("hardware_x_max_t", "3.0", "3.1"),
+            ("hardware_z_max_t", "9.0", "9.1"),
+        ):
+            with self.subTest(field=field), self.assertRaisesRegex(ConfigError, "ratings"):
+                self.load_text(self.simulation_text().replace(
+                    f"{field} = {old}", f"{field} = {new}",
+                ))
+
     def simulation_text(self) -> str:
         return SIMULATION_CONFIG.read_text(encoding="utf-8")
 

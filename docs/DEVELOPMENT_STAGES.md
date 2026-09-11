@@ -2,6 +2,38 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Current magnetic-field update - axis-dependent limits (2026-09-11)
+
+This update supersedes historical universal-3-T and M3-pending statements below.
+
+- Operator-approved envelope: pure X +/-3 T, pure Z +/-9 T; both components
+  nonzero additionally require resultant <=3 T. Exact zeros only for requests
+  and readbacks. `experiment_vector_max_t` now applies only to dual-axis fields;
+  reduced axis ceilings still apply to single-axis fields and cannot exceed 3/9 T.
+- Shared safety checks cover configuration, planning, float32 endpoints, selected
+  component corners, takeover and live monitoring. A changed component is also
+  checked against the other coil's latest actual readback. Unsafe direct
+  intermediates fail without implicit zero detours. APS100 rates are unchanged.
+- Canonical JSONL adds `field_limit_policy = single-axis-hardware_combined-vector-v1`.
+  The file-only monitor checks archived limits and the chosen safe corner; the
+  unchosen alternative remains diagnostic. Unknown declarations fail closed,
+  and old undeclared files retain original 3 T semantics.
+- M3 is operator-confirmed from the supplied successful ten-sample read-only run
+  (writes disabled, zero errors, clean disconnect); the pasted output did not
+  identify exact source provenance. First M4 target selected: Bx=+0.1 T, Bz=0 T,
+  for configuration preparation only; step/timing, transition policy and
+  connection/write authorization remain pending. M4/M5 are uncommissioned.
+  This revision needs target-offline validation and a read-only state recheck
+  before writes. No new hardware operation occurred.
+- Local validation: 213 focused safety/stability/config/driver/magnetic/monitor
+  tests passed; full `unittest discover -s tests -q` ran 481 tests in 35.522 s,
+  OK with 5 skips (476 passed). `compileall -q src tests`, single-target/scan
+  CLI help, and `git diff --check` passed. The first two sandboxed focused runs
+  hit Windows temporary-directory ACL errors; the unmodified offline tests passed
+  outside that sandbox using the bundled 64-bit Python with user-site disabled.
+  All instrument paths used fakes; no real DLL or hardware was opened. No new
+  target-host evidence or hardware write commissioning is claimed.
+
 ## Stage 0 - design and safety scaffold
 
 Status: complete (2026-08-20).

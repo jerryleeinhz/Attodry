@@ -1,8 +1,37 @@
 # Project handoff
 
-Last updated: 2026-09-03
+Last updated: 2026-09-11
 
 ## Current stage
+
+### Latest magnetic-field safety update (2026-09-11)
+
+This entry supersedes older universal-3-T and M3-pending statements below.
+The operator approved pure X +/-3 T, pure Z +/-9 T, and resultant <=3 T only
+when BOTH components are nonzero. Exact zero is required for single-axis; no
+readback/stability tolerance changes the envelope. `experiment_vector_max_t`
+now means dual-axis resultant only. Reduced configured axis limits remain binding;
+configuration cannot raise the factory X 3 T / Z 9 T ceilings.
+Requests, float32 endpoints, executed corners and monitored readbacks share this
+rule. Each changed component is additionally checked against the other coil's
+latest actual readback before writing. Unsafe `direct` intermediate waypoints
+are rejected without implicit `via_zero` substitution.
+
+New canonical JSONL records declare `field_limit_policy` as
+`single-axis-hardware_combined-vector-v1` with resolved limits. The file monitor
+checks the chosen safe corner; the unchosen candidate is diagnostic. Historical
+undeclared records retain old 3 T semantics. No raw records are rewritten, and
+the outer schema remains v1 with an explicit policy discriminator.
+
+The operator supplied successful ten-sample M3 output and confirmed M3 success:
+writes disabled, all errors zero, zero field/setpoint readbacks, normal disconnect.
+Exact imported source/target revision was not captured in the pasted output;
+this is operator-confirmed evidence for that run, not target-offline evidence
+for the new policy. The operator selected first M4 target Bx=+0.1 T, Bz=0 T
+for configuration preparation only; step, timing, transition policy and
+connection/write authorization remain pending. Revalidate the changed revision offline on LK_setup
+and recheck read-only state before writes. No hardware was connected or written
+for this change. Local test evidence is in the current development-stage update.
 
 Stage 0 - confirmed design and safety scaffold: complete.
 
@@ -1158,7 +1187,9 @@ Current Lock-in safety-policy follow-up (2026-08-23):
 - Both lock-ins will be configured in software and measured by semantic role.
 - No rotator.
 - Control Bx and Bz; derive total field and direction from readback components.
-- The experiment field invariant is `sqrt(Bx^2 + Bz^2) <= 3 T`.
+- Current envelope (2026-09-11): `abs(Bx) <= 3 T`, `abs(Bz) <= 9 T`;
+  if both components are nonzero, also require `sqrt(Bx^2 + Bz^2) <= 3 T`.
+  Only exact zero selects single-axis; smaller configured axis limits remain binding.
 - A caught exception or `Ctrl+C` requests field zero after electrical outputs are made safe.
 - Normal completion field behavior is configurable, default `hold` in the example configuration.
 - Real vendor-specific gate SMU control and laboratory validation remain project

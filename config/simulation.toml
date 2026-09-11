@@ -10,6 +10,7 @@ temperature_max_k = 300.0
 [magnet]
 hardware_x_max_t = 3.0
 hardware_z_max_t = 9.0
+# Dual-axis resultant ceiling only; single-axis fields use the axis ceilings above.
 experiment_vector_max_t = 3.0
 field_tolerance_t = 0.001
 stable_range_t = 0.0005

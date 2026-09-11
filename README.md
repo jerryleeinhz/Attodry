@@ -8,7 +8,7 @@
 
 - attoDRY2100XL，USB 虚拟串口加 `attoDRYxyz64bit.dll` 接口。
 - 两轴矢量磁体：控制软件轴名为 X/Z；出厂规格表将横向轴写为 Y。
-- 硬件额定值：X 轴 3 T，Z 轴 9 T；本项目所有实验命令额外限制合成场不超过 3 T。
+- 用户于 2026-09-11 确认：纯 X 轴最高 3 T，纯 Z 轴最高 9 T；X/Z 同时非零时合场不超过 3 T。
 - SR830 #1：内部参考、SINE OUT 交流激励、测量 Vxx。
 - SR830 #2：从 #1 TTL OUT 获取外参考、测量 Vxy、SINE OUT 物理断开。
 - 三台 Keithley 2400 的独立模块使用 `smu_bias`、`gate_top`、
@@ -20,9 +20,19 @@
 
 ```text
 |Bx| <= 3 T
-|Bz| <= 9 T（硬件额定值）
-sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
+|Bz| <= 9 T
+Bx != 0 且 Bz != 0 时：sqrt(Bx^2 + Bz^2) <= 3 T
 ```
+
+只有另一分量严格等于零才算单轴；不以容差把小非零读回当作零。
+`[magnet].experiment_vector_max_t` 现在只限制双轴合场，单轴使用对应
+`hardware_x_max_t` / `hardware_z_max_t`（可降低，不可超过 3/9 T）。请求、
+float32 命令、实际读回和执行中的混合状态均检查。高 Z 到双轴的 `direct`
+路径若中间超限会拒绝，不自动改成经零场路径。
+
+2026-09-11 状态更新：操作者已确认此前 M3 只读成功；本次限值变更需新的
+目标机离线验证和写入前只读复核。首次 M4 选择 X 轴，具体目标/时序与
+连接、写入授权待确认。下方 M3 未执行描述为变更前的历史状态。
 
 可捕获的测量异常和 `Ctrl+C` 默认策略是：先安全关闭锁相激励与 SMU 输出，再请求 X/Z 磁场归零并监视读回。电脑硬崩溃或通信断开时软件不能保证归零，必须人工检查 attoDRY/APS100 状态。
 
@@ -57,7 +67,7 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
   已完成实验的经验规则；
 - [`Temperature`](docs/modules/TEMPERATURE.md)：attoDRY 温度读回、控制和稳定；
 - [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：本地 fake-DLL 的 X/Z
-  单目标/有序点列、3 T 限制、canonical JSONL、文件 monitor 和 monitored cleanup；
+  单目标/有序点列、单轴 3/9 T 与双轴合场 3 T 限制、canonical JSONL、文件 monitor 和 monitored cleanup；
   M2 target-offline 已完成，真实 M3–M5 仍待分别授权和验收；
 - [`Three-SMU`](docs/modules/THREE_SMU.md)：三台 Keithley、双栅极与 bias 的
   QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
@@ -120,8 +130,8 @@ python -m attodry_control.lockin_test --help
 重复项；它不会排序、去重或生成 Cartesian grid。`transition_policy` 是必填且显式的：
 `direct` 将相邻 X/Z 向量分段为已验证的离散 waypoint，`via_zero` 才会请求保守的
 经零场路径；程序绝不静默插入零场绕行。每个 target、float32 command waypoint，以及
-两种可能的 X→Z / Z→X mixed corner 都要通过 `sqrt(Bx^2 + Bz^2) <= 3 T` 和分量边界
-检查。每个 waypoint 从已确认 setpoint 重新选择一个已验证的轴写入顺序，并把计划及
+两种可能的 X→Z / Z→X mixed corner 都按上述单轴/双轴边界检查，只执行安全的顺序。
+每个 waypoint 从已确认 setpoint 重新选择一个已验证的轴写入顺序，并把计划及
 实际执行的完整 waypoint/path 写入审计；不能假定固定 X-first。`max_step_t` 必须大于
 1e-5 T acknowledgement resolution，且只约束离散请求 setpoint 的间距；starting
 setpoint、内部 waypoint、显式 target 和 cleanup zero 都要求 setpoint/actual field 的
@@ -161,7 +171,11 @@ cleanup 会独立重试 monitored zero。通信不确定、非有限读回、zer
 field control：
 zero 时保持 control enabled at zero，hold 时保持 control enabled at final target，随后
 断开 DLL session。OFF→ON takeover 还要求 actual field 与 latent setpoint 在 configured
-（且不大于 1 mT）tolerance 内相符，并验证两种可能的 mixed corners 均不超过 3 T。
+（且不大于 1 mT）tolerance 内相符，并验证两种可能的 mixed corners 均满足上述限值。
+
+新 JSONL 的 `run_started.field_limit_policy` 为
+`single-axis-hardware_combined-vector-v1`，并保存实际限值。文件 monitor 按
+归档规则检查新记录；无此字段的旧记录保留原 3 T 检查，未知规则拒绝认证。
 
 每次运行只有一个 canonical JSONL；每个事件 append 后都会 flush/`fsync`，partial、
 rejected、interrupted、stability、cleanup 和 terminal evidence 不删除。field monitor
