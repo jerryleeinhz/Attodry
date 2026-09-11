@@ -10,8 +10,9 @@ Supersedes earlier target-pending and cable/interlock-blocked statements: the
 operator selected M4 X=+0.1 T/Z=0 T and confirmed the cable/interlock issue resolved,
 allowing M4/M5 testing in principle. This change performs no hardware operation;
 M4/M5 are not commissioned. Timing/transition parameters and the exact M5 point
-list still need confirmation, with M4 evidence preceding M5 and fresh target
-offline/read-only checks before writes. No reboot or cabling action was taken.
+list still need confirmation, with M4 evidence preceding M5 and a fresh read-only
+check before writes. Target-offline passed as recorded below. No reboot or cabling
+action was taken.
 
 `magnetic_field_run` accepts exactly one of explicit `points` or `axis`+`segments`.
 Single-axis linear segments use min<max and exactly one of inclusive points>=2
@@ -26,8 +27,19 @@ JSONL v1 adds optional `segment_plan` plus per-point segment/direction metadata;
 the file monitor regenerates and cross-checks it, while old explicit-point records
 remain compatible. Copyable M4, M5 ascending, M5 hysteresis and pure-Z syntax-only
 examples are commented in `config/hardware.example.toml`; active default stays zero.
-Local validation is recorded in DEVELOPMENT_STAGES. Baseline is 89591ce; these
-changes have not been committed/pushed or synchronized to LK_setup.
+Implementation `42f9799e4142110265d4d611a8f937c96eb94a67` is committed/pushed to
+origin/codex/magnetic-field-m0-m2 and fast-forward synchronized via authorized SSH
+to `C:/Users/LK_Setup/Yuanrong Li/Attocube_control-magnetic`. At that exact commit,
+target `lyr` Python 3.12.13 / 64-bit imported this checkout's src, passed compileall,
+223 focused tests (27.459 s), all 491 full tests (44.477 s, no skips), file-monitor
+driver-import isolation and offline describe of the unchanged local hardware TOML.
+The checkout was clean and the local TOML hash unchanged after validation. Vendor
+files exist in this checkout; no real DLL was loaded and all test hardware was fake.
+The local TOML still has one zero target, via_zero and normal scan-end hold;
+it has not been changed to the selected +0.1 T M4 target or an M5 segment plan.
+Confirmed existing timing values are recorded in DEVELOPMENT_STAGES. M4 parameter
+approval and absence of competing GUI/controller clients still need confirmation.
+This evidence is target-offline only, not M4/M5 commissioning or current zero proof.
 
 ### Latest magnetic-field safety update (2026-09-11)
 

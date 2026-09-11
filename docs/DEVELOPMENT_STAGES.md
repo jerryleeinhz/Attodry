@@ -15,12 +15,29 @@ Update this file whenever a feature is completed. A stage is complete only when 
   tracked target remains zero; local hardware config and APS100 rates are unchanged.
 - Operator confirmed current-lead/interlock issue resolved and permits M4/M5 tests
   in principle. No real test ran; exact timing/M5 path remain to be selected and M4
-  must precede M5. Current revision still needs target-offline and live preflight.
+  must precede M5. Target-offline is now complete as recorded below; live preflight
+  and real M4/M5 remain unexecuted.
 - Validation: new 10-test segment/config/CLI/fake-DLL/monitor suite passed (0.534 s);
   full unittest discovery ran 491 tests in 36.501 s, OK with 5 optional skips
   (486 passed). Final magnetic-focused rerun passed all 223 tests in 29.238 s.
   Compileall, CLI help, default-example offline describe and diff check passed.
-  No real DLL, connection or hardware writes. Local changes remain uncommitted.
+  No real DLL, connection or hardware writes.
+- Target-offline validation completed via authorized SSH in the operator-named
+  `C:/Users/LK_Setup/Yuanrong Li/Attocube_control-magnetic` checkout at exact
+  implementation commit `42f9799e4142110265d4d611a8f937c96eb94a67`.
+  Fast-forward update from 89591ce preserved the ignored hardware.local.toml
+  SHA-256, and Git remained clean. Exact interpreter:
+  `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`, Python 3.12.13, 64-bit;
+  PYTHONPATH points at that checkout's src and user-site is disabled.
+  Compileall passed; 223 focused tests passed in 27.459 s; full discovery passed
+  all 491 tests in 44.477 s with no skips. File-monitor import isolation passed
+  without importing the attoDRY driver. Actual local-config offline describe
+  passed: one zero target, via_zero, 0.05 T internal step, 1 mT tolerance,
+  0.5 mT range, 10 s dwell, 1 s polling, 7200 s timeout; normal scan end is hold.
+  These are existing configuration values, not approved M4/M5 movement parameters.
+  Unlike the historical DLL-free snapshot, this validation used the real checkout
+  with vendor files present, but all instrument execution used fakes; no real DLL
+  was loaded, no instrument connected and no hardware command sent.
 
 ## Current magnetic-field update - axis-dependent limits (2026-09-11)
 
