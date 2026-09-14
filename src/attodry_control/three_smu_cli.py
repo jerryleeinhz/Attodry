@@ -5,12 +5,15 @@ from contextlib import ExitStack
 from dataclasses import asdict
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
+from queue import SimpleQueue
+import shutil
 import time
 from typing import Any, Callable, Sequence
 
 from .keithley2400 import open_keithley2400_monitor
-from .three_smu import ThreeSmuSession
+from .three_smu import ThreeSmuSample, ThreeSmuSession
 from .three_smu_config import (
     FinishAction,
     SEMANTIC_ROLES,
@@ -18,9 +21,8 @@ from .three_smu_config import (
     ThreeSmuHardwareConfig,
     ThreeSmuOperationConfig,
     ThreeSmuScanPlan,
-    load_three_smu_hardware,
+    active_smu_roles,
     load_three_smu_operation_config,
-    load_three_smu_scan,
     validate_plan_targets,
 )
 from .three_smu_live import (
@@ -28,9 +30,12 @@ from .three_smu_live import (
     format_live_three_smu_snapshot,
     monitor_problems,
 )
+from .three_smu_stream import LIVE_STREAM_URL, ThreeSmuLivePublisher
 
 
 DEFAULT_CONFIG_PATH = Path("config/hardware.local.toml")
+_WIDE_RUN_TABLE_MIN_COLUMNS = 96
+_WIDE_RUN_TABLE_SEPARATOR = "─" * 94
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,10 +53,6 @@ def build_parser() -> argparse.ArgumentParser:
                 "The default local file is never committed."
             ),
         )
-        child.add_argument("--hardware", type=Path, help=argparse.SUPPRESS)
-        child.add_argument("--plan", type=Path, help=argparse.SUPPRESS)
-        if command == "run":
-            child.add_argument("--output-dir", type=Path, help=argparse.SUPPRESS)
         if command == "monitor-live":
             child.add_argument(
                 "--samples",
@@ -84,6 +85,7 @@ def run(
     sleep: Callable[[float], None] = time.sleep,
     session_open: Callable[..., ThreeSmuSession] = ThreeSmuSession.open,
     monitor_resource_manager_factory: Callable[[], Any] | None = None,
+    live_publisher_factory: Callable[[], ThreeSmuLivePublisher] = ThreeSmuLivePublisher,
 ) -> int:
     """Run the CLI while keeping connection paths injectable for fake tests."""
 
@@ -103,29 +105,80 @@ def run(
             sleep=sleep,
         )
 
-    _confirm_scan_run(
+    _print_scan_run_summary(
         operation,
         hardware,
         plan,
         points,
         output_dir,
-        input_fn=input_fn,
         print_fn=print_fn,
     )
-    with session_open(
-        hardware,
-        plan,
-        authorize_writes=True,
-        authorize_status_consumption=True,
-    ) as session:
-        for _sample in session.run(
-            output_dir=output_dir,
-            run_name="" if operation is None else operation.run_name,
-            note="" if operation is None else operation.note,
-            config_path=None if operation is None else operation.config_path,
-        ):
-            pass
+    _confirm_hold_outputs(plan, input_fn=input_fn)
+    sample_queue: SimpleQueue[ThreeSmuSample] = SimpleQueue()
+    displayed_samples = 0
+    total_samples = len(points) * plan.samples_per_point
+    publisher = live_publisher_factory()
+    try:
+        # This binds before QCoDeS/VISA opens. A local endpoint failure must never
+        # leave a scan running without the requested live-plot data path.
+        publisher.start(plan, total_samples=total_samples)
+    except OSError as exc:
+        raise SystemExit(
+            f"Cannot start Three-SMU live stream at {LIVE_STREAM_URL}: {exc}. "
+            "No QCoDeS/VISA resource was opened."
+        ) from exc
+    print_fn(f"Live Notebook endpoint: {publisher.endpoint} (memory samples; no extra queries)")
+
+    def display_pending_samples() -> None:
+        nonlocal displayed_samples
+        while not sample_queue.empty():
+            displayed_samples += 1
+            _print_run_sample(
+                sample_queue.get(),
+                sample_number=displayed_samples,
+                total_samples=total_samples,
+                hardware=hardware,
+                plan=plan,
+                show_table_header=displayed_samples == 1,
+                print_fn=print_fn,
+            )
+
+    def publish_formal_sample(sample: ThreeSmuSample) -> None:
+        """Fan out one already-recorded sample without performing hardware I/O."""
+
+        sample_queue.put(sample)
+        publisher.publish_sample(sample)
+
+    try:
+        with session_open(
+            hardware,
+            plan,
+            authorize_writes=True,
+            authorize_status_consumption=True,
+        ) as session:
+            try:
+                for _sample in session.run(
+                    output_dir=output_dir,
+                    run_name="" if operation is None else operation.run_name,
+                    note="" if operation is None else operation.note,
+                    config_path=None if operation is None else operation.config_path,
+                    on_sample=publish_formal_sample,
+                ):
+                    display_pending_samples()
+            finally:
+                # The generator invokes the callback before raising for an unsafe
+                # formal sample, so this also displays that retained problem sample.
+                display_pending_samples()
+        publisher.finish(status="completed")
         print_fn(session.last_run_dir)
+    except BaseException as exc:
+        publisher.finish(
+            status="interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    finally:
+        publisher.close()
     return 0
 
 
@@ -137,22 +190,7 @@ def _load_command_configuration(
     ThreeSmuScanPlan,
     Path,
 ]:
-    legacy_requested = args.hardware is not None or args.plan is not None
-    if legacy_requested:
-        if args.config is not None:
-            raise SystemExit("--config cannot be combined with legacy --hardware/--plan")
-        if args.hardware is None or args.plan is None:
-            raise SystemExit("Legacy mode requires both --hardware and --plan")
-        hardware = load_three_smu_hardware(args.hardware)
-        plan = load_three_smu_scan(args.plan)
-        output_dir = getattr(args, "output_dir", None)
-        if args.command == "run" and output_dir is None:
-            raise SystemExit("Legacy run requires --output-dir")
-        return None, hardware, plan, Path(".") if output_dir is None else output_dir
-
     config_path = DEFAULT_CONFIG_PATH if args.config is None else args.config
-    if getattr(args, "output_dir", None) is not None:
-        raise SystemExit("--output-dir is only available with legacy --hardware/--plan")
     operation = load_three_smu_operation_config(config_path)
     return operation, operation.hardware, operation.plan, operation.output_directory
 
@@ -170,6 +208,10 @@ def _print_description(
                 "hardware": {
                     role: asdict(config) for role, config in hardware.by_role().items()
                 },
+                "active_roles": list(active_smu_roles(plan)),
+                "off_roles": [
+                    role for role in SEMANTIC_ROLES if role not in active_smu_roles(plan)
+                ],
                 "scan": asdict(plan),
                 "generated_points": len(points),
                 "formal_samples": len(points) * plan.samples_per_point,
@@ -182,41 +224,45 @@ def _print_description(
     )
 
 
-def _confirm_scan_run(
+def _print_scan_run_summary(
     operation: ThreeSmuOperationConfig | None,
     hardware: ThreeSmuHardwareConfig,
     plan: ThreeSmuScanPlan,
     points: Sequence[ScanPoint],
     output_dir: Path,
     *,
-    input_fn: Callable[[str], str],
     print_fn: Callable[..., None],
 ) -> None:
-    """Require exact, per-run human consent before QCoDeS/VISA is opened."""
+    """Show the direct-run plan before the session opens any instrument."""
 
     print_fn("Three-SMU scan plan (no instrument has been opened):")
-    print_fn(f"  config: {operation.config_path if operation else 'legacy split TOML'}")
+    print_fn(f"  config: {operation.config_path if operation else 'unknown'}")
     print_fn(f"  mode: {plan.mode.value}; points: {len(points)}; samples: {len(points) * plan.samples_per_point}")
     print_fn(f"  finish: {plan.finish_action.value}; output directory: {output_dir}")
     for role in SEMANTIC_ROLES:
-        config = hardware.by_role()[role]
         channel = plan.by_role()[role]
-        source_unit = "V" if config.source_mode.value == "voltage" else "A"
+        if channel.role.value == "off":
+            print_fn(f"  {role}: off; not connected; physical state remains unknown")
+            continue
+        config = hardware.require_role(role)
         print_fn(
             f"  {role}: {channel.role.value}; source={config.source_mode.value}; "
-            f"range=[{config.source_min:g}, {config.source_max:g}] {source_unit}; "
             f"max |V|={config.max_abs_voltage_v:g} V; "
             f"max |I|={config.max_abs_current_a:g} A"
         )
     print_fn(
-        "This will connect all three SMUs, send setting writes, and consume their "
+        "This will connect the active SMUs, send setting writes, and consume their "
         ":SYST:ERR? error queues."
     )
-    confirmation = _read_confirmation(input_fn, "Type RUN THREE SMU to continue: ")
-    if confirmation != "RUN THREE SMU":
-        raise SystemExit(
-            "Three-SMU scan was not authorized; no QCoDeS/VISA resource was opened"
-        )
+
+
+def _confirm_hold_outputs(
+    plan: ThreeSmuScanPlan,
+    *,
+    input_fn: Callable[[str], str],
+) -> None:
+    """Keep the separate confirmation for the exceptional hold-output cleanup."""
+
     if plan.finish_action is FinishAction.HOLD:
         hold_confirmation = _read_confirmation(
             input_fn,
@@ -226,6 +272,183 @@ def _confirm_scan_run(
             raise SystemExit(
                 "Hold was not authorized; no QCoDeS/VISA resource was opened"
             )
+
+
+def _print_run_sample(
+    sample: ThreeSmuSample,
+    *,
+    sample_number: int,
+    total_samples: int,
+    hardware: ThreeSmuHardwareConfig,
+    plan: ThreeSmuScanPlan,
+    show_table_header: bool,
+    print_fn: Callable[..., None],
+) -> None:
+    """Render a formal sample without querying or changing an instrument."""
+
+    terminal_columns = shutil.get_terminal_size(fallback=(120, 24)).columns
+    if terminal_columns < _WIDE_RUN_TABLE_MIN_COLUMNS:
+        _print_compact_run_sample(
+            sample,
+            sample_number=sample_number,
+            total_samples=total_samples,
+            hardware=hardware,
+            plan=plan,
+            show_table_header=show_table_header,
+            print_fn=print_fn,
+        )
+    else:
+        _print_wide_run_sample(
+            sample,
+            sample_number=sample_number,
+            total_samples=total_samples,
+            hardware=hardware,
+            plan=plan,
+            show_table_header=show_table_header,
+            print_fn=print_fn,
+        )
+    if sample.clean:
+        return
+    print_fn("! PROBLEM details (recorded formal sample; cleanup follows):")
+    print_fn("  status/error queue:")
+    for role in active_smu_roles(plan):
+        timed_reading = sample.readings.get(role)
+        if timed_reading is None:
+            print_fn(f"    {role}: formal reading unavailable")
+            continue
+        reading = timed_reading.reading
+        status = (
+            reading.status
+            if reading.status_query_consumed and reading.status is not None
+            else "not consumed or unavailable"
+        )
+        print_fn(f"    {role}: {status}")
+    print_fn("  problems:")
+    for problem in sample.problems:
+        print_fn(f"    - {problem}")
+
+
+def _print_wide_run_sample(
+    sample: ThreeSmuSample,
+    *,
+    sample_number: int,
+    total_samples: int,
+    hardware: ThreeSmuHardwareConfig,
+    plan: ThreeSmuScanPlan,
+    show_table_header: bool,
+    print_fn: Callable[..., None],
+) -> None:
+    if show_table_header:
+        print_fn("Three-SMU formal sample readbacks (memory FIFO; no extra queries):")
+        print_fn(
+            "Role        │ Setpoint rb    │ Voltage        │ Current        │ "
+            "Resistance     │ Output"
+        )
+        print_fn(_WIDE_RUN_TABLE_SEPARATOR)
+    print_fn(_run_sample_summary(sample, sample_number, total_samples, plan))
+    for role in active_smu_roles(plan):
+        timed_reading = sample.readings.get(role)
+        if timed_reading is None:
+            print_fn(_wide_run_table_row(role, "n/a", "n/a", "n/a", "n/a", "n/a"))
+            continue
+        reading = timed_reading.reading
+        source_unit = _source_unit(hardware, role)
+        print_fn(
+            _wide_run_table_row(
+                role,
+                _format_engineering(reading.source_setpoint, source_unit),
+                _format_engineering(reading.voltage_v, "V"),
+                _format_engineering(reading.current_a, "A"),
+                _format_engineering(reading.resistance_ohm, "Ω"),
+                "ON" if reading.output_enabled else "OFF",
+            )
+        )
+    print_fn(_WIDE_RUN_TABLE_SEPARATOR)
+
+
+def _print_compact_run_sample(
+    sample: ThreeSmuSample,
+    *,
+    sample_number: int,
+    total_samples: int,
+    hardware: ThreeSmuHardwareConfig,
+    plan: ThreeSmuScanPlan,
+    show_table_header: bool,
+    print_fn: Callable[..., None],
+) -> None:
+    if show_table_header:
+        print_fn("Three-SMU formal sample readbacks (compact terminal view):")
+    print_fn(_run_sample_summary(sample, sample_number, total_samples, plan))
+    for role in active_smu_roles(plan):
+        timed_reading = sample.readings.get(role)
+        if timed_reading is None:
+            print_fn(f"  {role}: formal reading unavailable")
+            continue
+        reading = timed_reading.reading
+        source_unit = _source_unit(hardware, role)
+        print_fn(
+            f"  {role}: src={_format_engineering(reading.source_setpoint, source_unit)}; "
+            f"V={_format_engineering(reading.voltage_v, 'V')}; "
+            f"I={_format_engineering(reading.current_a, 'A')}; "
+            f"R={_format_engineering(reading.resistance_ohm, 'Ω')}; "
+            f"{'ON' if reading.output_enabled else 'OFF'}"
+        )
+
+
+def _run_sample_summary(
+    sample: ThreeSmuSample,
+    sample_number: int,
+    total_samples: int,
+    plan: ThreeSmuScanPlan,
+) -> str:
+    outcome = "CLEAN" if sample.clean else "PROBLEM"
+    return (
+        f"[{sample_number}/{total_samples}]  repeat {sample.repeat_index + 1}/"
+        f"{plan.samples_per_point} · segment {sample.segment} · "
+        f"elapsed {sample.elapsed_s:.3f} s · {outcome}"
+    )
+
+
+def _wide_run_table_row(
+    role: str,
+    setpoint: str,
+    voltage: str,
+    current: str,
+    resistance: str,
+    output: str,
+) -> str:
+    return (
+        f"{role:<11} │ {setpoint:>14} │ {voltage:>14} │ {current:>14} │ "
+        f"{resistance:>14} │ {output:^6}"
+    )
+
+
+def _source_unit(hardware: ThreeSmuHardwareConfig, role: str) -> str:
+    return "V" if hardware.require_role(role).source_mode.value == "voltage" else "A"
+
+
+def _format_engineering(value: float | None, unit: str) -> str:
+    """Format a finite readback in a compact, copy-friendly engineering unit."""
+
+    if value is None:
+        return "n/a"
+    if not math.isfinite(value):
+        return str(value)
+    if value == 0:
+        return f"0 {unit}"
+    for scale, prefix in (
+        (1e9, "G"),
+        (1e6, "M"),
+        (1e3, "k"),
+        (1.0, ""),
+        (1e-3, "m"),
+        (1e-6, "µ"),
+        (1e-9, "n"),
+        (1e-12, "p"),
+    ):
+        if abs(value) >= scale:
+            return f"{value / scale:.5g} {prefix}{unit}"
+    return f"{value:.3e} {unit}"
 
 
 def _read_confirmation(input_fn: Callable[[str], str], prompt: str) -> str:
@@ -253,14 +476,17 @@ def _run_monitor_live(
         if monitor_resource_manager_factory is None
         else monitor_resource_manager_factory
     )
+    active_roles = active_smu_roles(plan)
+    if not active_roles:
+        raise SystemExit("monitor-live requires at least one fixed or sweep SMU role")
     manager = manager_factory()
     had_problem = False
     try:
         with ExitStack() as stack:
             monitors: dict[str, Any] = {}
-            for role in SEMANTIC_ROLES:
+            for role in active_roles:
                 monitor = open_keithley2400_monitor(
-                    role, hardware.by_role()[role], manager
+                    role, hardware.require_role(role), manager
                 )
                 stack.callback(monitor.close)
                 monitors[role] = monitor
@@ -270,13 +496,13 @@ def _run_monitor_live(
                     role: monitors[role].read_monitor(
                         consume_status_queue=args.consume_status_queue
                     )
-                    for role in SEMANTIC_ROLES
+                    for role in active_roles
                 }
                 problems = [
                     problem
-                    for role in SEMANTIC_ROLES
+                    for role in active_roles
                     for problem in monitor_problems(
-                        role, hardware.by_role()[role], readings[role]
+                        role, hardware.require_role(role), readings[role]
                     )
                 ]
                 problems.extend(_duplicate_identity_problems(readings))
@@ -295,6 +521,9 @@ def _run_monitor_live(
                 sample_index += 1
                 if args.samples == 0 or sample_index < args.samples:
                     sleep(args.interval_s)
+    except KeyboardInterrupt:
+        print_fn("\nThree-SMU live monitor stopped.")
+        return 130
     finally:
         manager.close()
     return 1 if had_problem else 0

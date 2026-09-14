@@ -22,7 +22,7 @@ from .three_smu_config import (
 
 @dataclass(frozen=True, slots=True)
 class ThreeSmuLiveSnapshot:
-    """One sequential, query-only snapshot of the three semantic SMU roles."""
+    """One sequential, query-only snapshot of the active semantic SMU roles."""
 
     sample_index: int
     captured_at_utc: datetime
@@ -41,9 +41,15 @@ class ThreeSmuLiveSnapshot:
             raise ValueError("captured_at_utc must be timezone-aware")
         if self.captured_at_utc.utcoffset().total_seconds() != 0:
             raise ValueError("captured_at_utc must be UTC")
-        for role in SEMANTIC_ROLES:
-            if role not in self.plan_roles or role not in self.readings:
-                raise ValueError(f"live snapshot is missing {role}")
+        if set(self.plan_roles) != set(SEMANTIC_ROLES):
+            raise ValueError("live snapshot plan_roles must contain all semantic roles")
+        active_roles = {
+            role
+            for role, channel_role in self.plan_roles.items()
+            if channel_role is not ChannelRole.OFF
+        }
+        if set(self.readings) != active_roles:
+            raise ValueError("live snapshot readings must contain exactly the active roles")
 
 
 def monitor_problems(
@@ -59,31 +65,23 @@ def monitor_problems(
             f"{role} source mode is {reading.source_mode.value}, expected "
             f"{config.source_mode.value}"
         )
-    if config.max_abs_voltage_v is not None and (
-        abs(reading.voltage_v) > config.max_abs_voltage_v
+    if (
+        reading.voltage_v is not None
+        and config.max_abs_voltage_v is not None
+        and abs(reading.voltage_v) > config.max_abs_voltage_v
     ):
         problems.append(
             f"{role} voltage {reading.voltage_v:g} V exceeds max_abs_voltage_v "
             f"{config.max_abs_voltage_v:g} V"
         )
-    if config.max_abs_current_a is not None and (
-        abs(reading.current_a) > config.max_abs_current_a
+    if (
+        reading.current_a is not None
+        and config.max_abs_current_a is not None
+        and abs(reading.current_a) > config.max_abs_current_a
     ):
         problems.append(
             f"{role} current {reading.current_a:g} A exceeds max_abs_current_a "
             f"{config.max_abs_current_a:g} A"
-        )
-    source_min = config.source_min
-    source_max = config.source_max
-    if (
-        source_min is not None
-        and source_max is not None
-        and not source_min <= reading.source_setpoint <= source_max
-    ):
-        unit = "V" if reading.source_mode is SourceMode.VOLTAGE else "A"
-        problems.append(
-            f"{role} source setpoint {reading.source_setpoint:g} {unit} is outside "
-            f"configured range [{source_min:g}, {source_max:g}] {unit}"
         )
     active_max = (
         config.max_abs_current_a
@@ -99,16 +97,6 @@ def monitor_problems(
         )
     if reading.compliance_trip:
         problems.append(f"{role} compliance trip is active")
-    if (
-        role != "smu_bias"
-        and reading.source_mode is SourceMode.VOLTAGE
-        and config.leakage_limit_a is not None
-        and abs(reading.current_a) > config.leakage_limit_a
-    ):
-        problems.append(
-            f"{role} leakage {reading.current_a:g} A exceeds leakage_limit_a "
-            f"{config.leakage_limit_a:g} A"
-        )
     if reading.status_queue_consumed and not _status_is_clean(reading.status):
         problems.append(f"{role} error queue reports {reading.status}")
     if reading.output_enabled:
@@ -129,18 +117,25 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
         "role         plan   source        setpoint          V read          I read          R=V/I       output  trip   sense",
     ]
     for role in SEMANTIC_ROLES:
+        if snapshot.plan_roles[role] is ChannelRole.OFF:
+            lines.append(
+                f"{role:<12} off    not connected; physical state is unknown"
+            )
+            continue
         reading = snapshot.readings[role]
         source_unit = "V" if reading.source_mode is SourceMode.VOLTAGE else "A"
+        voltage = _format_measurement(reading.voltage_v, "V")
+        current = _format_measurement(reading.current_a, "A")
         resistance = _format_resistance(reading.resistance_ohm)
         lines.append(
             f"{role:<12} {snapshot.plan_roles[role].value:<6} "
             f"{reading.source_mode.value:<12} "
             f"{reading.source_setpoint:>9.4g} {source_unit:<1} "
-            f"{reading.voltage_v:>11.4e} V "
-            f"{reading.current_a:>11.4e} A "
+            f"{voltage:>13} "
+            f"{current:>13} "
             f"{resistance:>11} "
             f"{'ON' if reading.output_enabled else 'OFF':<7} "
-            f"{'TRIP' if reading.compliance_trip else 'clear':<6} "
+            f"{_format_trip(reading.compliance_trip):<6} "
             f"{'4W' if reading.four_wire else '2W'}"
         )
         measure_unit = "A" if reading.source_mode is SourceMode.VOLTAGE else "V"
@@ -150,6 +145,11 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
             f"{measure_unit}; source range={reading.source_range:g} {source_unit}; "
             f"measure range={reading.measure_range:g} {measure_unit}; status={status}"
         )
+        if not reading.output_enabled:
+            lines.append(
+                f"  {role}: live V/I/R and trip state unavailable while output "
+                "is OFF; :READ? and protection-trip query not sent"
+            )
     if snapshot.problems:
         lines.append("warnings:")
         lines.extend(f"  - {problem}" for problem in snapshot.problems)
@@ -161,7 +161,17 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
 
 
 def _format_resistance(value: float | None) -> str:
-    return "—" if value is None else f"{value:.4e} ohm"
+    return "n/a" if value is None else f"{value:.4e} ohm"
+
+
+def _format_measurement(value: float | None, unit: str) -> str:
+    return "n/a" if value is None else f"{value:.4e} {unit}"
+
+
+def _format_trip(value: bool | None) -> str:
+    if value is None:
+        return "n/a"
+    return "TRIP" if value else "clear"
 
 
 def _status_is_clean(status: str | None) -> bool:

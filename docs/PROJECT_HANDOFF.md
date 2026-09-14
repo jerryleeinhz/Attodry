@@ -645,7 +645,7 @@ Completed offline in Stage 4:
   removed after its absolute cleanup path was verified.
 
 Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
-harmonic validation, the independent Three-SMU QCoDeS S0 module plus query-only
+harmonic validation, the independent Three-SMU QCoDeS module plus query-only
 monitor, and the attoDRY read-only connection are complete. The first
 attoDRY temperature setpoint/control actions, control-first ordering, actual sensor
 recording, and heater-driven warming are operator-accepted for this experiment.
@@ -653,10 +653,153 @@ The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; th
 fact remains diagnostic rather than being rewritten as stability. The commissioned
 0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Daily
 temperature operation uses the unified hardware TOML and dedicated command without
-additional authorization flags. Three-SMU target-computer validation, all real SMU
-connections/writes, integration of the independent SMU module into the main
-acquisition, other attoDRY setting writes, and real end-to-end acquisition still
-require staged authorization.
+additional authorization flags. Three-SMU target-offline validation, bounded
+bottom-only monitoring, and one authorized minimum bottom-gate write scan are
+complete; remaining-role queries/writes, integration of the independent SMU module
+into the main acquisition, other attoDRY setting writes, and real end-to-end
+acquisition still require staged authorization.
+
+Three-SMU direct-points follow-up (2026-08-26): the unified hardware TOML is now
+the only Three-SMU configuration entry. Each role keeps only independent
+`max_abs_voltage_v` and `max_abs_current_a`; user-entered compliance, source
+min/max, ramp, readback tolerance, leakage and per-device settle fields were
+removed. Keithley compliance is still programmed as a hardware protection value,
+derived from the opposite absolute limit and queried with source/measurement
+ranges after configuration. Both autoranges are required and `nplc=1.0` records
+the Finland 50 Hz/20 ms default.
+
+Scan roles now accept either an arbitrary `points` vector or `start/stop/step`;
+`bidirectional` is per role. Paired-gate and map modes independently expand each
+role, while software pulse rejects bidirectional. Formal targets and cleanup use
+one direct write, shared `delay_s`, then recorded readback; no software ramp or
+tolerance rejection remains. Schema v4 drops `near_compliance` while retaining
+requested target and actual source/V/I. The two split example TOMLs and hidden
+legacy CLI arguments were deleted. This work used only fake adapters and offline
+tests: 104 focused tests and the full 389-test suite passed (five optional plotting
+tests skipped), and source/test compilation passed. No real VISA resource, query,
+status consumption, or setting write occurred. The ignored local TOML in this
+checkout was schema-migrated without changing existing Lock-in values; all unknown
+SMU addresses/timeouts/absolute limits remain `CHANGE_ME` and must be operator-filled.
+
+Three-SMU active-role follow-up (2026-08-26): `[three_smu_run.<role>].role`
+is the sole activation source. The loader requires a flat same-name hardware
+table only for `fixed`/`sweep` roles and ignores absent or stale hardware
+configuration for `off` roles. Sessions and the live monitor construct, query,
+write, clean up, and record only that active subset; an off instrument remains
+physically unknown, never assumed zero or output-off. Bias/top/bottom now share
+one flat hardware-table schema, `[gate_*.smu]` and per-role `timeout_ms` are
+rejected, and the Keithley adapter plus query monitor use a fixed 5000 ms timeout.
+Schema v5 adds `active_roles`/`off_roles`, filters the hardware snapshot, and
+leaves stable CSV columns blank for off roles. A bottom-only fake run proves that
+bias/top factories and resources are never touched. Focused regression: 109
+tests pass. The complete hardware-free suite passed all 394 tests with five
+optional matplotlib tests skipped, and `compileall` passed for `src` and `tests`.
+No real instrument library/resource was opened and no real query or write ran.
+
+Three-SMU off-role scan-value follow-up (2026-08-31): an off run-plan role now
+ignores the values of recognized dormant scan fields (`bidirectional`, `fixed`,
+`points`, `start`, `stop`, and `step`) and normalizes its internal channel plan
+to off/false/empty. This lets an operator temporarily switch a role off without
+deleting its saved vector. Unknown/misspelled field names remain errors, and
+switching back to fixed/sweep restores strict type, completeness, exclusivity,
+and numeric validation. The tracked hardware example now documents ordered and
+arbitrary explicit vectors, range expansion, descending direction, and
+bidirectional behavior. No record schema or hardware path changed. The 42
+focused config/CLI/fake-session tests and the complete 396-test offline suite
+passed with five optional matplotlib skips; `compileall` passed. No real VISA
+resource was opened and no query, status consumption, or setting write occurred.
+
+Three-SMU ordered-range follow-up (2026-08-31): active sweep roles now require
+exactly one of an explicit ordered `points` vector or an ordered `ranges` array;
+the former active top-level `start/stop/step` form is rejected. A linear segment
+uses exactly one of positive `step` or a point count, while a logarithmic segment
+requires positive endpoints and a point count. Segments include their endpoints,
+concatenate in listed order without automatic boundary de-duplication, and then
+receive that role's bidirectional expansion. The loader resolves ranges immediately
+to the existing final point vector, so generator, target validation, session,
+cleanup, and schema-v5 recording are unchanged. An off role still ignores dormant
+recognized values, now including malformed `ranges`, while misspelled keys remain
+strict errors. The unified example and Three-SMU daily/module/safety documents now
+show all supported forms. All 76 focused Three-SMU/Keithley/fake tests and the full
+400-test offline suite passed (five optional plotting skips); `compileall` passed.
+No VISA resource was opened and no real query, status consumption, or setting write
+occurred.
+
+Three-SMU target read-only monitor follow-up (2026-09-01): the SNOM target's `lyr`
+environment passed 23 focused monitor/Keithley/CLI tests, all 402 offline tests, and
+`src/tests` compilation. Under explicit query-only authorization, the current plan
+opened only active `gate_bottom` and confirmed a Keithley 2400 identity, 0 V source
+setpoint, output OFF, compliance/ranges, 2-wire sense, and no compliance trip. The
+monitor now avoids `:READ?` while output is OFF, displays V/I/R as `n/a`, never turns
+output on, and leaves `:SYST:ERR?` unconsumed by default. No setting write or `*RST`
+was sent. The target's unused NI GPIB passport was disabled while retaining the
+Keithley KUSB passport; one selective device clear recovered a stuck parser/output
+queue without changing source/output/compliance. At that checkpoint other roles,
+consumptive status queries, smallest writes, and integration were uncommissioned;
+the bottom-gate write follow-up below supersedes only the smallest-write item.
+
+Three-SMU target bottom-gate write commissioning (2026-09-01): the Keithley 2400
+C32 firmware does not permit `:READ?` or the protection-trip query while output is
+OFF. QCoDeS preflight, configure confirmation, and cleanup now query output/source
+state without claiming unavailable V/I; the session confirms a 0 V setpoint before
+enabling output and obtains its first measurement only after output is ON. The raw
+VISA monitor follows the same OFF-state rule and handles Ctrl+C without a traceback.
+After consuming the backlog created by the former illegal queries, SNOM
+`gate_bottom` (Keithley 2400 serial 4029737) completed the explicitly authorized
+five-point -0.1, -0.05, 0, +0.05, +0.1 V scan. Run
+`data/three_smu/20260901_110258_e2b23039` contains five clean formal samples and is
+`completed`/`accepted`; structured cleanup confirms source setpoint 0 V, output OFF,
+status `0,"No error"`, and no manual verification requirement. A subsequent
+three-sample query-only monitor independently confirmed 0 V/OFF. Forty-one focused
+tests and the complete 404-test offline suite passed. Bias/top real commissioning
+and integrated acquisition remain pending.
+
+Three-SMU direct-run live-panel follow-up (2026-09-01): routine `python -m
+attodry_control.three_smu_cli run` now starts after its printed validated-plan
+summary without `RUN THREE SMU`; only `finish_action = "hold"` still requires
+the separate exact `HOLD OUTPUTS` confirmation. One session remains the sole
+hardware path. After each formal sample is durably recorded, the session publishes
+it to an in-process FIFO before rejecting an unsafe sample; the CLI prints sample
+number/total, repeat, segment, elapsed time, source-setpoint readback, V/I/R, output and
+`CLEAN`/`PROBLEM` from that FIFO. It prints the already-read status/error queue and
+reason only for a problem sample. The live Notebook plots the same FIFO rather than
+making any independent SMU query. Twenty-six focused fake-instrument/session/CLI/
+Notebook tests and the complete 405-test offline suite passed (five optional plotting
+skips). This follow-up opened no real resource and sent, queried, or consumed no
+real hardware command/status entry.
+
+Three-SMU terminal-table follow-up (2026-09-01): the FIFO-backed direct-run panel
+now renders a single fixed-width table header in terminals at least 96 columns wide,
+then appends each sample's progress and active-role setpoint/V/I/R/output readback
+with engineering units. Narrow terminals use compact per-role lines instead of
+wrapping the table. `PROBLEM` status/error details remain conditional and the
+renderer has no hardware access. Eleven focused fake CLI/Notebook tests passed;
+the complete 406-test offline suite passed with five optional plotting skips. No
+real resource was opened, queried, consumed, or written.
+
+Three-SMU unified plotting follow-up (2026-09-01): `notebooks/three_smu.ipynb`
+replaces the old separate live and accepted-only notebooks. The CLI alone owns the
+SMU session and, before opening it, binds a loopback-only Server-Sent Events endpoint at
+`127.0.0.1:8765/events`. It publishes the same already-durable formal samples that feed
+the terminal FIFO; Notebook consumers cannot create a session, import the hardware path,
+query VISA, write settings, or consume status queues. The dashboard defaults historical
+loading to completed/accepted/clean data, labels live data provisional until finalization,
+and makes rejected/problem evidence explicit Audit opt-in. It supports added line/scatter/
+incomplete-map panels, cross-role coordinate/readback U/I/R/G axes, gate-value series and
+slicing, so bias I--V families at different gate voltages can be displayed together without
+mixing forward/reverse segments. The feature is offline-only: 23 focused CLI/analysis/
+stream/Notebook tests passed (one optional Matplotlib rendering test skipped because this
+development environment lacks the analysis extra); source/test compilation and the complete
+offline suite (410 passed, 6 optional Matplotlib skips) passed. No real instrument resource
+was opened and no hardware command or status query ran.
+
+Three-SMU live-plot rendering correction (2026-09-01): live stream receipt was confirmed by
+the dashboard status counter, but asynchronous `display(fig)` did not reliably render inside
+the VS Code/Jupyter widget callback. Each plot card now writes Matplotlib PNG bytes directly
+to an `ipywidgets.Image`, so the same event that increments the formal-sample counter visibly
+refreshes the chart. This changes presentation only; session, stream, safety and hardware
+ownership are unchanged. Notebook JSON/code syntax and 14 focused fake CLI/stream/Notebook
+tests passed (one optional Matplotlib test skipped); no instrument operation ran.
 
 Temperature interruption follow-up (2026-08-24): `[temperature_run]` now accepts
 `interrupt_policy = "continue"`, `"abort"` (default), or `"wait-confirmation"`, plus
@@ -734,9 +877,10 @@ These files are planning and handoff artifacts. They do not authorize hardware
 connections, status-latch consumption, or setting writes, and no such action was
 performed while creating them.
 
-Stage 5 - gate safety and integrated acquisition: model-independent offline core
-and independent Three-SMU QCoDeS S0 module complete; target/real commissioning
-and main-acquisition integration remain pending.
+Stage 5 - gate safety and integrated acquisition: model-independent offline core,
+Three-SMU target-offline checks, and the current bottom-only read-only monitor path
+are complete; remaining-role/read-write commissioning and main-acquisition
+integration remain pending.
 
 Completed offline in Stage 5:
 
@@ -1258,9 +1402,9 @@ command was sent.
    PID values automatically.
 2. Perform staged attoDRY small-movement commissioning only after a new explicit
    write authorization and operator-selected smallest practical targets.
-3. Run Three-SMU S1 target-offline validation in `LK_setup` `lyr`, then fill
-   the ignored local addresses and safety values. Any real connection or setting
-   write still requires a separate plan-specific authorization.
+3. Complete Three-SMU read/write commissioning for the remaining planned roles and
+   integrate the independent module only under separate plan-specific authorization
+   and front-panel safety review.
 4. Freeze and verify the complete hardware wheelhouse on the offline control
    computer after its Python/VISA environment is known.
 

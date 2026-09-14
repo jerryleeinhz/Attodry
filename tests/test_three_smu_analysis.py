@@ -11,6 +11,7 @@ from attodry_control.three_smu_analysis import (
     resolve_run_dir,
 )
 from attodry_control.three_smu_config import SEMANTIC_ROLES
+from attodry_control.three_smu_plot import load_three_smu_plot_samples
 
 
 def make_run(
@@ -19,11 +20,18 @@ def make_run(
     status: str = "completed",
     clean: bool = True,
     bias_values: tuple[float, ...] = (0.1,),
+    active_roles: tuple[str, ...] = SEMANTIC_ROLES,
 ) -> Path:
     run_dir = root / "run"
     run_dir.mkdir()
     (run_dir / "metadata.json").write_text(
-        json.dumps({"status": status, "accepted": status == "completed"}),
+        json.dumps(
+            {
+                "status": status,
+                "accepted": status == "completed",
+                "active_roles": list(active_roles),
+            }
+        ),
         encoding="utf-8",
     )
     fields = [
@@ -36,7 +44,7 @@ def make_run(
             f"{role}_source_setpoint", f"{role}_voltage_v",
             f"{role}_current_a", f"{role}_resistance_ohm",
             f"{role}_output_enabled", f"{role}_compliance_trip",
-            f"{role}_near_compliance", f"{role}_status",
+            f"{role}_status",
         ])
     with (run_dir / "data.csv").open("w", newline="", encoding="utf-8") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
@@ -59,6 +67,8 @@ def make_run(
                         "gate_bottom": bottom,
                     }
                     for role in SEMANTIC_ROLES:
+                        if role not in active_roles:
+                            continue
                         row.update({
                             f"{role}_coordinate": coordinates[role],
                             f"{role}_timestamp": f"2026-01-01T00:00:0{index}Z",
@@ -68,7 +78,6 @@ def make_run(
                             f"{role}_resistance_ohm": 1000.0,
                             f"{role}_output_enabled": role != "gate_bottom",
                             f"{role}_compliance_trip": False,
-                            f"{role}_near_compliance": False,
                             f"{role}_status": "0,No error",
                         })
                     writer.writerow(row)
@@ -113,6 +122,21 @@ class ThreeSmuAnalysisTests(unittest.TestCase):
             self.assertEqual(
                 load_three_smu_rows(run_dir, segment="missing"), ()
             )
+
+    def test_schema_five_bottom_only_rows_skip_off_role_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = make_run(Path(directory), active_roles=("gate_bottom",))
+            rows = load_three_smu_rows(run_dir)
+            self.assertEqual(len(rows), 4)
+            self.assertTrue(all(row.role == "gate_bottom" for row in rows))
+            self.assertEqual(load_three_smu_rows(run_dir, role="smu_bias"), ())
+
+    def test_plot_loader_reconstructs_one_wide_sample_per_formal_point(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            samples = load_three_smu_plot_samples(make_run(Path(directory)))
+        self.assertEqual(len(samples), 4)
+        self.assertEqual(set(samples[0].readings), set(SEMANTIC_ROLES))
+        self.assertEqual(samples[0].readings["smu_bias"].conductance_s, 0.001)
 
     def test_rectangular_two_gate_map_uses_bias_measurement_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

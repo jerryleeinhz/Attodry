@@ -28,7 +28,6 @@ class ThreeSmuAnalysisRow:
     resistance_ohm: float | None
     output_enabled: bool
     compliance_trip: bool
-    near_compliance: bool
     status: str
     problems: str
 
@@ -116,7 +115,15 @@ def load_three_smu_rows(
         return ()
     if role is not None and role not in SEMANTIC_ROLES:
         raise ValueError(f"role must be one of: {', '.join(SEMANTIC_ROLES)}")
-    selected_roles = (role,) if role else SEMANTIC_ROLES
+    archived_active_roles = metadata.get("active_roles")
+    if role is not None:
+        selected_roles = (role,)
+    elif isinstance(archived_active_roles, list) and all(
+        item in SEMANTIC_ROLES for item in archived_active_roles
+    ):
+        selected_roles = tuple(archived_active_roles)
+    else:
+        selected_roles = SEMANTIC_ROLES
     rows: list[ThreeSmuAnalysisRow] = []
     with (run_dir / "data.csv").open(newline="", encoding="utf-8") as file:
         for record in csv.DictReader(file):
@@ -126,6 +133,8 @@ def load_three_smu_rows(
             if segment is not None and record["segment"] != segment:
                 continue
             for selected_role in selected_roles:
+                if not record[f"{selected_role}_timestamp"].strip():
+                    continue
                 resistance = record[f"{selected_role}_resistance_ohm"].strip()
                 rows.append(
                     ThreeSmuAnalysisRow(
@@ -145,7 +154,6 @@ def load_three_smu_rows(
                         resistance_ohm=None if resistance == "" else float(resistance),
                         output_enabled=_bool(record[f"{selected_role}_output_enabled"]),
                         compliance_trip=_bool(record[f"{selected_role}_compliance_trip"]),
-                        near_compliance=_bool(record[f"{selected_role}_near_compliance"]),
                         status=record[f"{selected_role}_status"],
                         problems=record["problems"],
                     )

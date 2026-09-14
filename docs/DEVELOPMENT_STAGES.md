@@ -654,9 +654,10 @@ writes remain uncommissioned and require separate explicit authorization.
 
 ## Stage 5 - gate SMUs and integrated acquisition
 
-Status: model-independent offline core and the independent Three-SMU QCoDeS S0
-module are complete (updated 2026-08-26); target-computer and real-SMU commissioning
-remain pending explicit authorization and operator-filled limits.
+Status: model-independent offline core and Three-SMU target-offline validation are
+complete. Bounded read-only monitoring and one minimum bottom-gate write scan passed
+for the current bottom-only active plan (updated 2026-09-01); other roles and
+integration remain pending separate authorization.
 
 - Added an explicitly write-authorized, model-independent gate controller with
   configured absolute-voltage limit, current compliance, stepped ramps, voltage
@@ -711,7 +712,7 @@ remain pending explicit authorization and operator-filled limits.
   chooser, and a bias slice can be selected for a two-gate map.
 - Added `three_smu_cli monitor-live`: an independent raw-VISA, query-only terminal
   monitor for the three configured semantic roles. It reports plan role, actual
-  V/I/R, source/output, compliance/trip/ranges/sense/identity and non-corrective
+  V/I/R when output is already on, source/output, compliance/trip/ranges/sense/identity and non-corrective
   safety warnings; it has no configure/ramp/output/cleanup path. Its default does
   not consume `:SYST:ERR?`; `--consume-status-queue` remains explicit, and the
   monitor may not run concurrently with a scan.
@@ -723,6 +724,104 @@ remain pending explicit authorization and operator-filled limits.
 - 71 focused fake-instrument/config/adapter/CLI/Notebook/analysis/gate tests
   pass, including query-only monitor/error-queue and exact-confirmation coverage.
   No real VISA resource was opened and no real setting command was sent.
+- Direct-points safety-contract follow-up (2026-08-26): removed Three-SMU
+  source min/max, software ramp, readback tolerance, per-device settle, leakage
+  threshold, and user-entered compliance fields. Each role now has only independent
+  `max_abs_voltage_v`/`max_abs_current_a`; the Keithley adapter derives hardware
+  compliance from the opposite physical limit, queries compliance/ranges after
+  configuration, and requires source/measurement autorange. `nplc=1.0` is the
+  tracked 50 Hz/20 ms default. Formal points and cleanup use direct single writes,
+  shared `delay_s`, and recorded actual readbacks.
+- The same follow-up adds non-empty arbitrary `points` vectors as an alternative
+  to `start/stop/step`, moves `bidirectional` into each role, expands paired/map
+  roles independently, and rejects bidirectional software pulses. It deletes the
+  duplicate split TOML templates and hidden legacy CLI path; unified
+  `hardware.local.toml` is now the only operation source. Audit schema v4 removes
+  `near_compliance` and records configuration compliance/range readback.
+- Verification for this follow-up: 104 focused Three-SMU/Keithley/config tests
+  passed; the full hardware-free suite passed all 389 tests with five optional
+  plotting tests skipped, and `compileall` passed for `src` and `tests`. No real
+  instrument library/resource was opened.
+- Active-role configuration follow-up (2026-08-26): the run-plan `role` is now
+  the sole enable state. Only `fixed`/`sweep` roles require and parse a same-name
+  hardware table; `off` roles may omit it and are never opened, queried, written,
+  cleaned up, or recorded. Monitor output explicitly marks them not connected
+  with unknown physical state. Hardware parameters for bias/top/bottom now use
+  the same flat table, legacy `[gate_*.smu]` and per-role `timeout_ms` are rejected,
+  and adapter/monitor timeout is fixed at 5000 ms. Audit schema v5 records
+  `active_roles`/`off_roles`, stores only active hardware snapshots, and leaves
+  stable CSV columns blank for off roles. Focused fake/config regression: 109
+  tests passed. The complete hardware-free suite passed all 394 tests with five
+  optional matplotlib tests skipped, and `compileall` passed for `src` and `tests`.
+  No real instrument library/resource was opened.
+- Off-role scan-value follow-up (2026-08-31): `role = "off"` now normalizes the
+  recognized `bidirectional`/`fixed`/`points`/`start`/`stop`/`step` values without
+  parsing them, so temporarily disabled channels cannot fail `describe` because
+  of dormant scan values. Misspelled field names remain strict errors, and all
+  value/type/exclusivity checks return when the role becomes `fixed` or `sweep`.
+  `hardware.example.toml` now shows an ordered vector, arbitrary non-monotonic/
+  repeated vector, `start/stop/step`, descending direction, and bidirectional
+  expansion. The 42 focused config/CLI/fake-session tests and all 396 offline
+  tests passed (five optional matplotlib skips); `compileall` passed. No real
+  hardware library/resource was opened and no query or write occurred.
+- Ordered-range scan follow-up (2026-08-31): an active Three-SMU sweep now accepts
+  exactly one of an explicit ordered `points` vector or an ordered `ranges` array.
+  Linear ranges accept exactly one of positive `step` or point count; logarithmic
+  ranges require positive endpoints and point count. Every segment includes both
+  endpoints, multiple segments concatenate in TOML order without hidden boundary
+  de-duplication, and per-role bidirectional expansion occurs after concatenation.
+  The loader expands ranges into the existing point vector before the shared scan
+  generator, target-limit checks, session, and record path, so no hardware or audit
+  schema changed. Active top-level `start/stop/step` is now rejected; dormant known
+  fields, including malformed `ranges`, remain unparsed while a role is off. The
+  unified example and operator/module/safety guides document explicit, linear-step,
+  linear-count, log-count, and multi-segment forms. All 76 focused Three-SMU,
+  Keithley, CLI, Notebook, analysis, and gate tests passed; the full offline suite
+  passed all 400 tests with five optional plotting skips, and `compileall` passed.
+  No real hardware library/resource was opened and no real query or write occurred.
+- Target read-only monitor follow-up (2026-09-01): the target `lyr` environment
+  passes all 402 offline tests plus `src/tests` compilation. A bounded real sample
+  opened only the current active `gate_bottom` Keithley 2400 and confirmed identity,
+  0 V setpoint, output OFF, compliance/ranges, 2-wire sense, and trip-clear without
+  consuming the error queue or sending setting writes. The monitor now skips
+  `:READ?` while output is OFF and reports V/I/R as unavailable; it never enables
+  output. Twenty-three focused fake/CLI regressions cover both output states. The
+  target's unused NI GPIB passport was disabled in favor of the installed Keithley
+  KUSB passport, and one selective device clear recovered a previously stuck parser
+  without `*RST` or source/output/compliance changes.
+- Target bottom-gate write commissioning (2026-09-01): Keithley 2400 firmware C32
+  does not permit `:READ?` or the protection-trip query while output is OFF. The
+  QCoDeS preflight/configuration/cleanup path now records confirmed output/setpoint
+  state without inventing V/I, enables only after a confirmed 0 V setpoint, and
+  takes its first V/I read after output is ON. The query-only monitor likewise shows
+  V/I/R/trip as unavailable while OFF and Ctrl+C exits without a traceback. After
+  draining errors left by the former illegal queries, the SNOM `gate_bottom`
+  Keithley 2400 serial 4029737 completed an authorized five-point -0.1 to +0.1 V
+  scan. All five formal samples were clean; run `20260901_110258_e2b23039` was
+  completed/accepted and cleanup independently confirmed 0 V, output OFF, and a
+  clean status queue. Forty-one focused tests and the complete 404-test offline
+  suite passed. Bias/top roles and integrated acquisition remain uncommissioned.
+- Direct-run live-panel follow-up (2026-09-01): normal `three_smu_cli run` no
+  longer requires a per-run `RUN THREE SMU` prompt; `finish_action = "hold"`
+  retains the separate exact `HOLD OUTPUTS` confirmation. `ThreeSmuSession.run`
+  now publishes each already-recorded formal sample to an optional in-process
+  callback before a problem sample triggers its fail-closed exception. The CLI
+  consumes that FIFO in the same single session and prints only sample progress,
+  repeat, segment, elapsed time, source-setpoint readback, V/I/R, output state,
+  and `CLEAN`/`PROBLEM`; status/error queue evidence and problem reasons print
+  only for a retained problem sample. The live Notebook uses the same FIFO and
+  makes no separate hardware query. Twenty-six focused fake-instrument/session/
+  CLI/Notebook tests and the complete 405-test offline suite passed (five optional
+  plotting skips); no real resource was opened, queried, consumed, or written
+  during this follow-up.
+- Terminal-table follow-up (2026-09-01): the direct-run panel now prints a single
+  fixed-width table header in terminals at least 96 columns wide, then appends each
+  formal sample's progress line and active-role setpoint/V/I/R/output readback in
+  engineering units. Narrow terminals use compact per-role lines rather than wrap
+  the table. Problem status/error details remain conditional on `PROBLEM`, and the
+  renderer still only reads the in-process FIFO. Eleven focused CLI/Notebook fake
+  tests and the complete 406-test offline suite passed (five optional plotting
+  skips); no real resource was opened, queried, consumed, or written.
 
 ## Stage 6 - analysis and notebook migration
 
@@ -779,8 +878,7 @@ real laboratory commissioning and a frozen hardware wheelhouse remain pending.
   wiring, phase preservation, settling, sensitivity transitions, latch handling,
   frequency tolerance, sequential pair reads, and cleanup. This is a planning
   and handoff deliverable only; it does not commission any new hardware writes.
-- Pending: Three-SMU target-`lyr` offline checks, operator-filled local safety
-  configuration, separately authorized real-SMU commissioning, integration into
+- Pending: remaining-role Three-SMU read/write commissioning and integration into
   the main acquisition, frozen hardware wheelhouse, and offline-control-computer
   installation verification.
 
@@ -1132,3 +1230,25 @@ Status: offline implementation complete (2026-09-01); no hardware connection.
   Offline tests cover tailing, current temperature/Lock-in rendering, latest-file
   discovery, CLI `--once`, and sweep-point propagation. No real DLL or VISA
   resource was created.
+## Three-SMU follow-up - unified live and historical plotting UI
+
+Status: offline implementation complete (2026-09-01).
+
+- Replaced the separate Three-SMU live and analysis Notebooks with one read-only
+  `notebooks/three_smu.ipynb` dashboard. Historical data remains completed/accepted/clean
+  by default; rejected runs and problem samples require visible Audit opt-in.
+- `three_smu_cli run` binds a loopback-only (`127.0.0.1:8765`) event stream before
+  opening the session. One formal sample is durably recorded once, then fanned out to the
+  terminal FIFO and Notebook stream; no presentation consumer can query, write, or consume
+  an SMU status queue. Bind failure occurs before any QCoDeS/VISA resource is opened.
+- The Notebook normalizes both sources into sample-wide records and supports arbitrarily
+  added line/scatter/live-incomplete-map panels. X/Y/colour can use point/repeat/time or any
+  active role's coordinate, source readback, U/I/R/G; series, segment/repeat, and coordinate
+  slice controls support gate-indexed multi-curve bias I--V plots without mixing segments.
+- Added standard analysis dependency `ipywidgets>=8,<9`, pure live/archived plot conversion,
+  loopback stream tests, notebook syntax/import-boundary checks, and fake-session CLI coverage.
+  The full offline suite passed 410 tests with 6 optional Matplotlib rendering skips. No real
+  instrument was connected, queried, status-consumed, or written.
+- The live panels render each Matplotlib figure to an explicit `ipywidgets.Image` PNG rather
+  than relying on asynchronous `display(fig)` capture. This keeps charts visible when live
+  samples arrive through the Notebook event task; no hardware path changed.

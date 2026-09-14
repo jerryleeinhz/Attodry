@@ -19,26 +19,13 @@ def smu(role: str) -> SmuHardwareConfig:
         role=role,
         model="Keithley2400",
         address=f"FAKE::{role}",
-        timeout_ms=1000,
         source_mode=SourceMode.VOLTAGE,
-        compliance_current_a=1e-3,
-        compliance_voltage_v=5.0,
         max_abs_voltage_v=5.0,
         max_abs_current_a=1e-3,
-        source_min_v=-1.0,
-        source_max_v=1.0,
-        ramp_step_v=0.1,
-        readback_tolerance_v=1e-6,
-        source_min_a=-1e-3,
-        source_max_a=1e-3,
-        ramp_step_a=1e-4,
-        readback_tolerance_a=1e-9,
-        settle_s=0.0,
         nplc=1.0,
         source_auto_range=True,
         measure_auto_range=True,
         four_wire=False,
-        leakage_limit_a=None if role == "smu_bias" else 1e-6,
     )
 
 
@@ -47,7 +34,7 @@ def reading(role: str, **changes) -> KeithleyMonitorReading:
         identity=f"KEITHLEY,MODEL 2400,{role},1.0",
         source_mode=SourceMode.VOLTAGE,
         source_setpoint=0.1,
-        output_enabled=False,
+        output_enabled=True,
         voltage_v=0.1,
         current_a=5e-7,
         compliance_limit=1e-3,
@@ -64,7 +51,7 @@ def reading(role: str, **changes) -> KeithleyMonitorReading:
 
 class ThreeSmuLiveTests(unittest.TestCase):
     def test_terminal_panel_shows_three_roles_and_unqueried_status(self) -> None:
-        readings = {role: reading(role) for role in ("smu_bias", "gate_top", "gate_bottom")}
+        readings = {role: reading(role) for role in ("smu_bias", "gate_top")}
         snapshot = ThreeSmuLiveSnapshot(
             sample_index=0,
             captured_at_utc=datetime(2026, 8, 26, tzinfo=timezone.utc),
@@ -80,14 +67,44 @@ class ThreeSmuLiveTests(unittest.TestCase):
         self.assertIn("smu_bias", panel)
         self.assertIn("gate_top", panel)
         self.assertIn("gate_bottom", panel)
+        self.assertIn("physical state is unknown", panel)
         self.assertIn("output", panel)
         self.assertIn("error queues were not queried", panel)
 
-    def test_gate_leakage_is_reported_without_changing_instrument_state(self) -> None:
+    def test_gate_current_limit_is_reported_without_changing_instrument_state(self) -> None:
         problems = monitor_problems(
-            "gate_top", smu("gate_top"), reading("gate_top", current_a=2e-6)
+            "gate_top", smu("gate_top"), reading("gate_top", current_a=2e-3)
         )
-        self.assertTrue(any("leakage" in problem for problem in problems))
+        self.assertTrue(any("max_abs_current_a" in problem for problem in problems))
+
+    def test_output_off_panel_marks_measurements_unavailable(self) -> None:
+        snapshot = ThreeSmuLiveSnapshot(
+            sample_index=0,
+            captured_at_utc=datetime(2026, 8, 26, tzinfo=timezone.utc),
+            status_queue_consumed=False,
+            plan_roles={
+                "smu_bias": ChannelRole.FIXED,
+                "gate_top": ChannelRole.OFF,
+                "gate_bottom": ChannelRole.OFF,
+            },
+            readings={
+                "smu_bias": reading(
+                    "smu_bias",
+                    output_enabled=False,
+                    voltage_v=None,
+                    current_a=None,
+                    compliance_trip=None,
+                )
+            },
+        )
+        panel = format_live_three_smu_snapshot(snapshot)
+        self.assertIn("n/a", panel)
+        self.assertIn("live V/I/R and trip state unavailable", panel)
+        self.assertFalse(
+            monitor_problems(
+                "smu_bias", smu("smu_bias"), snapshot.readings["smu_bias"]
+            )
+        )
 
 
 if __name__ == "__main__":
