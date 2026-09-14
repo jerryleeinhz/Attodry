@@ -1,0 +1,37 @@
+# OFFLINE ONLY. These are synthetic coordinates, not an authorized device plan.
+# Array order = outer-to-inner. Omit inactive modules; use one point for fixed.
+# Magnetic X/Z is one atomic ordered-point axis, never two Cartesian axes.
+[combination_scan]
+backend = "simulation"
+run_name = "smu_outer_lockin_inner"
+note = "Synthetic regrouping regression; not sample data"
+samples_per_condition = 1
+repeats = 1
+
+[[combination_scan.axes]]
+module = "smu"
+points = [
+  { values = { smu_bias_v = -0.1 }, segment = "forward", direction = "ascending" },
+  { values = { smu_bias_v = 0.0 }, segment = "forward", direction = "ascending" },
+  { values = { smu_bias_v = 0.1 }, segment = "forward", direction = "ascending" },
+]
+
+[[combination_scan.axes]]
+module = "lockin"
+points = [
+  { values = { lockin_excitation_v_rms = 0.004, lockin_frequency_hz = 17.0 } },
+  { values = { lockin_excitation_v_rms = 0.008, lockin_frequency_hz = 17.0 } },
+]
+
+# Optional axes: place these BEFORE the SMU axis for T -> B -> SMU -> Lock-in.
+# [[combination_scan.axes]]
+# module = "temperature"
+# points = [{ values = { temperature_k = 2.0 } }]
+#
+# [[combination_scan.axes]]
+# module = "magnetic"
+# points = [
+#   { values = { field_x_t = 0.0, field_z_t = 0.0 }, segment = "out" },
+#   { values = { field_x_t = 0.1, field_z_t = 0.0 }, segment = "out" },
+#   { values = { field_x_t = 0.0, field_z_t = 0.0 }, segment = "return" },
+# ]

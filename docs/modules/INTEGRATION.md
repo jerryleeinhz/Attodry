@@ -2,9 +2,15 @@
 
 ## 当前状态
 
-项目已经具备模拟 acquisition、SQLite 审计/恢复、cleanup、accepted-only 分析、
-双 SR830 真实独立验收和 attoDRY 真实只读连接。真实 attoDRY 设置写入、vendor
-SMU 和端到端硬件 acquisition 尚未验收。
+2026-09-14：四个模块已在隔离 `codex/integration-four-module-scan` 合并。
+温度、双 SR830、bottom-only SMU 小电压扫描及磁场小场有各自的独立验收记录；
+这些记录不代表四模块联合验收。
+
+新增任意子集/顺序的模拟执行器、统一 SQLite 记录、只读状态监控和通用分析
+Notebook；580 项离线测试通过。SMU 外层/Lock-in 内层逐叶重新采样并按激励重分组
+已经由模拟回归验证。真实 single-owner station / 共享 attoDRY / 全局硬件 cleanup
+尚未接入；不能将模拟器用于真实仪器。当前交付和下一步见
+[`COMBINATION_SCAN_GUIDE.md`](../COMBINATION_SCAN_GUIDE.md)。
 
 Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU 模块
 已经通过的接口与提交，不能代替它们各自的实验室 commissioning。

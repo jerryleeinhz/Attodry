@@ -4,6 +4,39 @@ Last updated: 2026-09-14
 
 ## Current stage
 
+### Combination record/analysis and simulation checkpoint (2026-09-14)
+
+Built on four-module merge commit 3913406. New `combination_scan` / `combination_store`
+provide a simulation-only arbitrary-subset/order coordinator and additive v1 SQLite
+WAL tables; `combination_cli` exposes describe/simulate/file-only monitor.
+`combination_analysis` and its read-only Notebook provide actual-coordinate plotting,
+requested-condition grouping, explicit audit/exclusions and legacy Three-SMU /
+temperature-excitation adapters without modifying their original schemas.
+
+Every leaf takes new active-module reads; SMU-outer/excitation-inner regression
+produces six fresh SMU reads and two three-point I--V groups. Full ordered magnetic
+point identities, repeated endpoints, segments and direction remain intact.
+The simulator has h1-only Lock-in responses and does not validate real stability,
+hardware cleanup or physical trajectories. It deliberately has no real backend.
+
+Verification: 580 full offline tests passed without skips (63.299 s), including
+26 new tests covering all 64 nonempty subsets/orders with multi-point T/B/SMU/
+Lock-in axes, failures, Ctrl+C, conservative resume, storage, legacy adapters,
+read-only monitoring and Notebook refresh/load/exclusions/missing channels.
+After final plotting-label/open-marker refinement, both focused plot/Notebook
+tests passed (1.737 s). Source/test compileall and diff check passed. The synthetic
+six-point demo, selected CSV/manifest and visually inspected PNG/PDF are under
+ignored `run_data/combination_demo_20260914/`; these are not experimental data.
+Test-created empty temporary directories were removed; no user data was deleted.
+
+Still incomplete: a real single-owner station joining the existing point/sample
+controllers, one shared attoDRY session, live temperature bracketing and field
+audits, full hardware-local configuration/identity provenance, verified all-role
+global cleanup, and fake-DLL/fake-VISA combined transcripts. Magnetic resume is
+blocked rather than guessing a history; killed active runs require recovery.
+See `docs/COMBINATION_SCAN_GUIDE.md` for exact boundaries and next work.
+No hardware connection, remote commands, main update, push or LK_setup sync.
+
 ### Four-module merge checkpoint (2026-09-14)
 
 The isolated local branch `codex/integration-four-module-scan` combines

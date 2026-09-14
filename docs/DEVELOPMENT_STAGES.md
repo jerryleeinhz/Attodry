@@ -2,6 +2,27 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Integration I1b - combination data and simulator checkpoint (2026-09-14)
+
+- Implemented literal arbitrary-subset/order Cartesian conditions, atomic X/Z
+  ordered points, fixed one-point axes, omitted inactive modules, source-unit
+  coordinates, duplicate/segment/direction/repeat preservation, and fresh reads
+  at every complete condition. Simulator-only: no device adapter imported.
+- Added versioned additive SQLite WAL/FULL audit, raw-before-promote, one accepted
+  attempt, clean completed-run analysis defaults, deterministic all-module cleanup,
+  explicit non-magnetic recovery and fail-closed magnetic/unknown-active recovery.
+- Added a read-only state monitor, actual/requested coordinate table, legacy SMU
+  and temperature-excitation adapters, grouping/filters without implicit averaging,
+  and a common read-only Notebook with explicit sample exclusions and manifest.
+- Full offline suite: 580 tests, 0 failures, 0 skips, 63.299 s; 26 new tests include
+  all 64 subset/order permutations with multi-point axes. Final plot/Notebook
+  refinement passed 2 focused tests in 1.737 s; compileall and diff check passed.
+  Synthetic six-point plot inspected with 2 groups, 6 observations, 1380x720 PNG
+  preview plus PDF and selection manifest. No publication-compliance claim.
+- Real combination station/adapters, physical readiness/cleanup transcripts,
+  target lyr validation and joint hardware commissioning remain incomplete.
+  No actual DLL/VISA device was opened, no remote sync or main update performed.
+
 ## Integration I0 - four-module merge checkpoint (2026-09-14)
 
 - Combined integration be6071f, Three-SMU direct points 02f04ec and magnetic
