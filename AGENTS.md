@@ -10,6 +10,11 @@ Before changing code, read these files in order:
 
 Project rules:
 
+- Treat all hardware operations as safety critical and fail closed.
+- Do not connect to real instruments or issue write commands unless the user explicitly authorizes that stage.
+- Integrated four-module scans additionally retain a universal `sqrt(Bx^2 + Bz^2) <= 3 T` cap until a separate integration safety-policy approval. Standalone magnetic policy is preserved below.
+- Preserve the operator-approved envelope (2026-09-11): `abs(Bx) <= 3 T`, `abs(Bz) <= 9 T`; when both components are nonzero also require `sqrt(Bx^2 + Bz^2) <= 3 T`. Only exact zero qualifies as single-axis; check requests, float32 commands, readbacks, and executed intermediate states.
+- Never infer that the field is zero after a communication failure. Record the last confirmed readback and require manual verification.
 - Configure the two SR830 units by semantic role (`lockin_xx`, `lockin_xy`), not by model-specific numbered slots.
 - SR830 #1 is the internal-reference excitation source and measures Vxx. SR830 #2 uses the TTL reference from #1, measures Vxy, and has its SINE OUT physically disconnected.
 - Do not reintroduce PPMS, MultiPyVu, ETO, SR865A, or rotator control into the active hardware path.

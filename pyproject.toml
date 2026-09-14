@@ -27,6 +27,8 @@ attodry-monitor = "attodry_control.monitor:main"
 attodry-analyze = "attodry_control.analysis:main"
 attodry-simulate = "attodry_control.simulate:main"
 attodry-three-smu = "attodry_control.three_smu_cli:main"
+attodry-magnetic-field = "attodry_control.magnetic_field_cli:main"
+attodry-field-monitor = "attodry_control.magnetic_field_monitor:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

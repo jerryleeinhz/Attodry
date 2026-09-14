@@ -20,7 +20,7 @@ from attodry_control.temperature_excitation_scan import (
     _temperature_window_statistics,
     run as run_temperature_excitation_scan,
 )
-from test_attodry import FakeAttoDryDll, StepClock
+from tests.test_attodry import FakeAttoDryDll, StepClock
 from test_sr830 import FakeResourceManager, FakeVisaResource
 
 

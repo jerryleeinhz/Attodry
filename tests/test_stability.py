@@ -33,6 +33,29 @@ class StabilityTests(unittest.TestCase):
 
         self.assertTrue(evaluate_stability(samples, 2.0, CRITERIA))
 
+    def test_out_of_tolerance_predecessor_cannot_supply_dwell_coverage(self) -> None:
+        samples = [
+            TimedValue(0.0, 2.02),
+            TimedValue(1.501, 2.0),
+            TimedValue(5.501, 2.0),
+            TimedValue(10.502, 2.0),
+        ]
+
+        self.assertFalse(evaluate_stability(samples, 2.0, CRITERIA))
+
+    def test_out_of_range_predecessor_cannot_supply_readback_dwell(self) -> None:
+        samples = [
+            TimedValue(0.0, 1.72),
+            TimedValue(1.501, 1.73),
+            TimedValue(5.501, 1.73),
+            TimedValue(10.502, 1.73),
+        ]
+        criteria = StabilityCriteria(
+            tolerance=None, stable_range=0.005, dwell_s=10.0
+        )
+
+        self.assertFalse(evaluate_readback_stability(samples, criteria))
+
     def test_readback_stability_does_not_require_setpoint_tolerance(self) -> None:
         samples = [
             TimedValue(0.0, 1.72),

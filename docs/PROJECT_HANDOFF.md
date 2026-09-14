@@ -1,8 +1,216 @@
 # Project handoff
 
-Last updated: 2026-09-03
+Last updated: 2026-09-14
 
 ## Current stage
+
+### Four-module merge checkpoint (2026-09-14)
+
+The isolated local branch `codex/integration-four-module-scan` combines
+`module/integration` at be6071f, `module/three-smu-direct-points` at 02f04ec,
+and `codex/magnetic-field-m0-m2` at 7d4417f. Existing main/integration worktree
+changes were left untouched. Shared configuration loaders retain both magnetic
+and temperature-excitation tables without requiring inactive modules.
+The merged baseline passed all 554 offline tests, zero skips, using the local
+AI Python 3.12.13 and Matplotlib 3.10.9 with its existing NumPy dependency.
+The temperature test fixture now edits the active grid table; local test-package
+imports no longer resolve an unrelated installed tests package.
+No real instruments, DLL or VISA resources were opened. No main merge, push or
+LK_setup synchronization was performed. This does not commission a four-module run.
+
+### Magnetic M3--M5 passed in the tested small-field scope (2026-09-14)
+
+Supersedes older X-only/uncommissioned descriptions below. Clean runtime 75c5d63
+and the exact target lyr interpreter completed the operator-authorized X and Z
+nine-point bipolar scans, an initial Z +0.1 T single target and the 0.05 T X/Z
+discrete circle. Each had a fresh ten-sample zero/error-free read-only preflight.
+Both bipolar scans used 0,-0.05,-0.10,-0.05,0,+0.05,+0.10,+0.05,0 T with the
+other axis setpoint zero. The circle used 13 targets at 0..360 degrees in 30-degree
+increments, Bx=0.05*sin(theta), Bz=0.05*cos(theta), from +Z toward +X, endpoint repeated.
+Parameters stayed direct, max_step 0.05 T, tolerance 1 mT, range 0.5 mT, dwell 10 s,
+poll 1 s, timeout 7200 s; normal/exception cleanup both monitored zero.
+
+All four runs returned exit 0, all points completed, verified zero and normal
+disconnect. Final circle receipt: 13/13 points, 26 successful command pairs,
+audit_complete=true, manual_verification_required=false, actual/setpoint Bx=Bz=0,
+error 0, field control ON. DLL disconnect does not disable zero-field control.
+The circle continued after chat interruption; its original process returned normally.
+The final file-only monitor independently verified all 1064 events, no integrity
+errors and safe terminal flags; no scan process remained. The documentation delivery
+passed 54 magnetic CLI/monitor plus 10 segment tests and diff checking, without runtime changes.
+This proves ordered field control, not specimen hysteresis or continuous constant-radius
+rotation. High fields, physical sample-axis calibration, real fault injection and
+integrated transport acquisition remain outside this acceptance.
+
+The ignored target TOML retains the circle plan. Backups, patches and preflight/
+stdout/stderr are in `run_data/magnetic_field_commissioning/xz_extension_20260914T070500Z/`.
+Canonical filenames, hashes and validation details are in DEVELOPMENT_STAGES.
+No runtime, APS100 rate/protection, wiring, temperature or other-instrument setting
+was changed. Raw logs/local configuration remain uncommitted. The user requested
+closure and push of the magnetic work only; do not start another module or experiment.
+
+### M4 and M5 passed within X 0--0.1 T scope (2026-09-13)
+
+Supersedes the paused/rejected status below. Operator reconfirmed Magnet
+temperature 4 K and permission to test, then closed the detected vendor GUI.
+After verifying its exit and another ten-sample zero/error-free read-only
+preflight, M4 ran from 11:45:44 to 11:51:09 UTC (325.494 s) on clean target 75c5d63
+using the unchanged approved M4 config and exact lyr interpreter.
+
+X +0.1 T / Z 0, direct, internal 0.05 T steps and the approved stability criteria
+passed; accepted actual X was +0.1001999974 T, Z 0. Monitored zero then passed with
+actual/setpoint Bx=Bz=0, error 0, field control ON. DLL disconnected normally;
+the program did NOT disable zero-field control. Four command attempt/result pairs
+all succeeded: enable field control, X 0.05 T, X 0.1 T, sweep-to-zero. No Z setting,
+temperature/APS100-parameter change, fault reset, reboot or cabling operation.
+
+Canonical target ignored log:
+`20260913T114544Z_m4_x_0p1T_single-target_d689e43a.jsonl` in the commissioning
+directory. File-only monitor verified 357 events, completed, zero_verified=true,
+disconnected=true, manual_verification_required=false, audit complete and no
+integrity errors. This proves the automated checks for this run, not sample-axis
+calibration, high-field/Z commissioning or continuous-path behavior. Operator
+subsequently confirmed panel zero/no alarms and explicitly approved M5.
+
+M5 then completed the exact X points 0,+0.05,+0.10,+0.05,0 T / Z setpoint 0, direct,
+same step/stability criteria and normal monitored-zero completion. Two configured
+segments expanded to exactly five formal points (three ascending, two descending).
+After another ten-sample read-only preflight, the real scan ran 11:57:54--12:06:05 UTC
+(490.955 s), exit 0. File-only monitor validated 568 events, 5/5 points, seven
+successful command pairs and no integrity errors. Zero/disconnect verified; no
+manual-verification fault flag. Final actual/setpoint Bx=Bz=0, control ON, error 0.
+No run process remained. Canonical target ignored log:
+`20260913T115754Z_m5_x_0p1T_roundtrip_scan_dc52d781.jsonl`.
+
+The target ignored hardware.local.toml now retains the approved M5 segments and
+normal_end_field_policy="zero" (previously hold); its SHA-256 is
+`87b3e4b783ec6b76a172a693e2fd7fa56e22e51de53ef7014dd39b723897c502`.
+The previous M4 config, patch and preflight/scan stdout/stderr are preserved in
+target ignored commissioning subdirectory `m5_x_roundtrip_20260913T115400Z`.
+No driver, APS100 parameter or other-instrument setting was changed. Both stages
+passed only for this small positive-X scope: Z motion, dual-axis motion, negative
+fields, larger fields and integrated transport measurements remain uncommissioned.
+Raw success and prior rejection logs remain uncommitted.
+Detailed provenance/hash/commands are in DEVELOPMENT_STAGES. Documentation changes
+are local only; source HEAD on local/origin/target remains 75c5d63.
+
+### M4/M5 retry request - fresh read-only complete, writes paused (2026-09-13)
+
+Operator requested M4/M5 again. Target source remains clean 75c5d63 and the local
+M4 config hash remains 88c8f57139d9c1216934b421764c479532e75b041274621b8cf8085a515239a3.
+No matching vendor/controller process was found. Ten fresh read-only samples
+passed: Bx/Bz and setpoints zero, control OFF, error 0, clean disconnect. Last
+sample was approximately 122.09 K Sample / 119.66 K VTI; neither is magnet
+temperature. This turn sent no setting command and did not retry single-target.
+Evidence remains in the target ignored commissioning subdirectory
+`m4_retry_20260913T113700Z/preflight_readonly.json` and accompanying stderr.
+
+Await current on-site Magnet temperature, no-fault/readiness/client-disconnected
+confirmation and explanation of how error 35 was addressed; the old 4 K report
+does not establish current readiness. Error 0 while read-only does not prove
+that the prior control-enable error is resolved. M4 parameters remain the prior
+X +0.1 T / Z 0 plan; no M4/M5 pass is claimed. Proposed M5 X points 0, +0.05,
++0.10, +0.05, 0 T (Z zero), direct and monitored-zero completion were sent for
+operator approval, not written into config or executed. Recheck state before writes.
+
+### Latest real M4 attempt - rejected, error 35 (2026-09-11 20:12 UTC)
+
+This entry supersedes older M4-unauthorized/unexecuted and unchanged-local-config
+statements below. The operator authorized X=+0.1 T, Z=0, direct, max_step=0.05 T,
+1 mT tolerance, 0.5 mT range, 10 s dwell, 1 s polling, 7200 s timeout and monitored
+zero; reported Magnet temperature approximately 4 K and explicitly requested an
+attempt despite the unresolved front-panel Remote indication. Prior cable/interlock
+concerns were operator-confirmed resolved. No M5 scan was authorized/executed here.
+
+Target exact `lyr` Python ran clean source `75c5d630e46e7593081a0ee722fc3e1fbd93d22d`.
+The ignored local TOML was backed up and prepared for this M4 earlier; approved
+configuration SHA-256 is `88c8f57139d9c1216934b421764c479532e75b041274621b8cf8085a515239a3`.
+A fresh ten-sample read-only preflight passed with zero field/setpoint, error 0
+and clean disconnect. No matching vendor/controller process was found before M4.
+`single-target` then issued exactly one field-control toggle: DLL return 0, but
+device acknowledgement failed with error 35 after approximately one second.
+No component setpoint or sweep-to-zero command was sent. Cleanup entered its
+zero path but refused further writes while error 35 remained. Final last-confirmed
+Bx/Bz and setpoints were zero, control OFF, error 35; this is NOT verified zero.
+Process exited, DLL disconnected; manual verification is required. Do not retry,
+clear faults, restart equipment or proceed to M5 without resolving the cause.
+
+Canonical record (target ignored `run_data/magnetic_field_commissioning/`):
+`20260911T201241Z_m4_x_0p1T_single-target_06667b45.jsonl`.
+File-only monitor: 15 events, outcome rejected, audit complete, no integrity errors,
+zero_verified=false, disconnected=true, manual_verification_required=true.
+Manufacturer attoDRY2100 V2.1 manual p.34 defines 35 as no connected magnet
+controller for the requested operation; 36 is the separate Remote-mode error.
+Investigate cryostat-to-APS100 communication/initialization with the operator;
+the root cause and current physical field still need on-site confirmation.
+No APS100 parameters, wiring, source code or firmware were changed by this attempt.
+Local documentation is updated only; local/origin/target HEAD remains 75c5d63.
+
+### Latest magnetic segment configuration update (2026-09-11)
+
+Supersedes earlier target-pending and cable/interlock-blocked statements: the
+operator selected M4 X=+0.1 T/Z=0 T and confirmed the cable/interlock issue resolved,
+allowing M4/M5 testing in principle. This change performs no hardware operation;
+M4/M5 are not commissioned. Timing/transition parameters and the exact M5 point
+list still need confirmation, with M4 evidence preceding M5 and a fresh read-only
+check before writes. Target-offline passed as recorded below. No reboot or cabling
+action was taken.
+
+`magnetic_field_run` accepts exactly one of explicit `points` or `axis`+`segments`.
+Single-axis linear segments use min<max and exactly one of inclusive points>=2
+or positive step that divides the span; direction is ascending (default) or
+descending. Input segment order and shared endpoints are retained, with at most
+10000 expanded segment points. Axis x/z explicitly sets the other target to zero.
+Existing limit, waypoint, acknowledgement, stability and cleanup checks are reused.
+No angle generator, continuous-path assertion, ramp-rate change or Lock-in readout.
+`magnetic_field_cli describe` expands the same config offline without DLL loading
+or run-data creation; it identifies its assumed zero start and need for live revalidation.
+JSONL v1 adds optional `segment_plan` plus per-point segment/direction metadata;
+the file monitor regenerates and cross-checks it, while old explicit-point records
+remain compatible. Copyable M4, M5 ascending, M5 hysteresis and pure-Z syntax-only
+examples are commented in `config/hardware.example.toml`; active default stays zero.
+Implementation `42f9799e4142110265d4d611a8f937c96eb94a67` is committed/pushed to
+origin/codex/magnetic-field-m0-m2 and fast-forward synchronized via authorized SSH
+to `C:/Users/LK_Setup/Yuanrong Li/Attocube_control-magnetic`. At that exact commit,
+target `lyr` Python 3.12.13 / 64-bit imported this checkout's src, passed compileall,
+223 focused tests (27.459 s), all 491 full tests (44.477 s, no skips), file-monitor
+driver-import isolation and offline describe of the unchanged local hardware TOML.
+The checkout was clean and the local TOML hash unchanged after validation. Vendor
+files exist in this checkout; no real DLL was loaded and all test hardware was fake.
+The local TOML still has one zero target, via_zero and normal scan-end hold;
+it has not been changed to the selected +0.1 T M4 target or an M5 segment plan.
+Confirmed existing timing values are recorded in DEVELOPMENT_STAGES. M4 parameter
+approval and absence of competing GUI/controller clients still need confirmation.
+This evidence is target-offline only, not M4/M5 commissioning or current zero proof.
+
+### Latest magnetic-field safety update (2026-09-11)
+
+This entry supersedes older universal-3-T and M3-pending statements below.
+The operator approved pure X +/-3 T, pure Z +/-9 T, and resultant <=3 T only
+when BOTH components are nonzero. Exact zero is required for single-axis; no
+readback/stability tolerance changes the envelope. `experiment_vector_max_t`
+now means dual-axis resultant only. Reduced configured axis limits remain binding;
+configuration cannot raise the factory X 3 T / Z 9 T ceilings.
+Requests, float32 endpoints, executed corners and monitored readbacks share this
+rule. Each changed component is additionally checked against the other coil's
+latest actual readback before writing. Unsafe `direct` intermediate waypoints
+are rejected without implicit `via_zero` substitution.
+
+New canonical JSONL records declare `field_limit_policy` as
+`single-axis-hardware_combined-vector-v1` with resolved limits. The file monitor
+checks the chosen safe corner; the unchosen candidate is diagnostic. Historical
+undeclared records retain old 3 T semantics. No raw records are rewritten, and
+the outer schema remains v1 with an explicit policy discriminator.
+
+The operator supplied successful ten-sample M3 output and confirmed M3 success:
+writes disabled, all errors zero, zero field/setpoint readbacks, normal disconnect.
+Exact imported source/target revision was not captured in the pasted output;
+this is operator-confirmed evidence for that run, not target-offline evidence
+for the new policy. The operator selected first M4 target Bx=+0.1 T, Bz=0 T
+for configuration preparation only; step, timing, transition policy and
+connection/write authorization remain pending. Revalidate the changed revision offline on LK_setup
+and recheck read-only state before writes. No hardware was connected or written
+for this change. Local test evidence is in the current development-stage update.
 
 Stage 0 - confirmed design and safety scaffold: complete.
 
@@ -439,8 +647,13 @@ Completed in Stage 3:
   (5 matplotlib-dependent skips); no instrument resource was opened or written.
 
 Stage 4 - attoDRY legacy-DLL adapter: Temperature operation is operator-accepted;
-DLL ABI preflight and real read-only connection validation are complete. Magnetic
-field writes remain uncommissioned and require separate explicit authorization.
+DLL ABI preflight and real read-only connection validation are complete. The
+standalone magnetic-field M0--M2 implementation, local fake-DLL evidence, and
+the historical DLL-free `LK_setup` target-offline validation are complete. A later
+offline-only extension adds explicit direct/via-zero transition policy and exact
+field-command transcript requirements; the historical target snapshot applies only
+to its pinned revision. Magnetic-field M3--M5 remain uncommissioned and separately
+gated.
 
 Completed offline in Stage 4:
 
@@ -450,8 +663,12 @@ Completed offline in Stage 4:
   `last_confirmed_state` rather than inferring a new field value.
 - Added full temperature/VTI/X/Z/setpoint/control/error state reads and
   read-before-toggle idempotent control operations.
-- Added safe zero-detour coordinated vector setpoints, rolling stable waits, and
-  monitored vendor sweep-to-zero behavior against a fake DLL.
+- Added explicit `direct`/`via_zero` setpoint planning, rolling stable waits, and
+  monitored vendor sweep-to-zero behavior against a fake DLL. `direct` segments
+  adjacent vectors while `via_zero` is the explicit conservative detour; there is
+  no transparent zero insertion. Discrete requested/read-back setpoints do not
+  establish the continuous physical trajectory, constant angle, constant magnitude,
+  or physical ramp rate between setpoints.
 - Target preflight found vendor DLL version 2.0 and confirmed 64-bit AMD64 PE32+
   plus all 21 required exports without calling begin/connect. The confirmed
   station-local COM port and DLL path are stored only in the ignored local TOML.
@@ -644,11 +861,132 @@ Completed offline in Stage 4:
   loaded, no `begin/connect` or hardware command ran, and the temporary clone was
   removed after its absolute cleanup path was verified.
 
-Current boundary: all hardware-free work through Stage 7, integrated dual-SR830
-harmonic validation, the independent Three-SMU QCoDeS module plus query-only
-monitor, and the attoDRY read-only connection are complete. The first
-attoDRY temperature setpoint/control actions, control-first ordering, actual sensor
-recording, and heater-driven warming are operator-accepted for this experiment.
+Current standalone magnetic-field module update (2026-09-06; offline contract
+extension, no real DLL/hardware):
+
+- Completed the local implementation and fake-DLL evidence needed across M0--M2:
+  a module-specific strict `[magnetic_field_run]` loader, pure setpoint planning,
+  standalone executor/CLI, canonical durable JSONL audit, and file-only monitor.
+  M2 target-offline is now also complete for the exact implementation revision
+  described below. M3 real read-only, M4 smallest single-axis movement, and M5
+  ordered X/Z scan remain separately gated and uncommissioned.
+- The explicit nonempty `points` array is executed exactly as written: order and
+  duplicate entries are preserved, with no sorting, deduplication, or Cartesian
+  expansion. `single-target` requires exactly one entry plus separate connection
+  and field-write authorization. `scan` also requires its own ordered-scan
+  authorization covering every listed entry.
+- `transition_policy` is required and explicit: `direct` segments each adjacent
+  vector transition into validated discrete steps; `via_zero` requests the
+  conservative zero detour. Ordered points and duplicates remain literal, and no
+  policy transparently becomes the other. Every target, float32 waypoint, and both
+  possible X→Z / Z→X mixed corners is prevalidated against component limits and
+  `sqrt(Bx^2 + Bz^2) <= 3 T`. The driver dynamically selects only a verified axis
+  order from the latest confirmed setpoint, then records the full planned and
+  executed waypoint/path. `max_step_t` must exceed the 1e-5 T acknowledgement
+  resolution. Actual field must be stable at the starting setpoint and each
+  internal waypoint before the next setting write; each explicit target and cleanup
+  zero also has stability evidence. Continuous motion between stable waypoints
+  remains unobserved, so no physical-path, constant-angle, constant-magnitude,
+  straight-line, or ramp-rate behavior has been measured or claimed.
+- Field-control enable is read-before-toggle with bounded full-state
+  acknowledgement, and initialization/control states are strict 0/1. Before an
+  OFF→ON takeover, actual field must match the latent setpoint inside the configured
+  tolerance (at most 1 mT), and both possible mixed corners must satisfy 3 T;
+  otherwise no toggle is sent. Each changed X or Z setting receives a bounded
+  complete setpoint readback. Stability monitoring validates actual and setpoint
+  fields, control and error state on every sample; control loss resets the dwell.
+  The first post-toggle acknowledgement uses measured elapsed time and enforces the
+  timeout. A retained sample immediately before a jittered dwell cutoff still
+  participates in tolerance and rolling-range qualification.
+- A normal single-target run always executes monitored zero. An ordered scan uses
+  the configured normal `hold` or `zero` policy; every exception/`Ctrl+C` path
+  requires best-effort monitored zero before close. Zero is verified only after
+  zero setpoint acknowledgement, actual-field stability inside the configured
+  tolerance, enabled field control, and clear error state. `isZeroingField`, vendor
+  action/error messages, and vendor logs may be recorded as optional diagnostics but
+  cannot prove zero. Normal hold rechecks actual field against the final target as
+  well as its setpoint/control/error state, including the magnitude criterion for an
+  exact zero target. If normal zero fails or is interrupted, cleanup independently
+  retries monitored zero. Communication uncertainty remains unverified even if a
+  later cleanup read appears zero, and any uncertain zero/connection/close/audit
+  state, non-finite readback, or missing last state requires manual attoDRY/APS100
+  verification with the last confirmed state retained. Cleanup does not disable
+  field control: it disconnects with control confirmed enabled at zero, or at the
+  final target for a normal `hold` scan.
+- One JSONL is the canonical run record. Its start event includes config hash,
+  source provenance, interface/config, authorization scope, full stability and
+  acknowledgement protocol, limits, points, transition policy, cleanup policy, and
+  a required exact-field-command audit descriptor. Every field-control toggle,
+  changed X/Z component, and sweep-to-zero command writes an attempt event before
+  the DLL call and a result after the return/readback acknowledgement, with command
+  index, context, DLL return code, and IEEE-754 binary32 component bits. Audit
+  failure blocks normal writes but preserves best-effort zero cleanup evidence.
+  Every event is appended, flushed, and fsynced; partial/rejected/interrupted/
+  transition/stability/cleanup/disconnect evidence remains together. An uncertain
+  append is rolled back best-effort, so a failed terminal `fsync` cannot leave a
+  certified completion. The separate file-only monitor validates schema/run/index/
+  point/terminal and command-transcript integrity and reports a torn, inconsistent,
+  or no-terminal stream as incomplete and requiring manual verification, never as
+  proof that the producer is alive. It rejects contradictory completed records when
+  required zero is not verified or the final confirmed state is missing.
+- Final focused safety/stability/config/attoDRY/magnetic/monitor verification passed
+  all 182 tests in 6.533 s. The full suite passed all 450 tests in 14.373 s with 5
+  optional-matplotlib skips; `python -m compileall -q src tests`, both magnetic CLI
+  `--help` commands, and `git diff --check` passed (diff check emitted only CRLF
+  warnings). No real vendor DLL was loaded, no `begin/connect` occurred, and no
+  real toggle, setpoint, sweep-to-zero, or other hardware command was sent.
+- Completed M2 on `LK_setup` against implementation commit
+  `e0924f1666b8e1b0b8e6e0c08daad2ab9f9ac4c4` (short `e0924f1`). The exact
+  `attodry_m2_e0924f1.zip` archive is 482705 bytes with SHA-256
+  `231F649FA8A77B6139F67239F4E322275AA06B0BA3B4F0E628DEAFBFD32569F1`.
+  It was copied to `C:\Users\LK_Setup\attodry_m2_e0924f1.zip`; the target snapshot
+  was `C:\Users\LK_Setup\attodry_m2_e0924f1`.
+- The target used Conda `lyr` with exact interpreter
+  `C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe`, Python 3.12.13, 64-bit.
+  The source archive explicitly excluded `vendor/`; the snapshot verified
+  `vendor/` absent and recursively 0 DLLs. A dedicated file-monitor import-isolation
+  check imported the monitor from that snapshot without importing the attoDRY
+  driver. Compileall and both magnetic CLI
+  `--help` checks passed.
+- The target focused safety/stability/config/attoDRY/magnetic/monitor command ran
+  182 tests in 4.675 s, OK. Full unittest discovery ran 450 tests in 20.299 s, OK,
+  with no skips reported. The target-validation shell did not invoke a
+  hardware-execution CLI or supply authorization flags; authorization-path unit
+  tests used injected fakes. No DLL was loaded, and no hardware was connected or
+  operated.
+  This evidence completes M2 only and grants no M3--M5 authorization.
+- The later direct/via-zero and exact-command-audit extension is local fake-DLL
+  work only. It preserves literal ordered/duplicate points, validates float32
+  endpoints, adjacent steps, and both mixed corners, and fails closed if a safe
+  execution order or durable audit evidence cannot be established. It did not load
+  a real DLL, call `begin/connect`, or issue a hardware command. The `e0924f1`
+  target snapshot remains historical evidence for that commit only; a later revision
+  needs its own DLL-free target-offline validation before making a new M2 target
+  claim.
+- The tracked example deliberately contains only a zero target. Real COM/DLL paths,
+  real targets, and run data remain ignored/local. M3 is the next defined stage,
+  but it remains unexecuted and requires new connection authorization; M4 and M5
+  remain separately gated.
+- M3 remains unexecuted. Its exact current-revision write-disabled command is
+  `python -m attodry_control.attodry_test --config config/hardware.local.toml
+  --samples 10 --interval-s 1 --authorize-connection`. It requires a new connection
+  authorization, has no write authorization, and must run without a competing GUI/
+  controller client.
+- The offline JSONL/monitor now require exact float32 toggle/component command-
+  attempt/result evidence, so that former audit-contract gap is closed only in
+  offline code. M4 is still not ready to operate hardware: it first needs the
+  separately authorized M3 read-only record, a user-selected smallest target,
+  fresh connection/write authorization, a real canonical record, and no competing
+  vendor GUI/controller client.
+
+Current boundary: all hardware-free work through Stage 7, the standalone
+magnetic-field M0--M2 local implementation/fake evidence and target-offline
+validation, integrated dual-SR830 harmonic validation, the independent Three-SMU
+QCoDeS S0 module plus query-only monitor, and the earlier generic attoDRY read-only
+connection are complete. The magnetic M3--M5 stages remain gated. The first
+attoDRY temperature setpoint/control
+actions, control-first ordering, actual sensor recording, and heater-driven warming
+are operator-accepted for this experiment.
 The 1.75 K and 1.8 K runs did not meet the former strict stability criterion; that
 fact remains diagnostic rather than being rewritten as stability. The commissioned
 0.2 K overshoot guard gives a 2.0 K live abort line for a 1.8 K target. Daily
@@ -845,9 +1183,14 @@ follow-up:
 - `LOCKIN.md` records the dual-SR830 configuration/phase/autorange objectives and
   turns the completed laboratory experience into implementation and acceptance
   rules.
-- `TEMPERATURE.md` and `MAGNETIC_FIELD.md` separate their offline, target-offline,
-  real read-only, and future write-commissioning stages without overstating the
-  completed 10-second attoDRY read-only connection.
+- `TEMPERATURE.md` separates its offline, target-offline, real read-only, and
+  write-commissioning stages.
+- `MAGNETIC_FIELD.md` now documents the standalone local fake-DLL implementation,
+  exact ordered/duplicate point semantics, separate single-target/write/scan
+  gates, canonical fsynced JSONL, file-only monitoring, and monitored cleanup.
+  It records M2 target-host verification complete while leaving M3--M5 hardware
+  commissioning pending, and does not convert discrete setpoints into a
+  physical-path claim.
 - `THREE_SMU.md` now records the three-Keithley QCoDeS S0 module as offline
   complete: semantic bias/top-gate/bottom-gate roles, one shared CLI/Notebook
   generator, retained scan modes, strict operator-filled safety configuration,
@@ -980,16 +1323,18 @@ Stage 7 - offline commissioning scaffold: complete; laboratory work pending.
 - Added `attodry-simulate` for a full no-hardware run and deliberate first-unlock
   rejection/retry test.
 - Added `LAB_COMMISSIONING.md` with all manual authorization checkpoints.
-- The merged main/Lock-in/Temperature/Three-SMU hardware-free suite passes all
-  385 tests in the minimal environment, with five optional matplotlib rendering
-  tests skipped. Source compilation passes. The plotting path is unchanged from
-  its prior rendered validation;
+- The current source-based main/Lock-in/Temperature/Magnetic-field/Three-SMU
+  suite passes all 450 tests in 14.373 s with five optional matplotlib rendering
+  skips; source/test compilation and magnetic CLI help checks pass. The plotting
+  path is unchanged from its prior rendered validation;
   the current system matplotlib/numpy binary mismatch is an environment issue.
-- The local `attodry_transport_control-0.1.0-py3-none-any.whl` was rebuilt
-  without downloading dependencies, inspected, and isolated-import checked after
-  the final offline changes. SHA-256:
+- The previously built local `attodry_transport_control-0.1.0-py3-none-any.whl`
+  was built without downloading dependencies, inspected, and isolated-import
+  checked. SHA-256:
   `0cb4b12e7ab76dbc8b2141e391955ba2c3f0b89167f3d254800bd747edc9d6b2`.
-  This is not yet the frozen hardware wheelhouse.
+  It predates the standalone magnetic-field module and is not evidence for that
+  implementation. A new wheel has not yet been reported; this is not the frozen
+  hardware wheelhouse.
 - The integrated acquisition path still cannot construct real SMU hardware. The
   integrated 1/2/3-harmonic SR830 path and attoDRY read-only connection are
   commissioned, but do not claim write-enabled attoDRY, SMU, or real end-to-end
@@ -1176,7 +1521,9 @@ Current Lock-in safety-policy follow-up (2026-08-23):
 - Both lock-ins will be configured in software and measured by semantic role.
 - No rotator.
 - Control Bx and Bz; derive total field and direction from readback components.
-- The experiment field invariant is `sqrt(Bx^2 + Bz^2) <= 3 T`.
+- Current envelope (2026-09-11): `abs(Bx) <= 3 T`, `abs(Bz) <= 9 T`;
+  if both components are nonzero, also require `sqrt(Bx^2 + Bz^2) <= 3 T`.
+  Only exact zero selects single-axis; smaller configured axis limits remain binding.
 - A caught exception or `Ctrl+C` requests field zero after electrical outputs are made safe.
 - Normal completion field behavior is configurable, default `hold` in the example configuration.
 - Real vendor-specific gate SMU control and laboratory validation remain project
@@ -1244,6 +1591,13 @@ Do not copy these defects:
 - misspelled `setUserMageticFieldX/Z` public methods;
 - one GUI field-control branch checks the temperature-control flag;
 - one X-field stability branch reads Z during its loop.
+
+The reference's `isZeroingField` state, GUI action/error strings, and vendor log
+output are retained only as optional diagnostics in the independent module's audit.
+They do not select a transition policy, schedule a command, or prove zero: this
+project requires confirmed setpoint, actual Bx/Bz, field-control/error state, and
+the configured dwell. The reference GUI/driver is not imported or copied into the
+active hardware path.
 
 ## Required cleanup semantics
 

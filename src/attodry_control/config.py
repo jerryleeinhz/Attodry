@@ -9,8 +9,16 @@ import tomllib
 from typing import Any, Mapping
 
 from .lockin_autorange import AutorangePolicy
-from .models import LockinRole
-from .safety import MagnetLimits
+from .field_segments import FieldSegmentPlan, expand_field_segments
+from .models import LockinRole, VectorField
+from .safety import (
+    CONFIRMED_EXPERIMENT_VECTOR_MAX_T,
+    CONFIRMED_FIELD_TOLERANCE_MAX_T,
+    FIELD_SETPOINT_READBACK_TOLERANCE_T,
+    FieldTransitionPolicy,
+    MagnetLimits,
+    plan_ordered_field_transitions,
+)
 from .scans import temperature_scan_points
 from .sr830_settings import (
     ExternalReferenceEdge,
@@ -26,7 +34,6 @@ from .sr830_settings import (
 from .stability import StabilityCriteria
 
 
-CONFIRMED_EXPERIMENT_VECTOR_MAX_T = 3.0
 MINIMUM_SR830_SINE_OUTPUT_V = 0.004
 MAXIMUM_SR830_SINE_OUTPUT_V = 5.0
 
@@ -139,6 +146,25 @@ class TemperatureOperationConfig:
 class MagnetConfig:
     limits: MagnetLimits
     stability: StabilityConfig
+
+
+@dataclass(frozen=True, slots=True)
+class MagneticFieldRunConfig:
+    points: tuple[VectorField, ...]
+    transition_policy: FieldTransitionPolicy
+    max_step_t: float
+    run_name: str
+    note: str
+    output_directory: Path
+    segment_plan: FieldSegmentPlan | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MagneticFieldOperationConfig:
+    cryostat: CryostatConfig
+    magnet: MagnetConfig
+    cleanup: CleanupConfig
+    run: MagneticFieldRunConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +396,7 @@ def load_config(
                     "temperature_run",
                     "temperature_scan",
                     "temperature_excitation_scan",
+                    "magnetic_field_run",
                 }
                 if project.mode is RunMode.HARDWARE
                 else set()
@@ -505,18 +532,27 @@ def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
     if experiment_limit > CONFIRMED_EXPERIMENT_VECTOR_MAX_T:
         raise ConfigError(
             "magnet.experiment_vector_max_t cannot exceed the confirmed 3 T "
-            "project limit."
+            "dual-axis project limit."
         )
-    limits = MagnetLimits(
-        hardware_x_max_t=_positive_number(
-            table["hardware_x_max_t"], f"{name}.hardware_x_max_t"
-        ),
-        hardware_z_max_t=_positive_number(
-            table["hardware_z_max_t"], f"{name}.hardware_z_max_t"
-        ),
-        experiment_vector_max_t=experiment_limit,
-    )
+    try:
+        limits = MagnetLimits(
+            hardware_x_max_t=_positive_number(
+                table["hardware_x_max_t"], f"{name}.hardware_x_max_t"
+            ),
+            hardware_z_max_t=_positive_number(
+                table["hardware_z_max_t"], f"{name}.hardware_z_max_t"
+            ),
+            experiment_vector_max_t=experiment_limit,
+        )
+    except ValueError as exc:
+        raise ConfigError(f"Invalid magnet limits: {exc}") from exc
     stability = _parse_stability(table, name, value_prefix="field_")
+    tolerance = stability.criteria.tolerance
+    if tolerance is None or tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T:
+        raise ConfigError(
+            "magnet.field_tolerance_t cannot exceed the confirmed "
+            f"{CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T zero-field criterion."
+        )
     return MagnetConfig(limits=limits, stability=stability)
 
 
@@ -860,6 +896,7 @@ def load_temperature_operation_config(
         "temperature_run",
         "temperature_scan",
         "temperature_excitation_scan",
+        "magnetic_field_run",
         "cleanup",
         "visa",
         "lockin_xx",
@@ -944,6 +981,7 @@ def load_temperature_excitation_operation_config(
         "lockin_sweep",
     }
     known_tables = required_tables | {
+        "magnetic_field_run",
         "cleanup",
         "gate_top",
         "gate_bottom",
@@ -1010,6 +1048,140 @@ def load_temperature_excitation_operation_config(
         lockin_xy=lockin_xy,
         lockin_safety=safety,
         lockin_sweep=lockin_sweep,
+    )
+
+
+def _parse_magnetic_field_run(
+    table: Mapping[str, Any], limits: MagnetLimits
+) -> MagneticFieldRunConfig:
+    name = "magnetic_field_run"
+    _strict_keys_with_optional(
+        table,
+        name,
+        {
+            "transition_policy",
+            "max_step_t",
+            "run_name",
+            "note",
+            "output_directory",
+        },
+        {"points", "segments", "axis"},
+    )
+    if ("points" in table) == ("segments" in table):
+        raise ConfigError(f"{name} requires exactly one of points or segments.")
+    segment_plan = None
+    if "segments" in table:
+        try:
+            segment_plan = expand_field_segments(table.get("axis"), table["segments"], limits)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        points = list(segment_plan.points)
+    else:
+        if "axis" in table:
+            raise ConfigError(f"{name}.axis is only allowed with segments.")
+        raw_points = table["points"]
+        if not isinstance(raw_points, list) or not raw_points:
+            raise ConfigError(
+                "magnetic_field_run.points must be a non-empty ordered array of tables."
+            )
+        points = []
+        for index, raw_point in enumerate(raw_points):
+            point_name = f"{name}.points[{index}]"
+            if not isinstance(raw_point, dict):
+                raise ConfigError(f"{point_name} must be a TOML table.")
+            _strict_keys(raw_point, point_name, {"bx_t", "bz_t"})
+            points.append(VectorField(
+                bx_t=_number(raw_point["bx_t"], f"{point_name}.bx_t"),
+                bz_t=_number(raw_point["bz_t"], f"{point_name}.bz_t"),
+            ))
+    max_step_t = _positive_number(table["max_step_t"], f"{name}.max_step_t")
+    if max_step_t <= FIELD_SETPOINT_READBACK_TOLERANCE_T:
+        raise ConfigError(
+            "magnetic_field_run.max_step_t must exceed the "
+            f"{FIELD_SETPOINT_READBACK_TOLERANCE_T:g} T setpoint-readback "
+            "acknowledgement tolerance."
+        )
+    transition_policy = _enum_value(
+        FieldTransitionPolicy,
+        table["transition_policy"],
+        f"{name}.transition_policy",
+    )
+    try:
+        # A zero start makes static validation independent of any real station
+        # state while still checking every target, exact float32 waypoint, and
+        # both component-write mixed corners for the selected transition policy.
+        plan_ordered_field_transitions(
+            VectorField(0.0, 0.0),
+            points,
+            max_step_t,
+            transition_policy,
+            limits,
+        )
+    except ValueError as exc:
+        raise ConfigError(f"Invalid magnetic_field_run path: {exc}") from exc
+    return MagneticFieldRunConfig(
+        points=tuple(points),
+        segment_plan=segment_plan,
+        transition_policy=transition_policy,
+        max_step_t=max_step_t,
+        run_name=_sweep_run_name(table["run_name"], f"{name}.run_name"),
+        note=_sweep_note(table["note"], f"{name}.note"),
+        output_directory=_relative_directory(
+            table["output_directory"], f"{name}.output_directory"
+        ),
+    )
+
+
+def load_magnetic_field_operation_config(
+    path: str | Path,
+) -> MagneticFieldOperationConfig:
+    """Load only the strict tables needed by standalone field operation."""
+
+    document = _load_document(path)
+    project = _parse_project(_table(document, "project"))
+    if project.mode is not RunMode.HARDWARE:
+        raise ConfigError("Standalone magnetic-field operation requires hardware mode.")
+    known_tables = {
+        "project",
+        "cryostat",
+        "magnet",
+        "magnetic_field_run",
+        "temperature_stability",
+        "temperature_run",
+        "temperature_scan",
+        "temperature_excitation_scan",
+        "cleanup",
+        "visa",
+        "lockin_xx",
+        "lockin_xy",
+        "lockin_sweep",
+        "gate_top",
+        "gate_bottom",
+        "smu_bias",
+        "three_smu_run",
+    }
+    _strict_keys_with_optional(
+        document,
+        "top level",
+        {"project", "cryostat", "magnet", "magnetic_field_run", "cleanup"},
+        known_tables,
+    )
+    try:
+        cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
+        magnet = _parse_magnet(_table(document, "magnet"))
+        cleanup = _parse_cleanup(_table(document, "cleanup"))
+        run = _parse_magnetic_field_run(
+            _table(document, "magnetic_field_run"), magnet.limits
+        )
+    except ConfigError:
+        raise
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    return MagneticFieldOperationConfig(
+        cryostat=cryostat,
+        magnet=magnet,
+        cleanup=cleanup,
+        run=run,
     )
 
 
