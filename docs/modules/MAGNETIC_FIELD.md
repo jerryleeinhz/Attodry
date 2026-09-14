@@ -2,6 +2,89 @@
 
 ## 当前状态
 
+### 2026-09-14 M3--M5 小场验收通过：X/Z 正负往返及离散圆周
+
+本条优先于下方历史状态。现场就绪确认后，在 clean 75c5d63 / exact lyr 上依次完成
+X 九点正负往返、Z +0.1 T 单目标、Z 九点正负往返及 0.05 T X/Z 十三点圆周。
+每项前均有新十次只读零场预检。单轴点列均为 0,-0.05,-0.10,-0.05,0,+0.05,+0.10,
++0.05,0 T，另一轴设定零；圆周从 +Z 向 +X，0..360°、间隔 30°，首尾重复。
+四项完成 9/9、1/1、9/9、13/13 点，成功命令对数为 14、3、13、26；终态均
+completed、zero_verified/disconnected/audit_complete=true，无人工核验故障标志。
+聊天中断未停止圆周进程，原进程最终 exit 0；actual/setpoint Bx=Bz=0、error 0、
+field control ON，DLL 已断开，零场控制未关闭。
+
+参数始终为 direct、max_step 0.05 T、容差 1 mT、range 0.5 mT、dwell 10 s、poll 1 s、
+timeout 7200 s，正常/异常 monitored zero。只改 ignored 扫描配置，不改运行代码、
+电源速率/保护、温控或其他仪器。配置保留圆周方案；备份、补丁和原始数据留在目标机
+ignored commissioning 目录，文件名、哈希和验收证据见 DEVELOPMENT_STAGES。
+本次验证的是双极性扫场控制，不是材料磁滞；离散圆周点通过不证明连续恒模长旋转。
+高场、样品物理轴标定、真实故障注入和多仪器集成不在本轮范围；不自动开始下一实验。
+
+### 2026-09-13 M4/M5 通过：限本次 X 轴 0--0.1 T 范围
+
+优先于下方暂停/失败记录。用户重新确认磁体 4 K、允许测试并退出厂商 GUI 后，
+新十次只读通过，随后在 clean 75c5d63 / exact lyr / 原已批准 M4 local 配置上
+完成 single-target（11:45:44--11:51:09 UTC，约 325.494 s，exit 0）。
+X=+0.1 T / Z=0，direct、内部 0.05 T、容差 1 mT、range 0.5 mT、dwell 10 s、
+poll 1 s、timeout 7200 s；目标验收读回 X=0.1001999974 T、Z=0。
+四对命令审计均成功：开启控制、X 0.05 T、X 0.1 T、sweep-to-zero；未发送 Z 设定。
+最终 actual/setpoint Bx=Bz=0、error 0、control ON，monitored zero 通过并正常断开。
+零场控制没有关闭；没有温控/其他仪器设置、清故障、重启或插拔操作。
+
+canonical JSONL：`20260913T114544Z_m4_x_0p1T_single-target_d689e43a.jsonl`，位于
+target ignored commissioning 目录。只读 monitor：357 事件、1/1 点、completed、
+zero_verified/disconnected/audit_complete 均 true、manual_verification_required=false，
+无完整性错误。原始成功及历史拒绝日志均保留且不提交；细节/hash 见 DEVELOPMENT_STAGES。
+用户随后确认 M4 现场面板零场/无报警，并明确授权 M5 五点方案。
+M5 将 local 配置备份后改为两段：上行 min=0/max=0.1/points=3；下行
+min=0/max=0.05/step=0.05/direction=descending，axis=x，严格展开
+0,+0.05,+0.10,+0.05,0 T 五点，Z 设定始终零；direct 和稳定参数复用 M4。
+normal_end_field_policy 从 hold 改为 zero；local 配置目前保留此 M5 方案。
+新十次只读通过后，scan 于 11:57:54--12:06:05 UTC 完成（490.955 s，exit 0）。
+正式点 X 验收读回分别为 0,0.0501,0.1001,0.0499,0 T，Z 均零；下行另经内部
+0.075/0.025 T 保护点，正式点数不增加。共六次 X 设定及一次 sweep-to-zero，
+七对命令审计成功，无 Z 设定或 control toggle。
+
+M5 canonical JSONL：`20260913T115754Z_m5_x_0p1T_roundtrip_scan_dc52d781.jsonl`；
+只读 monitor 验证 568 事件、5/5 点、completed、zero/disconnect/audit 均通过，
+无完整性错误及人工核验故障标志。最终 actual/setpoint Bx=Bz=0、control ON、error 0，
+DLL 正常断开，测试进程结束。运行/备份路径和配置/log hash 见 DEVELOPMENT_STAGES。
+M4/M5 只在本次正 X 小范围通过，不能扩展为负场、高场、Z/双轴、连续轨迹或输运测量认证。
+文档更新仅本地；运行代码未改，raw/local 配置/备份均不提交，没有清错、重启或改电源参数。
+
+### 2026-09-13 重试请求：新只读通过，尚未重新加场
+
+用户要求再次测试 M4/M5。目标机 clean 75c5d63、M4 local 配置和 exact lyr 未变；
+未发现厂商控制进程。新十次只读通过：Bx/Bz 和设定值均零、control OFF、error 0，
+正常断开。最后 Sample/VTI 约 122.09/119.66 K，不能替代磁体温度。本次没有发送
+toggle、分量设定或回零命令。原始预检在 target ignored commissioning 子目录
+`m4_retry_20260913T113700Z`。等待现场当前 Magnet temperature、就绪/无报警、
+客户端退出确认及此前 error 35 的处理说明；只读 error 0 不证明控制接管可用。
+已提出 M5 X=0,+0.05,+0.10,+0.05,0 T / Z=0、direct、结束 monitored zero 方案，
+尚待确认、未改配置、未执行。M4/M5 不宣称通过，写前仍需重新核对现场与读回。
+
+### 2026-09-11 20:12 UTC 真实 M4 尝试：error 35，未通过
+
+本条优先于下方历史“未授权/未执行”记录。用户确认完整 M4 参数并要求直接尝试：
+X +0.1 T、Z 0、direct、max_step 0.05 T、容差 1 mT、稳定范围 0.5 mT、dwell 10 s、
+poll 1 s、timeout 7200 s，结束 monitored zero；现场报告 Magnet temperature 约 4 K。
+此前电流线/联锁疑虑已由用户确认解决。本次不执行 M5。
+
+LK_setup 的 clean 75c5d63 / exact lyr 使用已备份并准备的 ignored local 配置。
+新一轮十次只读通过：Bx/Bz 和设定值均零、error 0、正常断开；未发现厂商控制进程。
+随后 single-target 只发出一次 field-control toggle，DLL 返回 0，但约 1 秒后读到
+error 35、control OFF，立即拒绝继续。没有发送 X/Z 设定值或 sweep-to-zero 命令。
+异常回零流程因 error 35 拒绝进一步写入；最后确认 field/setpoint 均零，不等于
+通过 monitored-zero 验证。DLL 已断开，进程结束，必须现场核验，不自动清错或重试。
+
+canonical JSONL 为 target ignored commissioning 目录中的
+`20260911T201241Z_m4_x_0p1T_single-target_06667b45.jsonl`；只读 monitor 验证 15 事件、
+1 对命令 attempt/result、无完整性错误、outcome rejected、zero_verified=false、
+disconnected=true、manual_verification_required=true。完整范围/hash 见 DEVELOPMENT_STAGES。
+厂商 attoDRY2100 V2.1 手册第 34 页：35 表示所需磁体控制器未连接/未检测到；
+Remote 状态错误另为 36。下一步检查冷台到 APS100 通信/初始化，不能仅据此断言
+必须重启或磁场安全；本次没有清故障、重启、改 APS100 参数、插拔线缆或运行 M5。
+
 ### 2026-09-11 分段配置交付（优先于下方历史记录）
 
 已实现 `points` 与 `axis`+`segments` 互斥配置；X/Z 单轴分段支持 signed min/max、
@@ -352,7 +435,7 @@ output_directory = "../run_data/magnetic_field_commissioning"
   authorization-path tests 仅使用 injected fakes；没有 DLL load、真实 `begin/connect` 或
   hardware operation。M2 只证明 target-offline 可复现性，不授权或替代 M3--M5。
 
-### M3 - real read-only commissioning（当前：gated / 未授权）
+### M3 - real read-only commissioning（当前：通过，2026-09-14 复验）
 
 - 需要新的 connection/read-only 授权；只读取 Bx/Bz、setpoint、field-control 和 error，
   不发送 toggle、component setpoint 或 sweep-to-zero。
@@ -368,11 +451,11 @@ output_directory = "../run_data/magnetic_field_commissioning"
 
 - 运行前必须让 attoDRY vendor GUI/其它 controller client 断开，并确认没有另一个
   magnetic-field 或 attoDRY process 并发占用 DLL/resource。保存 stdout/stderr 到 ignored
-  target path；本命令仍未在当前 revision 上执行。
+  target path；75c5d63 上本轮四次写入前的十样本只读均通过，详见顶部验收记录。
 - 早期通用 `attodry_test` 的 10 秒零场记录不能替代本模块、当前 commit 和当前 local
   config 的只读验收。
 
-### M4 - smallest single-axis movement（当前：gated / 未授权）
+### M4 - smallest single-axis movement（当前：X/Z +0.1 T 小目标通过）
 
 - 用户分别确认最小 X 或 Z 目标、`max_step_t`、tolerance、dwell、timeout、最终 zero
   策略和前面板初态，并明确授权 connection 与 field writes。GUI/其它 client 必须断开，
@@ -382,10 +465,10 @@ output_directory = "../run_data/magnetic_field_commissioning"
 - 完成需要原始 canonical JSONL、目标/zero 完整读回、人工核验，以及每条实际发出的
   float32 toggle/component command attempt/result。离线 writer/monitor 已要求并验证此
   transcript contract；它只是 M4 的必要审计前提，不能替代 M3 read-only、用户选择的
-  最小目标、connection/write authorization 或一次真实 M4 证据，因此当前仍不能申请日常
-  运行。
+  最小目标、connection/write authorization 或一次真实 M4 证据。本轮 X/Z 小目标已取得
+  真实完成证据；后续运行仍须复核现场状态并取得对应授权。
 
-### M5 - ordered X/Z scan（当前：gated / 未授权）
+### M5 - ordered X/Z scan（当前：小场双极性和离散圆周通过）
 
 - 只在 M4 通过后申请新的 ordered-scan 授权，并逐项审阅完整 `points` 列表；重复点也
   是独立授权目标。GUI/其它 client 必须断开，且不得并发运行其它 attoDRY field process。
@@ -414,9 +497,9 @@ output_directory = "../run_data/magnetic_field_commissioning"
 ```text
 请负责 Magnetic-field 模块。先按 AGENTS.md 顺序完整阅读五份必读文档，再阅读
 docs/modules/README.md 和 docs/modules/MAGNETIC_FIELD.md。检查 git status 和当前
-提交，从最早未完成阶段开始。M0--M2 已完成，包括历史 commit e0924f1 在
-LK_setup/lyr 的 DLL-free target-offline 验证；后续 revision 必须重新取得自己的 target-
-offline evidence。M3--M5 分别需要新授权。必须保持纯 X<=3 T、纯 Z<=9 T（均为绝对值），
+提交，先读取顶部最新验收范围。M0--M2 已完成，M3--M5 已在 X/Z 小场单目标、
+正负往返和 0.05 T 离散圆周范围通过；后续 revision 必须取得自己的验证证据，
+后续真实运行仍需对应授权，不自动扩大范围。必须保持纯 X<=3 T、纯 Z<=9 T（均为绝对值），
 双轴非零时 sqrt(Bx^2+Bz^2)<=3 T；严格零才算单轴。通信失败
 不得推断零场，也不得把离散 setpoint 计划描述为 continuous physical path、constant
 angle 或 constant magnitude。默认不加载真实 DLL、不连接或写真实 attoDRY。

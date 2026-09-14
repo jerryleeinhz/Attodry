@@ -2,7 +2,7 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。新增 standalone magnetic-field 模块的 M0–M2 已完成，包括本机 fake-DLL 实现/验证和 commit `e0924f1` 在 `LK_setup`/`lyr` 的 DLL-free target-offline 验证；M3 真实只读和 M4–M5 写入仍未授权。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 magnetic-field、SMU 连接/写入、独立模块的主 acquisition 集成和端到端硬件路径仍需分阶段显式授权。
+当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。Standalone magnetic-field 模块的 M0–M2 离线验证和 M3–M5 小场实机验收已完成：X/Z +0.1 T 单目标、各轴 ±0.1 T 正负往返及 0.05 T 离散圆周均通过，且逐次验证回零（2026-09-14）。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常命令读取统一的 `hardware.local.toml`；SMU 实机验收、主 acquisition 集成和端到端硬件路径尚未完成，后续真实磁场运行仍需限定范围的显式授权。
 
 ## 已确认硬件
 
@@ -30,9 +30,9 @@ Bx != 0 且 Bz != 0 时：sqrt(Bx^2 + Bz^2) <= 3 T
 float32 命令、实际读回和执行中的混合状态均检查。高 Z 到双轴的 `direct`
 路径若中间超限会拒绝，不自动改成经零场路径。
 
-2026-09-11 状态更新：操作者已确认此前 M3 只读成功；本次限值变更需新的
-目标机离线验证和写入前只读复核。首次 M4 选择 X 轴，具体目标/时序与
-连接、写入授权待确认。下方 M3 未执行描述为变更前的历史状态。
+2026-09-14 状态更新：M3–M5 已在上述小场范围通过，最终回零和正常断开已验证。
+限值校验通过不等于高场实机验收，离散圆周不等于连续恒模长旋转；新实验仍需
+现场就绪检查和对应授权。原始证据与历史拒绝记录见 `docs/DEVELOPMENT_STAGES.md`。
 
 可捕获的测量异常和 `Ctrl+C` 默认策略是：先安全关闭锁相激励与 SMU 输出，再请求 X/Z 磁场归零并监视读回。电脑硬崩溃或通信断开时软件不能保证归零，必须人工检查 attoDRY/APS100 状态。
 
@@ -68,7 +68,7 @@ float32 命令、实际读回和执行中的混合状态均检查。高 Z 到双
 - [`Temperature`](docs/modules/TEMPERATURE.md)：attoDRY 温度读回、控制和稳定；
 - [`Magnetic field`](docs/modules/MAGNETIC_FIELD.md)：本地 fake-DLL 的 X/Z
   单目标/有序点列、单轴 3/9 T 与双轴合场 3 T 限制、canonical JSONL、文件 monitor 和 monitored cleanup；
-  M2 target-offline 已完成，真实 M3–M5 仍待分别授权和验收；
+  M2 target-offline 及真实 M3–M5 小场验收已完成，范围见模块顶部；
 - [`Three-SMU`](docs/modules/THREE_SMU.md)：三台 Keithley、双栅极与 bias 的
   QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
   [`THREE_SMU_DAILY_OPERATION.md`](docs/THREE_SMU_DAILY_OPERATION.md)；
@@ -144,8 +144,8 @@ python -m attodry_control.magnetic_field_cli describe --config config/hardware.l
 输出完整点列、段编号、方向、限值及清理策略。静态路径以零场为起点，不代替连接后的
 实际状态复核。新 JSONL 保存 `segment_plan` 和每个点的段编号/方向；文件 monitor
 重新展开并校验，未声明分段的旧记录仍按旧格式读取。
-用户已确认电流线/联锁问题解决、允许进入 M4/M5 测试准备；当前尚无 M4/M5 完成证据，
-仍需确认时序/扫描点，先验收 X=+0.1 T 单目标回零，再进入完整 M5。
+M4 X/Z 单目标及 M5 各轴正负往返、0.05 T 十三点离散圆周已有完成和回零证据。
+通过范围仅限本次小场测试，不自动授权新点列、扩大场强或多仪器联合实验。
 
 `[magnetic_field_run].points` 是一个非空的显式点列，按 TOML 中的原顺序执行并保留
 重复项；它不会排序、去重或生成 Cartesian grid。`transition_policy` 是必填且显式的：
@@ -156,7 +156,7 @@ python -m attodry_control.magnetic_field_cli describe --config config/hardware.l
 实际执行的完整 waypoint/path 写入审计；不能假定固定 X-first。`max_step_t` 必须大于
 1e-5 T acknowledgement resolution，且只约束离散请求 setpoint 的间距；starting
 setpoint、内部 waypoint、显式 target 和 cleanup zero 都要求 setpoint/actual field 的
-稳定读回。即使选择 `direct`，这些只是离散命令端点：当前离线实现仍没有测量 vendor
+稳定读回。即使选择 `direct`，这些只是离散命令端点：当前实现仍没有测量 vendor
 controller 在端点之间的连续运动，因此不声明 physical path、constant angle、constant
 magnitude 或实际 ramp rate。
 
@@ -168,8 +168,8 @@ python -m attodry_control.magnetic_field_cli scan --help
 python -m attodry_control.magnetic_field_monitor --progress PATH_TO_PROGRESS.jsonl
 ```
 
-未来 M3 当前 revision 的真实只读验收使用下面的既有 write-disabled 命令；它仍未执行，
-命令不包含任何 write authorization，只有获得新的 connection authorization 后才能运行：
+M3 已使用下面的 write-disabled 命令完成验收及每项写前复核；该命令不包含任何
+write authorization，后续执行仍需获得对应 connection authorization：
 
 ```powershell
 python -m attodry_control.attodry_test `
@@ -212,7 +212,7 @@ binary32 bit pattern。写入审计
 setpoint、actual Bx/Bz、control/error 和 dwell 证实。此前 `e0924f1` 的 M2 DLL-free target
 snapshot 通过 182 focused tests（4.675 s）和 450 full tests（20.299 s，无 skip reported），
 但它只验证该历史 revision；后续 implementation revision 必须单独完成 target-offline
-validation，才可引用新的 M2 target evidence。M3–M5 真实阶段仍待完成。完整边界见
+validation，才可引用新的 M2 target evidence。最新 M3–M5 小场实机证据及完整边界见
 [`docs/modules/MAGNETIC_FIELD.md`](docs/modules/MAGNETIC_FIELD.md)。
 
 实际 sweep 网格、安全限制、时序与每次运行的备注统一保存在 ignored 的

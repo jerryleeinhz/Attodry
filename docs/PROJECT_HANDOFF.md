@@ -1,8 +1,136 @@
 # Project handoff
 
-Last updated: 2026-09-11
+Last updated: 2026-09-14
 
 ## Current stage
+
+### Magnetic M3--M5 passed in the tested small-field scope (2026-09-14)
+
+Supersedes older X-only/uncommissioned descriptions below. Clean runtime 75c5d63
+and the exact target lyr interpreter completed the operator-authorized X and Z
+nine-point bipolar scans, an initial Z +0.1 T single target and the 0.05 T X/Z
+discrete circle. Each had a fresh ten-sample zero/error-free read-only preflight.
+Both bipolar scans used 0,-0.05,-0.10,-0.05,0,+0.05,+0.10,+0.05,0 T with the
+other axis setpoint zero. The circle used 13 targets at 0..360 degrees in 30-degree
+increments, Bx=0.05*sin(theta), Bz=0.05*cos(theta), from +Z toward +X, endpoint repeated.
+Parameters stayed direct, max_step 0.05 T, tolerance 1 mT, range 0.5 mT, dwell 10 s,
+poll 1 s, timeout 7200 s; normal/exception cleanup both monitored zero.
+
+All four runs returned exit 0, all points completed, verified zero and normal
+disconnect. Final circle receipt: 13/13 points, 26 successful command pairs,
+audit_complete=true, manual_verification_required=false, actual/setpoint Bx=Bz=0,
+error 0, field control ON. DLL disconnect does not disable zero-field control.
+The circle continued after chat interruption; its original process returned normally.
+The final file-only monitor independently verified all 1064 events, no integrity
+errors and safe terminal flags; no scan process remained. The documentation delivery
+passed 54 magnetic CLI/monitor plus 10 segment tests and diff checking, without runtime changes.
+This proves ordered field control, not specimen hysteresis or continuous constant-radius
+rotation. High fields, physical sample-axis calibration, real fault injection and
+integrated transport acquisition remain outside this acceptance.
+
+The ignored target TOML retains the circle plan. Backups, patches and preflight/
+stdout/stderr are in `run_data/magnetic_field_commissioning/xz_extension_20260914T070500Z/`.
+Canonical filenames, hashes and validation details are in DEVELOPMENT_STAGES.
+No runtime, APS100 rate/protection, wiring, temperature or other-instrument setting
+was changed. Raw logs/local configuration remain uncommitted. The user requested
+closure and push of the magnetic work only; do not start another module or experiment.
+
+### M4 and M5 passed within X 0--0.1 T scope (2026-09-13)
+
+Supersedes the paused/rejected status below. Operator reconfirmed Magnet
+temperature 4 K and permission to test, then closed the detected vendor GUI.
+After verifying its exit and another ten-sample zero/error-free read-only
+preflight, M4 ran from 11:45:44 to 11:51:09 UTC (325.494 s) on clean target 75c5d63
+using the unchanged approved M4 config and exact lyr interpreter.
+
+X +0.1 T / Z 0, direct, internal 0.05 T steps and the approved stability criteria
+passed; accepted actual X was +0.1001999974 T, Z 0. Monitored zero then passed with
+actual/setpoint Bx=Bz=0, error 0, field control ON. DLL disconnected normally;
+the program did NOT disable zero-field control. Four command attempt/result pairs
+all succeeded: enable field control, X 0.05 T, X 0.1 T, sweep-to-zero. No Z setting,
+temperature/APS100-parameter change, fault reset, reboot or cabling operation.
+
+Canonical target ignored log:
+`20260913T114544Z_m4_x_0p1T_single-target_d689e43a.jsonl` in the commissioning
+directory. File-only monitor verified 357 events, completed, zero_verified=true,
+disconnected=true, manual_verification_required=false, audit complete and no
+integrity errors. This proves the automated checks for this run, not sample-axis
+calibration, high-field/Z commissioning or continuous-path behavior. Operator
+subsequently confirmed panel zero/no alarms and explicitly approved M5.
+
+M5 then completed the exact X points 0,+0.05,+0.10,+0.05,0 T / Z setpoint 0, direct,
+same step/stability criteria and normal monitored-zero completion. Two configured
+segments expanded to exactly five formal points (three ascending, two descending).
+After another ten-sample read-only preflight, the real scan ran 11:57:54--12:06:05 UTC
+(490.955 s), exit 0. File-only monitor validated 568 events, 5/5 points, seven
+successful command pairs and no integrity errors. Zero/disconnect verified; no
+manual-verification fault flag. Final actual/setpoint Bx=Bz=0, control ON, error 0.
+No run process remained. Canonical target ignored log:
+`20260913T115754Z_m5_x_0p1T_roundtrip_scan_dc52d781.jsonl`.
+
+The target ignored hardware.local.toml now retains the approved M5 segments and
+normal_end_field_policy="zero" (previously hold); its SHA-256 is
+`87b3e4b783ec6b76a172a693e2fd7fa56e22e51de53ef7014dd39b723897c502`.
+The previous M4 config, patch and preflight/scan stdout/stderr are preserved in
+target ignored commissioning subdirectory `m5_x_roundtrip_20260913T115400Z`.
+No driver, APS100 parameter or other-instrument setting was changed. Both stages
+passed only for this small positive-X scope: Z motion, dual-axis motion, negative
+fields, larger fields and integrated transport measurements remain uncommissioned.
+Raw success and prior rejection logs remain uncommitted.
+Detailed provenance/hash/commands are in DEVELOPMENT_STAGES. Documentation changes
+are local only; source HEAD on local/origin/target remains 75c5d63.
+
+### M4/M5 retry request - fresh read-only complete, writes paused (2026-09-13)
+
+Operator requested M4/M5 again. Target source remains clean 75c5d63 and the local
+M4 config hash remains 88c8f57139d9c1216934b421764c479532e75b041274621b8cf8085a515239a3.
+No matching vendor/controller process was found. Ten fresh read-only samples
+passed: Bx/Bz and setpoints zero, control OFF, error 0, clean disconnect. Last
+sample was approximately 122.09 K Sample / 119.66 K VTI; neither is magnet
+temperature. This turn sent no setting command and did not retry single-target.
+Evidence remains in the target ignored commissioning subdirectory
+`m4_retry_20260913T113700Z/preflight_readonly.json` and accompanying stderr.
+
+Await current on-site Magnet temperature, no-fault/readiness/client-disconnected
+confirmation and explanation of how error 35 was addressed; the old 4 K report
+does not establish current readiness. Error 0 while read-only does not prove
+that the prior control-enable error is resolved. M4 parameters remain the prior
+X +0.1 T / Z 0 plan; no M4/M5 pass is claimed. Proposed M5 X points 0, +0.05,
++0.10, +0.05, 0 T (Z zero), direct and monitored-zero completion were sent for
+operator approval, not written into config or executed. Recheck state before writes.
+
+### Latest real M4 attempt - rejected, error 35 (2026-09-11 20:12 UTC)
+
+This entry supersedes older M4-unauthorized/unexecuted and unchanged-local-config
+statements below. The operator authorized X=+0.1 T, Z=0, direct, max_step=0.05 T,
+1 mT tolerance, 0.5 mT range, 10 s dwell, 1 s polling, 7200 s timeout and monitored
+zero; reported Magnet temperature approximately 4 K and explicitly requested an
+attempt despite the unresolved front-panel Remote indication. Prior cable/interlock
+concerns were operator-confirmed resolved. No M5 scan was authorized/executed here.
+
+Target exact `lyr` Python ran clean source `75c5d630e46e7593081a0ee722fc3e1fbd93d22d`.
+The ignored local TOML was backed up and prepared for this M4 earlier; approved
+configuration SHA-256 is `88c8f57139d9c1216934b421764c479532e75b041274621b8cf8085a515239a3`.
+A fresh ten-sample read-only preflight passed with zero field/setpoint, error 0
+and clean disconnect. No matching vendor/controller process was found before M4.
+`single-target` then issued exactly one field-control toggle: DLL return 0, but
+device acknowledgement failed with error 35 after approximately one second.
+No component setpoint or sweep-to-zero command was sent. Cleanup entered its
+zero path but refused further writes while error 35 remained. Final last-confirmed
+Bx/Bz and setpoints were zero, control OFF, error 35; this is NOT verified zero.
+Process exited, DLL disconnected; manual verification is required. Do not retry,
+clear faults, restart equipment or proceed to M5 without resolving the cause.
+
+Canonical record (target ignored `run_data/magnetic_field_commissioning/`):
+`20260911T201241Z_m4_x_0p1T_single-target_06667b45.jsonl`.
+File-only monitor: 15 events, outcome rejected, audit complete, no integrity errors,
+zero_verified=false, disconnected=true, manual_verification_required=true.
+Manufacturer attoDRY2100 V2.1 manual p.34 defines 35 as no connected magnet
+controller for the requested operation; 36 is the separate Remote-mode error.
+Investigate cryostat-to-APS100 communication/initialization with the operator;
+the root cause and current physical field still need on-site confirmation.
+No APS100 parameters, wiring, source code or firmware were changed by this attempt.
+Local documentation is updated only; local/origin/target HEAD remains 75c5d63.
 
 ### Latest magnetic segment configuration update (2026-09-11)
 
