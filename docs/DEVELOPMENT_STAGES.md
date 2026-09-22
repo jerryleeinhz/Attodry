@@ -2,6 +2,21 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## NKT Photonics module - planning and dependency audit
+
+Status: planning deliverable complete (2026-09-22); implementation `planned`.
+
+- Added [`modules/NKT_PHOTONICS.md`](modules/NKT_PHOTONICS.md): three optical
+  modes, actual hardware capability limits, dependency/reuse decisions, intended
+  configuration and audit records, fail-closed behavior, N0-N7 acceptance stages,
+  physical/SDK unknowns, and Git/target synchronization boundaries.
+- Verified the official SDK's Python/ctypes route for EXTREME/VARIA without
+  installation, DLL loading, or connection. LLTF's exact SDK remains to be
+  verified before a real adapter. No dependency or production code changed.
+- Baseline verification: 385 offline tests, OK with 5 optional matplotlib skips.
+  No real hardware was opened, reset, or written. This does not complete N0 or
+  authorize later connection, emission, or setting writes.
+
 ## Stage 0 - design and safety scaffold
 
 Status: complete (2026-08-20).

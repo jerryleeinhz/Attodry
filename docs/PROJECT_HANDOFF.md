@@ -4,6 +4,23 @@ Last updated: 2026-08-25
 
 ## Current stage
 
+NKT Photonics module planning update (2026-09-22):
+
+- Added [`modules/NKT_PHOTONICS.md`](modules/NKT_PHOTONICS.md) on
+  `module/NKT-photonics` for EXW-12 PP, VARIA, and LLTF SWIR HP8. Status is
+  `planned`: the plan/dependency audit is complete; N0 hardware-contract closure,
+  drivers, target validation, and real commissioning remain pending.
+- Reuse the Python/strict-config/fake-backend/audit foundation. Use the official
+  NKTP Python/ctypes DLL interface for EXTREME/VARIA; verify the separate LLTF
+  SDK before implementing its ABI. Existing PyVISA/QCoDeS cannot replace these
+  vendor runtimes. No SDK was installed or loaded and no instrument was opened.
+- Broad-spectrum routing must be physically confirmed. VARIA provides visible
+  variable bandwidth; LLTF SWIR does not offer arbitrary adjustable bandwidth,
+  and the filters do not cover the 840-1000 nm tuning gap.
+- The unchanged offline suite ran 385 tests successfully with 5 optional plotting
+  skips. Only planning documents are committed; existing SR830 figure work is
+  preserved separately. The next step is review followed by scoped offline work.
+
 Stage 0 - confirmed design and safety scaffold: complete.
 
 Stage 1 - strict configuration and full simulation: complete.

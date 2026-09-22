@@ -1,6 +1,6 @@
 # Module work packages
 
-本目录把后续工作拆成五个可以由独立 Chat 跟进的工作包。这里定义的是
+本目录把后续工作拆成可独立跟进的设备与 Integration 工作包。这里定义的是
 目标、阶段、文件边界和验收条件，不代表尚未授权的硬件工作已经完成。
 
 ## 依赖顺序
@@ -16,9 +16,12 @@ Three-SMU ─────┘
 - [`TEMPERATURE.md`](TEMPERATURE.md)：attoDRY 温度读回、控制和稳定判据。
 - [`MAGNETIC_FIELD.md`](MAGNETIC_FIELD.md)：X/Z 矢量磁场、安全路径和归零。
 - [`THREE_SMU.md`](THREE_SMU.md)：三台 Keithley、双栅极、bias、CLI/Notebook。
+- [`NKT_PHOTONICS.md`](NKT_PHOTONICS.md)：EXW-12 PP 超连续谱、VARIA 可见光
+  波长/带宽和 LLTF SWIR 窄带控制；目前仅完成计划及依赖调查，待分阶段实现。
 - [`INTEGRATION.md`](INTEGRATION.md)：只在四个设备模块分别验收后进行组合。
 
-四个设备模块可以独立审核和测试。Integration 不重新发明各模块的安全逻辑，
+原有 Integration 的四设备验收范围保持不变；NKT 后续加入时需单独扩展集成契约。
+各设备模块可以独立审核和测试。Integration 不重新发明各模块的安全逻辑，
 只组合已经通过测试并带有明确提交号的接口。
 
 ## 所有 Chat 的共同规则
