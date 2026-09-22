@@ -17,7 +17,8 @@ Three-SMU ─────┘
 - [`MAGNETIC_FIELD.md`](MAGNETIC_FIELD.md)：X/Z 矢量磁场、安全路径和归零。
 - [`THREE_SMU.md`](THREE_SMU.md)：三台 Keithley、双栅极、bias、CLI/Notebook。
 - [`NKT_PHOTONICS.md`](NKT_PHOTONICS.md)：EXW-12 PP 超连续谱、VARIA 可见光
-  波长/带宽和 LLTF SWIR 窄带控制；目前仅完成计划及依赖调查，待分阶段实现。
+  波长/带宽和 LLTF SWIR 窄带控制；三模式模拟及 EXTREME/VARIA DLL 适配已离线验证，
+  LLTF 厂商 SDK 适配与所有实机验收仍待完成。
 - [`INTEGRATION.md`](INTEGRATION.md)：只在四个设备模块分别验收后进行组合。
 
 原有 Integration 的四设备验收范围保持不变；NKT 后续加入时需单独扩展集成契约。

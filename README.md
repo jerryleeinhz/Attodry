@@ -61,7 +61,8 @@ sqrt(Bx^2 + Bz^2) <= 3 T（项目实验上限）
   QCoDeS CLI/Notebook 双路线；日常配置、离线检查、运行和分析步骤见
   [`THREE_SMU_DAILY_OPERATION.md`](docs/THREE_SMU_DAILY_OPERATION.md)；
 - [`NKT Photonics`](docs/modules/NKT_PHOTONICS.md)：EXW-12 PP、VARIA 和 LLTF
-  SWIR 的宽带发射、波长/带宽与输出强度控制计划；目前为 `planned`，尚无实机控制实现；
+  SWIR 的宽带发射、波长/带宽与输出强度控制；三模式模拟和 EXTREME/VARIA DLL 适配
+  已完成离线验证，LLTF 真实 SDK 适配待补齐；[脚本用法](docs/NKT_CONTROL_GUIDE.md)；
 - [`Integration`](docs/modules/INTEGRATION.md)：各设备模块分别验收后的组合流程。
 
 每个工作包都包含当前真实验收边界、目标、非目标、分阶段验收条件、预计文件

@@ -326,7 +326,8 @@ def load_config(
         # Keeping them admissible here permits one daily hardware.local.toml
         # without making an unrelated controller validate SMU-only details.
         expected_tables.update(
-            {"smu_bias", "three_smu_run"}.intersection(document)
+            {"smu_bias", "three_smu_run", "nkt_source", "nkt_varia",
+             "nkt_lltf", "nkt_run"}.intersection(document)
         )
         if project.mode is RunMode.HARDWARE:
             expected_tables.add("visa")
@@ -689,6 +690,7 @@ def load_temperature_operation_config(
         # deliberately does not interpret or validate their hardware fields.
         "smu_bias",
         "three_smu_run",
+        "nkt_source", "nkt_varia", "nkt_lltf", "nkt_run",
     }
     _strict_keys_with_optional(
         document,

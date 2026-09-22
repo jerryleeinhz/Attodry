@@ -1,0 +1,37 @@
+# Offline example only. These values are NOT approved laboratory limits.
+# Daily station values belong in config/hardware.local.toml.
+[nkt_source]
+control = "current" # "power" only when that mode is supported and already active.
+max_level_pct = 10.0
+allowed_pp_ratios = [] # Empty: leave PP unchanged. Populate only from confirmed device capability.
+
+[nkt_varia]
+monitor_present = false
+
+[nkt_lltf]
+# Reserved semantic adapter; actual vendor SDK not yet available.
+
+[nkt_run]
+backend = "simulation"
+mode = "varia_bandpass" # broadband | varia_bandpass | lltf_swir
+manual_route = "SIMULATED VARIA route"
+emit = true # In this file this is SIMULATED emission only.
+timeout_s = 5.0
+poll_interval_s = 0.1
+dwell_s = 0.0
+output_directory = "../run_data/nkt_simulation"
+run_name = "offline_example"
+note = "No instruments, no sample, no calibrated power measurement."
+
+# Each point is explicit. Repeat/change rows for wavelength, bandwidth or level scans.
+[[nkt_run.points]]
+source_level_pct = 5.0
+wavelength_nm = 600.0
+bandwidth_nm = 20.0
+nd_pct = 10.0
+
+[[nkt_run.points]]
+source_level_pct = 5.0
+wavelength_nm = 650.0
+bandwidth_nm = 30.0
+nd_pct = 20.0

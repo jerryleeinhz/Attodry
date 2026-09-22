@@ -1,8 +1,27 @@
 # NKT Photonics 光源与滤波模块开发计划
 
-日期：2026-09-22。状态：`planned`，计划和依赖调查已完成，N0 硬件契约尚未冻结。
+日期：2026-09-22。状态：N1 与 EXTREME/VARIA N2 `offline complete`；
+LLTF 真实 SDK、完整 N0 契约、N3-N7 实机阶段尚未完成。
 分支：`module/NKT-photonics`。用户原名 `module/NKT photonics` 包含 Git 不允许的空格，改为连字符。
-基线：本地 `main` 的 `b9e50f7`。本次只提交规划文档，不实现驱动、不安装 SDK、不连接或写入仪器。
+基线：本地 `main` 的 `b9e50f7`；最初规划提交 `b905c67`。
+用户随后授权脚本实现与 LK_setup 软件清点，明确暂不实际测试仪器。
+
+## 当前实现更新
+
+- 用户确认手动换路，控制机继续使用 LK_setup；连接拓扑、CONNECT 波段和实验点由用户后续确认。
+- 已实现 `nkt_config.py`、`nkt_control.py`、`nkt_sdk.py`、`nkt_test.py`，
+  [使用说明](../NKT_CONTROL_GUIDE.md) 与纯模拟配置 `config/nkt_simulation.toml`。
+- 官方 SDK 安装器仅静态解包检查；依据 `NKTPDLL.h`，用标准库 ctypes 直接绑定五个
+  必需函数。无需额外 Python 包，也无需复制官方 wrapper；未安装/加载真实 DLL。
+- 三模式配置、逐点扫描、readback、JSON/JSONL、功率计注入接口、授权边界和故障收尾
+  已离线实现。真实 EXTREME/VARIA API 有 fake register/ABI 测试，尚未实机验收。
+- LLTF 完成模拟流程与公共 backend 接口；没有猜测厂商 ABI。真实 LLTF 模式在开端口前拒绝。
+- LK_setup 仅只读查询软件注册表、常见目录（最多四层）与 SDK 环境路径：未找到
+  NKT CONTROL/PHySpec/LLTF/NKTP SDK。未安装软件、同步代码、运行设备 GUI 或连接仪器。
+- 30 项 NKT 离线测试通过；完整回归结果见项目阶段记录。设备读回与实际光谱/功率分离，
+  没有功率计时 `measured_power_w=null`，没有选配 VARIA 监测器时 `monitor_pct=null`。
+
+以下为原始设计依据；预计文件/阶段仍以本节和使用说明所列实际交付为准。
 
 ## 1. 目标、模式及硬件能力边界
 
@@ -168,10 +187,10 @@ N1-N2 不等待硬件到场；已经确认的 EXTREME/VARIA 部分可以先开�
 - 经现场确认的允许波长、源设定/ND 上限、样品功率上限、联锁和有效输出封闭方式。
 - 是否需要实际 mW 闭环；如需要，确认功率计和测量位置。没有这项硬件时交付百分比设定及读回。
 
-本次用户明确要求先列计划并保存分支。因此接下来由用户审阅后推进获准的离线阶段；
-真实连接、读状态或写入仍遵守仓库分阶段授权要求。计划本身不是操作激光器的许可。
+用户已批准并要求先完成脚本，暂不实际测试。离线工作已推进；真实连接、读状态或写入
+仍遵守仓库分阶段授权要求。LK_setup 软件清点许可不是连接激光器的许可。
 
-## 8. 本次验证及 Git 交付
+## 8. 初始规划验证及 Git 交付（b905c67）
 
 - 已阅读项目规定的五份入口文档及模块约定，核对 `pyproject.toml` 与现有 adapter 分层。
 - `PYTHONPATH=src; python -m unittest discover -s tests`：385 tests，OK，5 skipped

@@ -1,25 +1,32 @@
 # Project handoff
 
-Last updated: 2026-08-25
+Last updated: 2026-09-22
 
 ## Current stage
 
-NKT Photonics module planning update (2026-09-22):
+NKT Photonics offline implementation update (2026-09-22):
 
-- Added [`modules/NKT_PHOTONICS.md`](modules/NKT_PHOTONICS.md) on
-  `module/NKT-photonics` for EXW-12 PP, VARIA, and LLTF SWIR HP8. Status is
-  `planned`: the plan/dependency audit is complete; N0 hardware-contract closure,
-  drivers, target validation, and real commissioning remain pending.
-- Reuse the Python/strict-config/fake-backend/audit foundation. Use the official
-  NKTP Python/ctypes DLL interface for EXTREME/VARIA; verify the separate LLTF
-  SDK before implementing its ABI. Existing PyVISA/QCoDeS cannot replace these
-  vendor runtimes. No SDK was installed or loaded and no instrument was opened.
-- Broad-spectrum routing must be physically confirmed. VARIA provides visible
-  variable bandwidth; LLTF SWIR does not offer arbitrary adjustable bandwidth,
-  and the filters do not cover the 840-1000 nm tuning gap.
-- The unchanged offline suite ran 385 tests successfully with 5 optional plotting
-  skips. Only planning documents are committed; existing SR830 figure work is
-  preserved separately. The next step is review followed by scoped offline work.
+- User approved scripts first, manual optical routing, LK_setup as target, and
+  operator-supplied future experiment/power settings. No real instrument testing
+  is authorized by this stage. CONNECT range and detailed topology are deferred.
+- Added strict NKT configuration, three-mode simulation, a standalone controller,
+  explicit-point scans, optional PowerMeter Protocol, and JSON/JSONL audit. Added
+  a minimal ctypes adapter verified against official SDK 2.1.16.3027 headers for
+  EXTREME/VARIA. No new pip dependencies. See [script guide](NKT_CONTROL_GUIDE.md).
+- Source/ND percentages and filter-edge setting readbacks remain separate from
+  actual optical measurements. Optional VARIA monitor uses percent; absent
+  monitors/meters produce null, not fabricated W. LLTF bandwidth is not writable.
+- EXTREME/VARIA adapter and N1 logic are offline complete. LLTF supports simulation
+  and the shared backend contract, but its real SDK/ABI is unavailable and hardware
+  mode fails before DLL loading. Complete N0 closure and N3-N7 remain pending.
+- Authorized SSH software inventory on LK_setup found no NKT CONTROL, PHySpec,
+  LLTF or NKTP SDK in uninstall entries/common directories (search depth four);
+  NKTP_SDK_PATH is unset. lyr Python exists. No install, GUI launch, port discovery,
+  driver load, instrument command, code deployment or target test was performed.
+- Local offline tests cover strict config, fake registers/C ABI, intermediate
+  emission, motion timeout, identity, authorization, Ctrl+C and failed cleanup.
+  Current validation totals are recorded in DEVELOPMENT_STAGES.md. Existing
+  uncommitted SR830 figure work remains separate from this module commit.
 
 Stage 0 - confirmed design and safety scaffold: complete.
 

@@ -2,7 +2,31 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
-## NKT Photonics module - planning and dependency audit
+## NKT Photonics module - standalone offline implementation
+
+Status: N1 and EXTREME/VARIA N2 `offline complete` (2026-09-22). LLTF real SDK
+adapter, full N0 contract closure and N3-N7 remain pending.
+
+- Added NKT config/models, three-mode simulation, controller, native SDK adapter,
+  CLI, explicit scan points, optional power-meter interface and JSON/JSONL audit.
+- EXTREME/VARIA ctypes signatures were checked against the manufacturer's SDK
+  headers extracted without running the installer. No extra pip dependency.
+- Configuration distinguishes source current/power percent, VARIA ND/monitor
+  percent, filter setting edges and actual measured watts. No inferred spectrum
+  or sample power. LLTF simulation preserves its fixed-bandwidth capability;
+  unavailable LLTF hardware mode fails before opening any resource.
+- Fail-closed checks cover exact identity, explicit connection/write permission,
+  confirmed manual route, source-off takeover, busy/intermediate states,
+  readback mismatch, interlock, timeout, Ctrl+C and last-confirmed-state retention.
+  No reset-interlock, implicit source-mode change, background scan or auto-resume.
+- User-authorized software-only SSH inventory on LK_setup found no matching NKT
+  or LLTF software in the documented locations. No SDK installation, instrument
+  connection, target deployment or target test. This is not N3 acceptance.
+- Validation: 30 NKT tests; full suite 415 tests, 410 passed / 5 optional plotting
+  skips. All tests use fake/simulated instruments. CLI simulation and compile checks
+  passed. See [usage and remaining limitations](NKT_CONTROL_GUIDE.md).
+
+## NKT Photonics module - initial planning and dependency audit
 
 Status: planning deliverable complete (2026-09-22); implementation `planned`.
 

@@ -312,3 +312,44 @@ fixed = 0.0
 start = 0.0
 stop = 0.0
 step = 1.0
+
+# NKT standalone module. Other module loaders ignore these tables.
+# Offline demonstration: config/nkt_simulation.toml; never copy its limits to hardware.
+[nkt_source]
+control = "current" # current | power; must match the already-active source mode.
+max_level_pct = "CHANGE_ME" # Operator-approved percent cap, NOT measured sample mW.
+allowed_pp_ratios = [] # Leave pulse picker unchanged unless a verified ratio list is supplied.
+dll_path = "CHANGE_ME_X64_NKTPDLL_PATH"
+port = "CHANGE_ME_PORT" # One explicit port; no automatic discovery.
+address = "CHANGE_ME_MODULE_ADDRESS"
+expected_serial = "" # Query-only commissioning may leave blank; writes require an exact serial.
+
+[nkt_varia]
+address = "CHANGE_ME_MODULE_ADDRESS"
+expected_serial = ""
+monitor_present = false # True only if the optional monitor is physically fitted.
+
+[nkt_lltf]
+# This version provides simulation/semantic interfaces. Vendor SDK binding pending.
+
+[nkt_run]
+backend = "nkt_sdk" # nkt_sdk | simulation. simulate command always forces simulation.
+mode = "varia_bandpass" # broadband | varia_bandpass | lltf_swir
+manual_route = "CHANGE_ME_DESCRIPTION_OF_SELECTED_ROUTE"
+emit = false # Enable only within a separately authorized emission commissioning/run.
+timeout_s = 10.0 # Overall state transition wait, not the vendor's per-telegram timeout.
+poll_interval_s = 0.1
+dwell_s = 0.0 # Duration with verified settings/emission at each scan point.
+output_directory = "../run_data/nkt"
+run_name = "CHANGE_ME_RUN_NAME"
+note = ""
+
+[[nkt_run.points]]
+source_level_pct = "CHANGE_ME"
+wavelength_nm = "CHANGE_ME" # VARIA or LLTF only; omit for broadband.
+bandwidth_nm = "CHANGE_ME" # VARIA only: 10-100 nm; both edges must lie in 400-840 nm.
+nd_pct = "CHANGE_ME" # VARIA only, 0-100%, 0.1% steps.
+# pulse_picker_ratio = 1 # Optional; must be in source.allowed_pp_ratios.
+# LLTF points: source_level_pct + wavelength_nm only (1000-2300 nm).
+# Broadband points: source_level_pct only. Repeat [[nkt_run.points]] for a scan.
+# Every completed/interrupted write run attempts emission OFF, then verifies it.

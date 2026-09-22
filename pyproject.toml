@@ -15,6 +15,7 @@ hardware = ["pyvisa==1.16.2", "qcodes>=0.47,<1"]
 analysis = ["matplotlib==3.10.9"]
 
 [project.scripts]
+attodry-nkt-test = "attodry_control.nkt_test:main"
 attodry-lockin-test = "attodry_control.lockin_test:main"
 attodry-cryostat-test = "attodry_control.attodry_test:main"
 attodry-temperature-test = "attodry_control.temperature_test:main"
