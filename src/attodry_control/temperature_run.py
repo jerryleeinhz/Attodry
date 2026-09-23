@@ -123,20 +123,17 @@ def run(
             )
 
         mutation_attempted = True
-        driver.ensure_temperature_control(
-            True, monotonic=monotonic, sleeper=sleeper
-        )
-        record["command_actions"].append(
-            "temperature_control_confirmed_enabled"
-        )
         force_setpoint_reapply = not initial_state.temperature_control_enabled
         record["setpoint_force_reapply_requested"] = force_setpoint_reapply
-        driver.set_temperature(
+        driver.set_temperature_and_enable(
             request.target_k,
-            force_write=force_setpoint_reapply,
             monotonic=monotonic,
             sleeper=sleeper,
         )
+        record["command_actions"].extend([
+            "temperature_target_confirmed_before_enable",
+            "temperature_control_confirmed_enabled",
+        ])
         record["command_actions"].append("temperature_setpoint_confirmed")
 
         measurement_state = _monitor_until_measurement(

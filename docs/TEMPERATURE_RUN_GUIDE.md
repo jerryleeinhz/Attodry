@@ -10,7 +10,7 @@ Temperature 已经是独立模块。日常使用者不需要阅读或修改 Pyth
 4. 使用输出中的实际 `sample_temperature_k`，而不是把 setpoint 当成实际温度。
 
 日常命令没有额外的授权参数。执行 `attodry-temperature-run` 本身就会连接
-attoDRY、开启 Full Temperature Control，并写入配置的样品温度目标。
+attoDRY、先确认配置的样品温度目标，再开启 Full Temperature Control。
 
 ## 模块结构
 
@@ -104,13 +104,17 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe `
    停止；Lock-in/SMU 表由各自模块验证，不会阻止或改变本次温控；
 2. 加载 vendor DLL，连接并读取完整初始状态；
 3. 用初始 `sample_temperature_k` 检查 `max_delta_k`；
-4. 先开启并确认 Full Temperature Control；
-5. 再写入并确认 `target_k`；
+4. 先写入并确认 `target_k`，确认失败则不允许开启温控；
+5. 再开启并确认 Full Temperature Control；若本次由 OFF 启动，仍在开启后
+   强制复写并确认目标，以保留设备需要的 post-enable reapply；
 6. 每隔 `poll_interval_s` 记录完整状态；
 7. 连续监测 `pre_measure_wait_s`；
 8. 时间达到后将当时的实际状态写入 `measurement_state`，并标记
    `measurement_ready = true`；
 9. 保持目标温度和温控开启，只断开 Python 对 DLL 的连接。
+
+这个顺序避免在基温、温控 OFF、却保留旧 300 K 设定时短暂启用旧目标。
+它不修改 PID/heater 设置，也不把关闭温控等同于已回到 base temperature。
 
 进入测量不要求实际温度在30分钟内严格等于 setpoint。测量数据必须保存当时的
 `sample_temperature_k`；现有 acquisition/storage 路径已经同时保存：

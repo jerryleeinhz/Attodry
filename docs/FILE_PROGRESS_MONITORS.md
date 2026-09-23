@@ -10,6 +10,19 @@
 
 ## 温度 monitor
 
+所有示例都应先进入目标 worktree 根目录。在每个新 PowerShell 终端，以及切换
+worktree 后，先执行（不连接仪器）：
+
+```powershell
+conda activate lyr
+$env:PYTHONPATH = (Resolve-Path -LiteralPath ".\src").Path
+python -c "import sys, attodry_control; print(sys.executable); print(attodry_control.__file__)"
+```
+
+核对模块路径属于当前 worktree；清空 `PYTHONPATH` 不会解决 `src` 布局导入问题。
+下文目录仅为示例，以本次扫描实际输出为准；并行存在多个 run 时优先指定准确的
+`--progress` 文件，而不是自动挑选最近文件。
+
 独立温度扫描和温度—激励扫描均可使用：
 
 ```powershell

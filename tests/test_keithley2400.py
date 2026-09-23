@@ -51,7 +51,7 @@ class FakeQcodesInstrument:
             ":SOUR:FUNC?": "VOLT",
             ":SOUR:VOLT?": "0.125",
             ":OUTP?": "1",
-            ":READ?": "0.125,0.0005,250",
+            ":READ?": "0.125,0.0005",
             ":SENS:CURR:PROT?": "0.001",
             ":SOUR:VOLT:RANG?": "1.0",
             ":SENS:CURR:RANG?": "0.001",
@@ -61,6 +61,9 @@ class FakeQcodesInstrument:
             ":SYST:RSEN?": "0",
             "SENS:CURR:PROT:TRIP?": "0",
             ":SYST:ERR?": "0,No error",
+            ":SENS:FUNC:CONC?": "1",
+            ":SENS:FUNC?": '"VOLT:DC","CURR:DC"',
+            ":FORM:ELEM?": "VOLT,CURR",
         }
         self.closed = False
         self.fail_write = None
@@ -123,6 +126,60 @@ class FakeVisaManager:
 
 
 class Keithley2400AdapterTests(unittest.TestCase):
+    def test_both_source_modes_enable_and_verify_actual_vi_measurement(self):
+        for mode in SourceMode:
+            with self.subTest(mode=mode):
+                instrument = FakeQcodesInstrument()
+                adapter = QcodesKeithley2400("smu_bias", instrument)
+                state = adapter.configure(replace(config(), source_mode=mode))
+                self.assertIn(("write", ":SENS:FUNC:CONC ON"), instrument.calls)
+                self.assertIn(("write", ':SENS:FUNC "VOLT","CURR"'), instrument.calls)
+                self.assertIn(("write", ":FORM:ELEM VOLT,CURR"), instrument.calls)
+                self.assertEqual(state.measurement_functions, ("VOLT", "CURR"))
+                self.assertTrue(state.concurrent_measurement)
+                self.assertEqual(state.read_elements, ("VOLT", "CURR"))
+                self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
+    def test_measurement_configuration_mismatch_fails_before_output_enable(self):
+        for command, response in ((":SENS:FUNC:CONC?", "0"),
+                                  (":SENS:FUNC?", '"CURR:DC"'),
+                                  (":FORM:ELEM?", "CURR,VOLT")):
+            with self.subTest(command=command):
+                instrument = FakeQcodesInstrument()
+                instrument.responses[command] = response
+                adapter = QcodesKeithley2400("smu_bias", instrument)
+                with self.assertRaisesRegex(Exception, "V/I measurement"):
+                    adapter.configure(config())
+                self.assertNotIn(("output", "on"), instrument.calls)
+
+    def test_read_rechecks_measurement_functions_before_consuming_values(self):
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.configure(config())
+        instrument.responses[":SENS:FUNC?"] = '"CURR:DC"'
+        instrument.calls.clear()
+        with self.assertRaisesRegex(Exception, "V/I measurement"):
+            adapter.read()
+        self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
+    def test_configured_read_never_triggers_when_output_is_off(self):
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.configure(config())
+        instrument.responses[":OUTP?"] = "0"
+        instrument.calls.clear()
+        with self.assertRaisesRegex(Exception, "output OFF"):
+            adapter.read()
+        self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
+    def test_read_rejects_unexpected_extra_elements(self):
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.configure(config())
+        instrument.responses[":READ?"] = "0.125,0.0005,250"
+        with self.assertRaisesRegex(Exception, "VOLT,CURR format"):
+            adapter.read()
+
     def test_fixed_timeout_is_five_seconds(self) -> None:
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)

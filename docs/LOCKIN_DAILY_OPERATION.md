@@ -8,6 +8,7 @@ attoDRY、PPMS、SMU 或旋转台控制。
 
 ```powershell
 conda activate lyr
+$env:PYTHONPATH = (Resolve-Path -LiteralPath ".\src").Path
 python -m attodry_control.lockin_test sweep-frequency
 python -m attodry_control.lockin_test sweep-excitation
 python -m attodry_control.lockin_test sweep-frequency-excitation
@@ -45,8 +46,10 @@ python -B -m attodry_control.lockin_test sweep-excitation --help
 
 第二条输出必须指向当前 checkout 的
 `src\attodry_control\lockin_test.py`；最后一条帮助只应显示 `--config`。验证后，在
-同一个终端运行日常 sweep。新开 terminal 通常只需重新 `conda activate lyr`，无需重填
-本机地址。
+同一个终端运行日常 sweep。新开 terminal 或更换 worktree 后，进入正确根目录、激活
+`lyr` 并重新设置 `$env:PYTHONPATH = (Resolve-Path -LiteralPath ".\src").Path`，
+再核对导入路径；无需重填本机地址。`$env:PYTHONPATH = ''` 只是清空变量，不是 src
+布局的导入设置。完整说明见 [README](../README.md)。
 
 命令默认读取 `config/hardware.local.toml`。仅当配置文件确实位于其他位置时，
 才使用 `--config <path>`；日常运行不需要填写电阻、量程、采样时间、扫描点、

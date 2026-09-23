@@ -98,8 +98,10 @@ C:\Users\LK_Setup\anaconda3\envs\lyr\python.exe -m `
   --authorize-temperature-scan
 ```
 
-程序对每个点执行：读取完整状态，检查样品温度移动，确认 Full Temperature Control
-开启，确认 setpoint，随后从 setpoint 确认时刻开始对实际样品读回计时。正常完成后
+程序对每个点执行：读取完整状态，检查样品温度移动，先写入/确认目标 setpoint，
+再确认 Full Temperature Control 开启；若由 OFF 启动，再强制复写/确认目标。
+预写目标未确认时不得开启温控，避免启用 OFF 状态遗留的高温目标。
+随后从最终 setpoint 确认时刻开始对实际样品读回计时。正常完成后
 保持最后一个目标和温控开启，只断开 Python 的 DLL/COM 连接。
 
 ## 记录内容

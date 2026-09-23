@@ -48,6 +48,7 @@ class FakeAttoDryDll:
         self.setpoint_x_t = 0.0
         self.setpoint_z_t = 0.0
         self.temperature_control = 0
+        self.targets_at_temperature_enable: list[float] = []
         self.temperature_follows_setpoint = False
         self.field_control = 0
         self.error_code = 0
@@ -167,6 +168,8 @@ class FakeAttoDryDll:
 
     def AttoDRY_Interface_toggleFullTemperatureControl(self):
         self.temperature_control = 1 - self.temperature_control
+        if self.temperature_control:
+            self.targets_at_temperature_enable.append(self.user_temperature_k)
         return self._code("toggle_temperature_control")
 
     def AttoDRY_Interface_toggleMagneticFieldControl(self):
@@ -875,6 +878,46 @@ class AttoDryDriverTests(unittest.TestCase):
 
         self.assertIs(self.driver.last_confirmed_state, confirmed)
 
+    def test_temperature_start_preloads_target_before_enabling_stale_300k(self) -> None:
+        self.connect()
+        self.dll.user_temperature_k = 300.0
+        targets_at_enable = []
+        original = self.dll.AttoDRY_Interface_toggleFullTemperatureControl
+
+        def guarded_toggle():
+            targets_at_enable.append(self.dll.user_temperature_k)
+            return original()
+
+        self.dll.AttoDRY_Interface_toggleFullTemperatureControl = guarded_toggle
+        state = self.driver.set_temperature_and_enable(2.0)
+        self.assertEqual(targets_at_enable, [2.0])
+        self.assertTrue(state.temperature_control_enabled)
+        self.assertEqual(state.user_temperature_k, 2.0)
+        # Keep the established post-enable reapply as well as the safe preload.
+        self.assertEqual(self.dll.events.count("set_temperature"), 2)
+        self.assertLess(self.dll.events.index("set_temperature"),
+                        self.dll.events.index("toggle_temperature_control"))
+
+    def test_temperature_start_does_not_enable_if_preload_is_unacknowledged(self) -> None:
+        self.connect()
+        self.dll.user_temperature_k = 300.0
+        self.dll.AttoDRY_Interface_setUserTemperature = (
+            lambda value: self.dll._code("set_temperature")
+        )
+        with self.assertRaisesRegex(AttoDryTimeout, "setpoint readback"):
+            self.driver.set_temperature_and_enable(
+                2.0, monotonic=iter([0.0, 30.0]).__next__, sleeper=lambda _: None
+            )
+        self.assertNotIn("toggle_temperature_control", self.dll.events)
+        self.assertEqual(self.dll.temperature_control, 0)
+
+    def test_temperature_start_rejects_invalid_target_before_enable(self) -> None:
+        self.connect()
+        with self.assertRaisesRegex(ValueError, "outside configured limits"):
+            self.driver.set_temperature_and_enable(301.0)
+        self.assertNotIn("toggle_temperature_control", self.dll.events)
+        self.assertNotIn("set_temperature", self.dll.events)
+
     def test_temperature_setpoint_write_records_full_confirmed_state(self) -> None:
         self.connect()
 
@@ -1469,7 +1512,7 @@ failure_policy = "disable-control"
         self.assertTrue(result["completed"])
         self.assertAlmostEqual(result["request"]["target_k"], 2.1)
         self.assertGreaterEqual(len(result["target_samples"]), 3)
-        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+        self.assertEqual(self.dll.events.count("set_temperature"), 2)
 
     def test_temperature_cli_rejects_mixed_parameter_sources_before_dll_load(self) -> None:
         loaded = []
@@ -1519,6 +1562,7 @@ failure_policy = "disable-control"
         self.assertEqual(loaded, [])
 
     def test_temperature_cli_records_stable_target_and_holds_it(self) -> None:
+        self.dll.user_temperature_k = 300.0
         self.dll.temperature_follows_setpoint = True
         output = io.StringIO()
 
@@ -1541,16 +1585,18 @@ failure_policy = "disable-control"
             result["final_state"]["user_temperature_k"], 2.1, delta=1e-4
         )
         self.assertTrue(result["final_state"]["temperature_control_enabled"])
-        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+        self.assertAlmostEqual(self.dll.targets_at_temperature_enable[0], 2.1, places=4)
+        self.assertEqual(self.dll.events.count("set_temperature"), 2)
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 1)
         self.assertLess(
-            self.dll.events.index("toggle_temperature_control"),
             self.dll.events.index("set_temperature"),
+            self.dll.events.index("toggle_temperature_control"),
         )
         self.assertTrue(result["setpoint_force_reapply_requested"])
         self.assertEqual(
             result["command_actions"],
             [
+                "temperature_target_confirmed_before_enable",
                 "temperature_control_confirmed_enabled",
                 "temperature_setpoint_confirmed",
             ],
@@ -1606,7 +1652,7 @@ failure_policy = "disable-control"
         self.assertTrue(check["passed"])
         self.assertAlmostEqual(check["sample_target_delta_k"], 0.0256, places=4)
         self.assertAlmostEqual(check["user_setpoint_target_delta_k"], 0.25)
-        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+        self.assertEqual(self.dll.events.count("set_temperature"), 2)
 
     def test_temperature_cli_rejects_excessive_step_before_write(self) -> None:
         args = self.temperature_args()
@@ -1648,7 +1694,7 @@ failure_policy = "disable-control"
         self.assertTrue(result["completed"])
         self.assertAlmostEqual(result["final_state"]["user_temperature_k"], 2.0)
         self.assertFalse(result["final_state"]["temperature_control_enabled"])
-        self.assertEqual(self.dll.events.count("set_temperature"), 2)
+        self.assertEqual(self.dll.events.count("set_temperature"), 3)
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 2)
         self.assertEqual(
             result["recovery_actions"],
@@ -1678,7 +1724,7 @@ failure_policy = "disable-control"
         self.assertIn("timed out", result["error"])
         self.assertAlmostEqual(result["final_state"]["user_temperature_k"], 2.0)
         self.assertFalse(result["final_state"]["temperature_control_enabled"])
-        self.assertEqual(self.dll.events.count("set_temperature"), 2)
+        self.assertEqual(self.dll.events.count("set_temperature"), 3)
         self.assertTrue(result["disconnected"])
 
     def test_temperature_cli_failure_disables_control_and_records_diagnostic(
@@ -1698,7 +1744,7 @@ failure_policy = "disable-control"
 
         result = json.loads(output.getvalue())
         self.assertFalse(result["completed"])
-        self.assertEqual(self.dll.events.count("set_temperature"), 1)
+        self.assertEqual(self.dll.events.count("set_temperature"), 2)
         self.assertEqual(self.dll.events.count("toggle_temperature_control"), 2)
         self.assertAlmostEqual(
             result["final_state"]["user_temperature_k"], 2.1, delta=1e-4
@@ -1864,6 +1910,7 @@ failure_policy = "hold-current"
     def test_temperature_run_uses_one_config_and_records_actual_temperature(
         self,
     ) -> None:
+        self.dll.user_temperature_k = 300.0
         output = io.StringIO()
         config_path = self.temperature_run_config()
 
@@ -1892,9 +1939,10 @@ failure_policy = "hold-current"
             result["temperature_samples"][-1]["elapsed_s"], 1800.0
         )
         self.assertTrue(result["final_state"]["temperature_control_enabled"])
+        self.assertAlmostEqual(self.dll.targets_at_temperature_enable[0], 2.1, places=4)
         self.assertLess(
-            self.dll.events.index("toggle_temperature_control"),
             self.dll.events.index("set_temperature"),
+            self.dll.events.index("toggle_temperature_control"),
         )
         self.assertEqual(self.dll.events[-2:], ["disconnect", "end"])
 
@@ -2088,7 +2136,7 @@ failure_policy = "hold-current"
     ) -> None:
         config_path, _ = self.temperature_scan_config()
         self.dll.sample_temperature_k = 1.7
-        self.dll.user_temperature_k = 1.7
+        self.dll.user_temperature_k = 300.0
         self.dll.temperature_follows_setpoint = True
         output = io.StringIO()
 
@@ -2116,10 +2164,11 @@ failure_policy = "hold-current"
         self.assertTrue(
             all(point["time_to_stable_s"] >= 2.0 for point in result["points"])
         )
-        self.assertEqual(self.dll.events.count("set_temperature"), 3)
+        self.assertEqual(self.dll.events.count("set_temperature"), 4)
+        self.assertAlmostEqual(self.dll.targets_at_temperature_enable[0], 1.7, places=4)
         self.assertLess(
-            self.dll.events.index("toggle_temperature_control"),
             self.dll.events.index("set_temperature"),
+            self.dll.events.index("toggle_temperature_control"),
         )
         self.assertTrue(Path(result["stable_times_csv"]).is_file())
         progress = Path(result["progress_jsonl"]).read_text(encoding="utf-8")

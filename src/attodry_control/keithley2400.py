@@ -80,6 +80,9 @@ class KeithleyConfigurationReadback:
     compliance_limit: float
     source_range: float
     measure_range: float
+    measurement_functions: tuple[str, ...] = ()
+    concurrent_measurement: bool = False
+    read_elements: tuple[str, ...] = ()
 
 
 def open_keithley2400(
@@ -203,6 +206,13 @@ class QcodesKeithley2400:
         self.config = config
         mode = "VOLT" if config.source_mode is SourceMode.VOLTAGE else "CURR"
         self.instrument.mode(mode)
+        # QCoDeS mode() selects only the opposite sense function. Without
+        # explicitly enabling both, READ? may return the programmed source
+        # value in place of a measured voltage/current (2400 manual 6-22).
+        self.write(":SENS:FUNC:CONC ON")
+        self.write(":SENS:FUNC:OFF:ALL")
+        self.write(':SENS:FUNC "VOLT","CURR"')
+        self.write(":FORM:ELEM VOLT,CURR")
         if config.source_mode is SourceMode.VOLTAGE:
             assert config.max_abs_current_a is not None
             self.instrument.compliancei(config.max_abs_current_a)
@@ -220,6 +230,10 @@ class QcodesKeithley2400:
         )
         self.write(
             f":SENS:{measure_function}:RANG:AUTO "
+            f"{'ON' if config.measure_auto_range else 'OFF'}"
+        )
+        self.write(
+            f":SENS:{source_function}:RANG:AUTO "
             f"{'ON' if config.measure_auto_range else 'OFF'}"
         )
         self.write(f":SYST:RSEN {'ON' if config.four_wire else 'OFF'}")
@@ -248,11 +262,32 @@ class QcodesKeithley2400:
             raise Keithley2400Error(
                 f"{self.role} returned a non-positive source or measurement range"
             )
+        functions, concurrent, elements = self._verify_vi_measurement()
         return KeithleyConfigurationReadback(
             compliance_limit=compliance,
             source_range=source_range,
             measure_range=measure_range,
+            measurement_functions=functions,
+            concurrent_measurement=concurrent,
+            read_elements=elements,
         )
+
+    def _verify_vi_measurement(self) -> tuple[tuple[str, ...], bool, tuple[str, ...]]:
+        concurrent = _parse_bool(
+            self.ask(":SENS:FUNC:CONC?"), f"{self.role} V/I measurement concurrency"
+        )
+        functions = tuple(
+            item.strip().strip('\"\'').upper().removesuffix(":DC")
+            for item in self.ask(":SENS:FUNC?").split(",")
+        )
+        elements = tuple(item.strip().upper() for item in self.ask(":FORM:ELEM?").split(","))
+        if (not concurrent or len(functions) != 2
+                or set(functions) != {"VOLT", "CURR"} or elements != ("VOLT", "CURR")):
+            raise Keithley2400Error(
+                f"{self.role} V/I measurement not verified: "
+                f"concurrent={concurrent}, functions={functions}, elements={elements}"
+            )
+        return functions, concurrent, elements
 
     def set_source(self, value: float) -> None:
         config = self._require_configured()
@@ -279,10 +314,13 @@ class QcodesKeithley2400:
 
     def read(self) -> KeithleyReading:
         config = self._require_configured()
+        if not _parse_bool(self.ask(":OUTP?"), f"{self.role} output"):
+            raise Keithley2400Error(f"{self.role} cannot measure V/I with output OFF")
+        self._verify_vi_measurement()
         values = _parse_float_list(self.ask(":READ?"))
-        if len(values) < 2:
+        if len(values) != 2:
             raise Keithley2400Error(
-                f"{self.role} :READ? returned fewer than voltage and current"
+                f"{self.role} :READ? did not match verified VOLT,CURR format"
             )
         voltage, current = values[:2]
         if not math.isfinite(voltage) or not math.isfinite(current):

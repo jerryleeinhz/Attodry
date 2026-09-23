@@ -74,6 +74,34 @@ float32 命令、实际读回和执行中的混合状态均检查。高 Z 到双
 
 如果电脑没有 `py` 命令，先安装 64 位 Python 3.11，并在安装器中勾选 Python Launcher。Conda 不是必需条件。更完整的 Codex、虚拟环境和离线 wheelhouse 工作流见 `docs/CODEX_AND_OFFLINE_SETUP.md`。
 
+## PowerShell：src 布局与不同 worktree
+
+LK_setup 上各 worktree 可以共用同一个 Conda `lyr` 解释器；切换的是源码目录，
+不是解释器。先进入**要运行的 worktree 根目录**，然后在每个新终端执行：
+
+```powershell
+conda activate lyr
+if (-not (Test-Path -LiteralPath ".\src\attodry_control" -PathType Container)) {
+    throw "请先进入目标 worktree 根目录"
+}
+$env:PYTHONPATH = (Resolve-Path -LiteralPath ".\src").Path
+python -c "import sys, attodry_control; print(sys.executable); print(attodry_control.__file__)"
+python -m attodry_control.lockin_test monitor-live --help
+```
+
+以上仅做导入/帮助检查，不连接仪器。第一条输出应是 `lyr` 的解释器，第二条必须位于
+当前 worktree 的 `src\attodry_control` 下。当前终端更换 worktree 后，必须重新设置
+`PYTHONPATH`；新终端也须重新设置。使用普通英文引号，不要复制排版后的弯引号。
+
+`$env:PYTHONPATH = ''` 只是清空该变量，**不会自动把 src 加入搜索路径**。只有依赖
+正确安装的包等其他导入机制时才可能仍然可用。共享环境中的 `pip install -e .`
+可能指向另一个 worktree，因此不要只看 Conda 环境名，始终核对实际模块路径。
+不要把某个 worktree 的源码路径永久写入系统环境变量。配置和输出路径也应属于本次运行。
+
+扫描期间监控请用[纯文件 JSONL monitor](docs/FILE_PROGRESS_MONITORS.md)；
+`lockin_test monitor-live` 是直接查询仪器的独立诊断，**不是内存数据订阅**，
+不能与访问同一对 SR830 的采集并行运行。
+
 ## 分模块继续开发
 
 后续工作已经整理为可交给独立 Chat 的工作包，总入口是

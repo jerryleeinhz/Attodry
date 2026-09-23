@@ -420,6 +420,37 @@ class AttoDryDriver:
             ):
                 return
 
+    def set_temperature_and_enable(
+        self,
+        temperature_k: float,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> CryostatState:
+        """Confirm the requested target BEFORE enabling a disabled controller.
+
+        A disabled cryostat can retain an unrelated target (e.g. 300 K while
+        the sample is at base temperature). An unacknowledged preload must not
+        enable that stale target. Preserve the established post-enable reapply
+        for firmware that requires it. The caller owns failure cleanup.
+        """
+        self._require_write_authorized()
+        before = self.read_state()
+        self._require_clear_error(before)
+        self.set_temperature(temperature_k, monotonic=monotonic, sleeper=sleeper)
+        self.ensure_temperature_control(True, monotonic=monotonic, sleeper=sleeper)
+        if not before.temperature_control_enabled:
+            self.set_temperature(
+                temperature_k, force_write=True, monotonic=monotonic, sleeper=sleeper
+            )
+        confirmed = self.read_state()
+        self._require_clear_error(confirmed)
+        if not confirmed.temperature_control_enabled or not math.isclose(
+            confirmed.user_temperature_k, temperature_k, rel_tol=0.0, abs_tol=1e-4
+        ):
+            raise AttoDryError("Temperature target/control changed during startup.")
+        return confirmed
+
     def ensure_temperature_control(
         self,
         enabled: bool,

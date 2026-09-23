@@ -44,7 +44,7 @@ python -m attodry_control.temperature_excitation_scan `
 
 ```text
 升序目标温度
-  -> 读回/确认温控与 setpoint
+  -> 先写入/确认目标，再开启温控（由 OFF 启动时再复写目标）
   -> 等待稳定窗口
   -> 记录稳定窗口温度摘要
   -> 完整 SR830 excitation sweep（所有配置幅值与正式谐波）

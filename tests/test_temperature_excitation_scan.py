@@ -257,7 +257,7 @@ class TemperatureExcitationScanTests(unittest.TestCase):
         config_path, _ = self._config()
         dll = FakeAttoDryDll()
         dll.sample_temperature_k = 1.7
-        dll.user_temperature_k = 1.7
+        dll.user_temperature_k = 300.0
         dll.temperature_follows_setpoint = True
         manager = FakeResourceManager(
             {
@@ -354,6 +354,7 @@ class TemperatureExcitationScanTests(unittest.TestCase):
         self.assertTrue(result["completed"])
         self.assertEqual(result["outcome"], "completed")
         condition = result["temperature_conditions"][0]
+        self.assertAlmostEqual(dll.targets_at_temperature_enable[0], 1.7, places=4)
         self.assertAlmostEqual(condition["stability_measurement_temperature_k"], 1.7)
         self.assertAlmostEqual(condition["measurement_temperature_k"], 1.775)
         self.assertNotEqual(

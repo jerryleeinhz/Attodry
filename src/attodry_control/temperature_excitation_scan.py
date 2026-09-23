@@ -266,13 +266,9 @@ def run(
                 )
 
                 mutation_attempted = True
-                driver.ensure_temperature_control(
-                    True, monotonic=monotonic, sleeper=sleeper
-                )
                 force_reapply = not before_state.temperature_control_enabled
-                driver.set_temperature(
+                driver.set_temperature_and_enable(
                     target_k,
-                    force_write=force_reapply,
                     monotonic=monotonic,
                     sleeper=sleeper,
                 )

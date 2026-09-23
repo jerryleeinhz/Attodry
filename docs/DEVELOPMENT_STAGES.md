@@ -2,6 +2,115 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Continuing four-module branch (2026-09-23)
+
+- Operator selected codex/integration-four-module-scan for continuation/publication.
+- Preserve module/integration's unique documentation commit and uncommitted
+  Notebook changes; no branch/worktree deletion or main merge.
+- Publication includes the existing V/I sensing and safe temperature-startup
+  fixes, tests, bounded acceptance reports, and src/monitor documentation.
+- No instrument operation or LK_setup deployment is part of this publication.
+- Full local guarded regression: 588 passed, zero errors/failures/skips, 65.706 s.
+  An initial user-site-disabled run lacked NumPy; the successful rerun used the
+  existing user-site NumPy 2.4.6, with no dependency installation.
+
+## Worktree imports and Lock-in monitor guidance (2026-09-23)
+
+- Document resolved src PYTHONPATH and actual import-path verification for every
+  new terminal/worktree switch, retaining the same lyr interpreter.
+- Explain that empty PYTHONPATH is clearing, not src setup, and shared editable
+  installations may still point to a different checkout.
+- Clarify direct VISA monitor-live versus file-only JSONL progress monitors,
+  status-latch side effects, and query duration plus inter-frame wait.
+- Documentation-only change; no instrument access, runtime modification or remote sync.
+- Verification: 98 related fake-SR830/file-progress tests passed in 3.434 s with
+  hardware imports/DLL loads blocked; earlier sandbox attempts hit temporary-folder
+  permission errors. Current-src import verified; no real monitor was started.
+
+## Explicit V/I sensing and safe temperature startup (2026-09-22)
+
+- Keithley configuration enables concurrent voltage/current sensing, both sense
+  autoranges, and an explicit VOLT,CURR return format. Configuration and every
+  formal read verify those settings. Output-OFF reads and unexpected element
+  counts fail closed. Five new unit tests; target guarded full suite 585/585.
+- Real unloaded bias test: five points 0,+1,0,-1,0 mV, 3 s per-point settling,
+  |V| <= 0.01 V / |I| <= 1 microampere. Five clean samples; independently confirmed
+  zero/OFF, dual sense functions, correct return format, error zero and clean
+  cleanup. Historical current-only-sense records are not relabelled.
+- A fresh cryostat status check exposed stored 300 K with control disabled at
+  1.6796 K. All four active temperature entry points now preload/acknowledge the
+  requested target before enabling and preserve the post-enable reapply.
+  Rejected preload never enables control. 96 focused fake-DLL/VISA tests passed.
+- User now authorizes temperature testing within 2–3 K. Isolated commissioning
+  targets are 2.0,2.2,2.4 K, software target ceiling 3 K, max step from current
+  sensor 0.5 K, overshoot margin 0.2 K, abort-on-interruption. No field movement
+  is authorized by this update. Target guarded full regression passed 588 tests
+  in 75.672 s, with no failures/errors/skips.
+- Real low-T run completed all three targets with 603 raw polls. Coarse test
+  acceptance: +/-0.2 K, 10 s window, <=20 mK peak-to-peak. Accepted actual window
+  means 1.802786/2.003700/2.205586 K; this is not precision equilibration at the
+  nominal targets. Command receipt proves preload-before-enable and no field
+  write. Normal finish holds target 2.4 K with temperature control enabled.
+- Independent 10:01:45 UTC cryostat read confirmed 2.331900 K actual / 2.4 K
+  target, error 0, X/Z actual and setpoint zero, field control OFF. Connections
+  were closed after checks; no continuous watchdog or long-term qualification.
+- Electrical final check confirmed bias zero/OFF/1 microampere and both SR830
+  4 mV, but retained a failed strict check on XY LIAS=4. Three later paired
+  checks were clean without setting changes; root cause is not established.
+- Raw-data audit and unsmoothed 603-poll trace completed; PNG visually reviewed,
+  PNG/PDF metadata and provenance retained in ignored evidence. Details:
+  LOW_T_AND_VI_ACCEPTANCE_20260922.md. No commit/push/main update.
+- Arbitrary-order four-module real execution remains a separate unfinished stage.
+
+## Bias-only unloaded real acceptance (2026-09-22)
+
+- Operator corrected the physical condition to no sample connected and authorized
+  autonomous scanning within existing 0.01 V / 1 microampere ceilings. Only bias
+  hardware was accessed; all other roles remained untouched and physically unknown.
+- Exact 1a87f03 target snapshot / lyr Python 3.12.13. Added missing QCoDeS 0.59.0
+  and dependencies without replacing existing scientific/VISA packages; before
+  environment list and install report retained. Full guarded offline regression:
+  580 tests, zero failures/errors/skips, 68.048 s.
+- Real read-only identity: Keithley 2400 serial 4414633, firmware C34, voltage
+  source/two-wire/OFF/zero. First preflight stopped on recorded error 601 before
+  any settings writes; retained failure plus three clean status checks preceded
+  one retry. No reset or deliberate buffer-clear command.
+- Zero trace 9/9, 0/+1 mV/0 9/9, +/-9 mV bidirectional 39/39, literal ordered
+  duplicates 15/15: all clean/accepted. Soft KeyboardInterrupt at +2 mV retained
+  3 formal samples as interrupted/rejected by default analysis.
+- All five runs confirmed zero then output OFF, cleanup_errors empty and no
+  manual-verification flag. Hardware current compliance read back 1 microampere.
+  Three final independent OFF-state queries confirmed zero/OFF/compliance/error 0.
+- Stream verification: 41 events, 39 sample payloads identical to raw JSONL.
+  Standalone, Notebook data loader and unified legacy adapter returned exactly
+  72 accepted rows; interrupted rows loaded only by explicit audit opt-in.
+  Source target order, repeats, segments and the three raw artifact hashes per
+  run were validated. Diagnostic PNG inspected at 1440x900, no fit/averaging.
+- Scope limitation: SENS:FUNC reports CURR:DC only; reported voltage is not
+  certified as independent terminal-voltage measurement. No load/accuracy or
+  physical compliance-trip test, current-source/four-wire test, hard crash,
+  communication-loss test, or joint four-module hardware commissioning.
+- No runtime source/schema/safety-policy change, Git commit/push/main merge or
+  alteration of pre-existing target checkouts. See BIAS_SMU_ACCEPTANCE_20260922.md.
+
+## Integration I1b target-offline receipt (2026-09-22)
+
+- User authorized SSH and target work under LK_setup's Yuanrong Li directory.
+  Real specimen reported; 0.01 V / 1 microampere stated, but active SMU roles and
+  exact voltage/scope semantics remain to be confirmed before configuring outputs.
+- Preserved all existing dirty main/temperature-excitation checkouts and clean
+  magnetic checkout. No hardware.local.toml or lockin_safety.toml was changed.
+  Vendor attoDRY interface was running during inspection; left untouched.
+- Deployed a DLL-free source archive of 1a87f03 into a new isolated
+  Attodry_combination_offline_1a87f03_20260922/source directory.
+  Exact archive SHA-256 is recorded in PROJECT_HANDOFF.
+- Exact lyr Python 3.12.13, 64-bit, snapshot src first, user-site disabled:
+  580 tests passed, 0 failures/errors/skips, 73.197 s. Real VISA/QCoDeS/serial
+  imports and Windows DLL loaders were explicitly blocked during the test run.
+- Zero real hardware connection, status consumption or writes. This receipt
+  applies only to the simulator/record/analysis checkpoint; the real combination
+  station and joint hardware commissioning are still incomplete.
+
 ## Integration I1b - combination data and simulator checkpoint (2026-09-14)
 
 - Implemented literal arbitrary-subset/order Cartesian conditions, atomic X/Z

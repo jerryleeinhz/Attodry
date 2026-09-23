@@ -4,14 +4,26 @@
 忽略的 `config/hardware.local.toml` 读取 XX/XY 的语义地址和 VISA 超时；不需要填写
 电阻、量程、频率或写入授权参数。
 
-从仓库根目录运行：
+注意：这里的“只读”只表示不改变仪器设置，不表示不与仪器通信。
+每轮都会在已打开的 VISA 会话中顺序调用 XX、XY 的 `read_diagnostic()`，
+发送 `*IDN?`、`FREQ?`、`SLVL?`、`SNAP? 1,2,3,4,9` 等查询；
+带 `--consume-status-latches` 时还查询并清除 `LIAS?` / `ERRS?`。
+它不订阅扫描进程的内存，也不读取扫描 JSONL。
+
+先进入目标 worktree 根目录；`src` 布局每个新终端/切换 worktree 后都要设置：
 
 ```powershell
 conda activate lyr
+$env:PYTHONPATH = (Resolve-Path -LiteralPath ".\src").Path
+python -c "import sys, attodry_control; print(sys.executable); print(attodry_control.__file__)"
 python -m attodry_control.lockin_test monitor-live --consume-status-latches
 ```
 
-默认每秒刷新一次并持续到 `Ctrl+C`。停止监视不会触发 sweep cleanup，因为此命令从不
+上面的最后一条命令会真实查询仪器，只能在没有扫描/其他仪器 owner 时运行。
+不要用 `$env:PYTHONPATH = ''` 代替 src 路径；详见 [README](../README.md)。
+
+默认首轮立即查询，之后每轮先等待 1 s 再查询，持续到 `Ctrl+C`；实际周期还包含
+两台仪器的查询耗时，并不是精确 1 Hz 采样。停止监视不会触发 sweep cleanup，因为此命令从不
 修改 SR830 设置。需要有限次刷新时，例如排线检查，可使用：
 
 ```powershell
@@ -52,6 +64,18 @@ warnings，应停止后续测量并按前面板和接线手动核实。
 改用 [`FILE_PROGRESS_MONITORS.md`](FILE_PROGRESS_MONITORS.md) 的
 `temperature_progress_monitor` 或 `lockin_progress_monitor`。它们只读取扫描已写入并
 flush 的 JSONL，不访问 COM/VISA，也不清除锁存位。
+
+例如在另一个已设置好 `lyr` / `PYTHONPATH` 的终端中：
+
+```powershell
+python -m attodry_control.lockin_progress_monitor --directory run_data\commissioning
+```
+
+目录须替换为本次扫描实际输出目录；更稳妥的是用 `--progress "<本次进度文件>.jsonl"`
+指定准确文件，避免选到别的运行。刷新频率不会增加采集次数，文件不更新就没有新读数。
+不能因为换终端、Python 进程或 worktree 就认为仪器已隔离：它们仍指向同一物理设备。
+并发查询可能交错请求/响应或改变时序；第二个读者还可能抢先消费扫描需要的告警锁存。
+本命令没有自动转发到采集 owner 的机制，不要把它当成并发安全的监控端。
 
 ## 写入边界
 

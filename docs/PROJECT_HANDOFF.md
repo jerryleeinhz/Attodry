@@ -1,8 +1,183 @@
 # Project handoff
 
-Last updated: 2026-09-14
+Last updated: 2026-09-23
 
 ## Current stage
+
+### Selected continuation branch and publication scope (2026-09-23)
+
+The operator selected codex/integration-four-module-scan as the continuing
+integration worktree and authorized committing/publishing it to origin.
+Keep module/integration and its temperature-excitation-worktree: it contains
+three uncommitted Notebook edits, checkpoints and the local documentation commit
+2a9bdd4 (not pushed). Do not delete it merely because its runtime baseline is older.
+Equivalent import/monitor guidance is included here without merging its dirty
+Notebook work. Publishing this branch does not update main, deploy to LK_setup,
+or complete the real four-module runner. Local configs and raw evidence stay ignored.
+Pre-publication local regression: 588 tests passed in 65.706 s, zero errors,
+failures or skips, with real pyvisa/qcodes/serial and DLL loads blocked.
+The first run with user-site disabled lacked NumPy (2 errors, 16 skips); rerunning
+with the existing user-site NumPy 2.4.6 passed without installing dependencies.
+
+### Worktree import setup and monitoring boundary documentation (2026-09-23)
+
+README and Lock-in operation/monitor guides now explicitly set process-local
+PYTHONPATH to the selected worktree's resolved src directory, check interpreter
+and module paths, and require repeating setup after a new terminal/worktree switch.
+An empty PYTHONPATH does not add src. The shared lyr interpreter need not change.
+Source inspection confirms lockin_test monitor-live performs sequential real VISA
+diagnostics, not acquisition-memory reads; optional LIAS?/ERRS? consumes latches.
+Do not run it alongside acquisition of the same devices, even without latch reads.
+Use lockin_progress_monitor on the run's flushed JSONL during scans. Documentation
+only; no hardware connection, remote deployment or runtime behavior change.
+Verification: 98 SR830 fake-resource and file-progress tests passed (3.434 s),
+with real pyvisa/qcodes/serial imports and DLL loading blocked. Initial sandbox
+runs encountered temporary-directory PermissionError; the guarded rerun outside
+that sandbox passed. Resolved-src import verification and CLI help checks are
+offline only.
+
+### V/I sensing and bounded low-temperature startup verified (2026-09-22)
+
+The current operator authorization permits an unloaded temperature test in 2–3 K.
+Use the separate local 2.0/2.2/2.4 K commissioning plan, not the existing target
+computer's high-temperature grid. Do not infer authorization for a field movement.
+
+Real bias-only verification on LK_setup passed five ordered points
+0,+1,0,-1,0 mV with a 3 s settling delay, 0.01 V / 1 microampere limits, and
+zero-then-OFF cleanup. Explicit concurrent VOLT/CURR sensing and returned element
+order were confirmed; actual terminal-voltage readings are now distinguishable
+from source setpoints. This does not calibrate accuracy or validate loaded trips,
+current-source mode, four-wire wiring or the two inactive gates. Previous raw
+records remain unchanged. Full target guarded offline suite: 585 tests passed.
+
+Status-only cryostat checks at 09:28 UTC found sample 1.6796 K, stored target
+300 K, temperature control OFF, measured/setpoint X/Z zero, field control OFF,
+error zero. No temperature/field write occurred during those checks. XX/XY were
+both at 4 mV; initial latched status was retained, followed by two clean pairs.
+No SR830 setting was changed. This is not a field/persistent-mode certification.
+
+Added set_temperature_and_enable: preload and confirm the requested target BEFORE
+enabling control, then retain the established forced post-enable reapply when
+starting from OFF. Unacknowledged or invalid preloads fail without enabling.
+Temperature commissioning, daily single-target, scan and temperature/excitation
+scan all use this path. 96 related fake-DLL/VISA tests passed, including stale
+300 K startup at all four entry points. Target guarded full suite: 588 tests
+passed, zero errors/failures/skips, 75.672 s.
+
+Real temperature-only run 20260922T094241Z_lowT_2p0_2p4 completed all three
+2.0/2.2/2.4 K targets and retained 603 temperature polls. The deliberately coarse
+test criterion was target +/-0.2 K, 10 s window, peak-to-peak <=0.02 K; accepted
+window means were 1.802786/2.003700/2.205586 K, NOT precise target equilibration.
+The raw command receipt confirms 2 K preload, enable, 2 K reapply, 2.2 K, 2.4 K,
+with no magnetic mutation. Normal finish holds the 2.4 K target/controller ON.
+Independent 10:01:45 UTC read: actual 2.331900 K, target 2.4 K, cryostat error 0,
+X/Z readback and setpoint zero, field control OFF. Software then disconnected;
+this is not a continuous 3 K watchdog or a long-term hold qualification.
+
+Independent electrical postcheck confirmed bias zero/OFF/1 microampere and both
+SR830 at 4 mV. Its strict all-clean assertion FAILED on XY LIAS=4; that original
+failure is retained. Three subsequent paired status checks at 10:03:34–40 UTC
+were all LIAS=0/ERRS=0, without setting changes. The transient cause is unknown;
+do not claim every postcheck was clean. See LOW_T_AND_VI_ACCEPTANCE_20260922.md.
+
+The real arbitrary-order four-module station remains incomplete. These bounded
+checks do not constitute a completed four-module combined experiment.
+
+### LK_setup unloaded bias acceptance completed within tested scope (2026-09-22)
+
+This supersedes the earlier specimen-connected, address-unknown and no-write
+statements below. The operator explicitly confirmed NO SAMPLE connected,
+identified the bias VISA role in ignored local configuration, and authorized
+autonomous bounded scanning and acceptance. Only smu_bias was opened; gate,
+Lock-in, temperature and magnetic hardware were not operated. Electrical
+ceilings stayed |V| <= 0.01 V and |I| <= 1 microampere. Scan targets were bounded
+at +/-0.009 V to leave margin inside the voltage ceiling.
+
+The existing exact 1a87f03 source snapshot on LK_setup, using lyr Python 3.12.13,
+completed zero/time trace (9 samples), 0/+1 mV/0 (9), bipolar forward/reverse
+(13 points, 39), and literal duplicate/nonmonotonic points (5 points, 15).
+All 72 formal samples were clean/completed/accepted. A controlled Python
+KeyboardInterrupt after the third point at +2 mV retained three samples as
+interrupted/not accepted; normal and interruption cleanup both confirmed
+zero setpoint/output OFF without cleanup errors. This is not OS-kill/SSH-loss
+or physical-disconnection fault commissioning.
+
+Keithley 2400 identity/serial 4414633 and C34 firmware were confirmed. Hardware
+current compliance was changed from 105 microamperes to 1 microampere and read
+back before output enable. Three final independent status-only checks confirmed
+0 V setpoint, output OFF, 1 microampere compliance, two-wire, and error 0.
+Output-OFF V/I were correctly unavailable, not read or invented.
+Initial preflight retained error 601 (Reading buffer data lost) and stopped with
+zero settings writes; three subsequent clean OFF/zero checks preceded one retry.
+The rejected preflight was not reclassified as accepted.
+
+IMPORTANT measurement limitation: final :SENS:FUNC? returned CURR:DC only,
+matching QCoDeS mode setup. The archived voltage field is NOT certified as an
+independently sensed terminal voltage. This acceptance proves control, current
+readout and data/cleanup paths, not terminal-voltage accuracy, loaded compliance
+trip response, wiring/guard suitability for a specimen, or real four-module
+integration. Review and test explicit voltage/current sensing before relying
+on that voltage field as an independent overvoltage measurement.
+
+The live HTTP stream contained 39 samples identical to the bipolar raw events;
+72 rows loaded through standalone and unified legacy adapters, while all three
+interrupted rows were excluded by default and available through audit opt-in.
+Read-only verification retained point order, duplicate identities, forward/reverse
+segments, source hashes and raw files; the inspected diagnostic plot uses source
+setpoint vs measured current, no fits or averaging.
+
+Target lyr lacked QCoDeS: installed 0.59.0 plus missing dependencies after dry-run
+review; existing NumPy/PyVISA/Matplotlib were not replaced. Full hardware-guarded
+offline suite then passed 580 tests, zero failures/errors/skips in 68.048 s.
+Runtime src remained byte-identical to archive 1a87f03; only ignored one-off
+configs/harness/logs and local documentation were added. No main update/push.
+Details and canonical record identifiers: BIAS_SMU_ACCEPTANCE_20260922.md.
+
+### LK_setup combination snapshot target-offline check (2026-09-22)
+
+Operator confirmed LK_setup, requested continued work under the existing
+Yuanrong Li directory, authorized SSH, and stated that a real specimen is wired.
+The operator subsequently confirmed only smu_bias is active, with absolute
+ceilings 0.01 V and 1 microampere; neither number is a requested formal target.
+gate_top/gate_bottom must not be connected, queried or controlled by this run.
+Their physical output state is unknown, not inferred off. Source mode and wiring
+still need preflight/operator confirmation. No hardware-write permission was
+inferred from the confirmed limits.
+
+Follow-up file-only inspection found no usable bias VISA mapping in any of the
+three target configurations: the main table is absent and the other two still
+use CHANGE_ME_BIAS_SMU_VISA_ADDRESS. Do not identify bias by bus order or silently
+borrow another SMU's address. An incomplete bias-only local draft records the
+limits and off gates; its missing address must fail readiness before any device
+open. Its voltage/two-wire defaults and zero fixed point are preparation only,
+not operator confirmation of wiring or permission to enable output.
+
+SSH filesystem/environment inspection found the existing main checkout at
+b9e50f7 and temperature-excitation checkout at d87ecb1 with local tracked changes;
+the magnetic checkout was clean at 75c5d63. None contained combination_cli.
+Existing SMU tables still contained CHANGE_ME placeholders. These checkouts,
+their local safety files and hardware.local.toml were not edited. A vendor
+attoDRY interface process was present during inspection and was not stopped.
+
+Created only a new isolated target-offline snapshot under the operator's
+Yuanrong Li directory: Attodry_combination_offline_1a87f03_20260922/source.
+Source is a Git archive of exact commit 1a87f03, not a remote Git checkout.
+Archive SHA-256: E60920559E1C4F1B0732EB7F1C59A4145FA83DC5FD41F928D553187DB077DE18.
+The source package excludes vendor binaries, ignored hardware configuration and
+experimental data; existing target directories were neither pulled nor reset.
+
+Exact target lyr Python 3.12.13 / 64-bit imported this snapshot's src.
+Matplotlib 3.10.9, NumPy 2.5.2 and ipywidgets 8.1.9 were already installed.
+All 580 offline tests passed in 73.197 s, zero skips/errors/failures, with
+user-site disabled and explicit guards rejecting real pyvisa/qcodes/serial imports,
+ctypes.WinDLL and windll.LoadLibrary. The snapshot contains no vendor directory.
+Test terminal prompts and electrical values were fake fixture output only.
+No real DLL was loaded; no instrument identity/status/measurement was queried;
+no output, excitation, temperature or field command was sent.
+
+This verifies the existing simulation/data/analysis checkpoint on LK_setup,
+not a newly implemented or commissioned real combination runner. Real station
+adapter integration remains pending as described below. No push or main update.
 
 ### Combination record/analysis and simulation checkpoint (2026-09-14)
 
