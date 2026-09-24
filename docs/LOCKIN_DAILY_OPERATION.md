@@ -165,8 +165,7 @@ SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次�
 正在运行 sweep 时，使用纯文件 monitor 读取本次 `*_lockin_*_progress.jsonl`：
 
 ```powershell
-python -m attodry_control.lockin_progress_monitor `
-  --directory run_data\commissioning
+python -m attodry_control.lockin_progress_monitor --directory run_data\commissioning
 ```
 
 它不打开 VISA/GPIB、不发送查询，也不清除锁存位；每个已经完成 `SLVL?` 读回的点会显示
