@@ -15,17 +15,39 @@ checkpoint, not a requirement to leave this revision unpublished.
 Publication-day guarded regression: 638 tests passed, zero failures/errors/skips,
 111.757 s with local AI Python; real instrument imports/DLL loads blocked.
 
-Hardware acceptance has NOT started. Current sample/DC+AC wiring, XY physical
-disconnection and the proposed Z 0 -> 0.01 -> 0 T / X 0 path await confirmation.
-Retain the user's bias-only ceiling of 0.01 V / 1 uA and test temperature 2-3 K.
-Read-only SSH file inspection found that the existing Integration local TOML still
-has SMU address/limit placeholders, a +/-0.1 V SMU grid, excitation up to 0.45 V,
-and no combination_scan table: it must not be executed as the acceptance plan.
-The remote Notebook has local edits/checkpoints and has not been overwritten.
-No instrument connection, status consumption, setting or output write has occurred
-in this publication/preparation stage. Use a separate scoped acceptance config
-only after the physical facts/combined sample limits are confirmed; local settings
-and run data remain uncommitted.
+Published code commit: b3570c53361b3c8625ffd5bb5712b79135cd2e3c; origin was
+verified at the same commit after push. A detached copy is prepared at
+`C:/Users/LK_Setup/Yuanrong Li/Integration_joint_acceptance_20260924`.
+
+Hardware acceptance has NOT started. The user subsequently confirmed a connected
+sample, XY SINE OUT physically disconnected, and Z 0 -> 0.01 -> 0 T / X 0.
+The sole SMU physically drives a GATE, not a sample electrode and not in parallel
+with XX. Its authorized ceiling is now 1 V / 1 uA; use much smaller initial
+points. XX source ceiling is 0.2 Vrms. Test temperature remains 2-3 K.
+There is NO external excitation series resistor: the updated local TOML uses
+0.01 ohm as an operator-supplied placeholder because the parser requires a positive
+value. Its approximate and maximum device resistance are both 100 Gohm; this is
+an estimate, not measured impedance or a current limiter. Never interpret the
+legacy smu_bias channel current as sample transport current in this setup.
+
+Current Integration local TOML still has SMU address/limit placeholders, a
++/-0.1 V SMU grid, excitation up to 0.45 V, and no combination_scan table; do not
+execute it as the acceptance plan. The original remote checkout/Notebook edits
+are preserved. A private smoke hardware.local.toml and unchanged lockin_safety
+were prepared under the isolated worktree's run_data/joint_acceptance_20260924/smoke
+and validated offline with both local AI and target lyr: one condition at 2 K,
+gate 0 V, zero field, XX 4 mVrms, h1/h2; normal field zero and SMU zero/OFF.
+Planned later grid (only after smoke passes): T 2/2.1 K, gate 0/0.01 V,
+Z 0/0.01/0 T, XX 4/8 mVrms. Keep configured dwell/settling requirements.
+XX 1 V full scale is allowed; XY 1 V is NOT in the project allowlist, so its
+existing 20 mV is retained. This distinction was communicated to the user; no
+safety-policy expansion was made to facilitate the test.
+
+One Jupyter kernel remains open on LK_setup. Operator confirmation that no other
+scan/monitor-live/controller is accessing the instruments is pending; an open
+kernel alone is not proof of activity or inactivity. Do not kill that kernel or
+start competing I/O. No instrument connection, status consumption, setting or
+output write has occurred in this stage. Private settings/run data stay uncommitted.
 
 ### Integration I2b — shared four-module point coordinator (2026-09-23)
 

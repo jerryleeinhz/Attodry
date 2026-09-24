@@ -8,9 +8,14 @@ Update this file whenever a feature is completed. A stage is complete only when 
   joint hardware acceptance; the source/config/tests remain identical to the
   final 638-test offline snapshot. Earlier uncommitted status below is historical.
   Publication-day guarded rerun: 638/638 passed, zero failures/errors/skips, 111.757 s.
-- Real acceptance is pending current sample/combined wiring/XY-disconnection and
-  small field-path confirmation. Existing remote local TOML is not a safe ready
-  acceptance plan (SMU placeholders and oversized grid); no instrument I/O issued.
+- Code published as b3570c5. User confirmed sample, separate gate SMU (<=1 V/1 uA),
+  XX <=0.2 Vrms without external series resistor, estimated 100 Gohm device,
+  XY disconnection and Z 0/0.01/0 T. The 0.01-ohm TOML entry is a placeholder.
+- Private single-point smoke config passed local/target offline parsing; no
+  instrument I/O issued. Existing daily TOML is not an acceptance plan. XX 1 V
+  range allowed; XY remains 20 mV because XY 1 V is outside the project allowlist.
+- Real acceptance awaits confirmation that the open Jupyter kernel is not running
+  another controller/scan/monitor-live. Do not terminate it or start competing I/O.
 - Preserve remote Notebook changes and keep hardware-local settings/data out of Git.
 
 ## Integration I2b — shared cryostat / four-module point interfaces (2026-09-23)
