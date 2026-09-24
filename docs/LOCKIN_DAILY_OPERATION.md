@@ -20,6 +20,19 @@ python -m attodry_control.lockin_test sweep-frequency-excitation
 `config/hardware.local.toml` 填写实际 VISA 地址；后续 `git pull` 不会覆盖本机值。
 日常命令会拒绝空地址、`CHANGE_ME` 地址或 XX/XY 相同的地址。
 
+三种独立 sweep 及四模块组合扫描中的 Lock-in 入口，均在正式激励前先读取两台
+SR830。预检确认型号/语义角色、XX 内部参考、XY 外部 TTL 参考、h1、两台
+4 mVrms 基线与安全状态；这些不是可由扫描自动改写的接线或身份设置。
+通过预检后，程序只对与 TOML 不同的 `input_mode`、`shield_grounding`、
+`input_coupling`、`time_constant_s`、`filter_slope_db_oct` 写入相应
+`ISRC/IGND/ICPL/OFLT/OFSL`，逐项读回确认并消费设置转换状态；预期的
+`OFLT` 变化锁存位会记录，其它过载、失锁或仪器错误会拒绝运行。然后在最小输出下将 XX
+`frequency_hz` 对齐并检查 XX/XY 频率读回，再对齐 `reserve_mode` 和
+`sensitivity_full_scale_v`。任何写入/读回失败都会在提高 XX 激励或启用
+SMU 前拒绝本次运行。`model`、`address` 和 XY SINE OUT 的物理断开仍须
+由配置校验和操作者确认，不能靠软件写入。`apply-toml` 仍可用于单独准备面板，
+但不再是运行这些扫描前的必需手动步骤。
+
 若出现 `VI_ERROR_RSRC_NFOUND`，先在同一环境运行以下只读发现命令：
 
 ```powershell
@@ -78,8 +91,8 @@ python -m attodry_control.lockin_test validate-config
 每个角色还必须在 TOML 中填写 `reserve_mode`：`"high_reserve"`（RMOD 0）、
 `"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。它只由该角色的
 `hardware.local.toml` 选择，不再在 `lockin_safety.toml` 重复维护白名单；日常默认仍是
-`"normal"`。Sweep 会记录原始 RMOD、目标模式、读回和转换状态，并在 cleanup 时恢复
-扫描前的 RMOD。Reserve 写入始终在降低 SINE OUT 后进行，读回与状态确认失败会 fail
+`"normal"`。Sweep 会记录原始 RMOD、目标模式、读回和转换状态，并在 cleanup 时保持
+TOML 指定的 RMOD，而不是恢复扫描前的任意面板值。Reserve 写入始终在降低 SINE OUT 后进行，读回与状态确认失败会 fail
 closed。
 
 ### Reserve dB、内部增益分配和选择方法
@@ -246,8 +259,9 @@ h1、频率和两台 SINE OUT 的 4 mVrms 基线，但只向所选角色写入
   端接”的事实应与当天线路一致。
 - 每次运行前填写非空的 `run_name` 和 `note`；不要沿用示例中的
   `replace_before_run`。
-- 两台 SR830 应先回到 h1、17.777 Hz、4 mVrms 基线。扫描的预检会读取并检查
-  参考角色、锁定、过载、错误状态、频率、h1 和最小 SINE OUT；失败时不会开始扫描。
+- 两台 SR830 应先回到 h1、4 mVrms 安全基线。扫描预检读取并检查
+  参考角色、锁定、过载、错误状态、h1 和最小 SINE OUT；两台实际频率随后会
+  自动对齐 TOML 目标并读回确认，不能假定仍是 17.777 Hz。
 
 这里不再要求每次输入 `--authorize-writes`、
 `--confirm-xy-sine-disconnected` 或
@@ -259,7 +273,7 @@ commissioning 命令仍保留各自的显式授权门。
 
 每台 SR830 都有独立的 `sensitivity_mode`。当前 `hardware.example.toml` station 模板是 **fixed**：XX 为 1 V，
 XY 为 10 mV。固定模式在扫描开始时确认目标量程，只有预检读回不同才写入；若扫描
-改变过该角色的量程，cleanup 会恢复预检时的原量程。
+改变过该角色的量程，cleanup 会恢复 TOML 中的基线量程，而不是预检时的任意面板量程。
 
 只有明确把某一台的 `sensitivity_mode` 改为 `"bounded_auto"` 时，才启用该角色的
 受限自动判断。自动模式必须同时填写五个 `autorange_*` 字段，且
@@ -516,6 +530,14 @@ Lock-in 配置，并且日常 sweep 的安全基线仍要求两台都是 SR830 �
 改变 `SLVL`。扫频名义电流和分析横坐标使用每点记录的 SINE OUT 读回值，而不是手工
 输入的电流值；幅值扫描仍使用展开后的 `excitation_ranges` 逐点改变 `SLVL`。
 
+`sweep-excitation` 使用 `[lockin_xx].frequency_hz` 作为实际 XX 激励频率，
+并要求 `[lockin_xy].frequency_hz` 配置一致。即使面板仍停在上次频率，程序也会在
+已确认 4 mVrms 基线下先发送必要的 `FREQ` 设置，等待并消费转换状态，再读取
+两台仪器的 `FREQ?`。请求值与任一读回超出 SR830 显示量化容差时，会在提高
+`SLVL` 和正式采样之前拒绝扫描；`frequency_setup` 保存设置及读回证据。
+既有 JSON 不会被重写：分析旧数据时应以每点 `actual_frequency_hz` 和
+`frequency_readback_hz` 为准，不能仅按文件名或 TOML 的目标频率归类。
+
 `source_v_rms` 是程序向 SR830 请求的幅值；`source_readback_v_rms` 是随后由
 `SLVL?` 返回并实际用于名义电流、绘图和数据分析的仪器读回值。二者不再要求数值匹配：
 SR830 的幅值量化或显示精度造成的任意差异都会写入审计记录，而不会单独拒绝扫描。读回值
@@ -550,8 +572,9 @@ SINE OUT 计算的 RMS 电流、量程计划、状态锁存和正式样本。顶
 `grid_shape` 给出二维网格尺寸；失败记录仍
 保留为 `completed=false`，不会进入默认分析。
 
-Notebook 对这种记录提供 `plot_multi_frequency_iv_curves`：横轴是读回 SINE OUT
-换算的 RMS 电流，纵轴可以选 `x_v`、`y_v`、`amplitude_v` 或 `phase_deg`，每条
+Notebook 对这种记录提供 `plot_multi_frequency_iv_curves`：横轴可选读回 SINE OUT
+换算的名义 RMS 电流或原始 SINE OUT 电压读回，纵轴可以选 `x_v`、`y_v`、
+`amplitude_v` 或 `phase_deg`，每条
 颜色曲线对应一个实际读回频率。频率轻微量化抖动会按读回分辨率聚类，不会用请求值
 替代实际频率。
 
@@ -574,7 +597,9 @@ excitation_ranges = [
 扫描清理阶段不会恢复到扫描前的任意幅值，也不会把扫频的
 `frequency_source_voltage_v_rms` 留在输出端。只要扫描已经开始写入，清理函数会调用固定的
 `MINIMUM_SINE_OUTPUT_V = 0.004`，把 `lockin_xx` SINE OUT 降回 **4 mVrms**；
-扫频还会恢复基线频率和 1 阶谐波，扫幅则只恢复幅值和 1 阶谐波。当前 sweep
+扫频还会恢复 TOML 基线频率和 1 阶谐波，扫幅也保留 TOML 基线频率并恢复 1 阶谐波。
+两台的灵敏度和 Reserve 在清理后保持 TOML 配置值（自动量程只影响扫描期间的
+量程）；输入/滤波固定设置也保持 TOML 值，并由最终读回核对。当前 sweep
 预检同时强制 `lockin_xx.source_voltage_v` 与 `lockin_xy.source_voltage_v` 都为
 0.004；因此把扫频字段改成 20 mVrms 后，结束仍恢复为 4 mVrms。若要改变清理
 基线，必须先修改 sweep 的清理策略并重新验证安全协议，不能只改一个 TOML 字段。
@@ -626,8 +651,8 @@ run_data/commissioning/20260822T123456123456Z_sample_A_excitation_rejected.json
 
 ## 出错后
 
-程序会尝试将 XX 恢复为 4 mVrms、h1、17.777 Hz，并仅在扫描曾改变它们时恢复预检
-时的 XX 和 XY 灵敏度。自动量程或固定量程转换中出现的失锁、错误、input/filter
+程序会尝试将 XX 恢复为 4 mVrms、h1、TOML 中的基线频率，并将曾改变的 XX/XY
+灵敏度和 Reserve 恢复到 TOML 值，不再恢复运行前面板的任意值。自动量程或固定量程转换中出现的失锁、错误、input/filter
 overload 或未许可的 output overload 都会导致本次记录被拒绝；只有已记录的缩窄转换
 可消费该角色的 `LIAS=4`，且随后验证必须干净。若 JSON 为 `rejected` 或命令异常退出，
 不要仅依赖软件消息；在断开器件或继续下一轮之前，手动确认两台前面板的参考状态、

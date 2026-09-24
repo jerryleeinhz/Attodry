@@ -2,6 +2,42 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## SR830 TOML auto-alignment for all sweep entry points (offline complete; 2026-09-24)
+
+- Standalone frequency, excitation, and frequency×excitation sweeps and the
+  four-module combination Lock-in session now start with read-only dual-SR830
+  preflight, apply only differing TOML input/ground/coupling/time-constant/
+  filter-slope codes at minimum excitation, verify each write and consume the
+  expected OFLT-change latch while rejecting other setup faults, set and verify
+  the configured XX frequency against both roles, then apply Reserve and SENS.
+- Model/address/reference wiring and the disconnected XY SINE OUT remain
+  validation/operator responsibilities, not auto-writable controls. A failed
+  write or readback rejects before a formal point or higher excitation.
+  Cleanup restores minimum XX output/h1 and the TOML base frequency, SENS,
+  and RMOD, and audits the final fixed settings.
+- Offline fake-VISA SR830 and combination tests: 129 passed, including setting
+  mismatch correction, stale readback/write failure and setup-overload rejection, and integrated
+  frequency correction. Expanded sweep/combination/analysis/notebook suite:
+  222 tests passed or skipped (8 optional skips). No real instrument was contacted or configured.
+
+## SR830 excitation frequency verification and plot-axis choice (offline complete; 2026-09-24)
+
+- Standalone `sweep-excitation` now reads before writing, sets the configured XX
+  reference frequency while the source remains at the verified 4-mVrms baseline,
+  consumes transition status, and confirms both XX/XY frequency readbacks before
+  raising SINE OUT or accepting a formal point. A large mismatch rejects the run
+  and retains `frequency_setup`/cleanup audit evidence. Existing historical runs
+  are unchanged and must be grouped by actual frequency, not file-name targets.
+- The SR830 sweep notebook offers calculated nominal current or raw SINE OUT
+  readback voltage for excitation/f x e plot X axes. The combination notebook
+  offers the same choice alongside its custom X axis. Harmonic fits and the
+  condensed report remain current-based with each run's archived path.
+- Focused guarded fake-resource/analysis/notebook suite: 143 tests passed,
+  6 optional skips. The full guarded suite ran 652 tests with one unrelated
+  report-plotting error because this local interpreter lacks Matplotlib;
+  other tests passed or skipped. No live instrument connection, command, or
+  hardware acceptance was performed in this stage.
+
 ## SR830 browser selection and axis exclusions (2026-09-24)
 
 - Keep Frequency, Excitation, and f × e as three separate, initially collapsed

@@ -123,6 +123,11 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual({item.frequency_hz for item in statistics}, {17.777, 316.1})
         self.assertEqual(len(statistics), 4)
         self.assertEqual({item.current_a_rms for item in statistics}, {0.004 / 100550.0, 0.008 / 100550.0})
+        voltage_statistics = aggregate_frequency_excitation_iv(
+            rows, role="xx", harmonic=1, excitation_x_axis="sine_output_v_rms"
+        )
+        self.assertEqual({item.x_value for item in voltage_statistics}, {0.004, 0.008})
+        self.assertTrue(all(item.current_a_rms is None for item in voltage_statistics))
 
     def test_analysis_ignores_unused_output_overload_bit(self) -> None:
         payload = self._sweep(completed=True)
@@ -298,6 +303,33 @@ class CommissioningAnalysisTests(unittest.TestCase):
                 [first, second], excitation_path_override=override
             ),
             override,
+        )
+
+    def test_raw_sine_output_axis_allows_different_archived_resistances(self) -> None:
+        first_payload = self._sweep(completed=True)
+        first_payload["scan"] = "excitation"
+        first_payload["measurement_config"] = self._measurement_config_path()
+        first_payload["points"][0]["source_readback_v_rms"] = 0.0039
+        first = self._write_json("voltage-first.json", first_payload)
+        second_payload = self._sweep(completed=True)
+        second_payload["scan"] = "excitation"
+        second_payload["measurement_config"] = self._measurement_config_path(
+            external_series_resistance_ohm=200_000.0
+        )
+        second_payload["points"][0]["source_readback_v_rms"] = 0.0041
+        second = self._write_json("voltage-second.json", second_payload)
+        rows = load_sweep_sample_files([first, second])
+
+        statistics = aggregate_sweep_repeatability(
+            rows, role="xx", harmonic=1, excitation_x_axis="sine_output_v_rms"
+        )
+
+        self.assertEqual({item.x_value for item in statistics}, {0.0039, 0.0041})
+        self.assertEqual(
+            {item.x_value for item in aggregate_sweep_samples(
+                rows, x_axis="sine_output_v_rms"
+            )},
+            {0.0039, 0.0041},
         )
 
     def test_sweep_loader_resolves_shared_hashed_measurement_profiles(self) -> None:
@@ -929,6 +961,27 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual(len(scope["excitation_excluded_points_widget"].options), 1)
         self.assertEqual(len(scope["frequency_rows"]), 0)
         self.assertEqual(len(scope["excitation_rows"]), 2)
+
+    def test_notebook_voltage_axis_loads_mixed_resistance_runs(self) -> None:
+        first_payload = self._sweep(completed=True)
+        first_payload["scan"] = "excitation"
+        first_payload["measurement_config"] = self._measurement_config_path()
+        first = self._write_json("voltage-notebook-first.json", first_payload)
+        second_payload = self._sweep(completed=True)
+        second_payload["scan"] = "excitation"
+        second_payload["measurement_config"] = self._measurement_config_path(
+            external_series_resistance_ohm=200_000.0
+        )
+        second = self._write_json("voltage-notebook-second.json", second_payload)
+        scope = self._notebook_selector_scope(first.parent)
+        scope["excitation_record_widget"].value = (str(first), str(second))
+        scope["excitation_x_axis_widget"].value = "sine_output_v_rms"
+
+        scope["_load_selected_records"](None)
+
+        self.assertEqual(len(scope["excitation_rows"]), 4)
+        self.assertIsNone(scope["excitation_excitation_path"])
+        self.assertIn("V RMS target", scope["excitation_excluded_points_widget"].options[0][0])
 
     def _notebook_selector_scope(self, directory: Path) -> dict[str, object]:
         notebook = json.loads(

@@ -4,6 +4,39 @@ Last updated: 2026-09-24
 
 ## Current stage
 
+### SR830 TOML auto-alignment in all sweep entry points (offline complete; 2026-09-24)
+
+All three standalone sweep commands and the four-module combination Lock-in
+session now align XX/XY input mode, shield grounding, input coupling, time
+constant, filter slope, Reserve, and SENS with the resolved local TOML before
+raising excitation; XX frequency is set at 4 mVrms and verified on both roles.
+Writes are limited to differing fixed settings, with per-field readback and
+fixed-setting transition-latch audit. Expected OFLT-change status is consumed;
+overload/unlock/error at that boundary rejects before higher excitation.
+After a run, XX returns to 4 mVrms/h1 and the configured base frequency; both
+roles retain TOML base SENS/RMOD and fixed settings, with final readback checked.
+Reference roles, identity, physical XY SINE disconnect, and address are not
+auto-written. The 129 offline fake-VISA SR830/combination tests pass, including
+failed write/readback and integrated frequency cases; the expanded sweep,
+combination, analysis, and notebook suite ran 222 tests with 8 optional skips.
+No real hardware
+connection or write was made in this change; on-station acceptance remains.
+
+### SR830 excitation-frequency guard and analysis-axis switch (offline complete; 2026-09-24)
+
+`sweep-excitation` now applies the configured XX `frequency_hz` at verified
+minimum output before a point can raise the source level. Transition status and
+XX/XY readbacks are saved in `frequency_setup`; a frequency mismatch rejects
+before formal samples. Each point rechecks the requested frequency. The sweep
+and combination notebooks now allow nominal converted current or actual SINE OUT
+readback voltage as the excitation X axis. Current-based harmonic fits retain
+per-run archived resistance; old records are never relabeled from requested
+frequency. Focused guarded fake-resource, analysis, and notebook tests passed
+(143 tests, 6 optional skips). The full guarded 652-test suite had one
+unrelated report-plotting error because this local interpreter lacks
+Matplotlib. Real instrument verification remains for the operator; no hardware
+was connected.
+
 ### SR830 browser checkboxes and combined-axis exclusions (2026-09-24)
 
 The commissioning notebook retains separate Frequency, Excitation, and f × e

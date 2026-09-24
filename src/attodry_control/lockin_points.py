@@ -9,7 +9,7 @@ from dataclasses import asdict
 
 from . import lockin_test as daily
 from .combination_store import utc_now
-from .sr830 import DualSr830Controller, Sr830Error
+from .sr830 import DualSr830Controller
 
 
 class _AuditedInstrument:
@@ -21,7 +21,7 @@ class _AuditedInstrument:
 
     def __getattr__(self, name):
         method = getattr(self.instrument, name)
-        if name not in {"read_diagnostic", "read_harmonic_sample"} and not name.startswith("set_"):
+        if name not in {"read_diagnostic", "read_harmonic_sample", "read_fixed_setting", "read_status_latches"} and not name.startswith("set_"):
             return method
 
         def call(*args, **kwargs):
@@ -33,7 +33,9 @@ class _AuditedInstrument:
             result = method(*args, **kwargs)
             self.event("lockin_command_return" if write else "lockin_raw_role", {
                 "role": role, "method": name, "captured_at_utc": utc_now(),
-                "reading": None if write else asdict(result),
+                "reading": (None if write else result if name == "read_fixed_setting"
+                            else {"lia_status": asdict(result[0]), "error_status": result[1]}
+                            if name == "read_status_latches" else asdict(result)),
             })
             return result
         return call
@@ -53,6 +55,8 @@ class LockinPointSession:
         self.writes_started = False
         self.sensitivity_setup = None
         self.reserve_setup = None
+        self.fixed_setup = None
+        self.frequency_setup = None
         self.point_record = None
         self.sample_count = 0
         self.harmonics_by_role = daily._requested_sweep_harmonics_by_role(self.args)
@@ -69,15 +73,9 @@ class LockinPointSession:
         xx, xy = self.pair
         self.preflight = DualSr830Controller(xx, xy).verify_existing_configuration(
             frequency_hz=self.config.lockin_xx.frequency_hz,
+            check_frequency=False,
             ignore_output_overload=True,
         )
-        # Settling derives from TOML time constants; do not trust a mismatched panel.
-        for role, diagnostic in zip(("lockin_xx", "lockin_xy"), self.preflight):
-            expected = daily._setting_codes(getattr(self.config, role))
-            for field in ("input_mode", "shield_grounding", "input_coupling",
-                          "time_constant", "filter_slope"):
-                if getattr(diagnostic, field) != getattr(expected, field):
-                    raise Sr830Error(f"{role} {field} differs from TOML; apply-toml first")
         return {role: asdict(d) for role, d in
                 zip(("lockin_xx", "lockin_xy"), self.preflight)}
 
@@ -85,6 +83,18 @@ class LockinPointSession:
         xx, xy = self.pair
         before_xx, before_xy = self.preflight
         self.writes_started = True
+        self.fixed_setup = {}
+        daily._configure_sweep_fixed_settings(
+            xx, xy, config=self.config, preflight_xx=before_xx,
+            preflight_xy=before_xy, settle_s=self.args.settle_s,
+            record=self.fixed_setup,
+        )
+        self.frequency_setup = {}
+        daily._configure_sweep_baseline_frequency(
+            xx, xy, baseline_hz=self.config.lockin_xx.frequency_hz,
+            initial_xx_frequency_hz=before_xx.frequency_hz,
+            settle_s=self.args.settle_s, record=self.frequency_setup,
+        )
         self.reserve_setup = daily._new_sweep_reserve_setup(
             self.config.lockin_xx, self.config.lockin_xy,
             original_xx_reserve_mode=before_xx.reserve_mode,
@@ -104,7 +114,9 @@ class LockinPointSession:
             self.config.lockin_xx, self.config.lockin_xy,
             sensitivity_setup=self.sensitivity_setup)
         self.event("lockin_configured", {"sensitivity": self.sensitivity_setup,
-                                         "reserve": self.reserve_setup})
+                                         "reserve": self.reserve_setup,
+                                         "fixed": self.fixed_setup,
+                                         "frequency": self.frequency_setup})
 
     def set_point(self, source_v):
         if source_v not in self.points:
@@ -188,18 +200,24 @@ class LockinPointSession:
     def cleanup(self):
         if not self.writes_started:
             return {"attempted": False, "verified": True, "errors": []}
-        xx, xy = self.preflight
-        return daily._restore_scan_state(
+        cleanup = daily._restore_scan_state(
             *self.pair, baseline_hz=self.config.lockin_xx.frequency_hz,
-            original_xx_sensitivity=xx.sensitivity, original_xy_sensitivity=xy.sensitivity,
+            original_xx_sensitivity=daily.sensitivity_code(self.config.lockin_xx.sensitivity_full_scale_v),
+            original_xy_sensitivity=daily.sensitivity_code(self.config.lockin_xy.sensitivity_full_scale_v),
             restore_sensitivity=daily._range_write_attempted(self.sensitivity_setup, "lockin_xx"),
             restore_xy_sensitivity=daily._range_write_attempted(self.sensitivity_setup, "lockin_xy"),
-            original_xx_reserve_mode=xx.reserve_mode, original_xy_reserve_mode=xy.reserve_mode,
+            original_xx_reserve_mode=daily.RESERVE_MODE_CODES[self.config.lockin_xx.reserve_mode.value],
+            original_xy_reserve_mode=daily.RESERVE_MODE_CODES[self.config.lockin_xy.reserve_mode.value],
             restore_xx_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xx"),
             restore_xy_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xy"),
             restore_frequency=False, settle_s=self.args.settle_s, writes_started=True,
             ignore_output_overload=True,
         )
+        if (self.fixed_setup and self.fixed_setup.get("verified")
+                and self.frequency_setup and self.frequency_setup.get("verified")
+                and self.sensitivity_setup and self.reserve_setup):
+            daily._verify_sweep_configured_cleanup(cleanup, self.config)
+        return cleanup
 
     def close(self):
         if self.context is not None:

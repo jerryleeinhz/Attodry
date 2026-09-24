@@ -463,11 +463,12 @@ class Sr830Tests(unittest.TestCase):
             5622.0,
             5622.05,
         )
-        _verify_requested_sweep_frequency_readbacks(
-            target_hz,
-            5620.0,
-            5620.05,
-        )
+        with self.assertRaisesRegex(Sr830Error, "does not match requested"):
+            _verify_requested_sweep_frequency_readbacks(
+                target_hz,
+                5620.0,
+                5620.05,
+            )
 
     def test_internal_reference_frequency_preserves_requested_precision(self) -> None:
         resource = FakeVisaResource(responses(reference_mode=1))
@@ -1948,7 +1949,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["points"][2]["requested_full_scale_v"]["lockin_xx"], None)
         self.assertEqual(
             [write for write in xx_resource.writes if write.startswith("SENS ")],
-            ["SENS 22", "SENS 21", "SENS 23"],
+            ["SENS 22", "SENS 21", "SENS 21"],
         )
         self.assertEqual(result["run_configuration"]["schema_version"], 12)
 
@@ -2034,10 +2035,10 @@ class Sr830Tests(unittest.TestCase):
         self.assertAlmostEqual(
             result["points"][0]["nominal_current_a_rms"], 0.020 / 100550.0
         )
-        self.assertEqual(xx_resource.writes[0], "SENS 21")
+        self.assertEqual(xx_resource.writes[:2], ["OFLT 9", "SENS 21"])
         self.assertIn("SLVL 0.02", xx_resource.writes)
         self.assertEqual(
-            xx_resource.writes[-3:], ["SLVL 0.004", "FREQ 17.777", "SENS 23"]
+            xx_resource.writes[-3:], ["SLVL 0.004", "FREQ 17.777", "SENS 21"]
         )
         self.assertAlmostEqual(result["cleanup"]["final"]["lockin_xx"]["sine_output_v"], 0.004)
 
@@ -2156,14 +2157,15 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(
             xx_resource.writes,
             [
+                "OFLT 9",
                 "SENS 21",
                 "FREQ 1000",
                 "SLVL 0.004",
                 "FREQ 17.777",
-                "SENS 23",
+                "SENS 21",
             ],
         )
-        self.assertEqual(xy_resource.writes, ["SENS 17", "SENS 23"])
+        self.assertEqual(xy_resource.writes, ["OFLT 9", "SENS 17", "SENS 17"])
         self.assertTrue(result["cleanup"]["verified"])
         self.assertEqual(
             result["sensitivity_modes"],
@@ -2195,8 +2197,8 @@ class Sr830Tests(unittest.TestCase):
             [],
         )
         self.assertTrue(all("autorange" not in point for point in result["points"]))
-        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
-        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 23)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 21)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 17)
 
     def test_cli_frequency_sweep_xy_bounded_auto_widens_from_h1_probe_and_restores(
         self,
@@ -2280,7 +2282,7 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(
             [write for write in xx_resource.writes if write.startswith("SENS ")],
-            ["SENS 21", "SENS 23"],
+            ["SENS 21", "SENS 21"],
         )
         self.assertEqual(
             [write for write in xy_resource.writes if write.startswith("SENS ")],
@@ -2367,7 +2369,7 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(
             [write for write in xy_resource.writes if write.startswith("SENS ")],
-            ["SENS 17", "SENS 23"],
+            ["SENS 17", "SENS 17"],
         )
         self.assertEqual(len(point["samples"]), 1)
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 20)
@@ -2481,7 +2483,7 @@ class Sr830Tests(unittest.TestCase):
         )
         xy_responses = responses(reference_mode=0)
         xy_responses["SENS?"] = "20\n"
-        xy_responses["LIAS?"] = ["0\n"] * 6 + ["4\n"] + ["0\n"] * 12
+        xy_responses["LIAS?"] = ["0\n"] * 7 + ["4\n"] + ["0\n"] * 12
         xy_resource = TrackingVisaResource(
             xy_responses,
             shared_frequency=shared_frequency,
@@ -2553,9 +2555,9 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(
             [write for write in xy_resource.writes if write.startswith("SENS ")],
-            ["SENS 17", "SENS 20"],
+            ["SENS 17", "SENS 17"],
         )
-        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 20)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 17)
 
     def test_cli_frequency_sweep_rejects_auto_preflight_range_wider_than_policy_before_sens_write(
         self,
@@ -2686,7 +2688,7 @@ class Sr830Tests(unittest.TestCase):
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
         )
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "0\n", "8\n"] + ["0\n"] * 8
+        xy_responses["LIAS?"] = ["0\n", "0\n", "0\n", "8\n"] + ["0\n"] * 8
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
         )
@@ -2814,9 +2816,9 @@ class Sr830Tests(unittest.TestCase):
             ],
             17,
         )
-        self.assertEqual(xy_resource.writes, [])
+        self.assertEqual(xy_resource.writes, ["OFLT 9"])
 
-    def test_cli_frequency_sweep_applies_configured_reserve_and_restores_preflight(self) -> None:
+    def test_cli_frequency_sweep_applies_configured_reserve_and_keeps_toml(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
         xx_responses["RMOD?"] = "2\n"
@@ -2851,10 +2853,10 @@ class Sr830Tests(unittest.TestCase):
         self.assertTrue(reserve["write_attempted"])
         self.assertEqual(reserve["original_code"], 2)
         self.assertEqual(reserve["readback_code"], 1)
-        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["reserve_mode"], 2)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["reserve_mode"], 1)
         self.assertEqual(
             [write for write in xx_resource.writes if write.startswith("RMOD ")],
-            ["RMOD 1", "RMOD 2"],
+            ["RMOD 1", "RMOD 1"],
         )
 
     def test_cli_frequency_sweep_rejects_xy_range_transition_latch_and_restores(
@@ -2865,7 +2867,7 @@ class Sr830Tests(unittest.TestCase):
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
         )
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "4\n"] + ["0\n"] * 8
+        xy_responses["LIAS?"] = ["0\n", "0\n", "4\n"] + ["0\n"] * 8
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
         )
@@ -2899,7 +2901,7 @@ class Sr830Tests(unittest.TestCase):
             4,
         )
         self.assertTrue(result["cleanup"]["verified"])
-        self.assertEqual(xy_resource.writes, ["SENS 17", "SENS 23"])
+        self.assertEqual(xy_resource.writes, ["OFLT 9", "SENS 17", "SENS 17"])
 
     def test_cli_frequency_sweep_rejects_unsupported_harmonic_before_opening_visa(
         self,
@@ -3040,7 +3042,7 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 8
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 8
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -3080,9 +3082,9 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_records_observed_transition_latches(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "18\n"] + ["0\n"] * 11
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "18\n"] + ["0\n"] * 11
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "0\n", "0\n", "16\n"] + ["0\n"] * 11
+        xy_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "16\n"] + ["0\n"] * 11
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -3126,7 +3128,7 @@ class Sr830Tests(unittest.TestCase):
         )
         xy_responses = responses(reference_mode=0)
         xy_responses["LIAS?"] = [
-            "0\n", "0\n", "0\n", "26\n", "0\n", "24\n", "0\n", "0\n"
+            "0\n", "0\n", "0\n", "0\n", "26\n", "0\n", "24\n", "0\n", "0\n"
         ]
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
@@ -3196,7 +3198,7 @@ class Sr830Tests(unittest.TestCase):
             places=4,
         )
 
-    def test_cli_frequency_sweep_records_large_valid_pair_offset(self) -> None:
+    def test_cli_frequency_sweep_rejects_large_baseline_pair_offset(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -3210,8 +3212,8 @@ class Sr830Tests(unittest.TestCase):
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
-        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
-            exit_code = run(
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "lockin_xy frequency readback"):
+            run(
                 [
                     "sweep-frequency",
                     "--config", str(self._hardware_config()),
@@ -3224,13 +3226,10 @@ class Sr830Tests(unittest.TestCase):
             )
 
         result = json.loads(output.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertTrue(result["completed"])
-        self.assertAlmostEqual(
-            result["points"][1]["frequency_readback_hz"]["lockin_xy"], 22.5
-        )
-        self.assertEqual(xx_resource.clear_calls, 1)
-        self.assertEqual(xy_resource.clear_calls, 1)
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["points"], [])
+        self.assertEqual(xx_resource.clear_calls, 2)
+        self.assertEqual(xy_resource.clear_calls, 2)
         self.assertTrue(result["interface_clear"]["at_start"]["completed"])
 
     def test_recover_interface_clears_both_resources_without_writes(self) -> None:
@@ -3259,7 +3258,217 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xx_resource.writes, [])
         self.assertEqual(xy_resource.writes, [])
 
-    def test_cli_excitation_sweep_checks_limits_and_restores_original_range(self) -> None:
+    def test_excitation_sweep_applies_toml_fixed_settings_and_keeps_them_after_cleanup(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        for role_responses in (xx_responses, xy_responses):
+            role_responses.update({
+                "ISRC?": "0\n", "IGND?": "1\n", "ICPL?": "1\n",
+                "OFLT?": "10\n", "OFSL?": "2\n", "RMOD?": "2\n",
+                "LIAS?": ["0\n", "32\n"] + ["0\n"] * 16,
+            })
+        xx_resource = TrackingVisaResource(
+            xx_responses, shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation", "--config", str(self._hardware_config(frequency_hz=400)),
+                    "--xx-address", "XX", "--xy-address", "XY",
+                    "--points-v", "0.004,0.008", "--samples-per-point", "1",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["fixed_setup"]["verified"])
+        self.assertEqual(result["fixed_setup"]["transition_status"]["lockin_xx"]["lia_status"]["raw"], 32)
+        for resource in (xx_resource, xy_resource):
+            for command in ("ISRC 1", "IGND 0", "ICPL 0", "OFLT 9", "OFSL 3", "RMOD 1"):
+                self.assertIn(command, resource.writes)
+        for command in ("ISRC 1", "IGND 0", "ICPL 0", "OFLT 9", "OFSL 3", "FREQ 400"):
+            self.assertLess(xx_resource.writes.index(command), xx_resource.writes.index("SLVL 0.008"))
+        self.assertEqual(result["frequency_setup"]["frequency_readback_hz"],
+                         {"lockin_xx": 400.0, "lockin_xy": 400.0})
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 21)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 17)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["reserve_mode"], 1)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["reserve_mode"], 1)
+
+    def test_excitation_sweep_rejects_unconfirmed_fixed_setting_before_source_step(self) -> None:
+        class StaleInputReadback(TrackingVisaResource):
+            def query(self, command):
+                if command == "ISRC?" and "ISRC 1" in self.writes:
+                    self.queries.append(command)
+                    return "0\n"
+                return super().query(command)
+
+        shared_frequency = {"hz": 17.777}
+        xx_responses = responses(reference_mode=1)
+        xx_responses["ISRC?"] = "0\n"
+        xx_resource = StaleInputReadback(
+            xx_responses, shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "input_mode readback"):
+            run(
+                [
+                    "sweep-excitation", "--config", str(self._hardware_config()),
+                    "--xx-address", "XX", "--xy-address", "XY",
+                    "--points-v", "0.004,0.008", "--samples-per-point", "1",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertEqual(result["points"], [])
+        self.assertNotIn("SLVL 0.008", xx_resource.writes)
+        self.assertTrue(any(
+            write["field"] == "input_mode" and write["readback_code"] == 0
+            for write in result["fixed_setup"]["roles"]["lockin_xx"]["writes"]
+        ))
+
+    def test_excitation_sweep_rejects_fixed_setup_overload_before_source_step(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_responses = responses(reference_mode=0)
+        xy_responses["LIAS?"] = ["0\n", "1\n"] + ["0\n"] * 12
+        xy_resource = TrackingVisaResource(
+            xy_responses, shared_frequency=shared_frequency, name="xy"
+        )
+        output = io.StringIO()
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "input/reserve overload after fixed-setting setup"):
+            run(
+                [
+                    "sweep-excitation", "--config", str(self._hardware_config()),
+                    "--xx-address", "XX", "--xy-address", "XY",
+                    "--points-v", "0.004,0.008", "--samples-per-point", "1",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: FakeResourceManager(
+                    {"XX": xx_resource, "XY": xy_resource}
+                ),
+            )
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertEqual(result["points"], [])
+        self.assertNotIn("SLVL 0.008", xx_resource.writes)
+        self.assertEqual(
+            result["fixed_setup"]["transition_status"]["lockin_xy"]["lia_status"]["raw"], 1
+        )
+
+    def test_excitation_sweep_sets_configured_frequency_before_raising_source(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            exit_code = run(
+                [
+                    "sweep-excitation", "--config", str(self._hardware_config(frequency_hz=400)),
+                    "--xx-address", "XX", "--xy-address", "XY",
+                    "--points-v", "0.004,0.008", "--samples-per-point", "1",
+                    "--first-harmonic-only",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertTrue(result["frequency_setup"]["verified"])
+        self.assertEqual(result["frequency_setup"]["frequency_readback_hz"]["lockin_xx"], 400)
+        self.assertLess(xx_resource.writes.index("FREQ 400"), xx_resource.writes.index("SLVL 0.008"))
+        self.assertEqual(result["points"][1]["actual_frequency_hz"], 400)
+
+    def test_excitation_sweep_rejects_unconfirmed_frequency_before_source_step(self) -> None:
+        shared_frequency = {"hz": 17.777}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1), shared_frequency=shared_frequency, name="xx",
+            frequency_transform=lambda requested: 17.777,
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            with self.assertRaisesRegex(Sr830Error, "does not match requested 400 Hz"):
+                run(
+                    [
+                        "sweep-excitation", "--config", str(self._hardware_config(frequency_hz=400)),
+                        "--xx-address", "XX", "--xy-address", "XY",
+                        "--points-v", "0.004,0.008", "--samples-per-point", "1",
+                        "--first-harmonic-only",
+                    ],
+                    resource_manager_factory=lambda: manager,
+                )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertFalse(result["frequency_setup"]["verified"])
+        self.assertEqual(result["points"], [])
+        self.assertIn("FREQ 400", xx_resource.writes)
+        self.assertNotIn("SLVL 0.008", xx_resource.writes)
+        self.assertIn("does not match requested 400 Hz", result["error"])
+
+    def test_excitation_sweep_rejects_xy_frequency_mismatch_before_source_step(self) -> None:
+        shared_frequency = {"hz": 400.0}
+        xx_resource = TrackingVisaResource(
+            responses(reference_mode=1, frequency_hz=400),
+            shared_frequency=shared_frequency, name="xx",
+        )
+        xy_resource = TrackingVisaResource(
+            responses(reference_mode=0, frequency_hz=360),
+            shared_frequency=shared_frequency, name="xy", frequency_scale=0.9,
+        )
+        manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
+        output = io.StringIO()
+
+        with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
+            with self.assertRaisesRegex(Sr830Error, "lockin_xy frequency readback"):
+                run(
+                    [
+                        "sweep-excitation", "--config", str(self._hardware_config(frequency_hz=400)),
+                        "--xx-address", "XX", "--xy-address", "XY",
+                        "--points-v", "0.004,0.008", "--samples-per-point", "1",
+                        "--first-harmonic-only",
+                    ],
+                    resource_manager_factory=lambda: manager,
+                )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertEqual(result["points"], [])
+        self.assertNotIn("SLVL 0.008", xx_resource.writes)
+
+    def test_cli_excitation_sweep_checks_limits_and_keeps_toml_range(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -3298,15 +3507,16 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(
             xx_resource.writes,
             [
+                "OFLT 9",
                 "SENS 21",
                 "SLVL 0.4",
                 "SLVL 0.004",
-                "SENS 23",
+                "SENS 21",
             ],
         )
-        self.assertEqual(xy_resource.writes, ["SENS 17", "SENS 23"])
-        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 23)
-        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 23)
+        self.assertEqual(xy_resource.writes, ["OFLT 9", "SENS 17", "SENS 17"])
+        self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["sensitivity"], 21)
+        self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["sensitivity"], 17)
 
     def test_excitation_sweep_records_safe_quantized_sine_output_readback(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -3674,7 +3884,7 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_excitation_sweep_clears_range_restoration_overload_before_final_status(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "4\n", "0\n"]
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "0\n", "4\n", "0\n"]
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -3728,7 +3938,7 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_excitation_overload_keeps_rejected_sample_and_cleans_up(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 20
+        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 20
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
@@ -3765,7 +3975,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(len(result["points"]), 2)
         self.assertEqual(len(result["points"][1]["samples"]), 1)
         self.assertTrue(result["cleanup"]["verified"])
-        self.assertEqual(xx_resource.writes[-2:], ["SLVL 0.004", "SENS 23"])
+        self.assertEqual(xx_resource.writes[-2:], ["SLVL 0.004", "SENS 21"])
 
     def test_dual_controller_sets_both_harmonics_before_each_pair_snapshot(self) -> None:
         events: list[tuple[str, str, str]] = []

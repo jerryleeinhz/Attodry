@@ -332,6 +332,46 @@ class Sr830:
         self._resource.write(f"OFSL {settings.filter_slope}")
         self._resource.write(f"SENS {settings.sensitivity}")
 
+    def set_fixed_setting(self, field: str, code: int) -> None:
+        """Write one validated input/filter setting for read-before-write setup."""
+
+        allowed = {
+            "input_mode": ("ISRC", range(0, 4)),
+            "shield_grounding": ("IGND", range(0, 2)),
+            "input_coupling": ("ICPL", range(0, 2)),
+            "time_constant": ("OFLT", range(0, 20)),
+            "filter_slope": ("OFSL", range(0, 4)),
+        }
+        if field not in allowed or not isinstance(code, int):
+            raise ValueError("Unknown SR830 fixed setting or code.")
+        command, codes = allowed[field]
+        if code not in codes:
+            raise ValueError(f"Invalid SR830 {field} code {code}.")
+        self._resource.write(f"{command} {code}")
+
+    def read_fixed_setting(self, field: str) -> int:
+        """Read one input/filter code without consuming SR830 status latches."""
+
+        queries = {
+            "input_mode": ("ISRC?", range(0, 4)),
+            "shield_grounding": ("IGND?", range(0, 2)),
+            "input_coupling": ("ICPL?", range(0, 2)),
+            "time_constant": ("OFLT?", range(0, 20)),
+            "filter_slope": ("OFSL?", range(0, 4)),
+        }
+        if field not in queries:
+            raise ValueError(f"Unknown SR830 fixed setting {field}.")
+        query, codes = queries[field]
+        code = self._query_int(query)
+        if code not in codes:
+            raise Sr830Error(f"lockin_{self.role.value} returned invalid {field} code {code}.")
+        return code
+
+    def read_status_latches(self) -> tuple[LiaStatus, int]:
+        """Consume and return the LIA and instrument-error status registers."""
+
+        return decode_lia_status(self._query_int("LIAS?")), self._query_int("ERRS?")
+
     def set_harmonic(self, harmonic: int) -> None:
         if harmonic not in (1, 2, 3):
             raise ValueError("Only harmonics 1, 2, and 3 are supported.")

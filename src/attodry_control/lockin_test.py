@@ -1411,6 +1411,8 @@ def _run_frequency_sweep(
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
         reserve_setup: dict[str, object] | None = None
+        fixed_setup: dict[str, object] | None = None
+        frequency_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
         interface_clear: dict[str, object] = {
@@ -1428,6 +1430,18 @@ def _run_frequency_sweep(
                 transient_overload_recheck_s=args.settle_s,
             )
             writes_started = True
+            fixed_setup = {}
+            _configure_sweep_fixed_settings(
+                lockin_xx, lockin_xy, config=config,
+                preflight_xx=preflight_xx, preflight_xy=preflight_xy,
+                settle_s=args.settle_s, record=fixed_setup,
+            )
+            frequency_setup = {}
+            _configure_sweep_baseline_frequency(
+                lockin_xx, lockin_xy, baseline_hz=baseline_hz,
+                initial_xx_frequency_hz=preflight_xx.frequency_hz,
+                settle_s=args.settle_s, record=frequency_setup,
+            )
             reserve_setup = _new_sweep_reserve_setup(
                 config.lockin_xx,
                 config.lockin_xy,
@@ -1603,16 +1617,16 @@ def _run_frequency_sweep(
                 lockin_xx,
                 lockin_xy,
                 baseline_hz=baseline_hz,
-                original_xx_sensitivity=preflight_xx.sensitivity,
-                original_xy_sensitivity=preflight_xy.sensitivity,
+                original_xx_sensitivity=sensitivity_code(config.lockin_xx.sensitivity_full_scale_v),
+                original_xy_sensitivity=sensitivity_code(config.lockin_xy.sensitivity_full_scale_v),
                 restore_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xx"
                 ),
                 restore_xy_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xy"
                 ),
-                original_xx_reserve_mode=preflight_xx.reserve_mode,
-                original_xy_reserve_mode=preflight_xy.reserve_mode,
+                original_xx_reserve_mode=RESERVE_MODE_CODES[config.lockin_xx.reserve_mode.value],
+                original_xy_reserve_mode=RESERVE_MODE_CODES[config.lockin_xy.reserve_mode.value],
                 restore_xx_reserve=_reserve_write_attempted(
                     reserve_setup, "lockin_xx"
                 ),
@@ -1628,6 +1642,8 @@ def _run_frequency_sweep(
             if preflight_xx is not None
             else {"attempted": False, "verified": True, "errors": []}
         )
+        if fixed_setup and fixed_setup.get("verified") and frequency_setup and frequency_setup.get("verified") and sensitivity_setup and reserve_setup:
+            _verify_sweep_configured_cleanup(cleanup, config)
         result = {
             "scan": "frequency",
             "completed": failure is None and cleanup["verified"],
@@ -1671,6 +1687,8 @@ def _run_frequency_sweep(
             },
             "sensitivity_setup": sensitivity_setup,
             "reserve_setup": reserve_setup,
+            "fixed_setup": fixed_setup,
+            "frequency_setup": frequency_setup,
             "settle_time_constants": config.lockin_sweep.settle_time_constants,
             "slowest_time_constant_s": args.slowest_time_constant_s,
             "settle_interval_s": args.settle_s,
@@ -1742,6 +1760,8 @@ def _run_frequency_excitation_sweep(
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
         reserve_setup: dict[str, object] | None = None
+        fixed_setup: dict[str, object] | None = None
+        frequency_setup: dict[str, object] | None = None
         writes_started = False
         failure: BaseException | None = None
         interface_clear: dict[str, object] = {"at_start": None, "before_cleanup": None}
@@ -1756,6 +1776,18 @@ def _run_frequency_excitation_sweep(
                 transient_overload_recheck_s=args.settle_s,
             )
             writes_started = True
+            fixed_setup = {}
+            _configure_sweep_fixed_settings(
+                lockin_xx, lockin_xy, config=config,
+                preflight_xx=preflight_xx, preflight_xy=preflight_xy,
+                settle_s=args.settle_s, record=fixed_setup,
+            )
+            frequency_setup = {}
+            _configure_sweep_baseline_frequency(
+                lockin_xx, lockin_xy, baseline_hz=baseline_hz,
+                initial_xx_frequency_hz=preflight_xx.frequency_hz,
+                settle_s=args.settle_s, record=frequency_setup,
+            )
             reserve_setup = _new_sweep_reserve_setup(
                 config.lockin_xx,
                 config.lockin_xy,
@@ -1947,16 +1979,16 @@ def _run_frequency_excitation_sweep(
                 lockin_xx,
                 lockin_xy,
                 baseline_hz=baseline_hz,
-                original_xx_sensitivity=preflight_xx.sensitivity,
-                original_xy_sensitivity=preflight_xy.sensitivity,
+                original_xx_sensitivity=sensitivity_code(config.lockin_xx.sensitivity_full_scale_v),
+                original_xy_sensitivity=sensitivity_code(config.lockin_xy.sensitivity_full_scale_v),
                 restore_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xx"
                 ),
                 restore_xy_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xy"
                 ),
-                original_xx_reserve_mode=preflight_xx.reserve_mode,
-                original_xy_reserve_mode=preflight_xy.reserve_mode,
+                original_xx_reserve_mode=RESERVE_MODE_CODES[config.lockin_xx.reserve_mode.value],
+                original_xy_reserve_mode=RESERVE_MODE_CODES[config.lockin_xy.reserve_mode.value],
                 restore_xx_reserve=_reserve_write_attempted(
                     reserve_setup, "lockin_xx"
                 ),
@@ -1972,6 +2004,8 @@ def _run_frequency_excitation_sweep(
             if preflight_xx is not None
             else {"attempted": False, "verified": True, "errors": []}
         )
+        if fixed_setup and fixed_setup.get("verified") and frequency_setup and frequency_setup.get("verified") and sensitivity_setup and reserve_setup:
+            _verify_sweep_configured_cleanup(cleanup, config)
         result = {
             "scan": "frequency_excitation",
             "completed": failure is None and cleanup["verified"],
@@ -2015,6 +2049,8 @@ def _run_frequency_excitation_sweep(
             },
             "sensitivity_setup": sensitivity_setup,
             "reserve_setup": reserve_setup,
+            "fixed_setup": fixed_setup,
+            "frequency_setup": frequency_setup,
             "settle_time_constants": config.lockin_sweep.settle_time_constants,
             "slowest_time_constant_s": args.slowest_time_constant_s,
             "settle_interval_s": args.settle_s,
@@ -2159,6 +2195,8 @@ def _execute_excitation_sweep_on_open_pair(
     preflight_xy = None
     sensitivity_setup: dict[str, object] | None = None
     reserve_setup: dict[str, object] | None = None
+    fixed_setup: dict[str, object] | None = None
+    frequency_setup: dict[str, object] | None = None
     writes_started = False
     failure: BaseException | None = None
     interface_clear: dict[str, object] = {
@@ -2174,6 +2212,18 @@ def _execute_excitation_sweep_on_open_pair(
             transient_overload_recheck_s=args.settle_s,
         )
         writes_started = True
+        fixed_setup = {}
+        _configure_sweep_fixed_settings(
+            lockin_xx, lockin_xy, config=config,
+            preflight_xx=preflight_xx, preflight_xy=preflight_xy,
+            settle_s=args.settle_s, record=fixed_setup,
+        )
+        frequency_setup = {}
+        _configure_sweep_baseline_frequency(
+            lockin_xx, lockin_xy, baseline_hz=baseline_hz,
+            initial_xx_frequency_hz=preflight_xx.frequency_hz,
+            settle_s=args.settle_s, record=frequency_setup,
+        )
         reserve_setup = _new_sweep_reserve_setup(
             config.lockin_xx,
             config.lockin_xy,
@@ -2246,7 +2296,7 @@ def _execute_excitation_sweep_on_open_pair(
             )
             xx_frequency_readback = lockin_xx.read_reference_frequency()
             xy_frequency_readback = lockin_xy.read_reference_frequency()
-            _validate_frequency_observations(
+            _verify_requested_sweep_frequency_readbacks(
                 baseline_hz, xx_frequency_readback, xy_frequency_readback
             )
             point_record["frequency_readback_hz"] = {
@@ -2311,14 +2361,14 @@ def _execute_excitation_sweep_on_open_pair(
             lockin_xx,
             lockin_xy,
             baseline_hz=baseline_hz,
-            original_xx_sensitivity=preflight_xx.sensitivity,
-            original_xy_sensitivity=preflight_xy.sensitivity,
+            original_xx_sensitivity=sensitivity_code(config.lockin_xx.sensitivity_full_scale_v),
+            original_xy_sensitivity=sensitivity_code(config.lockin_xy.sensitivity_full_scale_v),
             restore_sensitivity=_range_write_attempted(sensitivity_setup, "lockin_xx"),
             restore_xy_sensitivity=_range_write_attempted(
                 sensitivity_setup, "lockin_xy"
             ),
-            original_xx_reserve_mode=preflight_xx.reserve_mode,
-            original_xy_reserve_mode=preflight_xy.reserve_mode,
+            original_xx_reserve_mode=RESERVE_MODE_CODES[config.lockin_xx.reserve_mode.value],
+            original_xy_reserve_mode=RESERVE_MODE_CODES[config.lockin_xy.reserve_mode.value],
             restore_xx_reserve=_reserve_write_attempted(reserve_setup, "lockin_xx"),
             restore_xy_reserve=_reserve_write_attempted(reserve_setup, "lockin_xy"),
             restore_frequency=False,
@@ -2330,6 +2380,8 @@ def _execute_excitation_sweep_on_open_pair(
         if preflight_xx is not None
         else {"attempted": False, "verified": True, "errors": []}
     )
+    if fixed_setup and fixed_setup.get("verified") and frequency_setup and frequency_setup.get("verified") and sensitivity_setup and reserve_setup:
+        _verify_sweep_configured_cleanup(cleanup, config)
     result = {
         "scan": "excitation",
         "completed": failure is None and cleanup["verified"],
@@ -2358,6 +2410,8 @@ def _execute_excitation_sweep_on_open_pair(
         },
         "sensitivity_setup": sensitivity_setup,
         "reserve_setup": reserve_setup,
+        "fixed_setup": fixed_setup,
+        "frequency_setup": frequency_setup,
         "settle_time_constants": config.lockin_sweep.settle_time_constants,
         "slowest_time_constant_s": args.slowest_time_constant_s,
         "settle_interval_s": args.settle_s,
@@ -2783,6 +2837,200 @@ def _sweep_baseline_source_voltage(settings: dict[str, object]) -> float:
                 f"{role}.source_voltage_v = {MINIMUM_SINE_OUTPUT_V:g} V RMS."
             )
     return config.lockin_xx.source_voltage_v
+
+
+_SWEEP_FIXED_SETTING_FIELDS = (
+    "time_constant",
+    "filter_slope",
+    "input_mode",
+    "shield_grounding",
+    "input_coupling",
+)
+
+
+def _configure_sweep_fixed_settings(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    config: object,
+    preflight_xx: Sr830Diagnostic,
+    preflight_xy: Sr830Diagnostic,
+    settle_s: float,
+    record: dict[str, object],
+) -> None:
+    """Apply only differing TOML input/filter fields at minimum excitation."""
+
+    roles: dict[str, object] = {}
+    record.update({
+        "attempted": True, "verified": False, "roles": roles,
+        "transition_status": None,
+    })
+    for role, instrument, before in (
+        ("lockin_xx", lockin_xx, preflight_xx),
+        ("lockin_xy", lockin_xy, preflight_xy),
+    ):
+        expected = _setting_codes(getattr(config, role))
+        role_record: dict[str, object] = {
+            "before": asdict(before),
+            "requested_codes": {
+                field: getattr(expected, field) for field in _SWEEP_FIXED_SETTING_FIELDS
+            },
+            "writes": [],
+        }
+        roles[role] = role_record
+        current_codes = {
+            field: getattr(before, field) for field in _SWEEP_FIXED_SETTING_FIELDS
+        }
+        for field in _SWEEP_FIXED_SETTING_FIELDS:
+            target = getattr(expected, field)
+            if current_codes[field] == target:
+                continue
+            write_record: dict[str, object] = {
+                "field": field,
+                "before_code": current_codes[field],
+                "requested_code": target,
+                "write_attempted": True,
+                "readback_code": None,
+            }
+            writes = role_record["writes"]
+            assert isinstance(writes, list)
+            writes.append(write_record)
+            instrument.set_fixed_setting(field, target)
+            time.sleep(settle_s)
+            readback = instrument.read_fixed_setting(field)
+            write_record["readback_code"] = readback
+            if readback != target:
+                raise Sr830Error(
+                    f"{role} {field} readback {readback} "
+                    f"does not match TOML code {target}."
+                )
+            current_codes[field] = readback
+            time.sleep(settle_s)
+        role_record["after_codes"] = current_codes
+    if any(roles[role]["writes"] for role in ("lockin_xx", "lockin_xy")):
+        transition, problems = _consume_sweep_fixed_transition(
+            lockin_xx, lockin_xy, roles
+        )
+        record["transition_status"] = transition
+        if problems:
+            raise Sr830Error("Unsafe fixed-setting transition: " + "; ".join(problems))
+    record["verified"] = True
+
+
+def _consume_sweep_fixed_transition(
+    lockin_xx: Sr830, lockin_xy: Sr830, roles: dict[str, object]
+) -> tuple[dict[str, object], list[str]]:
+    """Consume expected OFLT-change latches and reject other setup faults."""
+
+    statuses = {
+        "lockin_xx": lockin_xx.read_status_latches(),
+        "lockin_xy": lockin_xy.read_status_latches(),
+    }
+    problems: list[str] = []
+    for role, (status, error_status) in statuses.items():
+        role_record = roles[role]
+        assert isinstance(role_record, dict)
+        writes = role_record["writes"]
+        assert isinstance(writes, list)
+        expected_oflt_latch = any(write["field"] == "time_constant" for write in writes)
+        if status.reference_unlocked:
+            problems.append(f"{role} reference unlocked after fixed-setting setup")
+        if status.input_or_reserve_overload:
+            problems.append(f"{role} input/reserve overload after fixed-setting setup")
+        if status.filter_overload:
+            problems.append(f"{role} filter overload after fixed-setting setup")
+        if status.frequency_range_changed:
+            problems.append(f"{role} frequency range changed after fixed-setting setup")
+        if status.time_constant_changed and not expected_oflt_latch:
+            problems.append(f"{role} unexpected time constant change after fixed-setting setup")
+        if error_status:
+            problems.append(f"{role} instrument error {error_status} after fixed-setting setup")
+    return {
+        "captured_unix_s": time.time(),
+        "lockin_xx": {"lia_status": asdict(statuses["lockin_xx"][0]),
+                      "error_status": statuses["lockin_xx"][1]},
+        "lockin_xy": {"lia_status": asdict(statuses["lockin_xy"][0]),
+                      "error_status": statuses["lockin_xy"][1]},
+        "problems": problems,
+    }, problems
+
+
+def _configure_sweep_baseline_frequency(
+    lockin_xx: Sr830,
+    lockin_xy: Sr830,
+    *,
+    baseline_hz: float,
+    initial_xx_frequency_hz: float,
+    settle_s: float,
+    record: dict[str, object],
+) -> None:
+    """Set XX's configured baseline while source output is still minimum."""
+
+    record.update({
+        "requested_frequency_hz": baseline_hz,
+        "initial_xx_frequency_hz": initial_xx_frequency_hz,
+        "write_performed": False,
+        "transition_status": None,
+        "frequency_readback_hz": None,
+        "verified": False,
+    })
+    if not math.isclose(
+        initial_xx_frequency_hz,
+        baseline_hz,
+        rel_tol=0.0,
+        abs_tol=_sweep_requested_frequency_tolerance_hz(baseline_hz),
+    ):
+        record["write_performed"] = True
+        lockin_xx.set_internal_reference_frequency(baseline_hz)
+        time.sleep(settle_s)
+        transition, transition_problems = _consume_frequency_transition(
+            lockin_xx, lockin_xy
+        )
+        record["transition_status"] = transition
+        if transition_problems:
+            raise Sr830Error(
+                "Unsafe sweep baseline frequency transition: "
+                + "; ".join(transition_problems)
+            )
+    time.sleep(settle_s)
+    xx_readback = lockin_xx.read_reference_frequency()
+    xy_readback = lockin_xy.read_reference_frequency()
+    record["frequency_readback_hz"] = {
+        "lockin_xx": xx_readback,
+        "lockin_xy": xy_readback,
+    }
+    _verify_requested_sweep_frequency_readbacks(
+        baseline_hz, xx_readback, xy_readback
+    )
+    record["verified"] = True
+
+
+def _verify_sweep_configured_cleanup(
+    cleanup: dict[str, object], config: object
+) -> None:
+    """Require the final panel readback to retain the configured base settings."""
+
+    final = cleanup.get("final")
+    errors = cleanup.get("errors")
+    if not isinstance(final, dict) or not isinstance(errors, list):
+        cleanup["verified"] = False
+        return
+    for role in ("lockin_xx", "lockin_xy"):
+        diagnostic = final.get(role)
+        if not isinstance(diagnostic, dict):
+            errors.append(f"{role} final setting readback is unavailable")
+            continue
+        role_config = getattr(config, role)
+        expected = _setting_codes(role_config)
+        for field in (*_SWEEP_FIXED_SETTING_FIELDS, "sensitivity", "reserve_mode"):
+            actual = diagnostic.get(field)
+            target = (
+                RESERVE_MODE_CODES[role_config.reserve_mode.value]
+                if field == "reserve_mode" else getattr(expected, field)
+            )
+            if actual != target:
+                errors.append(f"{role} final {field} code {actual} differs from TOML {target}")
+    cleanup["verified"] = not errors
 
 
 def _new_sweep_sensitivity_setup(
@@ -4001,9 +4249,18 @@ def _verify_requested_sweep_frequency_readbacks(
     xx_readback_hz: float,
     xy_readback_hz: float,
 ) -> None:
-    """Validate sweep frequency observations without comparing display bins."""
+    """Require both role readbacks to match the requested SR830 display bin."""
 
     _validate_frequency_observations(requested_hz, xx_readback_hz, xy_readback_hz)
+    tolerance_hz = _sweep_requested_frequency_tolerance_hz(requested_hz)
+    for role, readback_hz in (("lockin_xx", xx_readback_hz), ("lockin_xy", xy_readback_hz)):
+        if not math.isclose(
+            readback_hz, requested_hz, rel_tol=0.0, abs_tol=tolerance_hz
+        ):
+            raise Sr830Error(
+                f"{role} frequency readback {readback_hz:g} Hz does not match "
+                f"requested {requested_hz:g} Hz within {tolerance_hz:g} Hz."
+            )
 
 
 def _validate_frequency_observations(*frequencies_hz: float) -> None:

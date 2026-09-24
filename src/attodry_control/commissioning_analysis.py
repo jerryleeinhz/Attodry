@@ -33,6 +33,7 @@ SWEEP_X_AXES = frozenset(
         "target_frequency_hz",
         "actual_frequency_hz",
         "source_v_rms",
+        "sine_output_v_rms",
         "nominal_current_a_rms",
         "sine_output_current_a_rms",
     }
@@ -148,7 +149,8 @@ class MultiFrequencyIVStatistic:
     """One aggregated point for a frequency-by-excitation I--V curve."""
 
     frequency_hz: float
-    current_a_rms: float
+    current_a_rms: float | None
+    x_value: float
     role: str
     harmonic: int
     metric: str
@@ -755,6 +757,7 @@ def aggregate_sweep_repeatability(
     harmonic: int,
     metric: str = "amplitude_v",
     excitation_path: ExcitationPathResistance | None = None,
+    excitation_x_axis: str = "sine_output_current_a_rms",
 ) -> tuple[RepeatabilityStatistic, ...]:
     """Aggregate repeats within each file and requested scan coordinate.
 
@@ -769,6 +772,7 @@ def aggregate_sweep_repeatability(
         raise ValueError(f"Unsupported harmonic: {harmonic}")
     if metric not in SWEEP_METRICS:
         raise ValueError(f"Unsupported metric: {metric}")
+    _validate_excitation_x_axis(excitation_x_axis)
     if not rows:
         raise ValueError("No sweep samples match the selected filters.")
     scan_types = {row.scan_type for row in rows}
@@ -791,13 +795,13 @@ def aggregate_sweep_repeatability(
         return ()
     resolved_path = (
         _single_excitation_path_for_rows(selected, excitation_path)
-        if scan_type != "frequency"
+        if scan_type != "frequency" and excitation_x_axis == "sine_output_current_a_rms"
         else excitation_path
     )
     x_axis = (
         "actual_frequency_hz"
         if scan_type == "frequency"
-        else "sine_output_current_a_rms"
+        else excitation_x_axis
     )
     grouped: dict[
         tuple[str, tuple[float, ...]], tuple[list[float], list[float], tuple[float, ...]]
@@ -848,6 +852,7 @@ def plot_sweep_repeatability(
     metric: str,
     baseline_source_path: str | Path,
     excitation_path: ExcitationPathResistance | None = None,
+    excitation_x_axis: str = "sine_output_current_a_rms",
 ):
     """Overlay independent runs and plot paired differences from one baseline."""
 
@@ -857,6 +862,7 @@ def plot_sweep_repeatability(
         harmonic=harmonic,
         metric=metric,
         excitation_path=excitation_path,
+        excitation_x_axis=excitation_x_axis,
     )
     if not statistics:
         raise ValueError("No selected samples match this role and harmonic.")
@@ -884,8 +890,8 @@ def plot_sweep_repeatability(
     }
     x_labels = {
         "frequency": "Measured frequency (Hz); paired by requested frequency",
-        "excitation": "SINE OUT readback-derived current (A RMS); paired by requested voltage",
-        "frequency_excitation": "SINE OUT readback-derived current (A RMS); paired by requested frequency and voltage",
+        "excitation": f"{_excitation_x_label(excitation_x_axis)}; paired by requested voltage",
+        "frequency_excitation": f"{_excitation_x_label(excitation_x_axis)}; paired by requested frequency and voltage",
     }
     combined = scan_type == "frequency_excitation"
     run_paths = tuple(by_run)
@@ -1009,6 +1015,7 @@ def aggregate_frequency_excitation_iv(
     harmonic: int,
     metric: str = "amplitude_v",
     excitation_path: ExcitationPathResistance | None = None,
+    excitation_x_axis: str = "sine_output_current_a_rms",
 ) -> tuple[MultiFrequencyIVStatistic, ...]:
     """Aggregate a combined scan into one I--V curve per actual frequency.
 
@@ -1025,6 +1032,7 @@ def aggregate_frequency_excitation_iv(
         raise ValueError(f"Unsupported harmonic: {harmonic}")
     if metric not in SWEEP_METRICS:
         raise ValueError(f"Unsupported metric: {metric}")
+    _validate_excitation_x_axis(excitation_x_axis)
     if not rows:
         raise ValueError("No sweep samples match the selected filters.")
     if {row.scan_type for row in rows} != {"frequency_excitation"}:
@@ -1034,7 +1042,11 @@ def aggregate_frequency_excitation_iv(
     )
     if not selected:
         return ()
-    resolved_path = _single_excitation_path_for_rows(selected, excitation_path)
+    resolved_path = (
+        _single_excitation_path_for_rows(selected, excitation_path)
+        if excitation_x_axis == "sine_output_current_a_rms"
+        else None
+    )
     # First assign rows to frequency bins.  The readback is retained as the
     # representative value; only sub-readback-resolution jitter is clustered.
     frequency_bins: list[tuple[float, list[CommissioningSample]]] = []
@@ -1053,17 +1065,20 @@ def aggregate_frequency_excitation_iv(
     grouped: dict[tuple[float, float], list[float]] = {}
     for frequency_hz, bin_rows in frequency_bins:
         for row in bin_rows:
-            current = resolved_path.current_from_sine_output(row.sine_output_v_rms)
-            grouped.setdefault((frequency_hz, current), []).append(
+            x_value = _sweep_x_value(row, excitation_x_axis, resolved_path)
+            grouped.setdefault((frequency_hz, x_value), []).append(
                 float(getattr(row, metric))
             )
     statistics: list[MultiFrequencyIVStatistic] = []
-    for (frequency_hz, current), values in sorted(grouped.items()):
+    for (frequency_hz, x_value), values in sorted(grouped.items()):
         mean, spread = _mean_and_standard_deviation(values, metric=metric)
         statistics.append(
             MultiFrequencyIVStatistic(
                 frequency_hz=frequency_hz,
-                current_a_rms=current,
+                current_a_rms=(
+                    x_value if excitation_x_axis == "sine_output_current_a_rms" else None
+                ),
+                x_value=x_value,
                 role=role,
                 harmonic=harmonic,
                 metric=metric,
@@ -3266,6 +3281,7 @@ def plot_commissioning_sweep(
             "actual_frequency_hz": "Frequency (Hz)",
             "source_v_rms": "Source voltage (V RMS)",
             "nominal_current_a_rms": "Nominal current (A RMS)",
+            "sine_output_v_rms": "SINE OUT readback (V RMS)",
             "sine_output_current_a_rms": "SINE OUT current (A RMS)",
         }[resolved_x_axis]
     )
@@ -3296,6 +3312,7 @@ def plot_role_harmonic_sweep(
     role: str,
     harmonic: int,
     excitation_path: ExcitationPathResistance | None = None,
+    excitation_x_axis: str = "sine_output_current_a_rms",
     phase_minimum_amplitude_v: float = 0.0,
     phase_maximum_standard_deviation_deg: float | None = None,
     destination: str | Path | None = None,
@@ -3310,6 +3327,7 @@ def plot_role_harmonic_sweep(
         raise ValueError(f"Unknown role: {role}")
     if harmonic not in PLOT_HARMONICS:
         raise ValueError(f"Unsupported harmonic: {harmonic}")
+    _validate_excitation_x_axis(excitation_x_axis)
     if not rows:
         raise ValueError("No sweep samples match the selected filters.")
     if (
@@ -3334,7 +3352,7 @@ def plot_role_harmonic_sweep(
     x_axis = (
         "actual_frequency_hz"
         if scan_type == "frequency"
-        else "sine_output_current_a_rms"
+        else excitation_x_axis
     )
     try:
         import matplotlib.pyplot as plt
@@ -3431,8 +3449,8 @@ def plot_role_harmonic_sweep(
             f"{title_prefix}"
         )
     else:
-        phase_axis.set_xlabel("SINE OUT current (A RMS)")
-        title = f"Current–voltage sweep · {signal_name} · h{harmonic}"
+        phase_axis.set_xlabel(_excitation_x_label(excitation_x_axis))
+        title = f"Excitation sweep · {signal_name} · h{harmonic}"
     voltage_axis.set_ylabel(f"{signal_name} R (V RMS)")
     phase_axis.set_ylabel("Unwrapped phase (°)")
     voltage_axis.set_title(title)
@@ -3455,6 +3473,7 @@ def plot_multi_frequency_iv_curves(
     harmonic: int,
     metric: str = "amplitude_v",
     excitation_path: ExcitationPathResistance | None = None,
+    excitation_x_axis: str = "sine_output_current_a_rms",
     destination: str | Path | None = None,
 ):
     """Plot combined-sweep I--V curves, with one colored curve per frequency."""
@@ -3465,6 +3484,7 @@ def plot_multi_frequency_iv_curves(
         harmonic=harmonic,
         metric=metric,
         excitation_path=excitation_path,
+        excitation_x_axis=excitation_x_axis,
     )
     try:
         import matplotlib.pyplot as plt
@@ -3479,7 +3499,7 @@ def plot_multi_frequency_iv_curves(
     for index, frequency_hz in enumerate(frequencies):
         selected = [item for item in statistics if item.frequency_hz == frequency_hz]
         axis.errorbar(
-            [item.current_a_rms for item in selected],
+            [item.x_value for item in selected],
             [item.mean for item in selected],
             yerr=[item.standard_deviation for item in selected],
             **ordered_series_style(
@@ -3494,9 +3514,9 @@ def plot_multi_frequency_iv_curves(
             elinewidth=0.8,
             label=f"{frequency_hz:.7g} Hz",
         )
-    if statistics and all(item.current_a_rms > 0.0 for item in statistics):
+    if statistics and all(item.x_value > 0.0 for item in statistics):
         axis.set_xscale("log")
-    axis.set_xlabel("SINE OUT current (A RMS)")
+    axis.set_xlabel(_excitation_x_label(excitation_x_axis))
     axis.set_ylabel(
         {
             "x_v": "X (V RMS)",
@@ -3505,7 +3525,7 @@ def plot_multi_frequency_iv_curves(
             "phase_deg": "Phase (degree)",
         }[metric]
     )
-    axis.set_title(f"Combined sweep · I–V{role} · h{harmonic}")
+    axis.set_title(f"Combined sweep · excitation–V{role} · h{harmonic}")
     style_axis(axis)
     if frequencies:
         uncertainty = (
@@ -3524,6 +3544,7 @@ def plot_six_role_harmonic_sweeps(
     rows: Sequence[CommissioningSample],
     *,
     excitation_path: ExcitationPathResistance | None = None,
+    excitation_x_axis: str = "sine_output_current_a_rms",
     phase_minimum_amplitude_v: float = 0.0,
     phase_maximum_standard_deviation_deg: float | None = None,
 ) -> dict[tuple[str, int], object]:
@@ -3535,6 +3556,7 @@ def plot_six_role_harmonic_sweeps(
             role=role,
             harmonic=harmonic,
             excitation_path=excitation_path,
+            excitation_x_axis=excitation_x_axis,
             phase_minimum_amplitude_v=phase_minimum_amplitude_v,
             phase_maximum_standard_deviation_deg=(
                 phase_maximum_standard_deviation_deg
@@ -3930,6 +3952,20 @@ def _sweep_x_value(
     if raw_x is None:
         raise ValueError(f"Selected x axis {x_axis} contains missing values.")
     return float(raw_x)
+
+
+def _validate_excitation_x_axis(x_axis: str) -> None:
+    if x_axis not in {"sine_output_current_a_rms", "sine_output_v_rms"}:
+        raise ValueError(f"Unsupported excitation x axis: {x_axis}")
+
+
+def _excitation_x_label(x_axis: str) -> str:
+    _validate_excitation_x_axis(x_axis)
+    return (
+        "SINE OUT readback-derived current (A RMS)"
+        if x_axis == "sine_output_current_a_rms"
+        else "SINE OUT readback (V RMS)"
+    )
 
 
 def _current_summary(

@@ -155,12 +155,38 @@ note = "Fake devices only"
         self.assertTrue(self.xx.closed and self.xy.closed)
         self.assertTrue(any(kind == "lockin_raw_role" for kind, _ in self.events()))
 
-    def test_panel_time_constant_mismatch_rejected_before_smu_enable(self):
+    def test_panel_time_constant_mismatch_applied_before_smu_enable(self):
         self.xy.responses["OFLT?"] = "10"
         result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn("OFLT 9", self.xy.writes)
+        self.assertEqual(self.xy.responses["OFLT?"], "9\n")
+        self.assertTrue(any(
+            kind == "lockin_configured" and payload["fixed"]["verified"]
+            for kind, payload in self.events()
+        ))
+
+    def test_failed_fixed_setting_write_stops_before_smu_enable(self):
+        self.xy.responses["OFLT?"] = "10"
+        self.xy.fail_write = "OFLT 9"
+        result = self.execute()
         self.assertEqual(result["status"], "failed")
-        self.assertIn("time_constant differs", result["error"])
-        self.assertEqual(self.xx.writes + self.xy.writes, [])
+        self.assertIn("injected VISA write failure", result["error"])
+        self.assertIn("OFLT 9", self.xy.writes)
+        self.assertFalse(any(e[0] in ("source", "output") for e in self.log))
+        self.assertEqual(load_combination_rows(self.database), ())
+
+    def test_combination_applies_toml_frequency_before_excitation(self):
+        self.write_config(source=self.base.replace("frequency_hz = 17.777", "frequency_hz = 400"))
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn("FREQ 400", self.xx.writes)
+        self.assertLess(self.xx.writes.index("FREQ 400"), self.xx.writes.index("SLVL 0.008"))
+        self.assertEqual(self.frequency["hz"], 400)
+        self.assertTrue(any(
+            kind == "lockin_configured" and payload["frequency"]["verified"]
+            for kind, payload in self.events()
+        ))
 
     def test_smu_trip_retained_excluded_and_zero_off(self):
         self.modify_adapter = lambda a: setattr(a, "trip_on_read", 2)
