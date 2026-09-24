@@ -292,13 +292,13 @@ Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可
 
 - 当前 4 mVrms、100 kohm 串联、50 ohm 输出和约 1 kohm 器件对应约
   39.58 nArms；400 mVrms 对应约 3.958 uArms。
-- 每次激励扫描从忽略的 `hardware.local.toml` `[lockin_sweep]` 读取完整路径阻抗、
-  器件最大 RMS 电流和最大 RMS 电压；日常命令不再带这些参数。任何一项缺失、格式错误
-  或超出上限都在打开 VISA 前失败，并把已解析值归档到 JSON。
-- 器件电压保护使用已确认的 `maximum_device_resistance_ohm`，而非直接把 SINE OUT
-  电压当作器件端电压：`Vsine × Rdevice,max / (Rseries + 50 Ω + Rdevice,max)`。
-  `approximate_device_resistance_ohm` 只用于名义电流和分析；它不能替代高阻状态的
-  电阻上界。上界不明确时必须保持保守值，不能为了通过预检而填入平均电阻。
+- 每次激励扫描从忽略的 `hardware.local.toml` `[lockin_sweep]` 读取外部串联电阻、
+  唯一的器件名义电阻估值，以及器件 RMS 电流/电压阈值；日常命令不再带这些参数。
+  配置缺失或名义估值超出阈值时，会在打开 VISA 前失败，并将输入和估值归档到 JSON。
+- 激励预检只使用一个 `approximate_device_resistance_ohm` 名义电阻模型：电流估值为
+  `Vsine / (Rseries + 50 Ω + Rdevice,estimate)`，器件端电压估值为
+  `Iestimate × Rdevice,estimate`。同一组估值分别与配置的 RMS 电流/电压限值比较；这
+  不是实测值或最坏情况保证，不能覆盖器件阻抗变化、开路、短路或接线异常。
 - SR830 的软件最小输出不是电气断开。异常 cleanup 后仍需人工确认实际接线和
   前面板读回。
 - 只读扫频/扫幅分析的电流不是新的独立测量值，而是 `SINE OUT Vrms / 完整串联路径
@@ -598,7 +598,7 @@ fake-VISA/加载器测试，未连接或写入真实仪器。
 2026-08-23：扫频固定激励幅值从 Lock-in 基线字段中分离，新增严格的
 `[lockin_sweep].frequency_source_voltage_v_rms`（0.004--5.0 Vrms）。扫频开始前
 只设置并读回一次 XX `SLVL`，所有频率点记录同一实际 SINE OUT 和由完整串联路径
-计算的名义电流；该幅值在打开 VISA 前按确认的器件电流/电压上限做 fail-closed 预检。
+计算的名义电流；该幅值在打开 VISA 前按统一名义路径估算电流和器件端电压，并与配置阈值比较。
 扫频清理仍将 XX SINE OUT 恢复到固定 4 mVrms 安全基线。`source_voltage_v` 继续表示
 两台 Lock-in 的最小基线，而不再是扫频运行幅值；配置字段、测量记录和日常说明已同步，
 仅 fake-VISA/离线测试覆盖，未连接真实仪器。

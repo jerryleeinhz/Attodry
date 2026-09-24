@@ -2002,3 +2002,15 @@ Status: offline implementation complete (2026-09-01).
 - The live panels render each Matplotlib figure to an explicit `ipywidgets.Image` PNG rather
   than relying on asynchronous `display(fig)` capture. This keeps charts visible when live
   samples arrive through the Notebook event task; no hardware path changed.
+
+## Current Lock-in excitation resistance estimate update (2026-09-24)
+
+Excitation preflight now uses one configured `approximate_device_resistance_ohm`
+for both nominal RMS-current and device-terminal RMS-voltage estimates. The same
+estimated path (`external series + SR830 50 Ω + estimated device resistance`) is
+also archived and used for nominal-current analysis. The separate
+`maximum_device_resistance_ohm` configuration was removed; older local TOMLs must
+delete that now-unknown field. The configured RMS current/voltage limits are still
+checked before VISA access, but these are nominal-model comparisons rather than
+guarantees against impedance changes or electrical faults. No instrument operation
+was performed for this configuration/code change.

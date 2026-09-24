@@ -316,9 +316,11 @@ documents every field:
   short-time stability readings, not guaranteed independent replicas.
 - `external_series_resistance_ohm`, `approximate_device_resistance_ohm`,
   `max_device_current_a_rms`, and `max_device_voltage_v_rms`: current conversion
-  and fail-closed device bounds. Current is calculated with the configured
-  external resistor plus the SR830 50 ohm output resistance plus the approximate
-  device resistance.
+  and nominal current/device-voltage estimates checked against configured RMS
+  limits before VISA opens. Both estimates use the same path: configured
+  external resistor + SR830 50 ohm output resistance + the one approximate
+  device-resistance value. These are nominal estimates, not a worst-case fault
+  guarantee.
 - `external_50_ohm_termination = false`: records the confirmed wiring and is
   rejected by the strict loader if changed to true.
 - `output_directory = "../run_data/commissioning"`: record destination relative

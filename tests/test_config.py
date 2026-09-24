@@ -132,7 +132,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.lockin_sweep.note, "Simulation fixture.")
         self.assertEqual(config.lockin_sweep.external_series_resistance_ohm, 100000.0)
         self.assertEqual(config.lockin_sweep.approximate_device_resistance_ohm, 500.0)
-        self.assertEqual(config.lockin_sweep.maximum_device_resistance_ohm, 500.0)
         self.assertFalse(config.lockin_sweep.external_50_ohm_termination)
         self.assertEqual(
             config.lockin_sweep.output_directory,
@@ -262,7 +261,6 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.lockin_sweep.excitation_xy_harmonics, (1, 2, 3))
         self.assertEqual(len(config.lockin_sweep.excitation_points_v_rms), 32)
         self.assertEqual(config.lockin_sweep.approximate_device_resistance_ohm, 100.0)
-        self.assertEqual(config.lockin_sweep.maximum_device_resistance_ohm, 150.0)
         self.assertIsNone(config.gate_top.max_abs_voltage_v)
         with self.assertRaisesRegex(ConfigError, "Hardware configuration is not ready"):
             config.require_hardware_ready()
@@ -872,12 +870,17 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "frequency_source_voltage_v_rms"):
             self.load_text(text)
 
-    def test_lockin_sweep_rejects_resistance_upper_bound_below_approximation(self) -> None:
+    def test_lockin_sweep_rejects_obsolete_resistance_upper_bound(
+        self,
+    ) -> None:
         text = self.simulation_text().replace(
+            "approximate_device_resistance_ohm = 500.0",
+            "approximate_device_resistance_ohm = 500.0\n"
             "maximum_device_resistance_ohm = 500.0",
-            "maximum_device_resistance_ohm = 499.0",
         )
-        with self.assertRaisesRegex(ConfigError, "maximum_device_resistance_ohm"):
+        with self.assertRaisesRegex(
+            ConfigError, "unknown field.*maximum_device_resistance_ohm"
+        ):
             self.load_text(text)
 
     def test_lockin_sweep_accepts_role_specific_harmonic_combinations(self) -> None:

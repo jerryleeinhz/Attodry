@@ -224,6 +224,9 @@ does **not** reread the computer's current local TOML or require a duplicate
 notebook constant. It uses
 `I_rms = V_sine_out_rms / total_path_resistance_ohm`, taking a recorded SINE OUT
 readback when available and otherwise the archived setpoint.
+The path includes the same approximate device resistance used by excitation
+preflight's nominal current and device-voltage estimates; it is an estimate, not
+an independent current measurement or worst-case device model.
 
 For normal daily JSON, the notebooks and plotting API use that per-record
 snapshot by default. A selection containing different recorded path snapshots is

@@ -283,7 +283,6 @@ class LockinSweepConfig:
     sample_interval_time_constants: float
     external_series_resistance_ohm: float
     approximate_device_resistance_ohm: float
-    maximum_device_resistance_ohm: float
     max_device_current_a_rms: float
     max_device_voltage_v_rms: float
     external_50_ohm_termination: bool
@@ -1586,7 +1585,6 @@ def _parse_lockin_sweep(
             "sample_interval_time_constants",
             "external_series_resistance_ohm",
             "approximate_device_resistance_ohm",
-            "maximum_device_resistance_ohm",
             "max_device_current_a_rms",
             "max_device_voltage_v_rms",
             "external_50_ohm_termination",
@@ -1819,15 +1817,6 @@ def _parse_lockin_sweep(
         table["approximate_device_resistance_ohm"],
         f"{name}.approximate_device_resistance_ohm",
     )
-    maximum_device_resistance_ohm = _nonnegative_number(
-        table["maximum_device_resistance_ohm"],
-        f"{name}.maximum_device_resistance_ohm",
-    )
-    if maximum_device_resistance_ohm < approximate_device_resistance_ohm:
-        raise ConfigError(
-            f"{name}.maximum_device_resistance_ohm must be at least "
-            "approximate_device_resistance_ohm."
-        )
     return LockinSweepConfig(
         frequency_points_hz=frequency_points_hz,
         frequency_ranges=frequency_ranges,
@@ -1863,7 +1852,6 @@ def _parse_lockin_sweep(
             f"{name}.external_series_resistance_ohm",
         ),
         approximate_device_resistance_ohm=approximate_device_resistance_ohm,
-        maximum_device_resistance_ohm=maximum_device_resistance_ohm,
         max_device_current_a_rms=_positive_number(
             table["max_device_current_a_rms"],
             f"{name}.max_device_current_a_rms",

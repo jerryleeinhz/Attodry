@@ -501,10 +501,9 @@ sensitivity_full_scale_v = 0.050
 | `samples_per_point` | 整数，至少 1；版本库示例为 3。 |
 | `sample_interval_time_constants` | 有限非负数；同一点相邻样本间隔为较慢时间常数乘以该倍数。版本库示例为 `1.0`；这是相关的稳定性样本间隔，不是独立重复实验保证。 |
 | `external_series_resistance_ohm` | 正数，单位 Ω；外部串联电阻。SR830 固有 50 Ω 输出阻抗会自动加入。 |
-| `approximate_device_resistance_ohm` | 非负数，单位 Ω；允许为 `0`，但应填写当前可得的器件近似值。 |
-| `maximum_device_resistance_ohm` | 非负数，单位 Ω，且不能小于 `approximate_device_resistance_ohm`；这是操作者确认的器件电阻上界，而不是平均值。扫幅的器件端电压上界按 `Vsine × Rdevice,max / (Rseries + 50 Ω + Rdevice,max)` 计算。高阻、断线或接触异常可能超过这个上界时，必须先更新该值；缺失或不满足约束会在打开 VISA 前失败。 |
-| `max_device_current_a_rms` | 正数，单位 Arms；扫幅的 fail-closed 器件电流上限。 |
-| `max_device_voltage_v_rms` | 正数，单位 Vrms；扫幅的 fail-closed 器件电压上限。 |
+| `approximate_device_resistance_ohm` | 非负数，单位 Ω；允许为 `0`。唯一的器件电阻模型：同一名义总电阻同时用于名义电流和器件端电压估算，再与下面两个 RMS 限值比较。它是估值，不是实测值或故障/状态变化时的最坏情况上界。 |
+| `max_device_current_a_rms` | 正数，单位 Arms；名义模型估算电流不得超过此阈值。 |
+| `max_device_voltage_v_rms` | 正数，单位 Vrms；名义模型估算器件电压不得超过此阈值。 |
 | `external_50_ohm_termination` | 当前接线严格只能是 `false`；加载器拒绝 `true`。 |
 | `output_directory` | 非空相对目录，不能是 `.` 或绝对路径；解析后也必须位于允许的项目目录内。默认 `../run_data/commissioning` 假定 TOML 位于 `config/`，所以落在仓库根的 `run_data/commissioning/`。 |
 
@@ -519,8 +518,14 @@ Lock-in 配置，并且日常 sweep 的安全基线仍要求两台都是 SR830 �
 `SLVL?` 返回并实际用于名义电流、绘图和数据分析的仪器读回值。二者不再要求数值匹配：
 SR830 的幅值量化或显示精度造成的任意差异都会写入审计记录，而不会单独拒绝扫描。读回值
 仍必须是有限、处于 SR830/项目允许范围内的数值，并会按完整串联路径重新检查器件电流和
-器件电压上限；这两项独立安全边界不因取消匹配检查而放宽。每个点同时保存
+器件电压阈值；两项估值分别与各自阈值比较。每个点同时保存
 `requested_nominal_current_a_rms` 与按读回值计算的 `nominal_current_a_rms`。
+
+电流和器件端电压预检均使用同一个名义估算路径
+`external_series_resistance_ohm + 50 Ω + approximate_device_resistance_ohm`。
+这只是基于配置电阻的估值，不是实测值或覆盖阻抗变化、开路、短路和接线异常的
+最坏情况保证。旧本地 TOML 若含已移除的 `maximum_device_resistance_ohm`，严格加载器
+会以未知字段拒绝；删除该行后由单一的 `approximate_device_resistance_ohm` 定义电阻模型。
 
 新的区间表与旧版 `frequency_points_hz`、`excitation_points_v_rms` 互斥；旧数组仍被解析，便于已有
 `hardware.local.toml` 过渡。不要同时填写数组和区间。命令行隐藏的 `--points-hz`/`--points-v`

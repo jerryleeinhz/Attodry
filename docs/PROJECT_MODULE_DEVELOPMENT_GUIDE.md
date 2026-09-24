@@ -203,7 +203,7 @@ time constant 乘 `settle_time_constants` 和 `sample_interval_time_constants` �
 1. 在 open resource 前解析配置、授权和静态安全边界
 2. 打开资源并查询 identity / current state / error or status
 3. 判断当前状态能否安全接管；未知状态不假定为 zero/off
-4. 计算整条请求路径和最坏情况边界
+4. 计算整条请求路径，并明确记录边界是最坏情况上界还是名义估值；不得把估值称作保证
 5. read-before-write，只发送最小且幂等的必要设置
 6. 每次写入后读取实际 readback 和状态
 7. 把 transition/settling 数据与 formal samples 分开

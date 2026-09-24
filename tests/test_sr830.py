@@ -290,11 +290,6 @@ class Sr830Tests(unittest.TestCase):
                 "approximate_device_resistance_ohm = 500.0",
                 1,
             )
-            .replace(
-                "maximum_device_resistance_ohm = 150.0",
-                "maximum_device_resistance_ohm = 500.0",
-                1,
-            )
         )
 
         configured = (
@@ -3514,7 +3509,6 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(
             result["safety"]["approximate_device_resistance_ohm"], 500.0
         )
-        self.assertEqual(result["safety"]["maximum_device_resistance_ohm"], 500.0)
         self.assertFalse(
             result["measurement_config"]["excitation_path"][
                 "external_50_ohm_termination"
@@ -3529,7 +3523,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["cleanup"]["final"]["lockin_xx"]["harmonic"], 1)
         self.assertEqual(result["cleanup"]["final"]["lockin_xy"]["harmonic"], 1)
 
-    def test_cli_excitation_sweep_uses_device_voltage_divider_upper_bound(self) -> None:
+    def test_cli_excitation_sweep_uses_nominal_device_voltage_estimate(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -3557,41 +3551,12 @@ class Sr830Tests(unittest.TestCase):
         result = json.loads(output.getvalue())
         self.assertEqual(exit_code, 0)
         self.assertAlmostEqual(
-            result["safety"]["worst_case_device_voltage_bound_v_rms"],
+            result["safety"]["nominal_maximum_device_voltage_v_rms"],
             2.0 * 500.0 / 100550.0,
         )
         self.assertLess(
-            result["safety"]["worst_case_device_voltage_bound_v_rms"], 0.5
+            result["safety"]["nominal_maximum_device_voltage_v_rms"], 0.5
         )
-
-    def test_cli_excitation_sweep_rejects_high_declared_device_resistance_before_visa(
-        self,
-    ) -> None:
-        config_path = self._hardware_config()
-        config_path.write_text(
-            config_path.read_text(encoding="utf-8").replace(
-                "maximum_device_resistance_ohm = 500.0",
-                "maximum_device_resistance_ohm = 40000.0",
-            ),
-            encoding="utf-8",
-        )
-        unopened = FakeResourceManager({})
-
-        with self.assertRaisesRegex(
-            ValueError, "Worst-case device voltage bound exceeds"
-        ):
-            run(
-                [
-                    "sweep-excitation",
-                    "--config", str(config_path),
-                    "--xx-address", "XX",
-                    "--xy-address", "XY",
-                    "--points-v", "0.004,2.0",
-                ],
-                resource_manager_factory=lambda: unopened,
-            )
-
-        self.assertEqual(unopened.opened, [])
 
     def test_cli_excitation_sweep_clears_range_restoration_overload_before_final_status(self) -> None:
         shared_frequency = {"hz": 17.777}

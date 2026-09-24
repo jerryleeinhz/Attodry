@@ -2388,7 +2388,6 @@ def _resolved_excitation_path(settings: dict[str, object]) -> dict[str, float | 
         "approximate_device_resistance_ohm": (
             sweep.approximate_device_resistance_ohm
         ),
-        "maximum_device_resistance_ohm": sweep.maximum_device_resistance_ohm,
         "nominal_total_resistance_ohm": nominal_total,
         "confirmed_max_device_current_a_rms": sweep.max_device_current_a_rms,
         "confirmed_max_device_voltage_v_rms": sweep.max_device_voltage_v_rms,
@@ -3591,7 +3590,6 @@ def _resolve_sweep_settings(
         args.points_v = sweep.excitation_points_v_rms
         args.point_specs = sweep.excitation_point_specs
         args.range_segments = sweep.excitation_ranges
-        args.maximum_device_resistance_ohm = sweep.maximum_device_resistance_ohm
         args.series_resistance_ohm = sweep.external_series_resistance_ohm
         args.device_resistance_ohm = sweep.approximate_device_resistance_ohm
         args.max_device_current_a = sweep.max_device_current_a_rms
@@ -3614,7 +3612,6 @@ def _resolve_sweep_settings(
     ):
         if getattr(args, argument_name) is None:
             setattr(args, argument_name, configured_value)
-    args.maximum_device_resistance_ohm = sweep.maximum_device_resistance_ohm
 
 
 def _initial_sweep_range_overrides(
@@ -3810,7 +3807,6 @@ def _validate_excitation_safety(
         maximum_source_v,
         series_resistance_ohm=args.series_resistance_ohm,
         device_resistance_ohm=args.device_resistance_ohm,
-        maximum_device_resistance_ohm=args.maximum_device_resistance_ohm,
         max_device_current_a=args.max_device_current_a,
         max_device_voltage_v=args.max_device_voltage_v,
         maximum_allowed_source_v=maximum_allowed_v,
@@ -3825,7 +3821,6 @@ def _validate_frequency_source_safety(
         source_voltage_v,
         series_resistance_ohm=sweep.external_series_resistance_ohm,
         device_resistance_ohm=sweep.approximate_device_resistance_ohm,
-        maximum_device_resistance_ohm=sweep.maximum_device_resistance_ohm,
         max_device_current_a=sweep.max_device_current_a_rms,
         max_device_voltage_v=sweep.max_device_voltage_v_rms,
         maximum_allowed_source_v=config.lockin_safety.maximum_source_voltage_v_rms,
@@ -3837,11 +3832,12 @@ def _calculate_source_voltage_safety(
     *,
     series_resistance_ohm: float,
     device_resistance_ohm: float,
-    maximum_device_resistance_ohm: float,
     max_device_current_a: float,
     max_device_voltage_v: float,
     maximum_allowed_source_v: float = MAXIMUM_SINE_OUTPUT_V,
 ) -> dict[str, float]:
+    """Check nominal path current/voltage estimates against configured limits."""
+
     if (
         not math.isfinite(maximum_source_v)
         or maximum_source_v < MINIMUM_SINE_OUTPUT_V
@@ -3851,43 +3847,31 @@ def _calculate_source_voltage_safety(
             "Source voltage must be within the configured lockin safety range "
             f"{MINIMUM_SINE_OUTPUT_V:g}-{maximum_allowed_source_v:g} V RMS."
         )
-    current_bound_a = maximum_source_v / (
-        series_resistance_ohm + SR830_OUTPUT_RESISTANCE_OHM
-    )
-    voltage_bound_v = maximum_source_v * maximum_device_resistance_ohm / (
-        series_resistance_ohm
-        + SR830_OUTPUT_RESISTANCE_OHM
-        + maximum_device_resistance_ohm
-    )
-    if current_bound_a > max_device_current_a:
-        raise ValueError(
-            "Worst-case current bound exceeds the confirmed device RMS current limit."
-        )
-    if voltage_bound_v > max_device_voltage_v:
-        raise ValueError(
-            "Worst-case device voltage bound exceeds the confirmed device RMS voltage limit."
-        )
     nominal_total = (
         series_resistance_ohm
         + SR830_OUTPUT_RESISTANCE_OHM
         + device_resistance_ohm
     )
     nominal_current_a = maximum_source_v / nominal_total
+    nominal_device_voltage_v = nominal_current_a * device_resistance_ohm
+    if nominal_current_a > max_device_current_a:
+        raise ValueError(
+            "Nominal estimated current exceeds the confirmed device RMS current limit."
+        )
+    if nominal_device_voltage_v > max_device_voltage_v:
+        raise ValueError(
+            "Nominal estimated device voltage exceeds the confirmed device RMS voltage limit."
+        )
     return {
         "series_resistance_ohm": series_resistance_ohm,
         "sr830_output_resistance_ohm": SR830_OUTPUT_RESISTANCE_OHM,
         "approximate_device_resistance_ohm": device_resistance_ohm,
-        "maximum_device_resistance_ohm": maximum_device_resistance_ohm,
         "nominal_total_resistance_ohm": nominal_total,
         "confirmed_max_device_current_a_rms": max_device_current_a,
         "confirmed_max_device_voltage_v_rms": max_device_voltage_v,
         "maximum_source_v_rms": maximum_source_v,
-        "worst_case_current_bound_a_rms": current_bound_a,
-        "worst_case_device_voltage_bound_v_rms": voltage_bound_v,
         "nominal_maximum_current_a_rms": nominal_current_a,
-        "nominal_maximum_device_voltage_v_rms": (
-            nominal_current_a * device_resistance_ohm
-        ),
+        "nominal_maximum_device_voltage_v_rms": nominal_device_voltage_v,
     }
 
 

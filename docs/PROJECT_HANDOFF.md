@@ -2268,6 +2268,19 @@ unknown rather than being reconstructed from event count. Offline tests passed w
 fake/file-only inputs. No real DLL or VISA resource was opened and no hardware
 command was sent.
 
+## Current Lock-in excitation resistance estimate update (2026-09-24)
+
+The daily Lock-in excitation preflight now uses a single nominal device-resistance
+estimate for both current and device-terminal voltage calculations. It computes
+`Iestimate = Vsine / (Rseries + 50 Ω + Rdevice,estimate)` and
+`Vdevice,estimate = Iestimate × Rdevice,estimate`, then compares each estimate
+with its configured RMS threshold before opening VISA. The separate
+`maximum_device_resistance_ohm` input was removed; delete that key from any local
+TOML before using the new loader. This unified nominal model does not guarantee
+protection against changing device impedance, open/short faults, or wiring errors.
+Existing point-current and analysis fields remain named `nominal_current_a_rms`
+to preserve the data contract. No real instrument was queried or written.
+
 ## Immediate next implementation tasks
 
 1. Obtain a distinct, limited real-hardware authorization before any combined DLL/VISA
