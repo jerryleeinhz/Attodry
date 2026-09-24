@@ -233,23 +233,30 @@ produced with different judgment rules reproducible and distinguishable.
 The daily source of truth for the variable path values is the ignored
 `config/hardware.local.toml` `[lockin_sweep]` table:
 `external_series_resistance_ohm` and `approximate_device_resistance_ohm`.
-The known SR830 output resistance is a fixed 50 Ω. Each sweep archives all three
-components and their total in `measurement_config.excitation_path`, so analysis
-does **not** reread the computer's current local TOML or require a duplicate
-notebook constant. It uses
+The known SR830 output resistance is a fixed 50 Ω. New sweeps store stable
+resolved settings once in a sibling `measurement-profile-<sha256>.json` file and
+put a relative `measurement_profile_ref` in each run. The content-addressed ID
+is verified when reading; the profile contains all three path components and
+their total. Analysis does **not** reread the computer's current local TOML or
+require a duplicate notebook constant. It uses
 `I_rms = V_sine_out_rms / total_path_resistance_ohm`, taking a recorded SINE OUT
 readback when available and otherwise the archived setpoint.
 The path includes the same approximate device resistance used by excitation
 preflight's nominal current and device-voltage estimates; it is an estimate, not
 an independent current measurement or worst-case device model.
 
-For normal daily JSON, the notebooks and plotting API use that per-record
-snapshot by default. A selection containing different recorded path snapshots is
-rejected rather than silently mixing current calibrations. Older JSON that lacks
-the snapshot requires the visible `EXCITATION_PATH_OVERRIDE` object; this is an
-explicit legacy-only analysis override and applies to every selected file. It
-does not write an instrument and cannot replace the safety review required before
-the next acquisition.
+For normal daily JSON, the notebooks and plotting API resolve the shared
+profile's `excitation_path`; per-run requested points and timing remain in
+`run_configuration`. Derived safety estimates remain with the run, while
+resistance and confirmed limits are stored only in the profile. Keep profile
+sidecars with run JSON files when copying/moving a data directory. Missing,
+changed, or hash-mismatched profiles fail closed. Older JSON with inline
+`measurement_config.excitation_path` remains supported. A selection containing
+different recorded path snapshots is rejected rather than silently mixing
+current calibrations. Older JSON that lacks the snapshot requires the visible
+`EXCITATION_PATH_OVERRIDE` object; this is an explicit legacy-only analysis
+override and applies to every selected file. It does not write an instrument and
+cannot replace the safety review required before the next acquisition.
 
 Phase uses circular rather than arithmetic statistics across the -180/180-degree
 wrap. The commissioning notebook exposes two display-only quality controls:

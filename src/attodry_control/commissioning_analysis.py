@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from dataclasses import asdict, dataclass, fields, replace
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -497,7 +498,11 @@ def discover_commissioning_records(
     root = Path(directory)
     selected_statuses = _validated_filter(record_statuses, RECORD_STATUSES, "record")
     selected_scans = None if scan_types is None else frozenset(scan_types)
-    paths = tuple(root.rglob("*.json")) + tuple(root.rglob("*.jsonl"))
+    paths = tuple(
+        path
+        for path in (*root.rglob("*.json"), *root.rglob("*.jsonl"))
+        if not path.name.startswith("measurement-profile-")
+    )
     summaries = [summarize_commissioning_file(path) for path in paths]
     summaries = [
         summary
@@ -566,10 +571,11 @@ def excitation_path_from_sweep_files(
 ) -> ExcitationPathResistance:
     """Resolve one analysis path from recorded sweep metadata or an override.
 
-    New sweep JSON files archive the complete path in
-    ``measurement_config.excitation_path``. All selected files must agree so a
-    plotted condition cannot silently combine incompatible current calibrations.
-    An explicit override is reserved for legacy records that lack this metadata.
+    New sweep JSON files reference an immutable shared settings profile; legacy
+    records may still archive the path inline in ``measurement_config``. All
+    selected files must agree so a plotted condition cannot silently combine
+    incompatible current calibrations. An explicit override is reserved for
+    legacy records that lack this metadata.
     """
 
     selected_paths = tuple(Path(path) for path in paths)
@@ -586,7 +592,7 @@ def excitation_path_from_sweep_files(
             "frequency_excitation",
         }:
             raise ValueError(f"{path} is not a supported lock-in sweep.")
-        recorded = _recorded_excitation_path(payload)
+        recorded = _recorded_excitation_path(payload, path)
         if recorded is None:
             raise ValueError(
                 f"{path.name} has no recorded measurement_config.excitation_path; "
@@ -629,7 +635,7 @@ def load_sweep_samples(
     if unknown_roles:
         raise ValueError(f"Unknown roles: {sorted(unknown_roles)}")
     record_status = "completed" if completed else "rejected"
-    recorded_excitation_path = _recorded_excitation_path(payload)
+    recorded_excitation_path = _recorded_excitation_path(payload, Path(path))
     rows: list[CommissioningSample] = []
     points = payload.get("points", [])
     if not isinstance(points, list):
@@ -3642,14 +3648,16 @@ def _formal_selected_roles(sample: Mapping[str, object]) -> tuple[str, ...]:
 
 def _recorded_excitation_path(
     payload: Mapping[str, object],
+    record_path: Path,
 ) -> ExcitationPathResistance | None:
-    """Read a complete path snapshot from a current sweep JSON record.
+    """Read a current path from an inline legacy config or shared profile.
 
-    Older records predate the snapshot and return ``None``. A present but malformed
-    snapshot is an audit error rather than a reason to silently choose a path.
+    Older records predate either snapshot format and return ``None``. A present
+    but malformed or changed profile is an audit error rather than a reason to
+    silently choose a path.
     """
 
-    measurement_config = payload.get("measurement_config")
+    measurement_config = _measurement_config_for_record(payload, record_path)
     if not isinstance(measurement_config, Mapping):
         return None
     excitation_path = measurement_config.get("excitation_path")
@@ -3672,6 +3680,63 @@ def _recorded_excitation_path(
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("measurement_config.excitation_path is invalid.") from exc
+
+
+def _measurement_config_for_record(
+    payload: Mapping[str, object], record_path: Path
+) -> Mapping[str, object] | None:
+    inline = payload.get("measurement_config")
+    if isinstance(inline, Mapping):
+        return inline
+    if inline is not None:
+        raise ValueError("measurement_config must be an object when present.")
+
+    reference = payload.get("measurement_profile_ref")
+    if reference is None:
+        return None
+    if not isinstance(reference, Mapping):
+        raise ValueError("measurement_profile_ref must be an object.")
+    profile_id = reference.get("id")
+    relative_path = reference.get("path")
+    if not isinstance(profile_id, str) or not profile_id.startswith("sha256:"):
+        raise ValueError("measurement_profile_ref.id must be a sha256 ID.")
+    digest = profile_id.removeprefix("sha256:")
+    if len(digest) != 64:
+        raise ValueError("measurement_profile_ref.id has an invalid SHA-256 value.")
+    try:
+        int(digest, 16)
+    except ValueError as exc:
+        raise ValueError("measurement_profile_ref.id has an invalid SHA-256 value.") from exc
+    expected_relative = Path(f"measurement-profile-{digest}.json")
+    if not isinstance(relative_path, str) or Path(relative_path) != expected_relative:
+        raise ValueError("measurement_profile_ref.path does not match its profile ID.")
+    record_directory = record_path.parent.resolve()
+    profile_path = (record_directory / expected_relative).resolve()
+    try:
+        profile_path.relative_to(record_directory)
+    except ValueError as exc:
+        raise ValueError("Measurement profile path escapes the record directory.") from exc
+    try:
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"Referenced measurement profile is unavailable or invalid: {profile_path}"
+        ) from exc
+    if not isinstance(profile, Mapping):
+        raise ValueError("Referenced measurement profile must contain an object.")
+    try:
+        canonical = json.dumps(
+            profile, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Referenced measurement profile is not valid JSON data.") from exc
+    actual_digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if actual_digest != digest:
+        raise ValueError("Referenced measurement profile failed its SHA-256 check.")
+    if profile.get("profile_schema_version") != 1:
+        raise ValueError("Referenced measurement profile has an unsupported schema.")
+    return profile
 
 
 def _commissioning_sample(

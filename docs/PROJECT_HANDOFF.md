@@ -6,18 +6,31 @@ Last updated: 2026-09-24
 
 ### SR830 browser checkboxes and combined-axis exclusions (2026-09-24)
 
-The commissioning notebook retains Frequency, Excitation, and f × e categories,
-with a checkbox at the right of every file. Top labels and wrapping filenames
-remove clipped descriptions; refresh preserves selections still in the catalog.
-Existing per-file frequency/excitation point exclusions remain. Combined records
-now expose separate requested-frequency and requested-excitation exclusions,
-applied across every selected combined file and archived in the export manifest.
-Fixed the missing global combined-loaded-rows assignment so filtering can restore
-the original selection. Reload resets exclusions; raw records stay unchanged.
-Validation: 37 commissioning-analysis tests passed, including multi-file selection,
-per-file exclusions, combined row/column removal and restoration. Real ipywidgets
-8.1.8 rendered at 1280/760 px with no horizontal overflow; browser checkbox
-interaction passed. This change is confined to offline analysis.
+The commissioning notebook retains separate Frequency, Excitation, and f × e
+categories, now collapsed until opened. Each list shows file names with a checkbox;
+archived run-condition summaries are hidden, and multi-run paired-comparison
+settings are in a separate collapsed section. Refresh preserves checked files
+still in the catalog.
+
+Frequency/excitation exclusions are global requested-axis coordinates across all
+selected records. Labels show only requested frequency or estimated excitation
+current plus point index/indices, not source JSON names. f × e exclusions remove
+requested frequency rows or excitation columns globally. Unequal point counts do
+not block overlay plotting; paired differences use only coordinates common to the
+baseline. The export manifest records coordinate exclusions.
+
+New sweep run JSONs reference a content-addressed sibling
+`measurement-profile-<sha256>.json` via `measurement_profile_ref`. Profiles
+deduplicate stable resolved instrument/safety/resistance settings; the per-run
+`run_configuration` retains scan-specific points/timing, and run JSON keeps only
+per-run safety estimates. Hashes are verified during analysis; absent/modified
+profiles fail closed. Legacy inline `measurement_config` remains supported, but
+profile sidecars must accompany copied/moved runs.
+
+Validation: 136 commissioning notebook, SR830, and profile/analysis tests passed
+(6 optional skips), including unequal point counts, global exclusions, profile
+deduplication, legacy loading, hash checking, collapsed sections, and notebook
+code compilation. No hardware I/O.
 
 ### Four-changing-axis bounded hardware validation passed (2026-09-24)
 

@@ -1,11 +1,14 @@
 import json
 from dataclasses import replace
+import hashlib
 import math
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import types
 import unittest
+import uuid
 from unittest.mock import patch
 
 from attodry_control.commissioning_analysis import (
@@ -296,6 +299,57 @@ class CommissioningAnalysisTests(unittest.TestCase):
             ),
             override,
         )
+
+    def test_sweep_loader_resolves_shared_hashed_measurement_profiles(self) -> None:
+        directory = PROJECT_ROOT / "tests"
+        tag = uuid.uuid4().hex
+        profile = {
+            "profile_schema_version": 1,
+            "test_tag": tag,
+            "excitation_path": {
+                "series_resistance_ohm": 100_000.0,
+                "sr830_output_resistance_ohm": 50.0,
+                "approximate_device_resistance_ohm": 500.0,
+            },
+        }
+        canonical = json.dumps(
+            profile, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        profile_path = directory / f"measurement-profile-{digest}.json"
+        record_path = directory / f"shared-profile-{tag}.json"
+        self.addCleanup(profile_path.unlink, missing_ok=True)
+        self.addCleanup(record_path.unlink, missing_ok=True)
+        profile_path.write_text(
+            json.dumps(profile), encoding="utf-8"
+        )
+        payload = self._sweep(completed=True)
+        payload["measurement_profile_ref"] = {
+            "id": f"sha256:{digest}",
+            "path": f"measurement-profile-{digest}.json",
+        }
+        record_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        rows = load_sweep_samples(record_path)
+        self.assertEqual(rows[0].recorded_external_series_resistance_ohm, 100_000.0)
+        self.assertEqual(rows[0].recorded_approximate_device_resistance_ohm, 500.0)
+        self.assertEqual(
+            excitation_path_from_sweep_files([record_path]),
+            ExcitationPathResistance(100_000.0, 50.0, 500.0),
+        )
+        catalog_paths = {
+            record.path
+            for record in discover_commissioning_records(
+                directory, scan_types={"frequency"}
+            )
+        }
+        self.assertIn(record_path, catalog_paths)
+        self.assertNotIn(profile_path, catalog_paths)
+
+        profile["excitation_path"]["series_resistance_ohm"] = 200_000.0
+        profile_path.write_text(json.dumps(profile), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "SHA-256 check"):
+            load_sweep_samples(record_path)
 
     def test_role_harmonic_plots_have_voltage_and_phase_axes(self) -> None:
         try:
@@ -769,6 +823,11 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("load_selected_records_button.on_click", code)
         self.assertIn("frequency_record_widget", code)
         self.assertIn("excitation_record_widget", code)
+        self.assertIn("record_categories_widget.selected_index = None", code)
+        self.assertIn("repeatability_options_widget.selected_index = None", code)
+        self.assertNotIn("condition_message", code)
+        self.assertNotIn("_condition_summary", code)
+        self.assertIn("paired differences use only shared requested coordinates", code)
         self.assertIn("frequency_excluded_points_widget", code)
         self.assertIn("excitation_excluded_points_widget", code)
         self.assertIn("apply_point_exclusions_button", code)
@@ -819,6 +878,43 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertIn("excitation_path_from_sweep_files", code)
         self.assertIn("EXCITATION_PATH_OVERRIDE", code)
         self.assertNotIn("EXTERNAL_SERIES_RESISTANCE_OHM", code)
+
+    def test_notebook_exclusions_are_global_coordinates_and_allow_unequal_runs(self) -> None:
+        first_payload = self._sweep(completed=True)
+        first_payload["scan"] = "excitation"
+        first_payload["measurement_config"] = self._measurement_config_path()
+        first_payload["points"][0]["point_index"] = 0
+        second_point = {
+            **first_payload["points"][0],
+            "point_index": 1,
+            "source_v_rms": 0.008,
+        }
+        first_payload["points"].append(second_point)
+        first = self._write_json("first.json", first_payload)
+
+        second_payload = self._sweep(completed=True)
+        second_payload["scan"] = "excitation"
+        second_payload["measurement_config"] = self._measurement_config_path()
+        second = self._write_json("second.json", second_payload)
+
+        scope = self._notebook_selector_scope(first.parent)
+        scope["excitation_record_widget"].value = (str(first), str(second))
+        scope["_load_selected_records"](None)
+
+        self.assertEqual(len(scope["excitation_rows"]), 6)
+        options = scope["excitation_excluded_points_widget"].options
+        self.assertEqual([value for _, value in options], [0.004, 0.008])
+        labels = [label for label, _ in options]
+        self.assertTrue(all("point(s) #" in label for label in labels))
+        self.assertTrue(all("first.json" not in label and "second.json" not in label for label in labels))
+        self.assertEqual(scope["excitation_record_widget"].title, "Excitation")
+        self.assertEqual(scope["record_categories_widget"].selected_index, None)
+
+        scope["excitation_excluded_points_widget"].value = (0.004,)
+        scope["_apply_point_exclusions"](None)
+        self.assertEqual(len(scope["excitation_rows"]), 2)
+        self.assertEqual({row.source_path for row in scope["excitation_rows"]}, {str(first)})
+        self.assertEqual({row.source_v_rms for row in scope["excitation_rows"]}, {0.008})
 
     def test_notebook_load_button_populates_selected_point_options(self) -> None:
         payload = self._sweep(completed=True)
@@ -889,14 +985,13 @@ class CommissioningAnalysisTests(unittest.TestCase):
             {row.source_path for row in scope["excitation_rows"]},
             {str(first), str(second)},
         )
-        # A single point exclusion remains specific to its selected source file.
+        # A coordinate exclusion applies to every selected source file.
         options = scope["excitation_excluded_points_widget"].options
-        key = next(value for _, value in options if str(first) in value)
+        self.assertTrue(all(str(first) not in label and str(second) not in label for label, _ in options))
+        key = options[0][1]
         scope["excitation_excluded_points_widget"].value = (key,)
         scope["_apply_point_exclusions"](None)
-        self.assertEqual(
-            {row.source_path for row in scope["excitation_rows"]}, {str(second)}
-        )
+        self.assertEqual(scope["excitation_rows"], ())
         selector._checkboxes[str(first)].value = False
         scope["_load_selected_records"](None)
         self.assertEqual(selector.value, (str(second),))
@@ -1180,6 +1275,13 @@ def _fake_notebook_widgets() -> types.ModuleType:
         def on_click(self, callback: object) -> None:
             self.callback = callback
 
+        def set_title(self, index: int, title: str) -> None:
+            titles = list(getattr(self, "titles", ()))
+            while len(titles) <= index:
+                titles.append("")
+            titles[index] = title
+            self.titles = tuple(titles)
+
     widgets = types.ModuleType("ipywidgets")
     widgets.Checkbox = Widget
     widgets.SelectMultiple = Widget
@@ -1188,6 +1290,7 @@ def _fake_notebook_widgets() -> types.ModuleType:
     widgets.HTML = Widget
     widgets.HBox = Widget
     widgets.VBox = Widget
+    widgets.Accordion = Widget
     widgets.Layout = lambda **kwargs: kwargs
     return widgets
 

@@ -133,8 +133,9 @@ Vxx 5.384 mV 的占比约 53.8%，但这不保证新的温度、磁场、门压�
 该安全文件同样不保存或审核 Reserve 模式；Reserve 只在角色 TOML 以 SR830 已知枚举值
 设置，实际写入仍有独立的读回、状态和 cleanup 检查。
 两条日常 sweep 自动读取后者，操作者不需要先运行 `validate-config`；该命令只是可选
-的无 VISA 离线检查。每条 JSON 的 `measurement_config` 保存解析后的策略和 SHA-256，
-便于按历史记录复现安全边界。驱动层仍映射完整 SR830 电压量程（包含 1 V/SENS 26），
+的无 VISA 离线检查。每条 sweep JSON 通过 `measurement_profile_ref` 引用按内容
+SHA-256 命名的共享档案，集中保存解析后的策略、配置和电阻值；读取历史记录时会验证
+哈希。每次运行独有的扫描条件仍留在 run JSON。驱动层仍映射完整 SR830 电压量程（包含 1 V/SENS 26），
 但只有安全文件列出的档位能用于日常运行。
 
 | 字段 | 含义与确认值 | 约束 |
@@ -304,9 +305,10 @@ Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可
 - 只读扫频/扫幅分析的电流不是新的独立测量值，而是 `SINE OUT Vrms / 完整串联路径
   电阻`。日常扫描路径的可变电阻只在忽略提交的 `hardware.local.toml` 的
   `[lockin_sweep]` 表中设置：`external_series_resistance_ohm` 和
-  `approximate_device_resistance_ohm`；固定 SR830 输出阻抗为 50 Ω。每次 sweep 把三项
-  和总阻抗归档进 JSON 的 `measurement_config.excitation_path`。Notebook 默认使用该
-  历史快照，不会复制或重读当前本机 TOML；只有没有该快照的旧 JSON 才需显式的
+  `approximate_device_resistance_ohm`；固定 SR830 输出阻抗为 50 Ω。每种稳定设置只归档
+  一份 `measurement-profile-<sha256>.json`，run JSON 通过 `measurement_profile_ref` 引用。
+  Notebook 默认使用该历史快照，不会复制或重读当前本机 TOML；旧格式内嵌
+  `measurement_config.excitation_path` 仍可读，早于该字段的 JSON 才需显式的
   `EXCITATION_PATH_OVERRIDE`。该覆盖只改变只读绘图标尺，不写仪器，也不能替代下一次
   激励扫描所需的安全确认。
 
@@ -563,8 +565,9 @@ h1/h2/h3、有界高频跳过、1.5 s settle、每点三个样本、0.3 s 间隔
 逐次接线 confirm 不再是运行参数。日常只需 `sweep-frequency` 或
 `sweep-excitation`；严格预检失败时不会开始扫描，但 TOML 不能替代对 XY SINE OUT 实际
 断开的物理检查。每次已打开双机的尝试都会原子保存到 `output_directory`（默认仓库根
-`run_data/commissioning`），带 `completed`/`rejected`/`interrupted` 状态。JSON 的无
-VISA 地址 `measurement_config` 是已解析 TOML 请求；实际读回保留在 preflight、point 和
+`run_data/commissioning`），带 `completed`/`rejected`/`interrupted` 状态。run JSON 通过
+`measurement_profile_ref` 引用不含 VISA 地址的稳定解析设置；本次点位/时序放在
+`run_configuration`。实际读回保留在 preflight、point 和
 cleanup。扫频点也记录由配置的 4 mVrms 与完整串联路径算出的名义电流。日常操作顺序和
 所有字段说明见
 [`../LOCKIN_DAILY_OPERATION.md`](../LOCKIN_DAILY_OPERATION.md)。

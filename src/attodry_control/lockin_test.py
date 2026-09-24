@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack
+from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import hashlib
@@ -2572,9 +2573,10 @@ def _emit_sweep_result(
     *,
     progress_writer: _JsonlProgressWriter | None = None,
 ) -> None:
+    stored_result: dict[str, object] | None = None
     try:
-        _save_sweep_result(record_directory, result)
-    except OSError as exc:
+        stored_result = _save_sweep_result(record_directory, result)
+    except (OSError, TypeError, ValueError) as exc:
         result["completed"] = False
         result["outcome"] = "rejected"
         result["recording_error"] = str(exc)
@@ -2595,33 +2597,129 @@ def _emit_sweep_result(
                 "error": result.get("error"),
             }
         )
-    print(json.dumps(result, indent=2, ensure_ascii=False), flush=True)
+    print(json.dumps(stored_result or result, indent=2, ensure_ascii=False), flush=True)
     if "recording_error" in result:
         raise Sr830Error("Sweep audit record could not be saved.")
 
 
 def _save_sweep_result(
     output_directory: Path, result: dict[str, object]
-) -> None:
+) -> dict[str, object]:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     run_metadata = result.get("run_metadata")
     if not isinstance(run_metadata, dict):
         raise ValueError("Sweep results must include run_metadata.")
+    measurement_config = result.get("measurement_config")
+    output_directory.mkdir(parents=True, exist_ok=True)
+    stored_result = deepcopy(result)
+    if isinstance(measurement_config, Mapping):
+        run_configuration = {
+            "schema_version": measurement_config.get("schema_version"),
+            "scan": measurement_config.get("scan"),
+            "sweep": deepcopy(measurement_config.get("sweep")),
+        }
+        if not isinstance(run_configuration["sweep"], Mapping):
+            raise ValueError("Sweep measurement_config must include a sweep snapshot.")
+        profile = _measurement_profile_snapshot(measurement_config)
+        canonical_profile = json.dumps(
+            profile, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            allow_nan=False,
+        )
+        profile_digest = hashlib.sha256(canonical_profile.encode("utf-8")).hexdigest()
+        profile_path = output_directory / f"measurement-profile-{profile_digest}.json"
+        if profile_path.exists():
+            try:
+                existing_profile = json.loads(profile_path.read_text(encoding="utf-8"))
+                existing_canonical = json.dumps(
+                    existing_profile, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"), allow_nan=False,
+                )
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise OSError(
+                    f"Existing measurement profile is unreadable: {profile_path}"
+                ) from exc
+            if hashlib.sha256(existing_canonical.encode("utf-8")).hexdigest() != profile_digest:
+                raise OSError(
+                    f"Existing measurement profile failed its content hash: {profile_path}"
+                )
+        else:
+            _write_json_atomically(profile_path, profile, prefix=".measurement_profile_")
+        stored_result.pop("measurement_config", None)
+        stored_result["measurement_profile_ref"] = {
+            "id": f"sha256:{profile_digest}",
+            "path": f"measurement-profile-{profile_digest}.json",
+        }
+        stored_result["run_configuration"] = run_configuration
+        for key in ("safety", "source_readback_safety"):
+            if key in stored_result:
+                stored_result[key] = _compact_safety_estimate(stored_result[key])
+        points = stored_result.get("points")
+        if isinstance(points, list):
+            for point in points:
+                if isinstance(point, dict) and "source_readback_safety" in point:
+                    point["source_readback_safety"] = _compact_safety_estimate(
+                        point["source_readback_safety"]
+            )
+
     run_name = _sweep_filename_label(run_metadata.get("name"))
     destination = output_directory / (
         f"{timestamp}_{run_name}_{result['scan']}_{result['outcome']}.json"
     )
-    serialized = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
+    _write_json_atomically(destination, stored_result, prefix=".lockin_sweep_")
+    return stored_result
+
+
+def _measurement_profile_snapshot(
+    measurement_config: Mapping[str, object],
+) -> dict[str, object]:
+    """Keep stable resolved settings once, apart from per-run sweep conditions."""
+    profile = {
+        "profile_schema_version": 1,
+        "measurement_config_schema_version": measurement_config.get("schema_version"),
+        **{
+            key: deepcopy(value)
+            for key, value in measurement_config.items()
+            if key not in {"schema_version", "scan", "sweep", "excitation_path"}
+        },
+    }
+    excitation_path = measurement_config.get("excitation_path")
+    if not isinstance(excitation_path, Mapping):
+        raise ValueError("Sweep measurement_config must include excitation_path.")
+    per_run_safety = {
+        "maximum_source_v_rms",
+        "nominal_maximum_current_a_rms",
+        "nominal_maximum_device_voltage_v_rms",
+    }
+    profile["excitation_path"] = {
+        key: deepcopy(value)
+        for key, value in excitation_path.items()
+        if key not in per_run_safety
+    }
+    return profile
+
+
+def _compact_safety_estimate(value: object) -> object:
+    """Leave per-run estimates but refer to shared resistance/limit settings."""
+    if not isinstance(value, Mapping):
+        return value
+    per_run_keys = (
+        "maximum_source_v_rms",
+        "nominal_maximum_current_a_rms",
+        "nominal_maximum_device_voltage_v_rms",
+    )
+    return {key: value[key] for key in per_run_keys if key in value}
+
+
+def _write_json_atomically(
+    destination: Path, payload: Mapping[str, object], *, prefix: str
+) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            "w",
-            encoding="utf-8",
-            newline="\n",
-            dir=output_directory,
-            prefix=".lockin_sweep_",
-            suffix=".tmp",
-            delete=False,
+            "w", encoding="utf-8", newline="\n", dir=destination.parent,
+            prefix=prefix, suffix=".tmp", delete=False,
         ) as temporary:
             temporary.write(serialized)
             temporary_path = Path(temporary.name)

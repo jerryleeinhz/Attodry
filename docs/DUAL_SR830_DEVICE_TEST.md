@@ -351,10 +351,12 @@ front-panel verification.
 Once the VISA pair has opened, every attempted scan writes an atomic JSON result
 under `output_directory`, including `completed`, `rejected`, and `interrupted`
 outcomes. `run_metadata` preserves the configured per-run name and note.
-`measurement_config` is an address-free snapshot of the resolved TOML request
-(scan points, harmonics, sensitivity, timing, and circuit/device limits); the
-actual SR830 readbacks remain in `preflight`, `sensitivity_setup`, each point,
-and `cleanup`. Failure to write the audit file fails the command rather than
+New records reference a sibling `measurement-profile-<sha256>.json` for shared,
+address-free resolved instrument, safety, and resistance settings; the per-run
+`run_configuration` retains scan points, harmonics, and timing. The profile
+reference is checked against the file contents when analysis reads it. Actual
+SR830 readbacks remain in `preflight`, `sensitivity_setup`, each point, and
+`cleanup`. Failure to write the audit file fails the command rather than
 reporting an unarchived measurement as complete.
 
 Both daily sweep commands derive their transition interval as the slower XX/XY

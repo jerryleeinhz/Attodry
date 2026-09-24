@@ -4,18 +4,28 @@ Update this file whenever a feature is completed. A stage is complete only when 
 
 ## SR830 browser selection and axis exclusions (2026-09-24)
 
-- Keep Frequency, Excitation, and f × e as three separate file lists, with a
-  right-side checkbox per record. Above-control labels and wrapping filenames
-  fix clipping; refreshed catalogs preserve still-available selections.
-- Preserve standalone per-file point exclusions; add requested-frequency and
-  requested-SINE-OUT exclusion lists for combined records. Either excluded axis
-  value removes matching rows across all selected combined files. Clearing
-  exclusions restores loaded rows, and reload resets the lists.
-- Persist combined exclusions in the export manifest. Corrected the missing
-  global combined-loaded-rows assignment used by the filtering callbacks.
-- Validation: 37 commissioning-analysis tests passed. Actual ipywidgets 8.1.8
-  controls rendered without horizontal overflow at 1280/760 px; independent
-  right-side checkbox interaction passed in the browser. No hardware I/O.
+- Keep Frequency, Excitation, and f × e as three separate, initially collapsed
+  record categories. Their record lists contain file names and checkboxes only;
+  archived run-condition summaries are hidden. Multi-run paired-comparison
+  settings are in their own collapsed section.
+- Frequency/excitation exclusions are keyed to requested axis values and apply
+  across all selected records. Labels show only the requested frequency or
+  estimated excitation current and the associated point index/indices, never
+  the JSON filename. f × e exclusions continue to remove requested frequency
+  rows or excitation columns across all selected files.
+- Different run point counts are supported. Overlay figures retain all samples;
+  paired-difference summaries use only coordinates shared with the baseline.
+  The export manifest records axis-coordinate exclusions.
+- Sweep records now reference a deduplicated sibling `measurement-profile-<sha256>.json`;
+  the immutable profile holds stable resolved instrument/safety/resistance settings,
+  while `run_configuration` holds scan-specific conditions. Run JSONs retain only
+  per-run safety estimates, not repeated resistance settings. Readers verify the
+  profile hash, continue to accept legacy inline `measurement_config`, and fail
+  closed for missing or changed profiles. Copy/move the profile sidecar with runs.
+- Validation: commissioning notebook tests and SR830/profile/analysis tests passed:
+  136 total, 6 optional skips. Coverage includes unequal point counts, global
+  coordinate exclusions, deduplication, legacy loading, hash verification,
+  collapsed notebook sections, and notebook code compilation. No hardware I/O.
 
 ## Bounded four-changing-axis hardware validation (2026-09-24; passed)
 

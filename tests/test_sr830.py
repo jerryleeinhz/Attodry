@@ -6,12 +6,14 @@ import shutil
 import tempfile
 from typing import Callable
 import unittest
+import uuid
 from unittest.mock import patch
 
 import attodry_control.config as config_module
 from attodry_control.lockin_test import (
     _consume_and_verify_harmonic_transition,
     _consume_sensitivity_transition,
+    _save_sweep_result,
     _sweep_requested_frequency_tolerance_hz,
     _verify_requested_sweep_frequency_readbacks,
     build_parser,
@@ -219,6 +221,103 @@ class Sr830Tests(unittest.TestCase):
         )
         self._load_config_patch.start()
         self.addCleanup(self._load_config_patch.stop)
+
+    def test_sweep_writer_deduplicates_stable_measurement_profiles(self) -> None:
+        output_directory = Path(__file__).resolve().parent
+        tag = uuid.uuid4().hex
+        run_prefix = f"profile-writer-{tag}"
+        stable_config = {
+            "source": "resolved_hardware_toml",
+            "readback_location": "preflight and per-point records",
+            "source_readback_policy": "record requests and readbacks",
+            "frequency_readback_policy": "record requests and readbacks",
+            "output_overload_policy": "retained for audit",
+            "status_recheck_policy": "recheck overload latches",
+            "setting_writes_enabled_by_command": True,
+            "lockin_safety": {"maximum_source_voltage_v_rms": 5.0},
+            "lockin_safety_path": f"profile-writer-test-{tag}.toml",
+            "lockin_safety_sha256": "a" * 64,
+            "lockin_xx": {"sensitivity_full_scale_v": 1.0},
+            "lockin_xy": {"sensitivity_full_scale_v": 0.1},
+            "excitation_path": {
+                "series_resistance_ohm": 100_000.0,
+                "sr830_output_resistance_ohm": 50.0,
+                "approximate_device_resistance_ohm": 500.0,
+                "nominal_total_resistance_ohm": 100_550.0,
+                "confirmed_max_device_current_a_rms": 1e-6,
+                "confirmed_max_device_voltage_v_rms": 0.5,
+                "external_50_ohm_termination": False,
+                "maximum_source_v_rms": 0.004,
+                "nominal_maximum_current_a_rms": 0.004 / 100_550.0,
+                "nominal_maximum_device_voltage_v_rms": 0.004 * 500.0 / 100_550.0,
+            },
+        }
+
+        def run_result(name: str, scan: str, source_v: float) -> dict[str, object]:
+            measurement_config = {
+                "schema_version": 12,
+                "scan": scan,
+                **stable_config,
+                "sweep": {"points": [source_v], "settle_interval_s": 1.0},
+                "excitation_path": {
+                    **stable_config["excitation_path"],
+                    "maximum_source_v_rms": source_v,
+                    "nominal_maximum_current_a_rms": source_v / 100_550.0,
+                    "nominal_maximum_device_voltage_v_rms": source_v * 500.0 / 100_550.0,
+                },
+            }
+            safety = {
+                "series_resistance_ohm": 100_000.0,
+                "approximate_device_resistance_ohm": 500.0,
+                "nominal_total_resistance_ohm": 100_550.0,
+                "maximum_source_v_rms": source_v,
+                "nominal_maximum_current_a_rms": source_v / 100_550.0,
+                "nominal_maximum_device_voltage_v_rms": source_v * 500.0 / 100_550.0,
+            }
+            return {
+                "scan": scan,
+                "outcome": "completed",
+                "completed": True,
+                "run_metadata": {"name": f"{run_prefix}-{name}", "note": ""},
+                "measurement_config": measurement_config,
+                "safety": safety,
+                "points": [{"source_readback_safety": safety}],
+            }
+
+        def cleanup_generated_files() -> None:
+            for path in output_directory.glob(f"*{run_prefix}-*.json"):
+                path.unlink(missing_ok=True)
+            for path in output_directory.glob("measurement-profile-*.json"):
+                try:
+                    profile = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if profile.get("lockin_safety_path") == f"profile-writer-test-{tag}.toml":
+                    path.unlink(missing_ok=True)
+
+        self.addCleanup(cleanup_generated_files)
+        first = _save_sweep_result(
+            output_directory, run_result("first", "excitation", 0.004)
+        )
+        second = _save_sweep_result(
+            output_directory, run_result("second", "frequency", 0.008)
+        )
+        self.assertEqual(
+            first["measurement_profile_ref"], second["measurement_profile_ref"]
+        )
+        tagged_profiles = [
+            path for path in output_directory.glob("measurement-profile-*.json")
+            if json.loads(path.read_text(encoding="utf-8")).get("lockin_safety_path")
+            == f"profile-writer-test-{tag}.toml"
+        ]
+        self.assertEqual(len(tagged_profiles), 1)
+        self.assertNotIn("series_resistance_ohm", first["safety"])
+        self.assertNotIn(
+            "series_resistance_ohm", first["points"][0]["source_readback_safety"]
+        )
+        self.assertEqual(first["run_configuration"]["scan"], "excitation")
+        self.assertEqual(second["run_configuration"]["scan"], "frequency")
+        self.assertEqual(len(tuple(output_directory.glob(f"*{run_prefix}-*.json"))), 2)
 
     @staticmethod
     def _fixed_codes(*, external: bool):
@@ -1740,14 +1839,22 @@ class Sr830Tests(unittest.TestCase):
                 "note": "Replace this note before every daily sweep.",
             },
         )
-        self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
+        self.assertNotIn("measurement_config", result)
+        self.assertEqual(result["run_configuration"]["schema_version"], 12)
         self.assertEqual(
-            result["measurement_config"]["source"], "resolved_hardware_toml"
-        )
-        self.assertEqual(
-            result["measurement_config"]["sweep"]["run_name"],
+            result["run_configuration"]["sweep"]["run_name"],
             "replace_before_run",
         )
+        self.assertNotIn("series_resistance_ohm", result["source_readback_safety"])
+        profile = json.loads(
+            (record_directory / result["measurement_profile_ref"]["path"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(profile["source"], "resolved_hardware_toml")
+        self.assertNotIn("sweep", profile)
+        self.assertNotIn("address", profile["lockin_xx"])
+        self.assertEqual(profile["excitation_path"]["series_resistance_ohm"], 100_000.0)
         self.assertIn("_replace_before_run_frequency_completed.json", record_paths[0].name)
 
     def test_frequency_sweep_records_actual_quantized_frequency(self) -> None:
@@ -1843,7 +1950,7 @@ class Sr830Tests(unittest.TestCase):
             [write for write in xx_resource.writes if write.startswith("SENS ")],
             ["SENS 22", "SENS 21", "SENS 23"],
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 12)
+        self.assertEqual(result["run_configuration"]["schema_version"], 12)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -2642,8 +2749,8 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["measurement_config"]["schema_version"], 12)
-        self.assertNotIn("address", result["measurement_config"]["lockin_xx"])
+        self.assertEqual(result["run_configuration"]["schema_version"], 12)
+        self.assertNotIn("measurement_config", result)
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
             [transition["harmonic"] for transition in result["points"][0]["harmonic_transition_status"]],
@@ -3376,7 +3483,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(result["sample_interval_time_constants"], 1.0)
         self.assertEqual(result["sample_interval_s"], 0.3)
         self.assertAlmostEqual(
-            result["measurement_config"]["sweep"]["settle_interval_s"],
+            result["run_configuration"]["sweep"]["settle_interval_s"],
             1.8,
         )
 
@@ -3487,12 +3594,13 @@ class Sr830Tests(unittest.TestCase):
         )
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
+        config_path = self._hardware_config()
 
         with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
             exit_code = run(
                 [
                     "sweep-excitation",
-                    "--config", str(self._hardware_config()),
+                    "--config", str(config_path),
                     "--xx-address", "XX",
                     "--xy-address", "XY",
                     "--points-v", "0.004,0.4",
@@ -3505,16 +3613,21 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(result["completed"])
         self.assertEqual(result["requested_harmonics"], [1, 2, 3])
-        self.assertEqual(result["safety"]["series_resistance_ohm"], 100000.0)
-        self.assertEqual(
-            result["safety"]["approximate_device_resistance_ohm"], 500.0
+        self.assertNotIn("series_resistance_ohm", result["safety"])
+        record_directory = config_path.parent / "run_data" / (
+            f"lockin_commissioning_{config_path.stem}"
         )
+        profile = json.loads(
+            (record_directory / result["measurement_profile_ref"]["path"]).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(profile["excitation_path"]["series_resistance_ohm"], 100_000.0)
+        self.assertEqual(profile["excitation_path"]["approximate_device_resistance_ohm"], 500.0)
         self.assertFalse(
-            result["measurement_config"]["excitation_path"][
-                "external_50_ohm_termination"
-            ]
+            profile["excitation_path"]["external_50_ohm_termination"]
         )
-        self.assertNotIn("address", result["measurement_config"]["lockin_xy"])
+        self.assertNotIn("measurement_config", result)
         self.assertEqual(len(result["points"][1]["samples"]), 3)
         self.assertEqual(
             [sample["lockin_xy"]["reading"]["harmonic"] for sample in result["points"][1]["samples"]],

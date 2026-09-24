@@ -248,7 +248,8 @@ completed
 outcome                 # completed / rejected / interrupted
 captured_at_utc
 run_metadata            # run_name, note, software/git version
-measurement_config      # 本地原始记录中的已解析配置和实际 role/resource
+measurement_profile_ref # 相对路径 + SHA-256 ID，引用一次保存的稳定配置档案
+run_configuration       # 本次扫描独有的点位、量程计划和时序
 safety_policy           # resolved values + hash（若有独立 policy）
 preflight
 interface_clear         # 若执行过
@@ -273,6 +274,11 @@ error
 semantic role 与足以区分仪器的 identity/serial。若某个既有模块按明确项目策略使用
 address-free 原始快照，也必须记录该省略规则和可唯一辨认仪器的 identity；不能静默
 删掉复现所需信息。Git 不提交本机地址与 ignored 原始记录保存实际地址并不冲突。
+
+SR830 sweep 记录把稳定仪器/电阻设置存入旁置的
+`measurement-profile-<sha256>.json`；多条相同配置的 run JSON 只保存
+`measurement_profile_ref`，不重复嵌入电阻。profile 按内容校验，移动数据时必须连同
+旁置文件一起移动。旧 run JSON 中的内嵌 `measurement_config` 仍可读取。
 
 ### 7.2 必须保留的内容
 

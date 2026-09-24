@@ -145,8 +145,11 @@ DC gain。Expand 另行增加输出缩放，不提高动态储备。
 [SRS SR830 手册](https://www.thinksrs.com/downloads/PDFs/Manuals/SR830m.pdf)。当前版本化
 安全策略仍只允许 `normal`；上面的其他模式说明用于理解仪器，不构成日常写入授权。
 
-每个 sweep JSON 的 `measurement_config` 会保存解析后的 `lockin_safety`、文件路径和
-SHA-256。这样即使以后安全协议改变，历史数据仍能还原当次允许的量程和时序。SR830
+每个 sweep JSON 通过 `measurement_profile_ref` 引用同目录下按内容 SHA-256 命名的
+`measurement-profile-<sha256>.json`。该档案集中保存解析后的 `lockin_safety`、文件路径、
+哈希和其他稳定仪器/电阻设置；每次运行只保留引用和独有的 `run_configuration`。读取时
+会验证档案内容哈希，档案缺失或改变就拒绝用它复算。这样相同设置只存一份，同时以后
+安全协议改变时历史数据仍能还原当次允许的量程和时序。SR830
 的 `FREQ?` 显示精度会随频率改变，因此 sweep 不再因为请求频率、XX 读回和 XY 读回的
 数值差异而拒绝；它们全部作为观测值记录。仍会拒绝非有限、低于 1 mHz 或高于 102 kHz
 的读回，以及 `LIAS?` 报告的 reference-unlocked、overload、错误和不安全转换状态。
@@ -529,7 +532,7 @@ SR830 的幅值量化或显示精度造成的任意差异都会写入审计记�
 新的区间表与旧版 `frequency_points_hz`、`excitation_points_v_rms` 互斥；旧数组仍被解析，便于已有
 `hardware.local.toml` 过渡。不要同时填写数组和区间。命令行隐藏的 `--points-hz`/`--points-v`
 覆盖仍可用于一次性离线测试，此时不带区间级量程覆盖。每个 JSON 的
-`measurement_config.sweep.range_segments`、`point_range_plan` 以及每点的
+`run_configuration.sweep.range_segments`、`point_range_plan` 以及每点的
 `range_segment_index`/`range_transition` 保存展开后的实际计划和量程切换证据。
 
 ### 频率×幅值二维扫描
@@ -596,17 +599,18 @@ run_data/commissioning/20260822T123456123456Z_sample_A_excitation_rejected.json
 - `rejected`：预检、正式样本或 cleanup 出现不安全/不匹配/通信错误。
 - `interrupted`：收到中断后已尝试 cleanup。
 
-每个 JSON 的根部都有 `run_metadata.name` 和 `run_metadata.note`，并在地址无关的
-`measurement_config` 中保留同一份已解析 TOML：请求配置、扫描点、量程、时序和
-激励路径。每个正式样本的 `selected_roles` 标出该阶数实际纳入曲线的 XX/XY；另一台
-SR830 的同时读回仍完整保留并参与安全判决。实际 SR830 读回位于同文件的 `preflight`、`sensitivity_setup`、每点记录
+每个 JSON 的根部都有 `run_metadata.name` 和 `run_metadata.note`。新记录用
+`measurement_profile_ref` 引用同目录下不可变的共享设置档案；每次运行独有的扫描类型、
+请求点、量程和时序放在 `run_configuration`。移动数据时必须连同引用的 profile 文件一起
+移动。每个正式样本的 `selected_roles` 标出该阶数实际纳入曲线的 XX/XY；另一台 SR830 的
+同时读回仍完整保留并参与安全判决。实际 SR830 读回位于同文件的 `preflight`、`sensitivity_setup`、每点记录
 和 `cleanup`；扫频点的 XX `FREQ?` 读回同时写为 `actual_frequency_hz`。因此不要把
-`measurement_config` 单独当作硬件读回证据。若归档写入
+配置档案或 `run_configuration` 单独当作硬件读回证据。若归档写入
 失败，命令以失败退出，避免把未保存的数据误报为完成。
 
-分析电流时，Notebook 和 Python API 默认只使用该 JSON 中归档的
-`measurement_config.excitation_path`，不会从当前的 `hardware.local.toml` 重新读取或
-要求再填一套电阻。这样历史文件保留其实际使用的换算标尺。只有早于该字段的旧 JSON
+分析电流时，Notebook 和 Python API 默认只使用该 JSON 引用 profile 中的
+`excitation_path`，不会从当前的 `hardware.local.toml` 重新读取或要求再填一套电阻。
+旧格式内嵌的 `measurement_config.excitation_path` 仍可读取。这样历史文件保留其实际使用的换算标尺。只有早于该字段的旧 JSON
 才需在 Notebook 的 `EXCITATION_PATH_OVERRIDE` 显式填写完整路径；它是只读分析覆盖，
 不改变本次或下次扫描的安全配置。若同时选择的文件归档了不同路径，Notebook 会拒绝把
 它们混成同一条电流曲线。
