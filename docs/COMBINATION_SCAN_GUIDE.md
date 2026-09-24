@@ -1,15 +1,18 @@
-# Four-module combination scans — offline-tested hardware coordinator
+# Four-module combination scans — bounded hardware validation complete
 
-Status: 2026-09-23. The real-driver coordinator now includes temperature, magnetic,
-SMU and fixed-frequency Lock-in excitation. It is **not jointly hardware
-commissioned**. All work in this checkpoint uses fake DLL/VISA, never instruments.
+Status: 2026-09-24. The real-driver coordinator includes temperature, magnetic,
+SMU and fixed-frequency Lock-in excitation. Bounded joint hardware validation
+passed: two four-point electrical nesting orders and one 24-point grid with all
+four axes varying, clean verified cleanup, file-only monitoring and analysis.
+See [the acceptance record](MULTI_AXIS_ACCEPTANCE_20260924.md) for exact scope,
+actual temperature ranges, data hashes and unresolved historical faults.
 
-Final verification: **638/638 guarded tests** locally (117.888 s) and on LK_setup
-lyr Python 3.12.13 (145.473 s), zero errors/failures/skips. Includes all 64 selected
-module permutations with fake devices. Exact source hashes and isolated target
-test logs are in PROJECT_HANDOFF's current stage; this is not real commissioning.
+Current verification: **644/644 guarded tests**, latest local rerun 126.899 s;
+unchanged runtime previously passed target lyr 644/644 in 143.182 s. No failures,
+errors or skips. All 64 module subsets/orders are fake-tested; this does not mean
+all 64 physical orders, fault cases or output ranges have been commissioned.
 
-## 真实驱动组合入口（目前仅离线验收）
+## 真实驱动组合入口（已完成限定范围实机验收）
 
 使用 `combination_hardware.py`、`cryostat_points.py`、`lockin_points.py`
 和 Three-SMU 单点接口。四模块支持任意非空子集及排列（共 64 种），
@@ -73,7 +76,7 @@ $env:PYTHONPATH = (Resolve-Path .\src).Path
 python -m attodry_control.combination_cli describe-hardware --config config/hardware.local.toml
 ```
 
-下面是未来**专门授权联合实机验收后**的写命令，不是本次已运行的命令：
+下面是**取得对应范围授权、核对私有 TOML 后**的实机写命令模板；不要直接沿用旧配置或 run-id：
 
 ```powershell
 New-Item -ItemType Directory -Force run_data/combination
@@ -288,12 +291,14 @@ journal-specific figure or compliance claim.
 
 ## Remaining acceptance work
 
-1. Joint hardware commissioning requires newly scoped connection/status/write
-   authorization, current wiring and DC+AC total sample-limit review. Start with
-   one fixed point, then tiny two-module grids before a four-module grid; test
-   interruption and verify physical cleanup. Offline results are not acceptance.
+1. The bounded normal four-axis path and two electrical orders have passed real
+   validation. Other physical orders, sample/wiring/output envelopes and deliberate
+   interruption/fault cases need scoped authorization and their own evidence.
+   Historical XY overload and 5-mT-command/readback discrepancy remain unresolved.
+   For strict temperature-target equilibrium, choose appropriate target-mode
+   tolerance/dwell rather than treating stable-readback acceptance as equilibration.
 2. If needed, add Lock-in frequency/frequency-excitation axes separately, retaining
    harmonic-range and transition policies. Current Lock-in axis is excitation only.
 
-The code implements the shared four-module path, but its real joint operation,
-thermal behavior, magnetic history and physical cleanup remain uncommissioned.
+The shared real path is validated within the recorded small-range experiment;
+this is not certification of all physical trajectories, faults or precision.

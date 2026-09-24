@@ -7,13 +7,17 @@ Three-SMU direct points 和 Magnetic。新增任意组合的**模拟执行器**�
 记录、只读 run/condition/attempt/cleanup 监控，以及
 [`combination_analysis.ipynb`](notebooks/combination_analysis.ipynb)。
 SMU 外层、激励内层的数据可按激励重组为 SMU I–V；每个组合点都重新采样。
-2026-09-23：真实驱动执行器已接入 Temperature、Magnetic、SMU 和固定频率双 SR830
-excitation，支持任意非空子集与顺序；温度/磁场共用一个连接。仅离线假仪器验证，
-尚未联合实机验收，Lock-in frequency 轴和硬件 resume 仍未支持。
-这不代表真实四模块执行器已接线或验收。命令、记录格式、旧数据适配和剩余工作见
+2026-09-24：真实驱动执行器已完成限定范围的联合实机验证：两种电学嵌套顺序各 4 点，
+以及 Temperature × ordered Magnetic × gate SMU × Lock-in excitation 的 24 点扫描，
+共 32 点有效且清理确认。温度/磁场共用连接，监控仅读 SQLite；64 种模块子集/顺序
+全部经过假仪器测试，并非逐一实机验收。Lock-in frequency 轴和硬件 resume 仍未支持。
+温控采用读回稳定判据，目标 2.1 K 不等于每点实测均为 2.1 K；必须使用保存的实际温度。
+范围、最终仪器状态及遗留限制见
+[`MULTI_AXIS_ACCEPTANCE_20260924.md`](docs/MULTI_AXIS_ACCEPTANCE_20260924.md)。
+下文较早的未验收描述保留为历史检查点；命令、记录格式、旧数据适配和剩余工作见
 [`COMBINATION_SCAN_GUIDE.md`](docs/COMBINATION_SCAN_GUIDE.md)。
-Three-SMU 的最新实机范围为 bottom-only 小电压扫描；下文旧 S0/未验收描述不是
-对全部历史 commissioning 的概括，其余角色及联合运行仍需独立验收。
+Three-SMU 实机范围还包括此前 bottom-only 小电压扫描；本次唯一启用的 smu_bias
+物理上是独立栅极，未启用的其他 SMU 角色不因此视为已验收。
 
 当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。Standalone magnetic-field 模块的 M0–M2 离线验证和 M3–M5 小场实机验收已完成：X/Z +0.1 T 单目标、各轴 ±0.1 T 正负往返及 0.05 T 离散圆周均通过，且逐次验证回零（2026-09-14）。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常命令读取统一的 `hardware.local.toml`；SMU 实机验收、主 acquisition 集成和端到端硬件路径尚未完成，后续真实磁场运行仍需限定范围的显式授权。
 

@@ -2,6 +2,24 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Bounded four-changing-axis hardware validation (2026-09-24; passed)
+
+- Following operator panel confirmation/authorization, clear fresh diagnosis and
+  unchanged safety policy: gate x excitation 4/4, reversed electrical nesting
+  4/4, then T x ordered B x gate x excitation 24/24, all process exit 0 and clean.
+- T targets 2/2.1 K; Z 0/0.05/0 T with X zero; gate 0/0.01 V and 1-uA compliance;
+  XX 4/8 mVrms, XX/XY h1/h2. All four axes actually changed in the full grid.
+- Final actual/setpoint field zero, gate zero/OFF, SR830 h1/4 mV, temperature
+  holding target 2.1 K with final actual 2.0958 K. Stable-readback acceptance is
+  NOT strict 2.1-K equilibrium: formal means at this target were 2.02319-2.09571 K.
+- File-only monitor and local/remote raw-data hashes verified; 32 default-analysis
+  samples regroup correctly for XY h1/h2 without merging run or field-revisit IDs.
+- Runtime unchanged. Fresh local guarded suite 644/644 in 126.899 s, no failures,
+  errors/skips, including 64 fake module orders; deployed 113-file hashes checked.
+- Bounded normal-path commissioning only; real induced fault/interruption tests,
+  all 64 physical orders and unexplained historical XY overload/5-mT mismatch
+  remain outside this pass. See MULTI_AXIS_ACCEPTANCE_20260924.md for evidence.
+
 ## Gate/excitation 2x2 hardware acceptance (2026-09-24; preflight blocked)
 
 - No runtime changes; local and exact-target offline validation passed for four

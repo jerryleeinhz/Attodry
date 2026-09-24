@@ -1,5 +1,10 @@
 # Joint hardware acceptance — bounded 50-mT pass and retained failure evidence
 
+Subsequent operator-confirmed validation passed both electrical loop orders and
+a 24-point four-changing-axis grid. See
+[MULTI_AXIS_ACCEPTANCE_20260924.md](MULTI_AXIS_ACCEPTANCE_20260924.md).
+The following outcomes remain historical evidence, not the latest pending state.
+
 ## Latest attempt: gate/excitation 2x2 rejected before writes
 
 After the operator approved the next step, the planned four conditions were

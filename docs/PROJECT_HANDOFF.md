@@ -4,7 +4,30 @@ Last updated: 2026-09-24
 
 ## Current stage
 
+### Four-changing-axis bounded hardware validation passed (2026-09-24)
+
+Operator confirmed no visible XY OVLD and authorized completion. Fresh four-sample
+SR830 diagnosis was clear. Three runs passed: gate x excitation 4/4, reversed
+excitation x gate 4/4, then T x ordered B x gate x excitation 24/24; all exit 0,
+clean verified cleanup, no retry within this stage. Runtime/safety policy unchanged.
+Full grid: T targets 2/2.1 K, Z 0/0.05/0 T, X zero, gate 0/0.01 V at 1-uA compliance,
+XX 4/8 mVrms; XX/XY h1/h2, ranges 1 V/50 mV. Normal final actual/setpoint X/Z zero,
+gate zero/OFF, both SR830 h1/4 mV, temperature held at target 2.1 K, actual 2.0958 K.
+Important: stable-readback is not strict target equilibration. The 2.1-K target's
+formal-window actual means spanned 2.02319-2.09571 K; use actual.temperature_k.
+File-only monitoring, integrity/hash verification, exact ordered 24-point path,
+32-row combined loading and excitation-indexed gate regrouping passed. All 64
+module subsets/orders remain fake-tested, not all individually hardware-tested.
+Fresh local guarded regression: 644/644, 126.899 s, no failures/errors/skips.
+Prior target 644-test receipt retained; 113 deployed source hashes reverified.
+No protection bypass; historical XY overload and 5-mT mismatch causes unresolved.
+Details, raw-data locations, SHA-256 and scope limitations:
+[MULTI_AXIS_ACCEPTANCE_20260924.md](MULTI_AXIS_ACCEPTANCE_20260924.md).
+
 ### Gate/excitation 2x2 acceptance blocked at preflight (2026-09-24)
+
+Historical checkpoint; the later operator-confirmed validation above supersedes
+the request to wait for panel review, but does not relabel the rejected run.
 
 After approval to continue, prepared and offline-validated gate 0/0.01 V x XX
 4/8 mVrms, fixed target T 2 K and X/Z zero; same 1 V/1 uA SMU ceilings, XX/XY
