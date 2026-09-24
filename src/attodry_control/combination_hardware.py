@@ -306,7 +306,7 @@ class HardwareCombinationStation:
         elif module in {"temperature", "magnetic"} and self.cryo is not None:
             try:
                 result = self.cryo.cleanup(module, failed)
-                clean = result["verified"]
+                clean = result["verified"] and not result.get("scan_limits_violated", False)
             except BaseException as exc:
                 state = self.cryo.driver.last_confirmed_state if self.cryo.driver is not None else None
                 result = {"verified": False, "error": f"{type(exc).__name__}: {exc}",

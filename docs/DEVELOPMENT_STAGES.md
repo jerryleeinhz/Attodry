@@ -2,7 +2,41 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
-## Joint hardware acceptance blocked by field mismatch (2026-09-24)
+## Integrated zero/disable cleanup recovery (2026-09-24; bounded real pass)
+
+- Reproduced the real field-envelope failure with a failing fake-DLL regression:
+  no sweep-to-zero command was sent under the old audited-reader policy.
+- Added a scoped recovery readback policy solely for already-owned zero/disable
+  cleanup. Universal resultant <=3 T remains mandatory; normal targets, scans,
+  hold, standalone operation and all error/control/finite-read checks stay strict.
+- Original limits are not mutated; scope resets even on errors. No point writes
+  after cleanup. Zero must acknowledge and dwell at actual zero; failed magnetic
+  cleanup cannot prevent an independent eligible temperature-disable attempt.
+- Recovery-time scan violations are retained and reject even an otherwise clean
+  run with a finally verified zero. No default-analysis promotion of failed runs.
+- Six new tests; local full guarded regression 644/644 in 121.119 s, no failures,
+  errors or skips. Initial sandbox test hit temporary-directory ACL errors; the
+  failing reproduction and passing suite ran outside that sandbox with real
+  pyvisa/qcodes/serial imports and Windows DLL loads blocked.
+- Target exact lyr: 644/644, 143.182 s, zero failures/errors/skips, exit 0. All 113
+  archive-file hashes verified before tests; isolated source/archive provenance
+  is in PROJECT_HANDOFF. Initial PowerShell/stderr-interrupted receipt retained.
+- Following explicit Z 0/0.05/0 T authorization and GUI exit, read-only preflight
+  confirmed actual/setpoint X/Z zero in 10/10 samples. First retry v2 rejected XY
+  overload before setting writes; four clean status samples preceded one retry.
+- joint-z50mT-20260924-v3 completed all three conditions, exit 0, clean verified
+  cleanup. All four modules active; only B varied, T/gate/excitation fixed.
+  Final actual/setpoint X/Z zero, gate zero/OFF, both SR830 h1/4 mV, T held at 2 K.
+  Full record, measured temperature/field ranges and raw-data hash are in
+  JOINT_ACCEPTANCE_20260924.md. Default analysis: v3 three rows; failed v2 zero.
+- This does not certify all hardware subsets/orders or multi-axis changing grids.
+  Out-of-envelope fault recovery remains fake-tested only; the original 5-mT
+  command/readback discrepancy and intermittent XY overload cause are unresolved.
+
+## Historical joint hardware attempt blocked by field mismatch (2026-09-24)
+
+Retained failure checkpoint; subsequent authorized recovery and bounded pass
+are recorded above, without relabeling this failed attempt.
 
 - User-authorized apply-toml completed: XY 50 mV, XX 1 V, clear statuses,
   4 mV excitation. Existing 300 ms time constants retained; settling 5.1 s.

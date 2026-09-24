@@ -105,6 +105,21 @@ hold 是保留控制器当前目标/控制状态，不是 persistent-mode 命令
 人工核验，不能因后续清理读回正常而抹去通信不确定性。
 硬退出/断电不能由 Python 保证安全；不允许在旧 run 上自动重开硬件。
 
+联合清理的越界恢复（2026-09-24）：正常扫描、目标写入和 hold 仍严格使用本次 TOML
+限值。只有已接管轴的 monitored-zero / failure-disable 动作，才允许读取超出较小
+实验限值但仍在通用合场 <=3 T 内的状态；不会把扫描限值改为 3 T，也不会继续扫描。
+非有限/不完整读回、设备 error 和未知控制状态仍拒绝；回零要求磁场控制已开启，
+不因 cleanup 自动开启它。回零超时后仍独立尝试关闭已设置的温控。
+新增 recovery-action、readback envelope 和首次 scan-limit violation 审计。
+即使最终回零验证成功，清理期间越界也使整次运行失败、默认分析排除并要求人工核验。
+普通 standalone 磁场驱动保持原来的实验限值检查，不隐式采用此联合恢复策略。
+
+`[magnetic_field_run].max_step_t` 是内部请求点间距，不是 T/min。
+`[magnet].wait_timeout_s` 是等待稳定的最长时间，不会延后越界保护；
+`stable_dwell_s` / `poll_interval_s` 分别控制稳定确认窗口与查询间隔。
+当前 legacy DLL 公开头文件没有 ramp-rate setter。历史小场验收使用 7200 s 超时，
+不代表任何点必须等待两小时，也不能保证物理 ramp 速度或忽略实际场越界。
+
 SQLite 仍为 combination-v1，硬件记录明确 `simulated=false`；配置快照保存解析值、
 实际 role/resource、源码哈希，preflight 保存 IDN，原始角色读数先于完整样本保存。
 默认分析只接收 completed + accepted + clean + verified cleanup。

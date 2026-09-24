@@ -12,6 +12,7 @@ from attodry_control.combination_cli import run as cli
 from attodry_control.combination_hardware import load_hardware_combination, run_hardware_combination
 from attodry_control.combination_store import CombinationStore
 from attodry_control.cryostat_points import CryostatPointSession
+from attodry_control.attodry import AttoDryError, AttoDryTimeout
 from tests.test_attodry import FakeAttoDryDll, StepClock
 from tests import test_combination_hardware as fixtures
 
@@ -238,6 +239,154 @@ segments = [
         self.assertIn("sweep_zero", self.dll.events)
         self.assertEqual(self.dll.temperature_control, 0)
         self.assertTrue(result["cleanup"]["manual_verification_required"])
+
+    def test_field_envelope_trip_still_zeroes_and_disables_temperature(self):
+        source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
+        source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
+        source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
+        source = source.replace('{ bx_t = 0.0, bz_t = 0.0 },', '{ bx_t = 0.0, bz_t = 0.005 },')
+        self.write_config(("temperature", "magnetic"), source=source)
+        original = self.dll.AttoDRY_Interface_setUserMagneticFieldZ
+        def overshoot(value):
+            result = original(value)
+            self.dll.bz_t = .026
+            return result
+        self.dll.AttoDRY_Interface_setUserMagneticFieldZ = overshoot
+        result = self.execute()
+        self.assertEqual(result["status"], "failed", result)
+        self.assertIn("exceeds 0.02", result["error"])
+        self.assertIn("sweep_zero", self.dll.events)
+        self.assertEqual(self.dll.events.count("set_field_z"), 1)
+        self.assertEqual(self.dll.temperature_control, 0)
+        actions = {a["module"]: a for a in result["cleanup"]["actions"]}
+        for module in ("magnetic", "temperature"):
+            self.assertTrue(actions[module]["result"]["verified"], actions)
+            self.assertFalse(actions[module]["clean"])
+        self.assertTrue(result["cleanup"]["manual_verification_required"])
+        self.assertEqual(load_combination_rows(self.database), ())
+        self.assertTrue(any(kind == "cryostat_state" and
+                            payload["state"]["field"]["bz_t"] > .02
+                            for kind, payload in self.events()))
+
+    def recovery_session(self):
+        source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
+        source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
+        source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
+        self.write_config(("temperature", "magnetic"), source=source)
+        config = load_hardware_combination(self.path)
+        events = []
+        session = CryostatPointSession(config.cryostat, config.temperature, config.magnetic,
+            lambda kind, payload: events.append((kind, payload)), dll=self.dll,
+            monotonic=StepClock(), sleep=lambda _: None)
+        session.open()
+        self.addCleanup(session.close)
+        session.touched.update(("temperature", "magnetic"))
+        self.dll.field_control = self.dll.temperature_control = 1
+        return session, events
+
+    def test_recovery_waits_for_actual_zero_and_restores_scan_checks(self):
+        session, events = self.recovery_session()
+        original_limits = session.driver.limits
+        self.dll.bz_t = .03
+        self.dll.setpoint_z_t = .005
+        def slow_zero():
+            self.dll.setpoint_x_t = self.dll.setpoint_z_t = 0
+            return self.dll._code("sweep_zero")
+        self.dll.AttoDRY_Interface_sweepFieldToZero = slow_zero
+        original = self.dll.AttoDRY_Interface_getMagneticFieldZ
+        def read(pointer):
+            if "sweep_zero" in self.dll.events:
+                self.dll.bz_t = max(0, self.dll.bz_t - .005)
+            return original(pointer)
+        self.dll.AttoDRY_Interface_getMagneticFieldZ = read
+        result = session.cleanup("magnetic", True)
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["scan_limits_violated"])
+        self.assertLess(result["state"]["field"]["bz_t"], 1e-9)
+        self.assertTrue(any(k == "cryostat_state" and p["state"]["field"]["bz_t"] > .02
+                            and p["recovery_action"] == "zero" for k, p in events))
+        self.assertIs(session.driver.limits, original_limits)
+        self.assertIsNone(session.recovery_action)
+        with self.assertRaisesRegex(AttoDryError, "Cannot resume"):
+            session.apply("magnetic", None)
+        self.dll.AttoDRY_Interface_getMagneticFieldZ = original
+        self.dll.bz_t = .03
+        with self.assertRaisesRegex(ValueError, "exceeds 0.02"):
+            session.driver.read_state()
+
+    def test_failed_zero_does_not_block_independent_temperature_disable(self):
+        session, _ = self.recovery_session()
+        self.dll.bz_t = .03
+        def stuck_zero():
+            self.dll.setpoint_x_t = self.dll.setpoint_z_t = 0
+            return self.dll._code("sweep_zero")
+        self.dll.AttoDRY_Interface_sweepFieldToZero = stuck_zero
+        with self.assertRaises(AttoDryTimeout):
+            session.cleanup("magnetic", True)
+        self.assertIsNone(session.recovery_action)
+        result = session.cleanup("temperature", True)
+        self.assertTrue(result["verified"])
+        self.assertTrue(result["scan_limits_violated"])
+        self.assertEqual(self.dll.temperature_control, 0)
+        self.assertAlmostEqual(self.dll.bz_t, .03)
+        self.assertEqual(self.dll.events.count("sweep_zero"), 1)
+        self.assertIsNone(session.recovery_action)
+
+    def test_recovery_rejects_hard_limits_faults_unknown_reads_and_disabled_control(self):
+        session, _ = self.recovery_session()
+        cases = ({"bz_t": 3.01}, {"bx_t": 2.2, "bz_t": 2.2},
+                 {"setpoint_z_t": 3.01}, {"error_code": 35},
+                 {"field_control": 0}, {"bz_t": float("nan")},
+                 {"return_codes": {"get_field_x": 1}})
+        for values in cases:
+            with self.subTest(values=values):
+                self.dll.bx_t = self.dll.bz_t = 0
+                self.dll.setpoint_x_t = self.dll.setpoint_z_t = 0
+                self.dll.error_code = 0
+                self.dll.field_control = 1
+                self.dll.return_codes = {}
+                for key, value in values.items():
+                    setattr(self.dll, key, value)
+                with self.assertRaises((AttoDryError, ValueError)):
+                    session.cleanup("magnetic", True)
+                self.assertIsNone(session.recovery_action)
+                self.assertNotIn("sweep_zero", self.dll.events)
+                self.assertNotIn("toggle_field_control", self.dll.events)
+
+    def test_normal_hold_does_not_use_recovery_envelope(self):
+        session, _ = self.recovery_session()
+        self.dll.bz_t = .03
+        with self.assertRaisesRegex(ValueError, "exceeds 0.02"):
+            session.cleanup("magnetic", False)
+        self.assertIsNone(session.recovery_action)
+        self.assertNotIn("sweep_zero", self.dll.events)
+
+    def test_trip_during_normal_zero_rejects_run_despite_verified_recovery(self):
+        source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
+        source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
+        source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
+        source = source.replace('normal_end_field_policy = "hold"', 'normal_end_field_policy = "zero"')
+        self.write_config(("temperature", "magnetic"), source=source)
+        original = self.dll.AttoDRY_Interface_sweepFieldToZero
+        def overshoot():
+            result = original()
+            self.dll.bz_t = .03
+            return result
+        self.dll.AttoDRY_Interface_sweepFieldToZero = overshoot
+        getter = self.dll.AttoDRY_Interface_getMagneticFieldZ
+        def read(pointer):
+            result = getter(pointer)
+            if "sweep_zero" in self.dll.events:
+                self.dll.bz_t = 0
+            return result
+        self.dll.AttoDRY_Interface_getMagneticFieldZ = read
+        result = self.execute()
+        self.assertEqual(result["status"], "failed", result)
+        actions = {a["module"]: a for a in result["cleanup"]["actions"]}
+        self.assertTrue(actions["magnetic"]["result"]["verified"])
+        self.assertTrue(actions["magnetic"]["result"]["scan_limits_violated"])
+        self.assertEqual(self.dll.temperature_control, 0)
+        self.assertEqual(load_combination_rows(self.database), ())
 
     def test_audit_failure_does_not_skip_safety_actions(self):
         self.write_config(("temperature", "magnetic", "smu"))

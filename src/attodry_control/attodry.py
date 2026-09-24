@@ -1204,11 +1204,16 @@ class AttoDryDriver:
     def _validate_field_state(
         self, state: CryostatState, *, require_control: bool = False
     ) -> None:
-        validate_vector_field(state.field, self.limits)
-        validate_vector_field(state.field_setpoint, self.limits)
+        limits = self._field_readback_limits()
+        validate_vector_field(state.field, limits)
+        validate_vector_field(state.field_setpoint, limits)
         self._require_clear_error(state)
         if require_control and not state.field_control_enabled:
             raise AttoDryError("Field control is not confirmed enabled.")
+
+    def _field_readback_limits(self) -> MagnetLimits:
+        """Readback policy; requested targets always use the configured limits."""
+        return self.limits
 
     @staticmethod
     def _field_matches(actual: VectorField, expected: VectorField) -> bool:

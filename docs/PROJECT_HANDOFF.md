@@ -4,7 +4,59 @@ Last updated: 2026-09-24
 
 ## Current stage
 
-### Joint hardware attempt stopped; field recovery unverified (2026-09-24)
+### Scoped cleanup recovery / 50-mT joint acceptance (2026-09-24; bounded real pass)
+
+Operator reports manual zero and explicitly approves Z 0 -> 0.05 -> 0 T, X 0,
+then confirms vendor GUI exited and permits field commands. This supersedes the
+prior manual-recovery request, but does not independently prove current zero.
+New fake-DLL regression reproduced the missing zero command after a 0.02-T trip.
+Integrated cleanup now permits only zero/temperature-disable recovery readbacks
+inside the universal 3-T envelope; original target/scan/hold limits remain intact.
+Recovered scan-limit violations still reject the run, including first violations
+during normal zero. Invalid reads/errors/disabled field control cannot certify zero;
+scanning cannot resume after cleanup. Standalone readback policy is unchanged.
+Local guarded regression: 644/644, zero failures/errors/skips, 121.119 s.
+Six new regressions cover the real envelope failure, slow/stuck zero, independent
+temperature shutdown, hard bounds/errors/nonfinite/communication/control failures,
+normal hold and a normal-zero trip. Target lyr guarded regression also passed
+644/644 in 143.182 s, zero failures/errors/skips, exit 0. The first target launch
+was interrupted by PowerShell treating unittest stderr progress as a terminating
+NativeCommandError; its incomplete receipt is retained, not counted as passing.
+Fresh read-only preflight passed 10/10 samples with actual/setpoint X/Z zero.
+The first retry (joint-z50mT-20260924-v2) rejected an XY input/reserve overload
+before setting writes. Four subsequent status samples, 3 s apart, were clear;
+one identical-plan retry (joint-z50mT-20260924-v3) completed with exit 0 and all
+three conditions accepted, 07:08:13-07:15:27 UTC. Both attempts are retained.
+All four modules participated, but only the ordered field axis varied; this is
+not real validation of every module subset/order or a multi-axis changing grid.
+Final verified state: actual/setpoint X/Z zero, gate setpoint zero/output OFF,
+both Lock-ins h1/4 mV with clear statuses, T control holding 2 K (actual 1.9999 K).
+Normal zero cleanup passed; out-of-scan-envelope recovery was tested with fakes,
+not deliberately induced on hardware. Earlier 5-mT mismatch remains unresolved.
+SQLite integrity and local/remote SHA-256 match; default analysis returns exactly
+3 accepted rows for v3 and zero for v2. See JOINT_ACCEPTANCE_20260924.md.
+
+Target isolated source: `C:/Users/LK_Setup/Yuanrong Li/Integration_recovery_20260924/source`.
+Archive SHA-256: `1321dac57c11efc38f3b006647d72ba4f83dbb1ce098966f757293cfc31cb2df`;
+all 113 tracked source/test/tool/template/Notebook files were hash-verified before
+target tests. Runtime/test files match this local working revision; docs changed
+after packaging. Exact lyr interpreter, source-first PYTHONPATH and user-site off.
+No ignored hardware configs or DLLs were in the archive; the private plan was
+transferred separately. Earlier source/experiments and failed raw data preserved.
+
+Executed private plan: Z 0/0.05/0 T, max_step 0.05 T, timeout 7200 s, unchanged
+1-mT tolerance/0.5-mT range/10-s dwell/1-s polling. Z/resultant scan guard 0.051 T
+includes the existing 1-mT tolerance; X guard remains 0.02 T. Initial T target 2 K,
+gate 0 V (1 V/1 uA ceilings), XX 4 mVrms, XX/XY ranges 1 V/50 mV unchanged.
+The float32-aware return plan includes an internal 0.025-T waypoint, not another
+formal measurement point. No ramp-rate API or guessed factor-of-ten adjustment.
+The historical magnetic and current integration DLL files have identical SHA-256;
+this does not explain the earlier actual/setpoint discrepancy. Retain that failure.
+
+### Historical joint attempt stopped; field recovery then unverified (2026-09-24)
+
+This checkpoint is retained as failure evidence; current recovery/acceptance
+status is above. Its stop instructions preceded the later explicit authorization.
 
 Supersedes the not-started/pending-operator statements in the preparation
 checkpoint below. The operator confirmed exclusive instrument access and

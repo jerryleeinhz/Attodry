@@ -5,6 +5,7 @@ are not a claim of continuous monitoring while a VISA call is in progress.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 import math
 import time
@@ -14,17 +15,21 @@ from .combination_store import utc_now
 from .config import TemperatureStabilityMode
 from .magnetic_field import execute_field_target
 from .models import VectorField
-from .safety import float32_field, validate_vector_field
+from .safety import MagnetLimits, SafetyViolation, float32_field, validate_vector_field
 from .temperature_scan import _validate_point_state
 from .temperature_excitation_scan import _temperature_window_statistics
 
 
 class _AuditedDriver(AttoDryDriver):
+    def _field_readback_limits(self):
+        return self.owner.field_readback_limits
+
     def read_state(self):
         state = super().read_state()
         # Persist even an unsafe complete readback before rejecting it.
         self.owner.event("cryostat_state", {
-            "captured_at_utc": utc_now(), "state": asdict(state)})
+            "captured_at_utc": utc_now(), "state": asdict(state),
+            "recovery_action": self.owner.recovery_action})
         self.owner.validate_state(state)
         return state
 
@@ -47,16 +52,48 @@ class CryostatPointSession:
         self.window = None
         self.baseline_temperature = None
         self.temperature_ceiling = None
+        self.recovery_action = None
+        self.recovery_scan_limits_violated = False
 
     @property
     def clock(self):
         return {"monotonic": self.monotonic, "sleeper": self.sleep}
 
+    @property
+    def field_readback_limits(self):
+        # A scan trip must not prevent an already-owned controller from zeroing.
+        # This is only a readback envelope for zero/disable, never target permission.
+        if self.recovery_action is not None:
+            return MagnetLimits(3.0, 3.0, 3.0)
+        return self.config.magnet.limits
+
+    @contextmanager
+    def _recovery(self, action):
+        if not self.cleaning or action not in {"zero", "disable"} or self.recovery_action is not None:
+            raise AttoDryError("Invalid cryostat recovery action")
+        self.recovery_action = action
+        try:
+            self.event("cryostat_recovery_started", {
+                "action": action, "readback_limits": asdict(self.field_readback_limits),
+                "scan_limits": asdict(self.config.magnet.limits)})
+            yield
+        finally:
+            self.recovery_action = None
+
     def validate_state(self, state):
         # Effective axis ceilings are both <=3 T, including pure Z. The same
         # limits are used inside the driver's float32/corner/ack checks.
-        validate_vector_field(state.field, self.config.magnet.limits)
-        validate_vector_field(state.field_setpoint, self.config.magnet.limits)
+        if self.recovery_action is not None:
+            try:
+                validate_vector_field(state.field, self.config.magnet.limits)
+                validate_vector_field(state.field_setpoint, self.config.magnet.limits)
+            except SafetyViolation as exc:
+                if not self.recovery_scan_limits_violated:
+                    self.recovery_scan_limits_violated = True
+                    self.event("cryostat_recovery_scan_limit_violation", {
+                        "action": self.recovery_action, "error": str(exc), "state": asdict(state)})
+        validate_vector_field(state.field, self.field_readback_limits)
+        validate_vector_field(state.field_setpoint, self.field_readback_limits)
         if state.error_code:
             raise AttoDryError(f"attoDRY error code {state.error_code}")
         if not self.cleaning:
@@ -79,6 +116,8 @@ class CryostatPointSession:
         return asdict(self.driver.read_state())
 
     def apply(self, module, point):
+        if self.cleaning:
+            raise AttoDryError("Cannot resume point writes after cryostat cleanup")
         if module == "magnetic":
             target = VectorField(point.values["field_x_t"], point.values["field_z_t"])
             self.touched.add(module)  # Includes interrupted/uncertain command attempts.
@@ -218,9 +257,12 @@ class CryostatPointSession:
             return {"attempted": False, "verified": True, "reason": "no writes attempted"}
         if module == "temperature":
             if failed:
-                self.event("temperature_disable_attempt", {})
-                self.driver.ensure_temperature_control(False, **self.clock)
-            state = self.driver.read_state()
+                with self._recovery("disable"):
+                    self.event("temperature_disable_attempt", {})
+                    self.driver.ensure_temperature_control(False, **self.clock)
+                    state = self.driver.read_state()
+            else:
+                state = self.driver.read_state()
             if failed:
                 if state.temperature_control_enabled:
                     raise AttoDryError("Temperature disable not confirmed")
@@ -232,8 +274,9 @@ class CryostatPointSession:
             if policy == "zero":
                 # Never toggle an unexpectedly disabled/unknown field controller
                 # merely to claim successful cleanup. Driver fails closed.
-                state = self.driver.request_zero_field(
-                    on_command=lambda payload: self.event("magnetic_cleanup_command", payload), **self.clock)
+                with self._recovery("zero"):
+                    state = self.driver.request_zero_field(
+                        on_command=lambda payload: self.event("magnetic_cleanup_command", payload), **self.clock)
             else:
                 state = self.driver.read_state()
                 if not state.field_control_enabled or self.field_target is None:
@@ -244,7 +287,8 @@ class CryostatPointSession:
                 if (abs(state.field.bx_t - self.field_target.bx_t) > tolerance or
                         abs(state.field.bz_t - self.field_target.bz_t) > tolerance):
                     raise AttoDryError("Field hold readback outside tolerance")
-        return {"attempted": True, "verified": True, "policy": policy, "state": asdict(state)}
+        return {"attempted": True, "verified": True, "policy": policy, "state": asdict(state),
+                "scan_limits_violated": self.recovery_scan_limits_violated}
 
     def close(self):
         # connect() unwinds its own partial initialization on failure.
