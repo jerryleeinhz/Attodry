@@ -2,6 +2,20 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Gate/excitation 2x2 hardware acceptance (2026-09-24; preflight blocked)
+
+- No runtime changes; local and exact-target offline validation passed for four
+  conditions: gate 0/0.01 V x XX 4/8 mVrms, T 2 K and field zero fixed. Verified
+  all 113 target source hashes against the previously tested snapshot.
+- joint-gate-excitation-20260924-v1 failed in XY preflight (LIAS=1 input/reserve
+  overload, ERRS=0), exit 2, before setting writes or any condition attempts.
+- Four subsequent status samples were clear, but this recurs after the earlier
+  similar preflight rejection. No automatic retry or safety-policy change.
+  Operator panel/input-path review required before further commissioning.
+- Read-only audit passed: SQLite integrity, zero default-analysis rows, matching
+  local/remote raw-data hash, scan process exited. Private config/data ignored.
+  No new full-suite run: unchanged runtime retains the earlier 644/644 receipts.
+
 ## Integrated zero/disable cleanup recovery (2026-09-24; bounded real pass)
 
 - Reproduced the real field-envelope failure with a failing fake-DLL regression:

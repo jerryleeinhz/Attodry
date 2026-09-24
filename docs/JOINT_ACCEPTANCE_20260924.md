@@ -1,6 +1,48 @@
 # Joint hardware acceptance — bounded 50-mT pass and retained failure evidence
 
-## Latest result: three-point joint acceptance passed
+## Latest attempt: gate/excitation 2x2 rejected before writes
+
+After the operator approved the next step, the planned four conditions were
+gate 0/0.01 V x XX 4/8 mVrms, temperature target 2 K and X/Z field zero fixed.
+Existing 1 V/1-uA gate limits, XX/XY 1 V/50 mV ranges, h1/h2, settling and cleanup
+policies were unchanged. Only a new ignored private TOML was prepared; existing
+experiment configs/source were not overwritten. A local invalid mode spelling
+was rejected offline and corrected to the supported bias_iv mode before transfer;
+both local and target then validated exactly the intended four conditions.
+All 113 deployed source hashes still matched the 644-test snapshot.
+
+Run `joint-gate-excitation-20260924-v1` terminated at 08:49:33.989703 UTC with
+process exit 2. XY preflight recorded LIAS=1 (input/reserve overload), with
+filter/output overload false, reference locked and ERRS=0. Its actual sensitivity
+code was 22 (50 mV), reserve 2, h1 and source 4 mV. No condition began and no
+setting/output/temperature/field writes occurred. This is not a failed move or
+evidence of a combined-source limit trip: the grid had not started.
+
+Preflight evidence: actual/setpoint X/Z zero, cryostat error 0, temperature
+target 2 K/actual 2.000799894 K with control ON; gate zero setpoint/output OFF,
+1-uA compliance and no error. SMU terminal voltage/current were unavailable
+while output was OFF, not measured zero. These are timestamped readbacks, not
+a guarantee of ongoing state after disconnect.
+
+After the scan closed, one bounded diagnostic sequence requested four snapshots
+3 s apart while consuming status latches. Both instruments reported LIAS=0 and
+ERRS=0 throughout, h1/4 mV, with unchanged XX/XY 1 V/50 mV ranges. No settings
+were written. The recurrent preflight overload has not been explained by these
+clear snapshots, so no second attempt was launched. Operator observation of XY
+front-panel overload indicators and input/reference setup is required before
+continuing; do not bypass the overload check or automatically clear-and-retry.
+
+Read-only audit: database integrity_check ok; zero condition attempts and samples;
+default analysis returns zero rows. The run remains failed with
+manual_verification_required=true. Cleanup did not write untouched modules;
+its global unverified result is not evidence that a zero command failed.
+The scan process exited. Local/remote database SHA-256 both:
+`607dbe46531c3d6d365c550560151c6588430061d2d5bdacb1295e56a1f9c46a`.
+Private config, database, stdout/stderr and diagnostic records are retained in
+local `run_data/gate_excitation_20260924` and the same-named run_data directory
+under the isolated target source. No runtime changes or new full-suite claims.
+
+## Previous result: three-point joint acceptance passed
 
 Date: 2026-09-24. Run: `joint-z50mT-20260924-v3`, LK_setup exact lyr Python.
 UTC 07:08:13.216842 to 07:15:27.652545 (434.436 s); process exit 0.

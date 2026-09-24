@@ -4,6 +4,25 @@ Last updated: 2026-09-24
 
 ## Current stage
 
+### Gate/excitation 2x2 acceptance blocked at preflight (2026-09-24)
+
+After approval to continue, prepared and offline-validated gate 0/0.01 V x XX
+4/8 mVrms, fixed target T 2 K and X/Z zero; same 1 V/1 uA SMU ceilings, XX/XY
+1 V/50 mV ranges and all existing stability/cleanup guards. No runtime edits.
+Target's 113 source hashes still matched the tested snapshot. Vendor GUI absent;
+existing Jupyter kernel idle with last activity before the earlier acceptance.
+Run joint-gate-excitation-20260924-v1 stopped at 08:49:33 UTC, process exit 2:
+XY preflight LIAS=1 (input/reserve overload), ERRS=0. Zero condition attempts,
+zero samples, no setting/output/field/temperature writes. Preflight confirmed
+SMU zero setpoint/output OFF, actual/setpoint X/Z zero, T 2.000799894 K/target 2 K.
+Four subsequent status-consuming diagnostic snapshots at 3-s requested intervals
+were clear on both SR830 units, still h1/4 mV and XX/XY 1 V/50 mV. This is not
+proof the intermittent problem is resolved. No retry or auto-clear policy added;
+recurrent overload requires operator panel/input-path review before another run.
+Raw SQLite integrity and local/remote hash match, accepted-only loader gives
+zero rows, scan process exited. Full receipt in JOINT_ACCEPTANCE_20260924.md.
+The earlier 50-mT pass below remains valid only for its own bounded scope.
+
 ### Scoped cleanup recovery / 50-mT joint acceptance (2026-09-24; bounded real pass)
 
 Operator reports manual zero and explicitly approves Z 0 -> 0.05 -> 0 T, X 0,
