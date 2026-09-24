@@ -2,6 +2,21 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Joint hardware acceptance blocked by field mismatch (2026-09-24)
+
+- User-authorized apply-toml completed: XY 50 mV, XX 1 V, clear statuses,
+  4 mV excitation. Existing 300 ms time constants retained; settling 5.1 s.
+- Three-point ordered field test at target 2 K/gate 0 V acquired the first
+  zero-field condition, then rejected the second. Actual Z exceeded 0.02 T
+  after an acknowledged 0.005-T waypoint; later read-only Z was 0.05 T.
+- Electrical cleanup confirmed safe outputs. Field-envelope validation blocked
+  BOTH magnetic zero and temperature cleanup before their commands. Zero remains
+  unverified; manual recovery/panel verification requested. Further scans stopped.
+- SQLite integrity passes and default analysis excludes the failed run.
+  No runtime code or safety-policy changes; private configurations/data ignored.
+- This is not completed hardware commissioning. Field scaling/controller behavior
+  and cleanup coupling require resolution. See JOINT_ACCEPTANCE_20260924.md.
+
 ## Integration publication / acceptance preparation (2026-09-24)
 
 - User requested origin publication of the integration branch and authorized small

@@ -4,6 +4,26 @@ Last updated: 2026-09-24
 
 ## Current stage
 
+### Joint hardware attempt stopped; field recovery unverified (2026-09-24)
+
+Supersedes the not-started/pending-operator statements in the preparation
+checkpoint below. The operator confirmed exclusive instrument access and
+explicitly requested wider-range apply-toml. XY 50 mV applied and verified;
+XX remained 1 V full scale, both sources 4 mV, statuses clear. Retained actual
+300 ms time constants with 5.1 s settling after a pre-write mismatch rejection.
+
+Run joint-wide-20260924-v1 accepted one zero-field condition, then failed while
+moving toward Z=0.01 T: the first 0.005-T waypoint was acknowledged, but actual
+Z crossed 0.02 T. Electrical cleanup verified minima/zero-OFF. Magnetic AND
+temperature cleanup were blocked by the audited reader's field-envelope check;
+no zero command was issued. Independent read-only check at 06:22:45 UTC:
+X=0, Z=0.0500000007 T, Z setpoint=0.0049999999 T, temperature target 2 K,
+actual 1.7896 K, both controllers ON, error zero. This is not current or zero
+confirmation. Operator manual recovery/panel verification was requested.
+Do not run another sweep, assume zero, increase limits, or apply a guessed
+factor-of-ten correction. Default analysis correctly excludes the failed run.
+See JOINT_ACCEPTANCE_20260924.md for receipts, limits and unresolved blockers.
+
 ### Publication and scoped hardware authorization (2026-09-24)
 
 The user requested publication to origin/codex/integration-four-module-scan and
