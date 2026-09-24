@@ -51,6 +51,7 @@ class CommissioningRecordSummary:
     sample_count: int
     problem_count: int
     modified_ns: int
+    channels: tuple[tuple[str, int], ...] = ()
     error: str | None = None
 
 
@@ -471,6 +472,7 @@ def summarize_commissioning_file(path: str | Path) -> CommissioningRecordSummary
             sample_count=len(samples),
             problem_count=sum(bool(sample.get("problems")) for sample in samples),
             modified_ns=source.stat().st_mtime_ns,
+            channels=_recorded_formal_channels(samples),
             error=(None if payload.get("error") is None else str(payload["error"])),
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -3630,6 +3632,29 @@ def _formal_sample_payloads(payload: Mapping[str, object]):
         samples = point.get("samples", [])
         if isinstance(samples, list):
             yield from (sample for sample in samples if isinstance(sample, dict))
+
+
+def _recorded_formal_channels(
+    samples: Iterable[Mapping[str, object]],
+) -> tuple[tuple[str, int], ...]:
+    channels: set[tuple[str, int]] = set()
+    for sample in samples:
+        try:
+            roles = _formal_selected_roles(sample)
+        except ValueError:
+            continue
+        for role in roles:
+            instrument = sample.get(f"lockin_{role}")
+            reading = instrument.get("reading") if isinstance(instrument, Mapping) else None
+            if not isinstance(reading, Mapping):
+                continue
+            try:
+                harmonic = int(reading.get("harmonic"))
+            except (TypeError, ValueError):
+                continue
+            if harmonic in PLOT_HARMONICS:
+                channels.add((role, harmonic))
+    return tuple(sorted(channels))
 
 
 def _formal_selected_roles(sample: Mapping[str, object]) -> tuple[str, ...]:

@@ -1001,6 +1001,31 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual(scope["excitation_rows"], ())
         self.assertEqual(scope["excitation_excluded_points_widget"].options, ())
 
+    def test_notebook_record_labels_show_formal_count_and_recorded_channels(self) -> None:
+        for scan_type, widget_name in (
+            ("frequency", "frequency_record_widget"),
+            ("excitation", "excitation_record_widget"),
+            ("frequency_excitation", "combined_record_widget"),
+        ):
+            payload = self._sweep(completed=True)
+            payload["scan"] = scan_type
+            first = payload["points"][0]["samples"][0]
+            first["lockin_xy"]["reading"]["harmonic"] = 2
+            second = self._sample()
+            second["sample_index"] = 1
+            second["selected_roles"] = ["xx"]
+            second["lockin_xx"]["reading"]["harmonic"] = 2
+            second.pop("lockin_xy")
+            payload["points"][0]["samples"].append(second)
+            path = self._write_json(f"{scan_type}.json", payload)
+            scope = self._notebook_selector_scope(path.parent)
+            label, selected_path = scope[widget_name].options[0]
+            self.assertEqual(selected_path, str(path))
+            self.assertEqual(
+                label,
+                f"{path.name} | 2 formal samples | XX h1/h2, XY h2",
+            )
+
     def test_notebook_combined_exclusions_remove_requested_rows_and_columns(self) -> None:
         payload = self._sweep(completed=True)
         payload["scan"] = "frequency_excitation"

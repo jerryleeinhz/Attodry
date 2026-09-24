@@ -5,9 +5,10 @@ Update this file whenever a feature is completed. A stage is complete only when 
 ## SR830 browser selection and axis exclusions (2026-09-24)
 
 - Keep Frequency, Excitation, and f × e as three separate, initially collapsed
-  record categories. Their record lists contain file names and checkboxes only;
-  archived run-condition summaries are hidden. Multi-run paired-comparison
-  settings are in their own collapsed section.
+  record categories. Each row shows the file name, raw formal-sample count,
+  actually recorded XX/XY harmonics, and a right-side checkbox; archived
+  run-condition summaries are hidden. Multi-run paired-comparison settings are
+  in their own collapsed section.
 - Frequency/excitation exclusions are keyed to requested axis values and apply
   across all selected records. Labels show only the requested frequency or
   estimated excitation current and the associated point index/indices, never
@@ -23,8 +24,9 @@ Update this file whenever a feature is completed. A stage is complete only when 
   profile hash, continue to accept legacy inline `measurement_config`, and fail
   closed for missing or changed profiles. Copy/move the profile sidecar with runs.
 - Validation: commissioning notebook tests and SR830/profile/analysis tests passed:
-  136 total, 6 optional skips. Coverage includes unequal point counts, global
-  coordinate exclusions, deduplication, legacy loading, hash verification,
+  137 total, 6 optional skips. Coverage includes catalog sample/channel labels,
+  unequal point counts, global coordinate exclusions, deduplication, legacy
+  loading, hash verification,
   collapsed notebook sections, and notebook code compilation. No hardware I/O.
 
 ## Bounded four-changing-axis hardware validation (2026-09-24; passed)

@@ -7,10 +7,11 @@ Last updated: 2026-09-24
 ### SR830 browser checkboxes and combined-axis exclusions (2026-09-24)
 
 The commissioning notebook retains separate Frequency, Excitation, and f × e
-categories, now collapsed until opened. Each list shows file names with a checkbox;
-archived run-condition summaries are hidden, and multi-run paired-comparison
-settings are in a separate collapsed section. Refresh preserves checked files
-still in the catalog.
+categories, now collapsed until opened. Each row shows the file name, raw
+formal-sample count, and XX/XY harmonic channels found in formal readings, with
+a checkbox on the right. Archived run-condition summaries are hidden, and
+multi-run paired-comparison settings are in a separate collapsed section.
+Refresh preserves checked files still in the catalog.
 
 Frequency/excitation exclusions are global requested-axis coordinates across all
 selected records. Labels show only requested frequency or estimated excitation
@@ -27,10 +28,10 @@ per-run safety estimates. Hashes are verified during analysis; absent/modified
 profiles fail closed. Legacy inline `measurement_config` remains supported, but
 profile sidecars must accompany copied/moved runs.
 
-Validation: 136 commissioning notebook, SR830, and profile/analysis tests passed
-(6 optional skips), including unequal point counts, global exclusions, profile
-deduplication, legacy loading, hash checking, collapsed sections, and notebook
-code compilation. No hardware I/O.
+Validation: 137 commissioning notebook, SR830, and profile/analysis tests passed
+(6 optional skips), including sample/channel catalog labels, unequal point
+counts, global exclusions, profile deduplication, legacy loading, hash checking,
+collapsed sections, and notebook code compilation. No hardware I/O.
 
 ### Four-changing-axis bounded hardware validation passed (2026-09-24)
 
