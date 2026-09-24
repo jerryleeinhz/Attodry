@@ -2,6 +2,15 @@
 
 ## 当前状态
 
+2026-09-23 新进度：真实驱动的四模块点执行器已实现；Temperature/Magnetic
+共用 attoDRY，SMU 与固定频率 SR830 excitation 使用已有单点接口。
+任意非空子集和排列（64 种）、有序/重复磁场点、扫场后温度重稳、正式窗口环境
+前后读回、全局失败清理均有 fake-DLL/VISA 测试。本机和 LK_setup lyr 各 638 项
+最终回归全部通过；源码哈希与独立测试目录回执见 PROJECT_HANDOFF。
+此前 620 项本机/目标通过仅属于电学检查点，不能替代这一版验证。
+未执行新的真实联合实验；频率轴和硬件 resume 仍未接入。
+操作入口和明确限制见 COMBINATION_SCAN_GUIDE.md 顶部。
+
 2026-09-14：四个模块已在隔离 `codex/integration-four-module-scan` 合并。
 温度、双 SR830、bottom-only SMU 小电压扫描及磁场小场有各自的独立验收记录；
 这些记录不代表四模块联合验收。
@@ -9,7 +18,7 @@
 新增任意子集/顺序的模拟执行器、统一 SQLite 记录、只读状态监控和通用分析
 Notebook；580 项离线测试通过。SMU 外层/Lock-in 内层逐叶重新采样并按激励重分组
 已经由模拟回归验证。真实 single-owner station / 共享 attoDRY / 全局硬件 cleanup
-尚未接入；不能将模拟器用于真实仪器。当前交付和下一步见
+在上述 2026-09-23 检查点已接入真实驱动路径（离线验证）；不能将模拟器用于真实仪器。当前交付和下一步见
 [`COMBINATION_SCAN_GUIDE.md`](../COMBINATION_SCAN_GUIDE.md)。
 
 Integration 只能组合 Lock-in、Temperature、Magnetic-field 和 Three-SMU 模块

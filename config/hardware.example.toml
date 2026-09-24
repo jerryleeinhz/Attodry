@@ -390,3 +390,29 @@ bidirectional = false
 [three_smu_run.gate_bottom]
 role = "off"
 bidirectional = false
+
+# Optional four-module combination (FAKE-RESOURCE TESTING, NOT JOINTLY COMMISSIONED).
+# Uncomment in hardware.local.toml only after configuring active addresses/limits.
+# Reuses the expanded three_smu_run points and lockin_sweep excitation points
+# at the existing fixed reference frequency. order is OUTER -> INNER.
+# Any nonempty subset/order of temperature, magnetic, smu, lockin is supported.
+# Temperature uses temperature_scan (or temperature_run.target_k if absent).
+# Magnetic reuses magnetic_field_run ordered points/segments without deduplication.
+# Temperature + magnetic share one connection; integrated resultant is ALWAYS <=3T,
+# including pure Z, with the same limits on float32 commands and intermediate corners.
+# Lock-in frequency-sweep, software-pulse mode and hardware resume are unavailable.
+# samples_per_condition replaces both standalone samples_per_point values.
+# Normal/exception cleanup is ALWAYS SR830 4 mV/h1/range restoration then SMU
+# zero_disable, even if standalone three_smu_run.finish_action is hold. Then field
+# normal hold/zero per cleanup policy, failure monitored-zero; T normal hold/failure
+# disable. Any earlier cleanup failure switches later modules to failure policy.
+# Environmental axes additionally require --authorize-cryostat, even when the old
+# --authorize-electrical-combination flag is present. See COMBINATION_SCAN_GUIDE.md.
+# Never infer that omitted instruments are physically off.
+# [combination_scan]
+# backend = "hardware"
+# order = ["smu", "lockin"]
+# samples_per_condition = 1
+# repeats = 1
+# run_name = "electrical_combination"
+# note = "Review DC+AC circuit limits and authorize joint commissioning first."

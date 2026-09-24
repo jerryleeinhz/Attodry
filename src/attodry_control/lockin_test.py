@@ -259,6 +259,37 @@ def build_parser() -> argparse.ArgumentParser:
         config=Path("config/hardware.local.toml"), handler=_run_recover_interface
     )
 
+    apply_toml = subparsers.add_parser(
+        "apply-toml",
+        help=(
+            "Apply one role's configured fixed input/filter/range/Reserve settings "
+            "and verify readbacks."
+        ),
+    )
+    _add_pair_arguments(apply_toml)
+    apply_toml.add_argument(
+        "--role",
+        choices=("lockin_xx", "lockin_xy"),
+        required=True,
+        help="Semantic Lock-in role to configure; only this instrument receives writes.",
+    )
+    apply_toml.add_argument(
+        "--authorize-writes",
+        action="store_true",
+        help="Explicitly authorize the selected role's fixed-setting and RMOD writes.",
+    )
+    apply_toml.add_argument(
+        "--authorize-status-latch-consumption",
+        action="store_true",
+        help="Explicitly authorize LIAS?/ERRS? queries, which clear latched status bits.",
+    )
+    apply_toml.add_argument(
+        "--confirm-xy-sine-disconnected",
+        action="store_true",
+        help="Confirm lockin_xy SINE OUT is physically disconnected.",
+    )
+    apply_toml.set_defaults(handler=_run_apply_toml)
+
     set_xx_sensitivity = subparsers.add_parser(
         "set-xx-sensitivity",
         help=(
@@ -820,6 +851,221 @@ def _run_set_xx_sensitivity(
     record["completed"] = True
     record["write_performed"] = True
     print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+    return 0
+
+
+def _run_apply_toml(
+    args: argparse.Namespace, factory: Callable[[], object]
+) -> int:
+    settings = _resolve_pair_settings(args)
+    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
+    config = settings["config"]
+    if not isinstance(config, ControlConfig):
+        raise ValueError("apply-toml requires --config with the strict hardware TOML policy.")
+    if not args.authorize_writes:
+        raise AuthorizationRequired("SR830 fixed-setting writes were not explicitly authorized.")
+    if not args.authorize_status_latch_consumption:
+        raise AuthorizationRequired(
+            "SR830 LIAS?/ERRS? latch consumption was not explicitly authorized."
+        )
+    if not args.confirm_xy_sine_disconnected:
+        raise AuthorizationRequired(
+            "Physical disconnection of lockin_xy SINE OUT was not confirmed."
+        )
+
+    role = LockinRole.XX if args.role == "lockin_xx" else LockinRole.XY
+    target_config = config.lockin_xx if role is LockinRole.XX else config.lockin_xy
+    target_settings = _setting_codes(target_config)
+    target_sensitivity = sensitivity_code(target_config.sensitivity_full_scale_v)
+    target_reserve = RESERVE_MODE_CODES[target_config.reserve_mode.value]
+    settle_s = max(
+        1.5,
+        config.lockin_sweep.settle_time_constants * target_config.time_constant_s,
+    )
+    record_directory = _prepare_sweep_record_directory(args, settings)
+    record: dict[str, object] = {
+        "schema_version": 1,
+        "scan": "apply_toml",
+        "command": "apply-toml",
+        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "captured_unix_s": time.time(),
+        "completed": False,
+        "outcome": "rejected",
+        "manual_verification_required": False,
+        "run_metadata": _sweep_run_metadata(settings),
+        "config_source": str(Path(args.config).resolve()),
+        "lockin_safety_path": str(settings["safety_config_path"]),
+        "lockin_safety_sha256": _lockin_safety_sha256(settings),
+        "resources": {
+            "lockin_xx": settings["xx_address"],
+            "lockin_xy": settings["xy_address"],
+        },
+        "target_role": f"lockin_{role.value}",
+        "resolved_target_config": asdict(target_config),
+        "requested": {
+            "input_mode": target_config.input_mode.value,
+            "shield_grounding": target_config.shield_grounding.value,
+            "input_coupling": target_config.input_coupling.value,
+            "time_constant_s": target_config.time_constant_s,
+            "filter_slope_db_oct": target_config.filter_slope_db_oct,
+            "sensitivity_full_scale_v": target_config.sensitivity_full_scale_v,
+            "sensitivity_code": target_sensitivity,
+            "reserve_mode": target_config.reserve_mode.value,
+            "reserve_mode_code": target_reserve,
+        },
+        "write_scope": ["ISRC", "IGND", "ICPL", "OFLT", "OFSL", "SENS", "RMOD"],
+        "never_written": ["FMOD", "RSLP", "FREQ", "HARM", "SLVL", "PHAS"],
+        "settle_s": settle_s,
+        "status_latches_consumed": True,
+        "safety_status_complete": True,
+        "cleanup": {
+            "attempted": False,
+            "policy": (
+                "No rollback: if applying a wider sensitivity fails verification, "
+                "preserve the last confirmed setting rather than restoring a "
+                "narrower range that may recreate overload."
+            ),
+        },
+    }
+
+    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
+        instrument = lockin_xx if role is LockinRole.XX else lockin_xy
+        try:
+            before_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            before_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["before"] = {
+                "lockin_xx": asdict(before_xx),
+                "lockin_xy": asdict(before_xy),
+            }
+
+            problems = _diagnostic_problems(
+                before_xx, before_xy, ignore_output_overload=True
+            )
+            target_before = before_xx if role is LockinRole.XX else before_xy
+            target_status = target_before.lia_status
+            widening_overload = (
+                target_status is not None
+                and target_status.input_or_reserve_overload
+                and not target_status.filter_overload
+                and not target_status.reference_unlocked
+                # Higher SR830 SENS codes represent wider full-scale ranges.
+                and target_sensitivity > target_before.sensitivity
+            )
+            if widening_overload:
+                overload_problem = f"lockin_{role.value} reports overload"
+                if overload_problem in problems:
+                    problems.remove(overload_problem)
+            for diagnostic in (before_xx, before_xy):
+                status = diagnostic.lia_status
+                if status is not None and (
+                    status.frequency_range_changed
+                    or status.time_constant_changed
+                    or status.triggered
+                    or status.raw & ~0x7F
+                ):
+                    problems.append(
+                        f"lockin_{diagnostic.role.value} has an unexpected "
+                        "frequency/time-constant/trigger/unknown status latch"
+                    )
+            if problems:
+                raise Sr830Error("apply-toml preflight failed: " + "; ".join(problems))
+
+            verify_pair_readback(
+                before_xx, before_xy, float(settings["frequency_hz"])
+            )
+            verify_fixed_settings_readback(
+                target_before,
+                replace(target_settings, sensitivity=target_before.sensitivity),
+                target_before.phase_shift_deg,
+            )
+
+            write_performed = (
+                target_before.input_mode != target_settings.input_mode
+                or target_before.shield_grounding != target_settings.shield_grounding
+                or target_before.input_coupling != target_settings.input_coupling
+                or target_before.time_constant != target_settings.time_constant
+                or target_before.filter_slope != target_settings.filter_slope
+                or target_before.sensitivity != target_sensitivity
+                or target_before.reserve_mode != target_reserve
+            )
+            record["write_performed"] = write_performed
+            if write_performed:
+                instrument.write_fixed_settings(target_settings)
+                instrument.set_reserve_mode(target_reserve)
+                time.sleep(settle_s)
+
+            after_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
+            after_xy = lockin_xy.read_diagnostic(consume_status_latches=True)
+            record["after"] = {
+                "lockin_xx": asdict(after_xx),
+                "lockin_xy": asdict(after_xy),
+            }
+            problems = _diagnostic_problems(
+                after_xx, after_xy, ignore_output_overload=True
+            )
+            for diagnostic in (after_xx, after_xy):
+                status = diagnostic.lia_status
+                if status is not None and (
+                    status.frequency_range_changed
+                    or status.time_constant_changed
+                    or status.triggered
+                    or status.raw & ~0x7F
+                ):
+                    problems.append(
+                        f"lockin_{diagnostic.role.value} retained an unexpected "
+                        "frequency/time-constant/trigger/unknown status latch"
+                    )
+            if problems:
+                raise Sr830Error("apply-toml verification failed: " + "; ".join(problems))
+            verify_pair_readback(after_xx, after_xy, float(settings["frequency_hz"]))
+            target_after = after_xx if role is LockinRole.XX else after_xy
+            verify_fixed_settings_readback(
+                target_after, target_settings, target_before.phase_shift_deg
+            )
+            if target_after.reserve_mode != target_reserve:
+                raise Sr830Error(
+                    f"lockin_{role.value} Reserve readback {target_after.reserve_mode} "
+                    f"!= configured code {target_reserve}."
+                )
+            record["last_confirmed_state"] = record["after"]
+            record["completed"] = True
+            record["outcome"] = "completed"
+        except BaseException as exc:
+            record["error"] = str(exc)
+            record["outcome"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected"
+            record["manual_verification_required"] = True
+            if "last_confirmed_state" not in record:
+                if "after" in record:
+                    record["last_confirmed_state"] = record["after"]
+                elif not isinstance(exc, KeyboardInterrupt) and (
+                    record.get("write_performed") or "before" not in record
+                ):
+                    try:
+                        last_xx = lockin_xx.read_diagnostic(consume_status_latches=False)
+                        last_xy = lockin_xy.read_diagnostic(consume_status_latches=False)
+                        record["last_confirmed_state"] = {
+                            "lockin_xx": asdict(last_xx),
+                            "lockin_xy": asdict(last_xy),
+                        }
+                        record["safety_status_complete"] = False
+                    except BaseException as readback_error:
+                        record["last_confirmed_state"] = None
+                        record["last_confirmed_state_error"] = str(readback_error)
+                elif "before" in record:
+                    record["last_confirmed_state"] = record["before"]
+                    if record.get("write_performed"):
+                        record["last_confirmed_state_caveat"] = (
+                            "Last readback preceded the interrupted write; final state is unknown."
+                        )
+                else:
+                    record["last_confirmed_state"] = None
+                    record["last_confirmed_state_error"] = (
+                        "Interrupted before a complete instrument readback."
+                    )
+            _emit_sweep_result(record_directory, record)
+            raise
+
+    _emit_sweep_result(record_directory, record)
     return 0
 
 

@@ -204,6 +204,35 @@ python -m attodry_control.lockin_test recover-interface
 该命令只打开两台已配置的 SR830、清理 VISA 接口并输出 JSON，`settings_changed` 必须
 为 `false`。通信故障后仍须人工确认前面板和接线；接口清理不能证明仪器处于安全状态。
 
+### 按 TOML 应用一台 SR830 的固定设置
+
+仪器面板设置与本地 TOML 不一致时，可在没有扫描或其他程序占用仪器的前提下，明确
+应用其中一个 semantic role 的固定输入、滤波、灵敏度和 Reserve 设置，并逐项回读：
+
+```powershell
+python -m attodry_control.lockin_test apply-toml `
+  --config config\hardware.local.toml `
+  --role lockin_xy `
+  --authorize-writes `
+  --authorize-status-latch-consumption `
+  --confirm-xy-sine-disconnected
+```
+
+每次只允许选择 `lockin_xx` 或 `lockin_xy` 一个角色。命令会检查双机身份、参考角色、
+h1、频率和两台 SINE OUT 的 4 mVrms 基线，但只向所选角色写入
+`ISRC`/`IGND`/`ICPL`/`OFLT`/`OFSL`/`SENS`/`RMOD`；不会写参考源、参考边沿、频率、谐波、
+相位或 SINE OUT。等待时间由该角色 TOML 时间常数乘以配置的
+`settle_time_constants` 自动计算，且至少 1.5 s。执行前要停止其他 VISA 客户端；
+`LIAS?`/`ERRS?` 会消费状态锁存。若目标角色有输入/Reserve overload，只有 TOML
+要求的 `SENS` 严格更宽且没有滤波过载/参考解锁时，才允许先应用设置；写后必须验证
+该过载消失。`LIAS` bit 2 仍作为未使用输出通道状态保留，但不单独阻止应用。
+
+命令不会自动把设置回滚到旧值：若较宽量程写入后验证失败，窄量程回滚可能重新触发
+过载。最终成功或拒绝状态、目标配置、双机前后读回和最后确认状态均原子保存到
+`[lockin_sweep].output_directory`。任何连接后的拒绝或中断都会设置
+`manual_verification_required = true`；通信故障后按最后确认读回人工检查，不要推断
+未读回的面板状态。
+
 ## 开始前
 
 先在断开扫描的状态下核对本机 `hardware.local.toml`，再核对实物接线：

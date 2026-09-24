@@ -1,8 +1,183 @@
 # Project handoff
 
-Last updated: 2026-09-23
+Last updated: 2026-09-24
 
 ## Current stage
+
+### Publication and scoped hardware authorization (2026-09-24)
+
+The user requested publication to origin/codex/integration-four-module-scan and
+authorized small joint hardware acceptance. The 112 runtime/test/tool/config/
+Notebook/pyproject files still exactly match the final 638-test offline snapshot
+below; the publication includes the previously approved apply-toml and repeatability
+analysis changes. The September 23 no-commit statements below describe that older
+checkpoint, not a requirement to leave this revision unpublished.
+Publication-day guarded regression: 638 tests passed, zero failures/errors/skips,
+111.757 s with local AI Python; real instrument imports/DLL loads blocked.
+
+Hardware acceptance has NOT started. Current sample/DC+AC wiring, XY physical
+disconnection and the proposed Z 0 -> 0.01 -> 0 T / X 0 path await confirmation.
+Retain the user's bias-only ceiling of 0.01 V / 1 uA and test temperature 2-3 K.
+Read-only SSH file inspection found that the existing Integration local TOML still
+has SMU address/limit placeholders, a +/-0.1 V SMU grid, excitation up to 0.45 V,
+and no combination_scan table: it must not be executed as the acceptance plan.
+The remote Notebook has local edits/checkpoints and has not been overwritten.
+No instrument connection, status consumption, setting or output write has occurred
+in this publication/preparation stage. Use a separate scoped acceptance config
+only after the physical facts/combined sample limits are confirmed; local settings
+and run data remain uncommitted.
+
+### Integration I2b — shared four-module point coordinator (2026-09-23)
+
+Implemented locally in `codex/integration-four-module-scan`: any nonempty subset
+and ordering of temperature, magnetic, SMU and fixed-frequency SR830 excitation.
+Temperature/magnetic share exactly one attoDRY session. Existing temperature dwell
+and field point/float32/corner/ack/zero engines are reused; integrated effective
+axis limits cap pure Z at 3 T as well as enforcing the resultant envelope.
+Ordered magnetic duplicates and segment/direction identities remain literal.
+Inner temperature resets are statically bounded; cooldown uses a bounded
+transient ceiling but cannot accept a still-hot plateau above the formal ceiling.
+Every condition requalifies temperature after all axis writes. Formal acquisition
+has synchronous whole-sample and per-harmonic environment brackets, not continuous
+background polling. Temperature coordinates use the existing time-weighted formal
+window helper; field coordinates use the arithmetic window mean. Raw endpoints,
+times, rejected/partial electrical reads and last confirmed state remain auditable.
+
+All active preflights precede writes. `--authorize-combination` (old electrical flag
+remains an alias) does NOT alone authorize environmental writes: selected T/B axes
+also require `--authorize-cryostat`. Missing authorization fails before any I/O.
+Global cleanup: electrical minima/zero-OFF, then field normal configured hold/zero
+or failure monitored-zero, then T normal hold/failure disable, shared close once.
+An earlier cleanup failure switches later axes to failure policy. No writes to
+untouched environmental axes; a failed communication never implies zero field.
+Combined interrupts abort/cleanup (no interactive thermal resume). Scan dwell,
+not temperature_run.pre_measure_wait_s, governs temperature qualification.
+
+17 new fake-DLL/VISA tests cover all 64 nonempty permutations, active/inactive
+ownership, fresh brackets, temperature actual vs target, reset/cooldown, repeated
+and descending field points, static/readback/float32 limits, failed writes,
+communication uncertainty, audit failure, Ctrl+C, and partial connect/close.
+One additional coordinator regression preserves the primary instrument error
+when the subsequent environmental read AND its audit write fail (reproduced
+before the fix). Secondary errors still require manual review and cannot skip
+cleanup. Full final guarded local suite: **638 passed**, zero errors/failures/skips, 117.888 s,
+AI Python 3.12.13; real pyvisa/qcodes/serial imports and DLL loading blocked.
+An initial focused regression exposed the simulator's old expectation that later
+cleanup still receives failed=false after earlier cleanup fails; that expectation
+was updated to the new fail-closed policy and is covered by hardware-fake tests.
+The initial revision also passed 637 tests on LK_setup lyr (146.872 s). Final
+target-offline revision passed **638 tests**, zero errors/failures/skips,
+145.473 s, exit code 0, using
+`C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe` (3.12.13), user-site disabled,
+snapshot src first and the same hardware-import/DLL guard. Final isolated source:
+`C:/Users/LK_Setup/Yuanrong Li/Attodry_four_module_offline_9d729d4f_20260923/final-source`.
+Sibling `final-offline.stdout.txt` and `final-offline.stderr.txt` retain the receipt.
+Final source archive SHA-256:
+`022e5e4fa8d5c0e7393ce62352948e7ef31b56c69cf218097f0cf2ab68da4898`
+(732598 bytes, 139 files). Every archive file hash was verified before target
+tests; no DLL/local hardware config/raw experiment data was packaged. All 112
+runtime/test/tool/config/Notebook/pyproject files match the local tested revision;
+only delivery documentation changed afterward. Earlier `source`/637-test logs
+are retained separately. Source/test/tool compilation and normal Git diff check pass.
+
+No real instrument connection/status consumption/write was performed. No commit,
+push or overwrite of existing LK_setup experiments/configuration. This dirty-tree
+revision is based on e85206c and preserves the previous apply-toml/analysis work.
+Remaining: separately authorized small-grid joint hardware
+commissioning and DC+AC circuit/total-sample-limit approval. Lock-in frequency axes,
+software-pulse timing and hardware resume remain unsupported. Hold does not mean
+persistent mode or long-term magnet safety certification.
+See COMBINATION_SCAN_GUIDE.md for configuration, authorization and limitations.
+
+### Earlier I2a electrical checkpoint (2026-09-23; target offline complete)
+
+The selected integration worktree now has a real-driver electrical runner:
+`combination_cli describe-hardware` validates offline; `run` requires explicit
+combined connection/write/status authorization and physical XY SINE disconnection
+confirmation. It supports SMU, fixed-frequency SR830 excitation, and both loop
+orders, reusing existing expanded grids, role activation, limits and harmonic
+selections. The shared coordinator still protects the simulation-only entry.
+Every leaf/sample takes fresh active SMU reads and selected XX/XY h1/h2/h3 reads;
+complete role-level reads survive companion failure. SQLite combination-v1,
+file-only monitoring and the existing unified analysis work for hardware records
+marked simulated=false. No standalone sweep/cleanup runs at each leaf.
+
+ThreeSmuSession exposes begin/set/sample/cleanup points while preserving its
+existing configuration, compliance, trip and zero-before-OFF engine. SR830 points
+reuse the daily sensitivity/Reserve/autorange/harmonic safety helpers. Both
+preflights precede configuration; input/filter/time-constant panel mismatches
+are rejected before writes. Normal/exception cleanup restores XX 4 mV and h1/
+original ranges/Reserve, then zeros/disables active SMUs and independently closes
+all resources. Startup uncertainty, communication or cleanup/audit failures
+cannot certify safety. Disk failure does not suppress remaining physical cleanup.
+Non-finite SMU V/I now explicitly fails safety checks.
+
+24 new electrical fake-resource tests pass. Full local guarded suite: 620 tests
+passed, zero errors/failures/skips, 74.274 s with AI Python 3.12.13; real
+pyvisa/qcodes/serial imports and Windows DLL loads blocked. Compilation and diff
+check passed. The first full attempt exposed stale multi-select/report Notebook
+test assumptions and a test discovery-path issue; these were fixed, and three
+repeatability-statistic regressions were added. The full passing suite includes
+the earlier uncommitted apply-toml and analysis work, which remain preserved.
+
+The first LK_setup isolated snapshot passed 619 tests (89.854 s); the final
+revision additionally makes every failed/interrupted hardware attempt require
+manual review even if later cleanup reads succeed (VISA errors need not inherit
+OSError). Its cleanup readbacks remain recorded, not erased or claimed unsafe
+merely because review is required. Final target-offline passed all 620 tests in
+88.395 s, zero failures/errors/skips, using exact
+`C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe` (3.12.13), user-site disabled,
+snapshot src first and real hardware imports/DLL loads blocked.
+Final isolated source:
+`C:/Users/LK_Setup/Yuanrong Li/Attodry_electrical_offline_9d729d4f_20260923/final-source`.
+Sibling `final-offline.stdout.txt` and `final-offline.stderr.txt` retain the receipt.
+Archive SHA-256:
+`28cfe061a7b575a683921bef50ce6799f5cbe462707cb6a8c9029a82cdf63276`
+(715514 bytes, 137 files). All archive file hashes were verified before tests;
+no DLL/local hardware config/raw experiment data is packaged. The 109 local
+runtime/test/tool/config/Notebook files match the target-tested snapshot.
+Only delivery documentation changed afterward. This is an uncommitted working-
+tree snapshot based on e85206c, not a new published Git commit.
+No real instrument
+was connected or written. No commit/push/main update or deployment over existing
+LK_setup checkouts/configuration. T/B shared cryostat integration, environmental
+formal-window bracketing, Lock-in frequency axes and real joint commissioning
+remain incomplete. Hardware resume and software-pulse plans are rejected.
+Independent DC and AC limit checks do not certify the superposed sample drive;
+joint wiring/total-device-limit approval is still required before real testing.
+See COMBINATION_SCAN_GUIDE.md for current commands and exact scope.
+
+### Multi-run SR830 repeatability analysis (2026-09-23; verification pending)
+
+The commissioning Notebook now supports multiple selected records per scan
+type, an independently chosen baseline, and X/Y/R/phase comparison. It groups
+repeats within each source file, overlays each run's mean ± within-run spread,
+and plots paired differences only at shared requested coordinates. The match
+keys are requested frequency, requested SINE OUT RMS voltage, or both for
+frequency×excitation; plotted axes remain based on recorded readbacks. Circular
+statistics/differences are used for phase. A side-by-side archived-settings
+table helps flag condition changes, and a paired-coordinate summary reports
+mean-absolute, RMS, and maximum differences. Excitation harmonic fits and
+condensed reports are generated per run rather than pooling records. The
+selection manifest records selected runs, baselines, metrics, repeatability
+summaries, and per-run fits; raw records are unchanged. Offline Notebook
+verification and tests remain pending; do not treat this stage as complete yet.
+
+### TOML-driven SR830 settings apply CLI (2026-09-23)
+
+Added `python -m attodry_control.lockin_test apply-toml --role lockin_xy|lockin_xx`
+for explicitly applying one semantic role's TOML-defined fixed input/filter/
+sensitivity/Reserve settings. The selected device alone receives ISRC, IGND,
+ICPL, OFLT, OFSL, SENS, and RMOD writes; reference, frequency, harmonic, phase,
+and SINE OUT are not changed. Writes require explicit operator flags, confirmed
+physical XY SINE OUT disconnection, and consumed/read-back status. A pre-existing
+input/Reserve overload is accepted only when the configured range is strictly
+wider; a repeated post-write overload is rejected without restoring the
+narrower range. Completed and rejected attempts are atomically retained in the
+configured commissioning output directory. All 97 SR830 fake-resource tests
+pass. This was offline-only: no real VISA resource was opened, no instrument
+write was issued, and LK_setup was not accessed. See
+`docs/LOCKIN_DAILY_OPERATION.md` for the operator command and constraints.
 
 ### Selected continuation branch and publication scope (2026-09-23)
 

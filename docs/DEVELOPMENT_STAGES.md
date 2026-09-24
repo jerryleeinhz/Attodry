@@ -2,6 +2,105 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Integration publication / acceptance preparation (2026-09-24)
+
+- User requested origin publication of the integration branch and authorized small
+  joint hardware acceptance; the source/config/tests remain identical to the
+  final 638-test offline snapshot. Earlier uncommitted status below is historical.
+  Publication-day guarded rerun: 638/638 passed, zero failures/errors/skips, 111.757 s.
+- Real acceptance is pending current sample/combined wiring/XY-disconnection and
+  small field-path confirmation. Existing remote local TOML is not a safe ready
+  acceptance plan (SMU placeholders and oversized grid); no instrument I/O issued.
+- Preserve remote Notebook changes and keep hardware-local settings/data out of Git.
+
+## Integration I2b — shared cryostat / four-module point interfaces (2026-09-23)
+
+- Local and target offline implementation complete; **joint hardware
+  commissioning NOT performed**. Four selected module subsets/orders (64), one
+  shared T/B connection, exact ordered/repeated/segmented field points, universal
+  integrated 3 T limit including float32 endpoints/corners/readbacks.
+- Reuses existing field execution, thermal dwell and formal-window temperature
+  statistics. Requalifies temperature after field changes; checks inner T resets
+  and bounded cooldown. Actual coordinates derive from fresh formal-window reads.
+  Environmental brackets are synchronous, not continuous while VISA blocks.
+- Separate cryostat authorization; all preflights before writes; global independent
+  cleanup and close. Earlier cleanup failure invokes later failure policies;
+  communication loss retains last confirmed evidence and requires manual review.
+- 17 new fake-resource tests plus one primary-error-preservation coordinator
+  regression; full final local guarded suite **638/638**, zero failures,
+  errors or skips, 117.888 s. No DLL loads or real instrument imports allowed.
+  Final LK_setup lyr Python 3.12.13: **638/638**, zero failures/errors/skips,
+  145.473 s, exit 0. Verified isolated snapshot/hash/log provenance is in
+  PROJECT_HANDOFF; 112 runtime/test/config/Notebook files match the local revision.
+  Existing electrical/analysis/apply-toml changes preserved. No commit/push.
+- Remaining: scoped real joint acceptance,
+  optional Lock-in frequency axis. Software pulses and hardware resume rejected.
+
+## Integration I2a — real electrical point interfaces (2026-09-23)
+
+- Local and target offline complete: active SMU × fixed-frequency dual-SR830 excitation,
+  both loop directions and single-module subsets, no per-leaf full sweep/cleanup.
+  The only new TOML table specifies order, repeats, sample count and run metadata;
+  existing hardware/grid/range/harmonic/safety configuration remains authoritative.
+- Single owner; all preflights before configuration; fresh readings at each leaf;
+  actual V/I and selected per-role h1/h2/h3 recorded separately from setpoints.
+  Partial role reads, source/config hashes, status/range evidence and rejected
+  attempts remain in canonical SQLite; file-only monitor never queries hardware.
+- Final cleanup: Lock-in minimum/h1/range/Reserve, then active SMU zero/OFF,
+  independent resource closes. Audit failure cannot skip remaining cleanup;
+  unsafe/preflight/communication/cleanup failures do not produce accepted data.
+- 24 new fake-resource tests pass; full local guarded regression 620/620,
+  zero skips/failures/errors, 74.274 s. Source/test/tool compileall and diff
+  check pass. Initial full-run Notebook fixture and discovery incompatibilities
+  were corrected; three new repeatability-statistic tests also pass.
+- Real pyvisa/qcodes/serial imports and DLL loads are blocked by
+  `tools/run_guarded_tests.py`. Final target-offline passed 620/620 with no skips/
+  failures/errors in 88.395 s, exact LK_setup lyr Python 3.12.13, user-site off.
+  New isolated directory under Yuanrong Li; existing experimental checkouts and
+  ignored hardware TOMLs untouched. First snapshot passed 619 tests in 89.854 s.
+  The final revision also conservatively requires manual review for every failed/
+  interrupted hardware attempt, including non-OSError VISA exceptions even after
+  apparently successful cleanup. No real I/O, existing-target overwrite or push.
+  Final archive SHA-256:
+  `28cfe061a7b575a683921bef50ce6799f5cbe462707cb6a8c9029a82cdf63276`;
+  source/receipt paths and provenance are recorded in PROJECT_HANDOFF.
+- Remaining: shared T/B attoDRY adapter and formal-window qualification/audits,
+  frequency-sweep Lock-in points, full hardware combinations and joint commissioning.
+  Hardware resume/software pulses remain blocked. Separate DC/AC compliance checks
+  are not proof of safe combined physical wiring or total sample drive.
+
+## Multi-run SR830 repeatability analysis (2026-09-23; implementation pending verification)
+
+- The commissioning Notebook now allows multiple frequency, excitation, and
+  frequency×excitation records to be selected independently, with a baseline
+  run and selectable X/Y/R/phase metrics.
+- Multi-run statistics remain partitioned by source file. Curves show each
+  run's mean and within-run spread; difference panels pair only shared requested
+  coordinates (frequency, SINE OUT voltage, or both), with circular phase
+  differences. Plot axes continue to use recorded readbacks.
+- The Notebook displays archived lock-in/excitation/sweep settings for condition
+  review and computes harmonic fits and condensed reports independently per run.
+  It also presents paired-coordinate mean-absolute, RMS, and maximum differences.
+  The selection manifest records chosen files, baselines, metrics, repeatability
+  summaries, and per-run fit results; original raw records remain unchanged.
+- Verification is pending: no Notebook execution or tests were run in this
+  change; do not mark the stage complete until offline verification succeeds.
+
+## TOML-driven SR830 settings apply command (2026-09-23)
+
+- Added `lockin_test apply-toml --role lockin_xx|lockin_xy` to apply only one
+  selected role's fixed input/filter/sensitivity/Reserve settings from the
+  strict station TOML, with explicit write and latch-consumption confirmations.
+- The command leaves reference, frequency, harmonic, phase, and SINE OUT
+  untouched. It accepts a target-role input/Reserve overload only when the
+  configured sensitivity is wider, then requires a clean post-settle status;
+  it does not roll back to a narrower range after a failed transition.
+- Completed and rejected attempts are saved atomically in the configured
+  commissioning output directory, including both roles' before/after readbacks
+  and the last confirmed state.
+- All 97 `test_sr830.py` fake-resource tests pass. No real VISA resource was
+  opened, no hardware write was issued, and no remote workstation was accessed.
+
 ## Continuing four-module branch (2026-09-23)
 
 - Operator selected codex/integration-four-module-scan for continuation/publication.

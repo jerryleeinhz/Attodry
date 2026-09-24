@@ -1,4 +1,4 @@
-"""Offline-only combination plan/simulator and read-only SQLite monitor."""
+"""Combination simulation, gated hardware scans and file-only monitor."""
 from __future__ import annotations
 
 import argparse
@@ -57,11 +57,44 @@ def run(argv: list[str] | None = None) -> int:
     simulate.add_argument("--database", type=Path, required=True)
     simulate.add_argument("--run-id", required=True)
     simulate.add_argument("--resume", action="store_true")
+    hardware_description = commands.add_parser(
+        "describe-hardware", help="Offline validation of selected four-module hardware axes")
+    hardware_description.add_argument("--config", type=Path, required=True)
+    hardware_run = commands.add_parser(
+        "run", help="REAL selected-module writes and status consumption; separately authorized")
+    hardware_run.add_argument("--config", type=Path, required=True)
+    hardware_run.add_argument("--database", type=Path, required=True)
+    hardware_run.add_argument("--run-id", required=True)
+    hardware_run.add_argument("--authorize-combination", "--authorize-electrical-combination",
+                              dest="authorize_electrical_combination", action="store_true")
+    hardware_run.add_argument("--authorize-cryostat", action="store_true",
+                              help="Additionally authorize selected temperature/field axis writes")
+    hardware_run.add_argument("--confirm-xy-sine-disconnected", action="store_true")
     monitor = commands.add_parser("monitor", help="Read SQLite; never query instruments")
     monitor.add_argument("--database", type=Path, required=True)
     monitor.add_argument("--run-id", required=True)
     monitor.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
+    if args.command in {"describe-hardware", "run"}:
+        from .combination_hardware import load_hardware_combination, run_hardware_combination
+        config = load_hardware_combination(args.config)
+        if args.command == "describe-hardware":
+            print(json.dumps({"plan": config.snapshot, "conditions": config.plan.conditions()},
+                             ensure_ascii=False, indent=2))
+            return 0
+        if not args.authorize_electrical_combination:
+            raise ValueError("Real combined writes require --authorize-electrical-combination")
+        if config.lockin is not None and not args.confirm_xy_sine_disconnected:
+            raise ValueError("Requires --confirm-xy-sine-disconnected")
+        if config.cryostat is not None and not args.authorize_cryostat:
+            raise ValueError("Selected temperature/field writes require --authorize-cryostat")
+        with CombinationStore(args.database) as store:
+            result = run_hardware_combination(
+                config, store, args.run_id, authorize_hardware=True,
+                confirm_xy_sine_disconnected=args.confirm_xy_sine_disconnected,
+                authorize_cryostat=args.authorize_cryostat)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["status"] == "completed" else 2
     if args.command == "describe":
         plan = load_plan(args.config)
         print(json.dumps({"plan": plan.snapshot(), "conditions": plan.conditions()}, indent=2))

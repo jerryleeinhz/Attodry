@@ -190,11 +190,30 @@ class CombinationTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertTrue(result["cleanup"]["manual_verification_required"])
         self.assertTrue(station.closed)
-        self.assertIn(("cleanup", "smu", False), station.operations)
+        self.assertIn(("cleanup", "smu", True), station.operations)
         self.assertEqual(load_combination_rows(self.path), ())
         self.assertEqual(len(load_combination_rows(self.path, audit=True)), 6)
         with self.assertRaisesRegex(ValueError, "Unverified cleanup"):
             self.execute(resume=True)
+
+    def test_primary_read_error_survives_environment_and_audit_errors(self):
+        class Fault(SimulatedCombinationStation):
+            def read(self, module):
+                raise OSError("primary instrument failure")
+
+            def end_sample(self, reads):
+                raise RuntimeError("secondary environmental failure")
+        original = CombinationStore.event
+        def event(store, run_id, kind, payload):
+            if kind == "environment_after_read_failed":
+                raise OSError("secondary audit failure")
+            return original(store, run_id, kind, payload)
+        station = Fault()
+        with patch.object(CombinationStore, "event", event):
+            result = self.execute(station=station)
+        self.assertEqual(result["error"], "OSError: primary instrument failure")
+        self.assertTrue(station.closed)
+        self.assertTrue(result["cleanup"]["manual_verification_required"])
 
     def test_nonfinite_raw_value_is_retained_as_explicit_invalid_numeric(self):
         class Fault(SimulatedCombinationStation):

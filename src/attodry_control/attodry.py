@@ -846,6 +846,7 @@ class AttoDryDriver:
         max_overshoot_k: float | None = None,
         minimum_response_k: float = 0.0,
         response_reference_k: float | None = None,
+        maximum_accepted_k: float | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: Callable[[CryostatState, float], None] | None = None,
@@ -862,6 +863,11 @@ class AttoDryDriver:
             raise ValueError("minimum_response_k must be finite and non-negative.")
         if response_reference_k is not None and not math.isfinite(response_reference_k):
             raise ValueError("response_reference_k must be finite when provided.")
+        if maximum_accepted_k is not None and (
+            not math.isfinite(maximum_accepted_k)
+            or not self.temperature_min_k < maximum_accepted_k <= self.temperature_max_k
+        ):
+            raise ValueError("maximum_accepted_k must be within configured temperature limits.")
         if minimum_response_k > 0 and response_reference_k is None:
             raise ValueError(
                 "response_reference_k is required when minimum_response_k is positive."
@@ -902,7 +908,11 @@ class AttoDryDriver:
             config=self.temperature_stability,
             value=lambda state: state.sample_temperature_k,
             control=lambda state: state.temperature_control_enabled,
-            qualify=lambda _: response_seen,
+            # A descending combined inner-axis reset may start above the new
+            # target's overshoot band. Monitor that cooldown under a bounded
+            # transient ceiling, but never accept its still-hot stable plateau.
+            qualify=lambda state: response_seen and (maximum_accepted_k is None or
+                state.sample_temperature_k < maximum_accepted_k),
             require_target=(
                 self.temperature_stability.acceptance_mode
                 is TemperatureStabilityMode.TARGET

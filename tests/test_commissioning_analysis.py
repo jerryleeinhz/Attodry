@@ -12,6 +12,7 @@ from attodry_control.commissioning_analysis import (
     HarmonicScalingRules,
     ExcitationPathResistance,
     aggregate_sweep_samples,
+    aggregate_sweep_repeatability,
     browse_and_load_commissioning_file,
     discover_commissioning_records,
     excitation_path_from_sweep_files,
@@ -858,13 +859,43 @@ class CommissioningAnalysisTests(unittest.TestCase):
                 if "def _load_selected_formal_samples" in "".join(cell["source"])
             )
             exec("".join(selector_cell["source"]), scope)
-            scope["excitation_record_widget"].value = str(source)
+            scope["excitation_record_widget"].value = (str(source),)
             scope["_load_selected_records"](None)
 
         self.assertEqual(len(scope["frequency_excluded_points_widget"].options), 0)
         self.assertEqual(len(scope["excitation_excluded_points_widget"].options), 1)
         self.assertEqual(len(scope["frequency_rows"]), 0)
         self.assertEqual(len(scope["excitation_rows"]), 2)
+
+    def test_repeatability_keeps_sources_separate_and_uses_actual_x(self):
+        path = self._write_json("base.json", self._sweep(completed=True))
+        rows = load_sweep_samples(path)
+        second = tuple(replace(row, source_path="second.json",
+                               actual_frequency_hz=row.actual_frequency_hz + 0.0001,
+                               amplitude_v=row.amplitude_v + 1e-6) for row in rows)
+        stats = aggregate_sweep_repeatability(rows + second, role="xx", harmonic=1)
+        self.assertEqual(len(stats), 2)
+        self.assertEqual(stats[0].coordinates, stats[1].coordinates)
+        self.assertNotEqual(stats[0].source_path, stats[1].source_path)
+        self.assertAlmostEqual(abs(stats[0].mean - stats[1].mean), 1e-6)
+        self.assertAlmostEqual(abs(stats[0].x_value - stats[1].x_value), .0001)
+
+    def test_repeatability_phase_uses_circular_statistics(self):
+        path = self._write_json("phase.json", self._sweep(completed=True))
+        row = next(r for r in load_sweep_samples(path) if r.role == "xx")
+        rows = (replace(row, phase_deg=179.0), replace(row, phase_deg=-179.0))
+        stats = aggregate_sweep_repeatability(rows, role="xx", harmonic=1, metric="phase_deg")
+        self.assertEqual(len(stats), 1)
+        self.assertAlmostEqual(abs(stats[0].mean), 180.0)
+        self.assertLess(stats[0].standard_deviation, 2.0)
+
+    def test_repeatability_does_not_merge_distinct_requested_points(self):
+        path = self._write_json("requested.json", self._sweep(completed=True))
+        row = next(r for r in load_sweep_samples(path) if r.role == "xx")
+        stats = aggregate_sweep_repeatability(
+            (row, replace(row, target_frequency_hz=row.target_frequency_hz + 1e-8)),
+            role="xx", harmonic=1)
+        self.assertEqual(len(stats), 2)
 
 
     def _write_json(self, _name: str, payload: dict[str, object]) -> Path:

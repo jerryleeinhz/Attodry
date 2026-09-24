@@ -1,7 +1,8 @@
-"""Offline four-module coordinator and acquisition-order-independent records.
+"""Four-module plan, shared coordinator and acquisition-order-independent records.
 
-Only the in-process simulator is executable here. This is not a commissioned
-hardware runner, and deliberately imports no DLL, VISA, or device adapter.
+The public simulator entry accepts only simulated stations. The separate
+hardware entry validates authorization/configuration before using the core.
+This module deliberately imports no DLL, VISA, or device adapter.
 """
 from __future__ import annotations
 
@@ -196,6 +197,17 @@ class SimulatedCombinationStation:
         self.operations.append(("close",))
         self.closed = True
 
+    def expected_measurements(self, condition: dict) -> set[str]:
+        expected = set()
+        for role in SMU_ROLES:
+            if set(condition["requested"]) & {role + "_v", role + "_a"}:
+                expected.update({role + "_voltage_v", role + "_current_a"})
+        if "lockin" in condition["axes"]:
+            expected.update(f"{role}_h1_{metric}" for role in
+                            ("lockin_xx", "lockin_xy") for metric in
+                            ("x_v", "y_v", "amplitude_v", "phase_deg"))
+        return expected
+
 
 def run_simulated_combination(
     plan: CombinationPlan, store: CombinationStore, run_id: str, *,
@@ -207,13 +219,18 @@ def run_simulated_combination(
     No automatic retry or magnetic resume. Cleanup independently attempts every
     active module; a failure never implies zero/off or erases the primary error.
     """
-    snapshot = plan.snapshot()
-    conditions = plan.conditions()
-    if not isinstance(run_id, str) or not run_id.strip():
-        raise ValueError("run_id must be nonempty")
     station = station if station is not None else SimulatedCombinationStation()
     if not isinstance(station, SimulatedCombinationStation):
         raise TypeError("Only the offline simulated station is supported")
+    return _run_combination(plan, store, run_id, station=station,
+                            snapshot=plan.snapshot(), resume=resume)
+
+
+def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) -> dict:
+    """Internal engine; backend entry points own pre-I/O validation."""
+    conditions = plan.conditions()
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("run_id must be nonempty")
     completed = store.begin_run(run_id, snapshot, conditions, resume=resume)
     modules = tuple(a.module for a in plan.axes)
     current: dict | None = None
@@ -228,6 +245,8 @@ def run_simulated_combination(
         store.event(run_id, kind, {**context, **payload})
 
     try:
+        if hasattr(station, "set_event_sink"):
+            station.set_event_sink(emit)
         emit("run_started", {"resume": resume, "plan": snapshot})
         emit("preflight", station.open(modules))
         previous_indices: tuple | None = None
@@ -252,15 +271,40 @@ def run_simulated_combination(
             for sample_index in range(plan.samples_per_condition):
                 start = utc_now()
                 reads = []
+                if hasattr(station, "begin_sample"):
+                    station.begin_sample()
                 # All settings/settling precede every fresh SMU/Lock-in read.
                 # Per-instrument times describe sequential, not simultaneous, reads.
-                for module in modules:
-                    reading = station.read(module)
-                    emit("raw_reading", {"sample_index": sample_index,
-                                         "reading": _audit_value(reading)})
-                    if reading.get("module") != module:
-                        raise ValueError("Reading belongs to the wrong module")
-                    reads.append(reading)
+                read_error = None
+                try:
+                    for module in modules:
+                        reading = station.read(module)
+                        emit("raw_reading", {"sample_index": sample_index,
+                                             "reading": _audit_value(reading)})
+                        if reading.get("module") != module:
+                            raise ValueError("Reading belongs to the wrong module")
+                        reads.append(reading)
+                        if reading.get("clean") is not True or reading.get("problems"):
+                            # Preserve partial reads and stop later acquisition.
+                            break
+                except BaseException as exc:
+                    read_error = exc
+                    raise
+                finally:
+                    if hasattr(station, "end_sample"):
+                        try:
+                            station.end_sample(reads)
+                        except BaseException as exc:
+                            if read_error is None:
+                                raise
+                            read_error.add_note(f"Environmental after-read failed: {exc}")
+                            try:
+                                emit("environment_after_read_failed", {"error": str(exc)})
+                            except BaseException as audit_error:
+                                # A second failure must not replace the original
+                                # instrument error or suppress global cleanup.
+                                cleanup_errors.append(
+                                    f"environment after-read: {exc}; audit: {audit_error}")
                 actual: dict = {}
                 measurements: dict = {}
                 for reading in reads:
@@ -269,14 +313,7 @@ def run_simulated_combination(
                 finite = all(type(v) in (int, float) and math.isfinite(v)
                              for v in (*actual.values(), *measurements.values()))
                 expected_keys = set(condition["requested"])
-                expected_measured = set()
-                for role in SMU_ROLES:
-                    if expected_keys & {role + "_v", role + "_a"}:
-                        expected_measured.update({role + "_voltage_v", role + "_current_a"})
-                if "lockin" in modules:
-                    expected_measured.update(f"{role}_h1_{metric}" for role in
-                                             ("lockin_xx", "lockin_xy") for metric in
-                                             ("x_v", "y_v", "amplitude_v", "phase_deg"))
+                expected_measured = station.expected_measurements(condition)
                 finish = utc_now()
                 fresh = all(datetime.fromisoformat(start) <=
                             datetime.fromisoformat(r["captured_at_utc"]) <=
@@ -301,7 +338,7 @@ def run_simulated_combination(
                 sample = {
                     "started_at_utc": start, "finished_at_utc": finish,
                     "actual": actual, "measurements": measurements, "reads": reads,
-                    "clean": clean, "simulated": True,
+                    "clean": clean, "simulated": snapshot["mode"] == "simulation",
                 }
                 store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
                 emit("formal_sample", {"sample_index": sample_index, "clean": clean})
@@ -332,10 +369,10 @@ def run_simulated_combination(
             except BaseException as exc:
                 cleanup_errors.append(f"cleanup audit: {exc}")
             try:
-                action = station.cleanup(module, primary is not None)
+                action = _audit_value(station.cleanup(module, primary is not None or bool(cleanup_errors)))
                 cleanup_actions.append(action)
                 if action.get("clean") is not True:
-                    cleanup_errors.append(f"{module}: final state unverified")
+                    cleanup_errors.append(f"{module}: cleanup not certified; review recorded actions")
                 emit("cleanup_result", action)
             except BaseException as exc:
                 cleanup_errors.append(f"{module}: {type(exc).__name__}: {exc}")

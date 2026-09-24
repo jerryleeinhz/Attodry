@@ -7,6 +7,9 @@ Three-SMU direct points 和 Magnetic。新增任意组合的**模拟执行器**�
 记录、只读 run/condition/attempt/cleanup 监控，以及
 [`combination_analysis.ipynb`](notebooks/combination_analysis.ipynb)。
 SMU 外层、激励内层的数据可按激励重组为 SMU I–V；每个组合点都重新采样。
+2026-09-23：真实驱动执行器已接入 Temperature、Magnetic、SMU 和固定频率双 SR830
+excitation，支持任意非空子集与顺序；温度/磁场共用一个连接。仅离线假仪器验证，
+尚未联合实机验收，Lock-in frequency 轴和硬件 resume 仍未支持。
 这不代表真实四模块执行器已接线或验收。命令、记录格式、旧数据适配和剩余工作见
 [`COMBINATION_SCAN_GUIDE.md`](docs/COMBINATION_SCAN_GUIDE.md)。
 Three-SMU 的最新实机范围为 bottom-only 小电压扫描；下文旧 S0/未验收描述不是
@@ -140,6 +143,7 @@ Copy-Item config\hardware.example.toml config\hardware.local.toml
 python -m attodry_control.lockin_test diagnose --config config\hardware.local.toml
 python -m attodry_control.lockin_test monitor-live --help
 python -m attodry_control.lockin_test recover-interface --help
+python -m attodry_control.lockin_test apply-toml --help
 python -m attodry_control.lockin_test measure-harmonics --help
 python -m attodry_control.lockin_test sweep-frequency --help
 python -m attodry_control.lockin_test sweep-excitation --help
@@ -155,6 +159,14 @@ python -m attodry_control.magnetic_field_cli scan --help
 python -m attodry_control.magnetic_field_monitor --help
 python -m attodry_control.lockin_test --help
 ```
+
+To explicitly apply one role's approved fixed input/filter/range/Reserve values
+from `hardware.local.toml`, use `apply-toml --role lockin_xy` (or
+`lockin_xx`) with its write, latch-consumption, and physical XY-output
+confirmations. It does not change reference, frequency, harmonic, phase, or
+SINE OUT settings; each authorized hardware attempt is saved as a
+completed/rejected commissioning JSON. It does not connect to hardware unless
+invoked with the explicit flags.
 
 日常温控参数统一写在已忽略的 `config/hardware.local.toml` 的
 `[temperature_run]` 表中，通常只修改 `target_k`。运行

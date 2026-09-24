@@ -239,7 +239,12 @@ class Sr830Tests(unittest.TestCase):
             sensitivity_full_scale_v=0.001,
         )
 
-    def _hardware_config(self, *, frequency_hz: float = 17.777) -> Path:
+    def _hardware_config(
+        self,
+        *,
+        frequency_hz: float = 17.777,
+        xy_sensitivity_full_scale_v: float = 0.001,
+    ) -> Path:
         temporary = tempfile.NamedTemporaryFile(suffix=".toml", delete=False)
         temporary.close()
         path = Path(temporary.name)
@@ -257,7 +262,7 @@ class Sr830Tests(unittest.TestCase):
             )
             .replace(
                 "sensitivity_full_scale_v = 0.010",
-                "sensitivity_full_scale_v = 0.001",
+                f"sensitivity_full_scale_v = {xy_sensitivity_full_scale_v:g}",
                 1,
             )
             .replace(
@@ -1072,6 +1077,204 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(xy_resource.writes, [])
         self.assertEqual(sleep.call_args_list[0].args, (1.5,))
         self.assertEqual(sleep.call_args_list[1].args, (1.5,))
+
+    def test_apply_toml_requires_all_authorizations_before_opening(self) -> None:
+        for missing_flag in (
+            "--authorize-writes",
+            "--authorize-status-latch-consumption",
+            "--confirm-xy-sine-disconnected",
+        ):
+            with self.subTest(missing_flag=missing_flag):
+                manager = FakeResourceManager({})
+                arguments = [
+                    "apply-toml",
+                    "--config",
+                    str(self._hardware_config()),
+                    "--role",
+                    "lockin_xy",
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ]
+                arguments.remove(missing_flag)
+                with self.assertRaises(AuthorizationRequired):
+                    run(arguments, resource_manager_factory=lambda: manager)
+                self.assertEqual(manager.opened, [])
+
+    def test_apply_toml_widens_overloaded_xy_to_configured_range_only(self) -> None:
+        config_path = self._hardware_config(xy_sensitivity_full_scale_v=0.020)
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["SENS?"] = "21\n"
+        xy_responses["SENS?"] = "8\n"
+        xy_responses["OFLT?"] = "9\n"
+        xy_responses["LIAS?"] = ["5\n", "0\n"]
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager(
+            {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output), patch("attodry_control.lockin_test.time.sleep") as sleep:
+            exit_code = run(
+                [
+                    "apply-toml",
+                    "--config",
+                    str(config_path),
+                    "--role",
+                    "lockin_xy",
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["before"]["lockin_xy"]["sensitivity"], 8)
+        self.assertEqual(result["after"]["lockin_xy"]["sensitivity"], 21)
+        self.assertEqual(result["after"]["lockin_xy"]["lia_status"]["raw"], 0)
+        self.assertEqual(
+            xy_resource.writes,
+            ["ISRC 1", "IGND 0", "ICPL 0", "OFLT 9", "OFSL 3", "SENS 21", "RMOD 1"],
+        )
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(sleep.call_args_list[0].args, (1.5,))
+        self.assertTrue(manager.closed)
+        config = config_module.load_config(
+            config_path, safety_path=Path("config/lockin_safety.toml")
+        )
+        record_directory = config_path.parent / config.lockin_sweep.output_directory
+        saved_records = tuple(record_directory.glob("*_apply_toml_completed.json"))
+        self.assertEqual(len(saved_records), 1)
+        saved_record = json.loads(saved_records[0].read_text(encoding="utf-8"))
+        self.assertEqual(saved_record["target_role"], "lockin_xy")
+        self.assertTrue(saved_record["completed"])
+
+    def test_apply_toml_rejects_overload_without_widening_and_does_not_write(self) -> None:
+        config_path = self._hardware_config(xy_sensitivity_full_scale_v=0.001)
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["SENS?"] = "21\n"
+        xy_responses["SENS?"] = "26\n"
+        xy_responses["OFLT?"] = "9\n"
+        xy_responses["LIAS?"] = "5\n"
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager(
+            {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+        )
+
+        with redirect_stdout(io.StringIO()), self.assertRaisesRegex(
+            Sr830Error, "apply-toml preflight failed"
+        ):
+            run(
+                [
+                    "apply-toml",
+                    "--config",
+                    str(config_path),
+                    "--role",
+                    "lockin_xy",
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        self.assertEqual(xx_resource.writes, [])
+        self.assertEqual(xy_resource.writes, [])
+        config = config_module.load_config(
+            config_path, safety_path=Path("config/lockin_safety.toml")
+        )
+        record_directory = config_path.parent / config.lockin_sweep.output_directory
+        saved_records = tuple(record_directory.glob("*_apply_toml_rejected.json"))
+        self.assertEqual(len(saved_records), 1)
+        self.assertFalse(
+            json.loads(saved_records[0].read_text(encoding="utf-8"))["completed"]
+        )
+
+    def test_apply_toml_keeps_wider_range_when_postwrite_overload_persists(self) -> None:
+        config_path = self._hardware_config(xy_sensitivity_full_scale_v=0.020)
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["SENS?"] = "21\n"
+        xy_responses["SENS?"] = "8\n"
+        xy_responses["OFLT?"] = "9\n"
+        xy_responses["LIAS?"] = ["5\n", "1\n"]
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(xy_responses)
+        manager = FakeResourceManager(
+            {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            Sr830Error, "apply-toml verification failed"
+        ):
+            run(
+                [
+                    "apply-toml",
+                    "--config",
+                    str(config_path),
+                    "--role",
+                    "lockin_xy",
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertEqual(result["last_confirmed_state"]["lockin_xy"]["sensitivity"], 21)
+        self.assertEqual(xy_resource.responses["SENS?"], "21\n")
+        self.assertNotIn("SENS 8", xy_resource.writes)
+        self.assertEqual(xx_resource.writes, [])
+
+    def test_apply_toml_records_readback_after_ambiguous_write_error(self) -> None:
+        config_path = self._hardware_config(xy_sensitivity_full_scale_v=0.020)
+        xx_responses = responses(reference_mode=1)
+        xy_responses = responses(reference_mode=0)
+        xx_responses["SENS?"] = "21\n"
+        xy_responses["SENS?"] = "8\n"
+        xy_responses["OFLT?"] = "9\n"
+        xy_responses["LIAS?"] = "5\n"
+        xx_resource = FakeVisaResource(xx_responses)
+        xy_resource = FakeVisaResource(xy_responses, fail_write="SENS 21")
+        manager = FakeResourceManager(
+            {"GPIB0::8::INSTR": xx_resource, "GPIB0::9::INSTR": xy_resource}
+        )
+        output = io.StringIO()
+
+        with redirect_stdout(output), self.assertRaisesRegex(
+            OSError, "injected VISA write failure"
+        ):
+            run(
+                [
+                    "apply-toml",
+                    "--config",
+                    str(config_path),
+                    "--role",
+                    "lockin_xy",
+                    "--authorize-writes",
+                    "--authorize-status-latch-consumption",
+                    "--confirm-xy-sine-disconnected",
+                ],
+                resource_manager_factory=lambda: manager,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertTrue(result["manual_verification_required"])
+        self.assertFalse(result["safety_status_complete"])
+        self.assertEqual(result["last_confirmed_state"]["lockin_xy"]["sensitivity"], 8)
+        self.assertEqual(xx_resource.writes, [])
 
     def test_cli_set_xx_sensitivity_rejects_latched_preflight_without_write(self) -> None:
         xx_responses = responses(reference_mode=1)

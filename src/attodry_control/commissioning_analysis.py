@@ -127,6 +127,21 @@ class SweepStatistic:
 
 
 @dataclass(frozen=True, slots=True)
+class RepeatabilityStatistic:
+    """One run's statistic at one requested scan coordinate."""
+
+    source_path: str
+    coordinates: tuple[float, ...]
+    x_value: float
+    role: str
+    harmonic: int
+    metric: str
+    mean: float
+    standard_deviation: float
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
 class MultiFrequencyIVStatistic:
     """One aggregated point for a frequency-by-excitation I--V curve."""
 
@@ -723,6 +738,260 @@ def aggregate_sweep_samples(
             )
         )
     return tuple(statistics)
+
+
+def aggregate_sweep_repeatability(
+    rows: Sequence[CommissioningSample],
+    *,
+    role: str,
+    harmonic: int,
+    metric: str = "amplitude_v",
+    excitation_path: ExcitationPathResistance | None = None,
+) -> tuple[RepeatabilityStatistic, ...]:
+    """Aggregate repeats within each file and requested scan coordinate.
+
+    Frequency runs are paired by requested frequency, excitation runs by the
+    requested SINE OUT RMS voltage, and combined runs by both requested values.
+    Plot coordinates still use measured frequency/current readbacks.
+    """
+
+    if role not in PLOT_ROLES:
+        raise ValueError(f"Unknown role: {role}")
+    if harmonic not in PLOT_HARMONICS:
+        raise ValueError(f"Unsupported harmonic: {harmonic}")
+    if metric not in SWEEP_METRICS:
+        raise ValueError(f"Unsupported metric: {metric}")
+    if not rows:
+        raise ValueError("No sweep samples match the selected filters.")
+    scan_types = {row.scan_type for row in rows}
+    if len(scan_types) != 1:
+        raise ValueError("Aggregate one sweep type at a time.")
+    scan_type = next(iter(scan_types))
+    coordinate_axes_by_scan = {
+        "frequency": ("target_frequency_hz",),
+        "excitation": ("source_v_rms",),
+        "frequency_excitation": ("target_frequency_hz", "source_v_rms"),
+    }
+    try:
+        coordinate_axes = coordinate_axes_by_scan[scan_type]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported repeatability scan type: {scan_type}") from exc
+    selected = tuple(
+        row for row in rows if row.role == role and row.harmonic == harmonic
+    )
+    if not selected:
+        return ()
+    resolved_path = (
+        _single_excitation_path_for_rows(selected, excitation_path)
+        if scan_type != "frequency"
+        else excitation_path
+    )
+    x_axis = (
+        "actual_frequency_hz"
+        if scan_type == "frequency"
+        else "sine_output_current_a_rms"
+    )
+    grouped: dict[
+        tuple[str, tuple[float, ...]], tuple[list[float], list[float], tuple[float, ...]]
+    ] = {}
+    for row in selected:
+        coordinates = tuple(float(getattr(row, axis)) for axis in coordinate_axes)
+        if any(not math.isfinite(value) for value in coordinates):
+            raise ValueError("Requested scan coordinates must be finite.")
+        key = (row.source_path, _repeatability_coordinate_key(coordinates))
+        if key not in grouped:
+            grouped[key] = ([], [], coordinates)
+        values, x_values, _ = grouped[key]
+        values.append(float(getattr(row, metric)))
+        x_values.append(_sweep_x_value(row, x_axis, resolved_path))
+
+    statistics: list[RepeatabilityStatistic] = []
+    for (source_path, _), (values, x_values, coordinates) in grouped.items():
+        mean, spread = _mean_and_standard_deviation(values, metric=metric)
+        statistics.append(
+            RepeatabilityStatistic(
+                source_path=source_path,
+                coordinates=coordinates,
+                x_value=fmean(x_values),
+                role=role,
+                harmonic=harmonic,
+                metric=metric,
+                mean=mean,
+                standard_deviation=spread,
+                count=len(values),
+            )
+        )
+    return tuple(
+        sorted(
+            statistics,
+            key=lambda item: (
+                item.source_path,
+                _repeatability_coordinate_key(item.coordinates),
+            ),
+        )
+    )
+
+
+def plot_sweep_repeatability(
+    rows: Sequence[CommissioningSample],
+    *,
+    role: str,
+    harmonic: int,
+    metric: str,
+    baseline_source_path: str | Path,
+    excitation_path: ExcitationPathResistance | None = None,
+):
+    """Overlay independent runs and plot paired differences from one baseline."""
+
+    statistics = aggregate_sweep_repeatability(
+        rows,
+        role=role,
+        harmonic=harmonic,
+        metric=metric,
+        excitation_path=excitation_path,
+    )
+    if not statistics:
+        raise ValueError("No selected samples match this role and harmonic.")
+    scan_type = next(row.scan_type for row in rows)
+    baseline_path = str(baseline_source_path)
+    by_run: dict[str, list[RepeatabilityStatistic]] = {}
+    for item in statistics:
+        by_run.setdefault(item.source_path, []).append(item)
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise RuntimeError(
+            "Plotting requires: python -m pip install -e '.[analysis]'"
+        ) from exc
+
+    figure, (value_axis, difference_axis) = plt.subplots(
+        2, 1, figsize=(8.5, 7.0), sharex=True,
+        gridspec_kw={"height_ratios": (2.2, 1)}, constrained_layout=True,
+    )
+    metric_labels = {
+        "x_v": "X (V)",
+        "y_v": "Y (V)",
+        "amplitude_v": "R (V RMS)",
+        "phase_deg": "Phase (degree)",
+    }
+    x_labels = {
+        "frequency": "Measured frequency (Hz); paired by requested frequency",
+        "excitation": "SINE OUT readback-derived current (A RMS); paired by requested voltage",
+        "frequency_excitation": "SINE OUT readback-derived current (A RMS); paired by requested frequency and voltage",
+    }
+    combined = scan_type == "frequency_excitation"
+    run_paths = tuple(by_run)
+    colors = [OKABE_ITO_ON_WHITE[index % len(OKABE_ITO_ON_WHITE)] for index in range(len(run_paths))]
+    line_styles = ("-", "--", ":", "-.")
+    frequency_values = sorted(
+        {item.coordinates[0] for item in statistics} if combined else set()
+    )
+    frequency_style = {
+        value: line_styles[index % len(line_styles)]
+        for index, value in enumerate(frequency_values)
+    }
+
+    def coordinate_key(item: RepeatabilityStatistic) -> tuple[float, ...]:
+        return _repeatability_coordinate_key(item.coordinates)
+
+    for run_index, source_path in enumerate(run_paths):
+        run_items = by_run[source_path]
+        subsets = (
+            [(frequency, [item for item in run_items if item.coordinates[0] == frequency])
+             for frequency in frequency_values]
+            if combined
+            else [(None, run_items)]
+        )
+        for frequency, selected in subsets:
+            selected = sorted(selected, key=lambda item: item.x_value)
+            if not selected:
+                continue
+            label = Path(source_path).name
+            if frequency is not None:
+                label += f" · {frequency:.7g} Hz"
+            style = frequency_style[frequency] if frequency is not None else "-"
+            value_axis.errorbar(
+                [item.x_value for item in selected],
+                [item.mean for item in selected],
+                yerr=[item.standard_deviation for item in selected],
+                color=colors[run_index], linestyle=style, marker="o",
+                linewidth=1.25, markersize=4, capsize=2.5, label=label,
+            )
+
+    baseline_by_coordinate = {
+        coordinate_key(item): item for item in by_run.get(baseline_path, ())
+    }
+    difference_count = 0
+    for run_index, source_path in enumerate(run_paths):
+        if source_path == baseline_path:
+            continue
+        common: dict[float | None, list[tuple[RepeatabilityStatistic, float]]] = {}
+        for item in by_run[source_path]:
+            reference = baseline_by_coordinate.get(coordinate_key(item))
+            if reference is None:
+                continue
+            delta = (
+                (item.mean - reference.mean + 180.0) % 360.0 - 180.0
+                if metric == "phase_deg"
+                else item.mean - reference.mean
+            )
+            frequency = item.coordinates[0] if combined else None
+            common.setdefault(frequency, []).append((reference, delta))
+        for frequency, pairs in common.items():
+            pairs.sort(key=lambda pair: pair[0].x_value)
+            difference_count += len(pairs)
+            difference_axis.plot(
+                [reference.x_value for reference, _ in pairs],
+                [delta for _, delta in pairs],
+                color=colors[run_index],
+                linestyle=(frequency_style[frequency] if frequency is not None else "-"),
+                marker="o", linewidth=1.15, markersize=3.8,
+                label=(
+                    f"{Path(source_path).name} − baseline"
+                    + (f" · {frequency:.7g} Hz" if frequency is not None else "")
+                    + f" ({len(pairs)} matched points)"
+                ),
+            )
+    difference_axis.axhline(0.0, color="black", linewidth=0.8, alpha=0.55)
+    if len(run_paths) < 2:
+        difference_axis.text(
+            0.5, 0.5, "Select at least two runs to compare repeatability",
+            ha="center", va="center", transform=difference_axis.transAxes,
+        )
+    elif difference_count == 0:
+        no_match_message = (
+            "Baseline has no selected samples for this channel"
+            if not baseline_by_coordinate
+            else "No shared requested scan coordinates with the baseline"
+        )
+        difference_axis.text(
+            0.5, 0.5, no_match_message,
+            ha="center", va="center", transform=difference_axis.transAxes,
+        )
+    value_axis.set_ylabel(metric_labels[metric])
+    difference_axis.set_ylabel(f"Δ {metric_labels[metric]}")
+    difference_axis.set_xlabel(x_labels[scan_type])
+    if scan_type == "frequency":
+        value_axis.set_xscale("log")
+    value_axis.set_title(
+        f"SR830 {scan_type} · V{role} h{harmonic} · {metric} by run"
+    )
+    difference_axis.set_title(
+        f"Paired difference from {Path(baseline_path).name}"
+    )
+    for axis in (value_axis, difference_axis):
+        style_axis(axis)
+        axis.grid(True, alpha=0.25)
+        if axis.get_legend_handles_labels()[0]:
+            outside_legend(
+                axis,
+                title=(
+                    "Run · mean ± within-run SD"
+                    if axis is value_axis
+                    else "Paired difference"
+                ),
+            )
+    return figure
 
 
 def aggregate_frequency_excitation_iv(
@@ -3620,3 +3889,11 @@ def _mean_and_standard_deviation(
         else math.degrees(math.sqrt(-2.0 * math.log(resultant)))
     )
     return mean, spread
+
+
+def _repeatability_coordinate_key(
+    coordinates: Sequence[float],
+) -> tuple[float, ...]:
+    """Use requested coordinates as exact keys, never point indexes/readbacks."""
+
+    return tuple(float(value) for value in coordinates)

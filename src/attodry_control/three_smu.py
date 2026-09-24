@@ -114,6 +114,9 @@ class ThreeSmuSession:
         self._run_active = False
         self._recorder: _RunRecorder | None = None
         self._closed = False
+        self._point_recorder = None
+        self._point_started = 0.0
+        self._points_cleaned = False
 
     @classmethod
     def open(
@@ -124,6 +127,7 @@ class ThreeSmuSession:
         authorize_writes: bool = False,
         authorize_status_consumption: bool = False,
         adapter_factory: Callable[[str, SmuHardwareConfig], SmuAdapter] = open_keithley2400,
+        on_preflight: Callable[[str, KeithleyPreflight], None] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> "ThreeSmuSession":
@@ -146,7 +150,11 @@ class ThreeSmuSession:
                 authorize_status = getattr(adapter, "authorize_status_consumption", None)
                 if callable(authorize_status):
                     authorize_status()
-            preflight = {role: adapters[role].preflight() for role in active_roles}
+            preflight = {}
+            for role in active_roles:
+                preflight[role] = adapters[role].preflight()
+                if on_preflight is not None:
+                    on_preflight(role, preflight[role])
             active = [
                 role for role, state in preflight.items() if state.output_enabled
             ]
@@ -214,12 +222,12 @@ class ThreeSmuSession:
                 sleep=sleep,
                 monotonic=monotonic,
             )
-        except Exception:
+        except BaseException as primary:
             for adapter in adapters.values():
                 try:
                     adapter.close()
-                except Exception:
-                    pass
+                except BaseException as close_error:
+                    primary.add_note(f"SMU close failed: {close_error}; manual verification required")
             raise
 
     def __enter__(self) -> "ThreeSmuSession":
@@ -260,7 +268,7 @@ class ThreeSmuSession:
         """
         if self._closed:
             raise ThreeSmuError("Session is closed")
-        if self._run_active or self._recorder is not None:
+        if self._run_active or self._recorder is not None or self._point_recorder is not None:
             raise ThreeSmuError("A Three-SMU session supports one audited run")
         recorder = _RunRecorder(
             Path(output_dir),
@@ -331,14 +339,62 @@ class ThreeSmuSession:
         if self._closed:
             return
         errors: list[str] = []
+        if self._point_recorder is not None and not self._points_cleaned:
+            try:
+                result = self.cleanup_points(self._point_recorder, reason="point owner closing")
+                if result["manual_verification_required"]:
+                    errors.append("Point cleanup requires manual verification")
+            except BaseException as exc:
+                errors.append(f"Point cleanup failed: {exc}")
         for role, adapter in self.adapters.items():
             try:
                 adapter.close()
-            except Exception as exc:
+            except BaseException as exc:
                 errors.append(f"{role}: {exc}")
         self._closed = True
         if errors:
             raise ThreeSmuError("Could not close all SMUs: " + "; ".join(errors))
+
+    def begin_points(self, recorder) -> None:
+        """Configure once; the external owner must always call cleanup_points.
+
+        The recorder supplies durable event(kind, payload). Standalone run()
+        and this point interface cannot share a session.
+        """
+        if self._closed or self._recorder is not None or self._point_recorder is not None:
+            raise ThreeSmuError("Session is closed or already used")
+        self._point_recorder = recorder
+        self._point_started = self.monotonic()
+        self._configure(recorder)
+
+    def set_point(self, coordinates: dict[str, float], *, index: int = 0,
+                  segment: str = "main") -> None:
+        if self._point_recorder is None or self._closed:
+            raise ThreeSmuError("begin_points is required")
+        if set(coordinates) != self._active_roles:
+            raise ThreeSmuSafetyError("A point must specify exactly the active SMU roles")
+        for role, target in coordinates.items():
+            self._validate_source_target(role, target)
+        self._apply_point(ScanPoint(index, segment, coordinates), self._point_recorder)
+        if self.plan.delay_s:
+            self.sleep(self.plan.delay_s)
+
+    def sample_point(self, coordinates: dict[str, float], *, index: int = 0,
+                     sample_index: int = 0, segment: str = "main") -> ThreeSmuSample:
+        if self._point_recorder is None or self._closed:
+            raise ThreeSmuError("begin_points is required")
+        if set(coordinates) != self._active_roles:
+            raise ThreeSmuSafetyError("A sample must specify exactly the active SMU roles")
+        return self._formal_sample(
+            ScanPoint(index, segment, coordinates), sample_index,
+            self._point_started, self._point_recorder,
+        )
+
+    def cleanup_points(self, recorder, *, reason: str) -> dict:
+        """Zero then disable configured roles; never clean up off roles."""
+        result = self._cleanup(recorder, reason=reason)
+        self._points_cleaned = True
+        return result
 
     def _configure(self, recorder: "_RunRecorder") -> None:
         for role in active_smu_roles(self.plan):
@@ -442,7 +498,7 @@ class ThreeSmuSession:
                         expected_output=role in self._active_roles,
                     )
                 )
-            except Exception as exc:
+            except BaseException as exc:
                 recorder.event(
                     "sample_partial",
                     {
@@ -491,6 +547,8 @@ class ThreeSmuSession:
             )
         if not math.isfinite(reading.source_setpoint):
             problems.append(f"{role} source setpoint readback is not finite")
+        if not math.isfinite(reading.voltage_v) or not math.isfinite(reading.current_a):
+            problems.append(f"{role} voltage/current readback is not finite")
         if abs(reading.voltage_v) > config.max_abs_voltage_v:
             problems.append(
                 f"{role} voltage {reading.voltage_v:g} V exceeds "
@@ -621,7 +679,7 @@ class ThreeSmuSession:
                 )
                 if problems:
                     raise ThreeSmuSafetyError("; ".join(problems))
-            except Exception as exc:
+            except BaseException as exc:
                 manual = True
                 cleanup_errors.append(
                     {
@@ -660,7 +718,7 @@ class ThreeSmuSession:
                         "problems": problems,
                     },
                 )
-            except Exception as exc:
+            except BaseException as exc:
                 manual = True
                 cleanup_errors.append(
                     {

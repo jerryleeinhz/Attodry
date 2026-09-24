@@ -397,6 +397,7 @@ def load_config(
                     "temperature_scan",
                     "temperature_excitation_scan",
                     "magnetic_field_run",
+                    "combination_scan",
                 }
                 if project.mode is RunMode.HARDWARE
                 else set()
@@ -897,6 +898,7 @@ def load_temperature_operation_config(
         "temperature_scan",
         "temperature_excitation_scan",
         "magnetic_field_run",
+        "combination_scan",
         "cleanup",
         "visa",
         "lockin_xx",
@@ -981,6 +983,7 @@ def load_temperature_excitation_operation_config(
         "lockin_sweep",
     }
     known_tables = required_tables | {
+        "combination_scan",
         "magnetic_field_run",
         "cleanup",
         "gate_top",
@@ -1142,6 +1145,7 @@ def load_magnetic_field_operation_config(
     if project.mode is not RunMode.HARDWARE:
         raise ConfigError("Standalone magnetic-field operation requires hardware mode.")
     known_tables = {
+        "combination_scan",
         "project",
         "cryostat",
         "magnet",
