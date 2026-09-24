@@ -30,8 +30,12 @@ opt-in. Formal samples can be filtered as `clean`, `problem`, `unlocked`,
 `overload`, or `instrument_error`; transition and cleanup payloads are excluded
 from the plotted rows.
 
-Set `DATA_DIRECTORY` once, click `Refresh records`, select a frequency record,
-an excitation record, a frequency×amplitude record, or any combination, then click `Load selected records`. This works
+Set `DATA_DIRECTORY` once, click `Refresh records`, and tick the checkbox to the
+right of each wanted file under the three separate categories: `Frequency`,
+`Excitation`, and `f × e`. Each category supports multiple files. Click
+`Load selected records` to analyze those selections together. Labels sit above
+the controls, long filenames wrap, and catalog refresh preserves checked files
+that still exist in the filtered catalog. This works
 when the kernel is running remotely through VSCode/SSH because it lists files
 on the kernel computer rather than opening a desktop dialog. The visible `Only
 completed records` checkbox defaults to selected; formal-sample status is a
@@ -58,6 +62,17 @@ phase plots made from the same raw data under different trust thresholds remain
 distinguishable and reproducible.
 Both Python UTF-8 records and PowerShell UTF-16/BOM records are detected and
 opened automatically.
+
+For `f × e`, two separate exclusion lists show the distinct requested frequencies
+and SINE OUT excitation values across all selected combined records. Excluding a
+frequency removes every excitation at that frequency; excluding an excitation
+removes that amplitude at every frequency. Either match removes the sample, in
+every selected combined file, across all roles and harmonics. Requested coordinates
+are used so small readback variations do not fragment a row or column. Apply the
+exclusions and rerun the figure cell; clearing and reapplying restores the loaded
+data. Loading a new file selection resets exclusions. Standalone frequency and
+excitation exclusions still operate on individual points identified by source
+file and point index. The export manifest records the two combined exclusion lists.
 
 The notebook creates six frequency figures and six current--voltage figures:
 separate Vxx/Vxy figures for h1, h2, and h3. Each uses aligned, shared-x panels

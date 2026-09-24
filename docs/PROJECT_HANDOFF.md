@@ -4,6 +4,21 @@ Last updated: 2026-09-24
 
 ## Current stage
 
+### SR830 browser checkboxes and combined-axis exclusions (2026-09-24)
+
+The commissioning notebook retains Frequency, Excitation, and f × e categories,
+with a checkbox at the right of every file. Top labels and wrapping filenames
+remove clipped descriptions; refresh preserves selections still in the catalog.
+Existing per-file frequency/excitation point exclusions remain. Combined records
+now expose separate requested-frequency and requested-excitation exclusions,
+applied across every selected combined file and archived in the export manifest.
+Fixed the missing global combined-loaded-rows assignment so filtering can restore
+the original selection. Reload resets exclusions; raw records stay unchanged.
+Validation: 37 commissioning-analysis tests passed, including multi-file selection,
+per-file exclusions, combined row/column removal and restoration. Real ipywidgets
+8.1.8 rendered at 1280/760 px with no horizontal overflow; browser checkbox
+interaction passed. This change is confined to offline analysis.
+
 ### Four-changing-axis bounded hardware validation passed (2026-09-24)
 
 Operator confirmed no visible XY OVLD and authorized completion. Fresh four-sample

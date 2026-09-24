@@ -2,6 +2,21 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## SR830 browser selection and axis exclusions (2026-09-24)
+
+- Keep Frequency, Excitation, and f × e as three separate file lists, with a
+  right-side checkbox per record. Above-control labels and wrapping filenames
+  fix clipping; refreshed catalogs preserve still-available selections.
+- Preserve standalone per-file point exclusions; add requested-frequency and
+  requested-SINE-OUT exclusion lists for combined records. Either excluded axis
+  value removes matching rows across all selected combined files. Clearing
+  exclusions restores loaded rows, and reload resets the lists.
+- Persist combined exclusions in the export manifest. Corrected the missing
+  global combined-loaded-rows assignment used by the filtering callbacks.
+- Validation: 37 commissioning-analysis tests passed. Actual ipywidgets 8.1.8
+  controls rendered without horizontal overflow at 1280/760 px; independent
+  right-side checkbox interaction passed in the browser. No hardware I/O.
+
 ## Bounded four-changing-axis hardware validation (2026-09-24; passed)
 
 - Following operator panel confirmation/authorization, clear fresh diagnosis and

@@ -825,6 +825,16 @@ class CommissioningAnalysisTests(unittest.TestCase):
         payload["scan"] = "excitation"
         payload["measurement_config"] = self._measurement_config_path()
         source = self._write_json("excitation.json", payload)
+        scope = self._notebook_selector_scope(source.parent)
+        scope["excitation_record_widget"].value = (str(source),)
+        scope["_load_selected_records"](None)
+
+        self.assertEqual(len(scope["frequency_excluded_points_widget"].options), 0)
+        self.assertEqual(len(scope["excitation_excluded_points_widget"].options), 1)
+        self.assertEqual(len(scope["frequency_rows"]), 0)
+        self.assertEqual(len(scope["excitation_rows"]), 2)
+
+    def _notebook_selector_scope(self, directory: Path) -> dict[str, object]:
         notebook = json.loads(
             (PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb").read_text(
                 encoding="utf-8"
@@ -852,20 +862,102 @@ class CommissioningAnalysisTests(unittest.TestCase):
             },
         ):
             exec("".join(cells[1]["source"]), scope)
-            scope["DATA_DIRECTORY"] = source.parent
+            scope["DATA_DIRECTORY"] = directory
             selector_cell = next(
                 cell
                 for cell in cells
                 if "def _load_selected_formal_samples" in "".join(cell["source"])
             )
             exec("".join(selector_cell["source"]), scope)
-            scope["excitation_record_widget"].value = (str(source),)
-            scope["_load_selected_records"](None)
+        return scope
 
-        self.assertEqual(len(scope["frequency_excluded_points_widget"].options), 0)
-        self.assertEqual(len(scope["excitation_excluded_points_widget"].options), 1)
-        self.assertEqual(len(scope["frequency_rows"]), 0)
-        self.assertEqual(len(scope["excitation_rows"]), 2)
+    def test_notebook_record_checkboxes_preserve_selection_on_refresh(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["scan"] = "excitation"
+        payload["measurement_config"] = self._measurement_config_path()
+        first = self._write_json("first.json", payload)
+        second = self._write_json("second.json", payload)
+        scope = self._notebook_selector_scope(first.parent)
+        selector = scope["excitation_record_widget"]
+        self.assertEqual(selector.value, ())
+        selector._checkboxes[str(first)].value = True
+        selector._checkboxes[str(second)].value = True
+        scope["_refresh_records"]()
+        self.assertEqual(set(selector.value), {str(first), str(second)})
+        scope["_load_selected_records"](None)
+        self.assertEqual(
+            {row.source_path for row in scope["excitation_rows"]},
+            {str(first), str(second)},
+        )
+        # A single point exclusion remains specific to its selected source file.
+        options = scope["excitation_excluded_points_widget"].options
+        key = next(value for _, value in options if str(first) in value)
+        scope["excitation_excluded_points_widget"].value = (key,)
+        scope["_apply_point_exclusions"](None)
+        self.assertEqual(
+            {row.source_path for row in scope["excitation_rows"]}, {str(second)}
+        )
+        selector._checkboxes[str(first)].value = False
+        scope["_load_selected_records"](None)
+        self.assertEqual(selector.value, (str(second),))
+        self.assertEqual(scope["excitation_excluded_points_widget"].value, ())
+        selector.value = ()
+        scope["_load_selected_records"](None)
+        self.assertEqual(scope["excitation_rows"], ())
+        self.assertEqual(scope["excitation_excluded_points_widget"].options, ())
+
+    def test_notebook_combined_exclusions_remove_requested_rows_and_columns(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["scan"] = "frequency_excitation"
+        payload["measurement_config"] = self._measurement_config_path()
+        payload["points"] = [
+            {
+                "point_index": index,
+                "target_frequency_hz": frequency,
+                "actual_frequency_hz": frequency + 0.0001,
+                "source_v_rms": excitation,
+                "source_readback_v_rms": excitation + 0.000001,
+                "samples": [self._sample()],
+            }
+            for index, (frequency, excitation) in enumerate(
+                (frequency, excitation)
+                for frequency in (17.777, 37.123)
+                for excitation in (0.004, 0.008, 0.012)
+            )
+        ]
+        first = self._write_json("combined-first.json", payload)
+        second = self._write_json("combined-second.json", payload)
+        scope = self._notebook_selector_scope(first.parent)
+        scope["combined_record_widget"].value = (str(first), str(second))
+        scope["_load_selected_records"](None)
+        original = scope["combined_loaded_rows"]
+        self.assertEqual(len(original), 24)
+        frequencies = scope["combined_excluded_frequencies_widget"]
+        excitations = scope["combined_excluded_excitations_widget"]
+        self.assertEqual([value for _, value in frequencies.options], [17.777, 37.123])
+        self.assertEqual([value for _, value in excitations.options], [0.004, 0.008, 0.012])
+        for frequency_values, excitation_values, expected_count in (
+            ((17.777,), (), 12),
+            ((), (0.008,), 16),
+            ((17.777,), (0.008,), 8),
+            ((17.777, 37.123), (), 0),
+            ((), (), 24),
+        ):
+            with self.subTest(frequencies=frequency_values, excitations=excitation_values):
+                frequencies.value = frequency_values
+                excitations.value = excitation_values
+                scope["_apply_point_exclusions"](None)
+                rows = scope["combined_rows"]
+                self.assertEqual(len(rows), expected_count)
+                self.assertTrue(all(row.target_frequency_hz not in frequency_values for row in rows))
+                self.assertTrue(all(row.source_v_rms not in excitation_values for row in rows))
+                self.assertEqual(scope["combined_loaded_rows"], original)
+        frequencies.value = (17.777,)
+        scope["_apply_point_exclusions"](None)
+        scope["combined_record_widget"].value = (str(second),)
+        scope["_load_selected_records"](None)
+        self.assertEqual(frequencies.value, ())
+        self.assertEqual(len(scope["combined_rows"]), 12)
 
     def test_repeatability_keeps_sources_separate_and_uses_actual_x(self):
         path = self._write_json("base.json", self._sweep(completed=True))
