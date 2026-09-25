@@ -27,6 +27,7 @@ from attodry_control.commissioning_analysis import (
     plot_harmonic_scaling_fit,
     plot_role_harmonic_sweep,
     plot_six_role_harmonic_sweeps,
+    plot_sweep_repeatability,
 )
 
 
@@ -1144,6 +1145,44 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertNotEqual(stats[0].source_path, stats[1].source_path)
         self.assertAlmostEqual(abs(stats[0].mean - stats[1].mean), 1e-6)
         self.assertAlmostEqual(abs(stats[0].x_value - stats[1].x_value), .0001)
+
+    def test_repeatability_plot_supports_log_linear_and_auto_x_scales(self):
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        path = self._write_json("repeatability-scale.json", self._sweep(completed=True))
+        rows = load_sweep_samples(path)
+        for requested_scale, expected_scale in (
+            ("auto", "log"),
+            ("log", "log"),
+            ("linear", "linear"),
+        ):
+            with self.subTest(x_scale=requested_scale):
+                figure = plot_sweep_repeatability(
+                    rows,
+                    role="xx",
+                    harmonic=1,
+                    metric="amplitude_v",
+                    baseline_source_path=path,
+                    x_scale=requested_scale,
+                )
+                self.addCleanup(plt.close, figure)
+                self.assertEqual(figure.axes[0].get_xscale(), expected_scale)
+                self.assertEqual(figure.axes[1].get_xscale(), expected_scale)
+
+    def test_repeatability_plot_rejects_unknown_x_scale(self):
+        path = self._write_json("repeatability-bad-scale.json", self._sweep(completed=True))
+        rows = load_sweep_samples(path)
+        with self.assertRaisesRegex(ValueError, "x_scale must be"):
+            plot_sweep_repeatability(
+                rows,
+                role="xx",
+                harmonic=1,
+                metric="amplitude_v",
+                baseline_source_path=path,
+                x_scale="symlog",
+            )
 
     def test_repeatability_phase_uses_circular_statistics(self):
         path = self._write_json("phase.json", self._sweep(completed=True))

@@ -853,8 +853,16 @@ def plot_sweep_repeatability(
     baseline_source_path: str | Path,
     excitation_path: ExcitationPathResistance | None = None,
     excitation_x_axis: str = "sine_output_current_a_rms",
+    x_scale: str = "auto",
 ):
-    """Overlay independent runs and plot paired differences from one baseline."""
+    """Overlay independent runs and plot paired differences from one baseline.
+
+    ``x_scale="auto"`` preserves the scan defaults: frequency scans use a
+    logarithmic X axis; excitation and frequency–excitation scans use linear.
+    """
+
+    if x_scale not in {"auto", "log", "linear"}:
+        raise ValueError("x_scale must be 'auto', 'log', or 'linear'.")
 
     statistics = aggregate_sweep_repeatability(
         rows,
@@ -867,6 +875,16 @@ def plot_sweep_repeatability(
     if not statistics:
         raise ValueError("No selected samples match this role and harmonic.")
     scan_type = next(row.scan_type for row in rows)
+    resolved_x_scale = (
+        ("log" if scan_type == "frequency" else "linear")
+        if x_scale == "auto"
+        else x_scale
+    )
+    if resolved_x_scale == "log" and any(
+        not math.isfinite(item.x_value) or item.x_value <= 0.0
+        for item in statistics
+    ):
+        raise ValueError("A logarithmic X axis requires all plotted X values to be finite and positive.")
     baseline_path = str(baseline_source_path)
     by_run: dict[str, list[RepeatabilityStatistic]] = {}
     for item in statistics:
@@ -985,8 +1003,8 @@ def plot_sweep_repeatability(
     value_axis.set_ylabel(metric_labels[metric])
     difference_axis.set_ylabel(f"Δ {metric_labels[metric]}")
     difference_axis.set_xlabel(x_labels[scan_type])
-    if scan_type == "frequency":
-        value_axis.set_xscale("log")
+    value_axis.set_xscale(resolved_x_scale)
+    difference_axis.set_xscale(resolved_x_scale)
     value_axis.set_title(
         f"SR830 {scan_type} · V{role} h{harmonic} · {metric} by run"
     )
