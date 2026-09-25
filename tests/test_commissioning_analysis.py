@@ -25,6 +25,7 @@ from attodry_control.commissioning_analysis import (
     load_sweep_samples,
     aggregate_frequency_excitation_iv,
     plot_harmonic_scaling_fit,
+    plot_multi_frequency_iv_curves,
     plot_role_harmonic_sweep,
     plot_six_role_harmonic_sweeps,
     plot_sweep_repeatability,
@@ -129,6 +130,48 @@ class CommissioningAnalysisTests(unittest.TestCase):
         )
         self.assertEqual({item.x_value for item in voltage_statistics}, {0.004, 0.008})
         self.assertTrue(all(item.current_a_rms is None for item in voltage_statistics))
+
+    def test_multi_frequency_plot_supports_explicit_linear_x_scale(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        payload = self._sweep(completed=True)
+        payload["scan"] = "frequency_excitation"
+        payload["measurement_config"] = self._measurement_config_path()
+        payload["points"] = [
+            {
+                "point_index": index,
+                "target_frequency_hz": frequency,
+                "actual_frequency_hz": frequency,
+                "source_v_rms": voltage,
+                "source_readback_v_rms": voltage,
+                "nominal_current_a_rms": None,
+                "samples": [self._sample(xx_amplitude=amplitude)],
+            }
+            for index, (frequency, voltage, amplitude) in enumerate(
+                (frequency, voltage, amplitude)
+                for frequency in (17.777, 400.0)
+                for voltage, amplitude in ((0.004, 1.0), (0.008, 2.0))
+            )
+        ]
+        path = self._write_json("combined-plot-scale.json", payload)
+        rows = load_sweep_samples(path)
+        for requested_scale, expected_scale in (
+            ("auto", "log"),
+            ("linear", "linear"),
+            ("log", "log"),
+        ):
+            with self.subTest(x_scale=requested_scale):
+                figure = plot_multi_frequency_iv_curves(
+                    rows,
+                    role="xx",
+                    harmonic=1,
+                    excitation_x_axis="sine_output_v_rms",
+                    x_scale=requested_scale,
+                )
+                self.addCleanup(plt.close, figure)
+                self.assertEqual(figure.axes[0].get_xscale(), expected_scale)
 
     def test_analysis_ignores_unused_output_overload_bit(self) -> None:
         payload = self._sweep(completed=True)

@@ -861,9 +861,6 @@ def plot_sweep_repeatability(
     logarithmic X axis; excitation and frequency–excitation scans use linear.
     """
 
-    if x_scale not in {"auto", "log", "linear"}:
-        raise ValueError("x_scale must be 'auto', 'log', or 'linear'.")
-
     statistics = aggregate_sweep_repeatability(
         rows,
         role=role,
@@ -875,16 +872,11 @@ def plot_sweep_repeatability(
     if not statistics:
         raise ValueError("No selected samples match this role and harmonic.")
     scan_type = next(row.scan_type for row in rows)
-    resolved_x_scale = (
-        ("log" if scan_type == "frequency" else "linear")
-        if x_scale == "auto"
-        else x_scale
+    resolved_x_scale = _resolve_comparison_x_scale(
+        x_scale,
+        (item.x_value for item in statistics),
+        automatic_x_scale="log" if scan_type == "frequency" else "linear",
     )
-    if resolved_x_scale == "log" and any(
-        not math.isfinite(item.x_value) or item.x_value <= 0.0
-        for item in statistics
-    ):
-        raise ValueError("A logarithmic X axis requires all plotted X values to be finite and positive.")
     baseline_path = str(baseline_source_path)
     by_run: dict[str, list[RepeatabilityStatistic]] = {}
     for item in statistics:
@@ -1024,6 +1016,24 @@ def plot_sweep_repeatability(
                 ),
             )
     return figure
+
+
+def _resolve_comparison_x_scale(
+    x_scale: str,
+    x_values: Iterable[float],
+    *,
+    automatic_x_scale: str,
+) -> str:
+    if x_scale not in {"auto", "log", "linear"}:
+        raise ValueError("x_scale must be 'auto', 'log', or 'linear'.")
+    resolved = automatic_x_scale if x_scale == "auto" else x_scale
+    if resolved == "log" and any(
+        not math.isfinite(value) or value <= 0.0 for value in x_values
+    ):
+        raise ValueError(
+            "A logarithmic X axis requires all plotted X values to be finite and positive."
+        )
+    return resolved
 
 
 def aggregate_frequency_excitation_iv(
@@ -3492,9 +3502,14 @@ def plot_multi_frequency_iv_curves(
     metric: str = "amplitude_v",
     excitation_path: ExcitationPathResistance | None = None,
     excitation_x_axis: str = "sine_output_current_a_rms",
+    x_scale: str = "auto",
     destination: str | Path | None = None,
 ):
-    """Plot combined-sweep I--V curves, with one colored curve per frequency."""
+    """Plot combined-sweep I--V curves, with one colored curve per frequency.
+
+    ``x_scale="auto"`` retains the historical behavior of using logarithmic
+    X when all plotted values are positive and linear X otherwise.
+    """
 
     statistics = aggregate_frequency_excitation_iv(
         rows,
@@ -3503,6 +3518,19 @@ def plot_multi_frequency_iv_curves(
         metric=metric,
         excitation_path=excitation_path,
         excitation_x_axis=excitation_x_axis,
+    )
+    automatic_x_scale = (
+        "log"
+        if statistics and all(
+            math.isfinite(item.x_value) and item.x_value > 0.0
+            for item in statistics
+        )
+        else "linear"
+    )
+    resolved_x_scale = _resolve_comparison_x_scale(
+        x_scale,
+        (item.x_value for item in statistics),
+        automatic_x_scale=automatic_x_scale,
     )
     try:
         import matplotlib.pyplot as plt
@@ -3532,8 +3560,7 @@ def plot_multi_frequency_iv_curves(
             elinewidth=0.8,
             label=f"{frequency_hz:.7g} Hz",
         )
-    if statistics and all(item.x_value > 0.0 for item in statistics):
-        axis.set_xscale("log")
+    axis.set_xscale(resolved_x_scale)
     axis.set_xlabel(_excitation_x_label(excitation_x_axis))
     axis.set_ylabel(
         {

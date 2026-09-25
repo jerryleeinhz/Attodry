@@ -4,13 +4,16 @@ Update this file whenever a feature is completed. A stage is complete only when 
 
 ## Sweep comparison X-axis scale (offline complete; 2026-09-25)
 
-- Multi-run paired comparisons in the SR830 sweep notebook now offer per-scan
-  defaults, explicit logarithmic, and explicit linear X scales. Defaults retain
-  logarithmic frequency and linear excitation/frequency×excitation behavior.
+- The SR830 sweep notebook's comparison options now control both multi-run
+  paired comparisons and the single-run f×e multi-frequency overlay. Choose the
+  per-plot default, logarithmic, or linear X scale; auto mode retains each
+  plot's historical behavior.
 - Logarithmic axes reject non-finite or non-positive plotted coordinates with a
   clear error. The selected scale is recorded in the export manifest.
-- Guarded analysis/notebook tests: 45 passed, 7 skipped. Plot-rendering checks
-  were among the skips because Matplotlib is optional and unavailable here.
+- The selector is in the collapsed `Comparison plot options` section; rerun the
+  plotting cell after changing it. Guarded analysis/notebook suite: 46 passed,
+  8 skipped. Plot-rendering checks were skipped because Matplotlib is optional
+  and unavailable here.
 
 ## SR830 TOML auto-alignment for all sweep entry points (offline complete; 2026-09-24)
 

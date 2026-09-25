@@ -1,18 +1,19 @@
 # Project handoff
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 ## Current stage
 
 ### SR830 sweep comparison X-axis scale (offline; 2026-09-25)
 
-The multi-run paired comparison in `notebooks/sr830_commissioning_sweeps.ipynb`
-now has an X-axis selector for per-scan defaults, logarithmic, or linear scale.
-The default preserves frequency-log and excitation/frequency×excitation-linear
-behavior. Log scale rejects non-finite or non-positive plotted coordinates, and
-the selected scale is recorded in the export manifest. The guarded analysis and
-notebook suite ran 45 tests with 7 optional skips; Matplotlib rendering checks
-were skipped because that optional dependency is unavailable in this interpreter.
+The comparison options in `notebooks/sr830_commissioning_sweeps.ipynb` control
+both multi-run paired comparisons and the single-run f×e multi-frequency overlay.
+The selector offers each plot's historical default, logarithmic, or linear scale;
+log mode rejects non-finite/non-positive coordinates. The choice is recorded in
+the export manifest. The selector is in the collapsed `Comparison plot options`
+section; rerun the plotting cell after changing it. The guarded analysis/notebook
+suite ran 46 tests with 8 optional skips; Matplotlib rendering checks were
+skipped because that optional dependency is unavailable in this interpreter.
 
 ### SR830 TOML auto-alignment in all sweep entry points (offline complete; 2026-09-24)
 
