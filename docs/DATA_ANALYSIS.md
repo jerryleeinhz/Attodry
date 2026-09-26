@@ -150,6 +150,14 @@ readback. This keeps frequency-dependent I--V curves separate and makes any
 frequency quantization visible. Up to 12 frequencies are listed in an outside
 legend; denser sweeps use an actual-frequency colorbar so the plot axes are not
 compressed by a long legend. Rejected runs remain audit-only, not default inputs.
+For a single selected f × e run, each recorded role/harmonic also gets a separate
+phase-versus-excitation figure with the same frequency mapping and X-axis choice.
+Repeat phases use circular mean/SD. The notebook's phase minimum-amplitude and
+maximum-SD settings omit unreliable phase points as visible gaps; each contiguous
+qualified segment is unwrapped along excitation, without aligning different
+frequencies to one arbitrary 360° branch. Optional export names these figures
+`combined_phase_*`. For multiple selected f × e runs, choose `Phase` in the
+repeatability metrics selector to compare runs.
 
 ### Harmonic current-power-law fitting
 

@@ -4,6 +4,18 @@ Last updated: 2026-09-26
 
 ## Current stage
 
+### SR830 f × e phase comparison (offline complete; 2026-09-26)
+
+The single-run commissioning notebook now draws an additional phase-versus-
+excitation comparison for each recorded XX/XY harmonic, with actual frequency
+as the series/colorbar coordinate. It shares the amplitude plot's row/exclusion
+selection, X-axis choice, and scale. Circular repeat statistics and the existing
+phase-quality thresholds apply; gaps mark omitted low-signal/high-spread points.
+Unwrapping is within each contiguous qualified segment, not a cross-frequency
+360° alignment. Optional export writes separate `combined_phase_*` figures. Multi-run
+f × e Phase remains selectable in the repeatability controls. Raw and rejected
+records/default filters are unchanged; tests are offline and no hardware I/O.
+
 ### Dense SR830 f × e plot layout (offline complete; 2026-09-26)
 
 The single-run f × e I–V figure now shows a continuous actual-frequency colorbar

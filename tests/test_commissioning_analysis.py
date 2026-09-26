@@ -196,16 +196,66 @@ class CommissioningAnalysisTests(unittest.TestCase):
         ]
         path = self._write_json("many-frequency-curves.json", payload)
         rows = load_sweep_samples(path)
+        for metric in ("amplitude_v", "phase_deg"):
+            with self.subTest(metric=metric):
+                figure = plot_multi_frequency_iv_curves(
+                    rows, role="xy", harmonic=1, metric=metric,
+                    excitation_x_axis="sine_output_v_rms",
+                )
+                self.addCleanup(plt.close, figure)
+                figure.canvas.draw()
+                self.assertIsNone(figure.axes[0].get_legend())
+                self.assertEqual(len(figure.axes), 2)
+                self.assertIn("Actual excitation frequency", figure.axes[1].get_ylabel())
+                self.assertGreater(figure.axes[0].get_position().height, 0.6)
+
+    def test_combined_phase_plot_unwraps_and_omits_low_signal_points(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        payload = self._sweep(completed=True)
+        payload["scan"] = "frequency_excitation"
+        payload["points"] = []
+        for frequency_index, frequency_hz in enumerate((17.777, 400.0)):
+            for excitation_index, (voltage, phase, amplitude) in enumerate(
+                ((0.004, 179.0, 1e-4), (0.008, -179.0, 1e-4), (0.012, 45.0, 1e-8))
+            ):
+                sample = self._sample(xx_amplitude=amplitude)
+                sample["lockin_xx"]["reading"]["phase_deg"] = phase
+                payload["points"].append({
+                    "point_index": frequency_index * 3 + excitation_index,
+                    "target_frequency_hz": frequency_hz,
+                    "actual_frequency_hz": frequency_hz,
+                    "source_v_rms": voltage,
+                    "source_readback_v_rms": voltage,
+                    "samples": [sample],
+                })
+        rows = load_sweep_samples(self._write_json("combined-phase.json", payload))
         figure = plot_multi_frequency_iv_curves(
-            rows, role="xy", harmonic=1,
+            rows, role="xx", harmonic=1, metric="phase_deg",
             excitation_x_axis="sine_output_v_rms",
+            phase_minimum_amplitude_v=1e-6,
         )
         self.addCleanup(plt.close, figure)
-        figure.canvas.draw()
-        self.assertIsNone(figure.axes[0].get_legend())
-        self.assertEqual(len(figure.axes), 2)
-        self.assertIn("Actual excitation frequency", figure.axes[1].get_ylabel())
-        self.assertGreater(figure.axes[0].get_position().height, 0.6)
+        first_curve = figure.axes[0].containers[0].lines[0].get_ydata()
+        self.assertAlmostEqual(first_curve[0], 179.0)
+        self.assertAlmostEqual(first_curve[1], 181.0)
+        self.assertTrue(math.isnan(first_curve[2]))
+        self.assertEqual(figure.axes[0].get_ylabel(), "Unwrapped phase (°)")
+
+    def test_notebook_adds_combined_phase_comparison_and_export(self) -> None:
+        notebook = json.loads(
+            (PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb")
+            .read_text(encoding="utf-8")
+        )
+        code = "\n".join(
+            "".join(cell["source"])
+            for cell in notebook["cells"] if cell["cell_type"] == "code"
+        )
+        self.assertIn("combined_phase_figures = {", code)
+        self.assertIn("metric='phase_deg'", code)
+        self.assertIn("('combined_phase', combined_phase_figures)", code)
 
     def test_analysis_ignores_unused_output_overload_bit(self) -> None:
         payload = self._sweep(completed=True)

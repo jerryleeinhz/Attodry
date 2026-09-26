@@ -2,6 +2,22 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## SR830 f × e phase comparison (offline complete; 2026-09-26)
+
+- For a single selected f × e record, the sweep notebook now adds a separate
+  frequency-indexed phase-versus-excitation figure beside each available XX/XY
+  harmonic amplitude figure. It uses the same selected rows, actual frequency,
+  excitation X-axis choice, and linear/log scale. Dense frequency plots retain
+  the actual-frequency colorbar and normal export adds `combined_phase_*` files.
+- Formal repeat phases use circular mean/SD. Contiguous qualified segments of
+  each frequency curve are unwrapped along excitation for display; the existing
+  minimum amplitude/maximum circular-SD settings mask unreliable points as gaps.
+  Separate frequency curves are not forced onto a common 360° branch. Multiple
+  selected f × e records retain the existing repeatability comparison, where
+  Phase is an explicitly selectable metric. Raw JSON is unchanged.
+- Guarded analysis/notebook tests and headless phase rendering passed; no
+  instrument connection or command was made.
+
 ## Dense SR830 f × e plot layout (offline complete; 2026-09-26)
 
 - The single-run multi-frequency I–V plot keeps its outside legend for at most

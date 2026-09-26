@@ -3505,13 +3505,30 @@ def plot_multi_frequency_iv_curves(
     excitation_path: ExcitationPathResistance | None = None,
     excitation_x_axis: str = "sine_output_current_a_rms",
     x_scale: str = "auto",
+    phase_minimum_amplitude_v: float = 0.0,
+    phase_maximum_standard_deviation_deg: float | None = None,
     destination: str | Path | None = None,
 ):
-    """Plot combined-sweep I--V curves, with one colored curve per frequency.
+    """Plot combined response versus excitation, one curve per frequency.
 
     ``x_scale="auto"`` retains the historical behavior of using logarithmic
-    X when all plotted values are positive and linear X otherwise.
+    X when all plotted values are positive and linear X otherwise. Phase
+    values are unwrapped within each frequency curve after quality filtering.
     """
+
+    if metric == "phase_deg":
+        if (
+            not math.isfinite(phase_minimum_amplitude_v)
+            or phase_minimum_amplitude_v < 0.0
+        ):
+            raise ValueError("Phase minimum amplitude must be finite and non-negative.")
+        if phase_maximum_standard_deviation_deg is not None and (
+            not math.isfinite(phase_maximum_standard_deviation_deg)
+            or phase_maximum_standard_deviation_deg <= 0.0
+        ):
+            raise ValueError(
+                "Phase maximum standard deviation must be finite and positive."
+            )
 
     statistics = aggregate_frequency_excitation_iv(
         rows,
@@ -3544,6 +3561,17 @@ def plot_multi_frequency_iv_curves(
         figsize=PUBLICATION_SINGLE_FIGSIZE, constrained_layout=True
     )
     frequencies = sorted({item.frequency_hz for item in statistics})
+    amplitude_by_frequency: dict[float, list[MultiFrequencyIVStatistic]] = {}
+    if metric == "phase_deg":
+        for item in aggregate_frequency_excitation_iv(
+            rows,
+            role=role,
+            harmonic=harmonic,
+            metric="amplitude_v",
+            excitation_path=excitation_path,
+            excitation_x_axis=excitation_x_axis,
+        ):
+            amplitude_by_frequency.setdefault(item.frequency_hz, []).append(item)
     use_colorbar = len(frequencies) > 12
     if use_colorbar:
         import matplotlib as mpl
@@ -3554,6 +3582,20 @@ def plot_multi_frequency_iv_curves(
         frequency_cmap = mpl.colormaps["viridis"]
     for index, frequency_hz in enumerate(frequencies):
         selected = [item for item in statistics if item.frequency_hz == frequency_hz]
+        if metric == "phase_deg":
+            _, y_values, _, _, _ = _phase_plot_values(
+                selected,
+                amplitude_by_frequency[frequency_hz],
+                minimum_amplitude_v=phase_minimum_amplitude_v,
+                maximum_standard_deviation_deg=phase_maximum_standard_deviation_deg,
+            )
+            spreads = [
+                item.standard_deviation if math.isfinite(value) else math.nan
+                for item, value in zip(selected, y_values)
+            ]
+        else:
+            y_values = [item.mean for item in selected]
+            spreads = [item.standard_deviation for item in selected]
         series_style = ordered_series_style(
             index, len(frequencies), colormap_name="viridis"
         )
@@ -3561,8 +3603,8 @@ def plot_multi_frequency_iv_curves(
             series_style["color"] = frequency_cmap(frequency_norm(frequency_hz))
         axis.errorbar(
             [item.x_value for item in selected],
-            [item.mean for item in selected],
-            yerr=[item.standard_deviation for item in selected],
+            y_values,
+            yerr=spreads,
             **series_style,
             linewidth=1.35,
             markersize=4.5,
@@ -3578,21 +3620,25 @@ def plot_multi_frequency_iv_curves(
             "x_v": "X (V RMS)",
             "y_v": "Y (V RMS)",
             "amplitude_v": "R (V RMS)",
-            "phase_deg": "Phase (degree)",
+            "phase_deg": "Unwrapped phase (°)",
         }[metric]
     )
-    axis.set_title(f"Combined sweep · excitation–V{role} · h{harmonic}")
+    axis.set_title(
+        f"Combined sweep · excitation–V{role} · h{harmonic}"
+        + (" phase" if metric == "phase_deg" else "")
+    )
     style_axis(axis)
     if frequencies:
         uncertainty = (
-            "circular sample SD" if metric == "phase_deg" else "sample SD"
+            "circular sample SD (qualified phase)"
+            if metric == "phase_deg" else "sample SD"
         )
         if use_colorbar:
             figure.colorbar(
                 mpl.cm.ScalarMappable(norm=frequency_norm, cmap=frequency_cmap),
                 ax=axis, label="Actual excitation frequency (Hz)",
             )
-            axis.set_title(axis.get_title() + f" · error bars: {uncertainty}")
+            axis.set_title(axis.get_title() + f"\nError bars: {uncertainty}")
         else:
             outside_legend(
                 axis,
@@ -3632,8 +3678,8 @@ def plot_six_role_harmonic_sweeps(
 
 
 def _phase_plot_values(
-    phase_statistics: Sequence[SweepStatistic],
-    voltage_statistics: Sequence[SweepStatistic],
+    phase_statistics: Sequence[SweepStatistic | MultiFrequencyIVStatistic],
+    voltage_statistics: Sequence[SweepStatistic | MultiFrequencyIVStatistic],
     *,
     minimum_amplitude_v: float,
     maximum_standard_deviation_deg: float | None,
