@@ -84,6 +84,8 @@ class CommissioningSample:
     error_status: int
     statuses: tuple[str, ...]
     problems: tuple[str, ...]
+    phase_shift_deg: float | None = None
+    source_readback_confirmed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -3923,6 +3925,11 @@ def _commissioning_sample(
         error_status=error_status,
         statuses=tuple(statuses),
         problems=problems,
+        phase_shift_deg=(
+            None if reading.get("phase_shift_deg") is None
+            else float(reading["phase_shift_deg"])
+        ),
+        source_readback_confirmed=point.get("source_readback_v_rms") is not None,
     )
 
 

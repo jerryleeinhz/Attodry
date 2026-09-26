@@ -2,6 +2,28 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## SR830 relative complex frequency-response calibration (offline complete; 2026-09-26)
+
+- `sr830_commissioning_sweeps.ipynb` now has a read-only calibration section
+  using one selected completed run and clean XX or XY h1 formal samples.
+  Frequency sweeps calculate mean complex `V1/U`; f × e runs fit
+  `V1=b(f)U+a(f)` with a complex intercept at each frequency, at least three
+  distinct readback excitations, point-balanced residuals, and a measured
+  reference frequency. Phase-setting changes within the run are rejected.
+- The relative response `Q=b(f)/b(f0)` is plotted as magnitude, unwrapped
+  relative phase, and complex-fit residual. h2 derived output requires either
+  an explicitly excitation-dominated `Q(f)^2` model or same-role readout-only
+  `Q(2f)/Q(2f0)` model; the mixed transfer remains unidentified. Interpolation
+  is logged, extrapolation is refused, and uncorrected rows remain in exports.
+  A same-plane single-point complex LCR anchor gives only a conditional total
+  impedance estimate under a selected transfer-proxy model.
+- Exports are opt-in, isolated under ignored `analysis_output`, and include
+  raw/derived h2 CSV, response figures, calibration parameters, exclusions and
+  analysis-code SHA-256. Raw acquisition JSON is never modified. Guarded
+  synthetic/notebook tests: 54 run, 8 optional skips, no failures. The guarded
+  full suite ran 670 tests with one unrelated existing report-plotting error
+  because this interpreter lacks Matplotlib; 19 tests skipped. No hardware I/O.
+
 ## Sweep comparison X-axis scale (offline complete; 2026-09-25)
 
 - The SR830 sweep notebook's comparison options now control both multi-run

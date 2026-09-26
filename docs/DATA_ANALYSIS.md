@@ -16,6 +16,46 @@ does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 
 ## Standalone SR830 commissioning sweeps
 
+### Relative complex frequency-response calibration
+
+At the end of `notebooks/sr830_commissioning_sweeps.ipynb`, first load one
+completed frequency or f × e file in the normal browser and apply any point
+exclusions. Click **Refresh loaded runs**, select the calibration file, choose
+`Vxx h1` or `Vxy h1`, and click **Fit and plot h1 response**. `Ref Hz` must be a
+measured requested frequency; 0 chooses the lowest. The figure plots relative
+gain `|Q|`, relative unwrapped phase `arg Q`, and complex residual RMS voltage.
+Frequency-only data use `b(f)=mean[(X+iY)/U]` and cannot identify an intercept.
+For f × e, each frequency fits `X+iY=b(f)U+a(f)` with complex intercept and
+at least three distinct SINE OUT readbacks. `U` is the recorded *actual*
+readback; repeated formal samples are averaged within point before fitting.
+Runs lacking SINE OUT readback, or with h1 frequency readbacks differing from
+their requested frequencies by more than 1% (minimum 0.1 Hz), are rejected
+for calibration rather than fitted under a mislabeled frequency.
+`Q(f)=b(f)/b(f0)` uses the selected measured reference. These are empirical
+transfer ratios, not automatically device impedance or proof of zero phase.
+
+To apply h2 calibration, choose an excitation level, h2 role and **H2 model**.
+`Excitation squared` applies `V2/Q(f)^2` only if the h1 response represents the
+excitation path and the h2 readout is flat. `Same-channel readout` applies
+`V2/[Q(2f)/Q(2f0)]` only if the h1 and h2 detector channel is the same and the
+input path is flat. A general combined input/readout response cannot be inferred
+from h1 alone. Complex interpolation between calibration frequencies uses log
+frequency, log magnitude and locally unwrapped phase. It does not extrapolate:
+uncovered h2 rows remain raw with a reason in `h2_derived.csv`. Corrected
+phase is relative to the chosen h1 baseline, not an absolute phase-zero claim.
+
+An optional complex LCR anchor (R + iX ohm) must be measured at the selected
+reference frequency and at the same electrical reference plane. With a
+voltage drive and h1 proportional to current, choose `Z=Z0/Q`; only if h1 is
+proportional to impedance choose `Z=Z0 Q`. This yields a conditional *total*
+impedance estimate, not separate sample, contact, wiring and amplifier terms.
+Enter the anchor, select the assumption, and calculate. **Export derived
+calibration** explicitly writes a new timestamped folder under ignored
+`analysis_output/sr830_commissioning` with response and h2 figures,
+`calibration_manifest.json`, `frequency_response.csv`, and available derived
+CSVs; it never edits raw
+acquisition JSON. Rebuild the response after changing a source run or filters.
+
 Open `notebooks/sr830_commissioning_sweeps.ipynb` in the `lyr` environment to
 browse and plot the standalone frequency/excitation or combined
 frequency×excitation JSON records under `run_data/commissioning`. The notebook is read-only unless its final

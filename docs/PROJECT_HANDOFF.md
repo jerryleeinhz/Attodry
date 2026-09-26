@@ -4,6 +4,24 @@ Last updated: 2026-09-25
 
 ## Current stage
 
+### SR830 relative complex frequency-response calibration (offline; 2026-09-26)
+
+The sweep notebook now derives a relative XX/XY h1 response from one completed
+frequency or f × e run after existing sample/point filters. Frequency-only uses
+complex V1/U; f × e fits a complex slope and intercept at each frequency.
+The normalized slope's magnitude/phase and residual are displayed. Optional
+h2 correction uses a declared excitation-squared or same-channel readout-at-2f
+limiting model, never an unqualified full-chain correction. Out-of-range rows
+remain raw with reasons. A one-frequency LCR anchor gives a conditional total
+impedance estimate only with a user-chosen transfer-proxy model and matching
+reference plane. Exports preserve provenance without rewriting acquisition
+JSON. Local guarded synthetic/notebook tests passed; figure rendering still
+needs a Matplotlib-enabled environment. The guarded full suite ran 670 tests
+with one existing report-plotting dependency error (Matplotlib absent), 19
+optional skips. The user's historical completed f × e run was read-only-loaded
+as a compatibility check: 3120 clean role/harmonic rows, 10 fitted XX h1
+frequencies, no instrument I/O. No real instrument was contacted.
+
 ### SR830 sweep comparison X-axis scale (offline; 2026-09-25)
 
 The comparison options in `notebooks/sr830_commissioning_sweeps.ipynb` control
