@@ -131,7 +131,8 @@ style is a general manuscript starting point, not a claim of compliance with a
 specific journal. Optional export writes 600 dpi PNG plus PDF and SVG vectors.
 Temperature-stacked I--V curves use a bright warm `plasma` sequence, while
 multi-frequency I--V curves use a distinct cool `viridis` sequence. Both retain
-marker and line-style redundancy, so series identity never depends on color alone.
+marker and line-style redundancy where practical; for dense frequency sweeps,
+the continuous frequency colorbar provides the numerical mapping.
 
 The final Notebook section provides a separate condensed report figure without
 changing the channel-by-channel analysis. `REPORT_AMPLITUDE_CHANNELS` accepts any
@@ -146,7 +147,9 @@ relative RMSE. Optional PNG/PDF/SVG export also writes a JSON report manifest.
 For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
 `amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency
 readback. This keeps frequency-dependent I--V curves separate and makes any
-frequency quantization visible in the legend.
+frequency quantization visible. Up to 12 frequencies are listed in an outside
+legend; denser sweeps use an actual-frequency colorbar so the plot axes are not
+compressed by a long legend. Rejected runs remain audit-only, not default inputs.
 
 ### Harmonic current-power-law fitting
 

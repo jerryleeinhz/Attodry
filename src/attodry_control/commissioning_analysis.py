@@ -3544,23 +3544,32 @@ def plot_multi_frequency_iv_curves(
         figsize=PUBLICATION_SINGLE_FIGSIZE, constrained_layout=True
     )
     frequencies = sorted({item.frequency_hz for item in statistics})
+    use_colorbar = len(frequencies) > 12
+    if use_colorbar:
+        import matplotlib as mpl
+
+        frequency_norm = mpl.colors.Normalize(
+            vmin=frequencies[0], vmax=frequencies[-1]
+        )
+        frequency_cmap = mpl.colormaps["viridis"]
     for index, frequency_hz in enumerate(frequencies):
         selected = [item for item in statistics if item.frequency_hz == frequency_hz]
+        series_style = ordered_series_style(
+            index, len(frequencies), colormap_name="viridis"
+        )
+        if use_colorbar:
+            series_style["color"] = frequency_cmap(frequency_norm(frequency_hz))
         axis.errorbar(
             [item.x_value for item in selected],
             [item.mean for item in selected],
             yerr=[item.standard_deviation for item in selected],
-            **ordered_series_style(
-                index,
-                len(frequencies),
-                colormap_name="viridis",
-            ),
+            **series_style,
             linewidth=1.35,
             markersize=4.5,
             markeredgewidth=0.7,
             capsize=2.5,
             elinewidth=0.8,
-            label=f"{frequency_hz:.7g} Hz",
+            label="_nolegend_" if use_colorbar else f"{frequency_hz:.7g} Hz",
         )
     axis.set_xscale(resolved_x_scale)
     axis.set_xlabel(_excitation_x_label(excitation_x_axis))
@@ -3578,10 +3587,17 @@ def plot_multi_frequency_iv_curves(
         uncertainty = (
             "circular sample SD" if metric == "phase_deg" else "sample SD"
         )
-        outside_legend(
-            axis,
-            title=f"Actual frequency\nError bars: {uncertainty}",
-        )
+        if use_colorbar:
+            figure.colorbar(
+                mpl.cm.ScalarMappable(norm=frequency_norm, cmap=frequency_cmap),
+                ax=axis, label="Actual excitation frequency (Hz)",
+            )
+            axis.set_title(axis.get_title() + f" · error bars: {uncertainty}")
+        else:
+            outside_legend(
+                axis,
+                title=f"Actual frequency\nError bars: {uncertainty}",
+            )
     if destination is not None:
         save_publication_figure(figure, destination)
     return figure

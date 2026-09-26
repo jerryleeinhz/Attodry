@@ -173,6 +173,40 @@ class CommissioningAnalysisTests(unittest.TestCase):
                 self.addCleanup(plt.close, figure)
                 self.assertEqual(figure.axes[0].get_xscale(), expected_scale)
 
+    def test_many_frequency_curves_keep_a_readable_plot_area(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        payload = self._sweep(completed=True)
+        payload["scan"] = "frequency_excitation"
+        payload["points"] = [
+            {
+                "point_index": frequency_index * 2 + excitation_index,
+                "target_frequency_hz": frequency_hz,
+                "actual_frequency_hz": frequency_hz,
+                "source_v_rms": voltage,
+                "source_readback_v_rms": voltage,
+                "samples": [self._sample(xy_amplitude=voltage * voltage)],
+            }
+            for frequency_index, frequency_hz in enumerate(
+                30_000.0 + 490.0 * index for index in range(50)
+            )
+            for excitation_index, voltage in enumerate((0.1, 0.2))
+        ]
+        path = self._write_json("many-frequency-curves.json", payload)
+        rows = load_sweep_samples(path)
+        figure = plot_multi_frequency_iv_curves(
+            rows, role="xy", harmonic=1,
+            excitation_x_axis="sine_output_v_rms",
+        )
+        self.addCleanup(plt.close, figure)
+        figure.canvas.draw()
+        self.assertIsNone(figure.axes[0].get_legend())
+        self.assertEqual(len(figure.axes), 2)
+        self.assertIn("Actual excitation frequency", figure.axes[1].get_ylabel())
+        self.assertGreater(figure.axes[0].get_position().height, 0.6)
+
     def test_analysis_ignores_unused_output_overload_bit(self) -> None:
         payload = self._sweep(completed=True)
         xy = payload["points"][0]["samples"][0]["lockin_xy"]

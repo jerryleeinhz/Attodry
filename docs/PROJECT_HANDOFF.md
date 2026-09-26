@@ -1,8 +1,22 @@
 # Project handoff
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 ## Current stage
+
+### Dense SR830 f × e plot layout (offline complete; 2026-09-26)
+
+The single-run f × e I–V figure now shows a continuous actual-frequency colorbar
+when more than 12 frequencies are drawn; smaller sweeps retain the outside
+legend. Error bars, raw values, X-axis selection, and the default exclusion of
+rejected runs are unchanged. A 50-frequency regression and an offline render of
+the supplied rejected 30–102 kHz record confirmed that the axes remain readable.
+The downturn at high excitation is present in the raw formal XY h2 values, so
+this layout fix does not validate those measurements. The run's 102002 Hz
+readback exceeds the SR830 maximum and caused rejection; cleanup was verified.
+The copied JSON references a missing measurement-profile sidecar, which must
+accompany it for normal notebook loading. Guarded commissioning/calibration/
+notebook tests: 55 passed with Matplotlib; no instrument I/O.
 
 ### SR830 relative complex frequency-response calibration (offline; 2026-09-26)
 

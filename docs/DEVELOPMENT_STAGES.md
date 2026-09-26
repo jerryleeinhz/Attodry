@@ -2,6 +2,20 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Dense SR830 f × e plot layout (offline complete; 2026-09-26)
+
+- The single-run multi-frequency I–V plot keeps its outside legend for at most
+  12 actual frequencies. For more frequencies it uses a continuous actual-frequency
+  colorbar, preserving the error bars and full plot height instead of allowing a
+  long legend to collapse the axes. X-axis scale selection is unchanged.
+- Read-only audit of the supplied rejected 30–102 kHz run reproduced the former
+  cramped layout with 50 XY h2 frequencies and verified the repaired rendering.
+  The raw high-excitation downturn remains visible and is not a layout artifact.
+  The run rejected at a 102002 Hz readback (above the 102000 Hz SR830 limit);
+  cleanup was verified. No acquisition data or rejected-run defaults changed.
+- Guarded commissioning/calibration/notebook tests: 55 passed with Matplotlib
+  available, including a 50-frequency layout regression. No hardware I/O.
+
 ## SR830 relative complex frequency-response calibration (offline complete; 2026-09-26)
 
 - `sr830_commissioning_sweeps.ipynb` now has a read-only calibration section
