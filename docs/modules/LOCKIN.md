@@ -1,13 +1,15 @@
 # Lock-in module work package
 
-## 分谐波固定量程（离线通过；2026-09-28）
+## 分谐波量程与 Reserve（离线完成；2026-09-28）
 
-可在 `lockin_xx/xy.harmonic_settings.h1/h2/h3` 覆盖固定 sensitivity/Reserve；
-未指定阶数继承角色基础设置，同角色分段量程覆盖冲突时预检拒绝。
-F0 204 项、F1 219 项硬件隔离测试通过；包括安全切换、实际设置审计、
-三类 sweep、组合采集和异常恢复。下一阶段继续按谐波独立 bounded_auto。
-接口与验收条件见 [分阶段计划](../LOCKIN_HARMONIC_SENSITIVITY_PLAN.md)。
-这次验收仅为离线软件验证，没有连接真实仪器或修改站点设置。
+`lockin_xx/xy.harmonic_settings.h1/h2/h3` 现在支持独立 fixed 或 bounded_auto，
+可混合 H1 fixed、H2 bounded_auto。角色基础模式保留 fixed，用于未覆盖阶数与
+结束恢复；同角色分段量程覆盖冲突时在打开硬件前拒绝。
+三种 sweep 和组合采集共用切换/读回/审计逻辑，各谐波自动状态互相独立。
+F0 204 项、F1 219 项依次通过后实施 A1；最终相关测试 250 项通过，
+含 21 项新增功能测试。见 [日常配置方法](../LOCKIN_DAILY_OPERATION.md#分谐波-sensitivityreserve-接口)
+及 [分阶段证据](../LOCKIN_HARMONIC_SENSITIVITY_PLAN.md)。
+本次只完成离线软件验收，未连接仪器、部署站点或修改本机 TOML。
 
 ## 当前状态
 

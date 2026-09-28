@@ -7,6 +7,11 @@ legacy fixed/segment/autorange controller. Never issue SR830 AGAN.
 from __future__ import annotations
 
 import time
+import math
+from dataclasses import asdict
+
+from .lockin_autorange import AutorangePolicy, AutorangeState
+from .sr830_settings import SensitivityMode
 
 from .sr830 import RESERVE_MODE_CODES, Sr830Error
 from .sr830_settings import sensitivity_code, sensitivity_full_scale_v, time_constant_seconds
@@ -21,9 +26,23 @@ class HarmonicSensitivitySession:
 
     def __init__(self, xx, xy, sensitivity_setup, reserve_setup):
         self.configs = {"lockin_xx": xx, "lockin_xy": xy}
+        self.sensitivity_setup = sensitivity_setup
         self.ranges = sensitivity_setup["ranges"]
         self.reserves = reserve_setup["roles"]
         self.owned = {role for role, config in self.configs.items() if config.harmonic_settings}
+        self.policies = {}
+        self.states = {}
+        for role in self.owned:
+            for harmonic in (1, 2, 3):
+                setting = self.setting(role, harmonic)
+                if setting.sensitivity_mode is SensitivityMode.BOUNDED_AUTO:
+                    policy = AutorangePolicy(
+                        setting.autorange_min_full_scale_v, setting.autorange_max_full_scale_v,
+                        setting.autorange_target_occupancy, setting.autorange_stable_samples,
+                        setting.autorange_full_scales_v)
+                    self.policies[role, harmonic] = policy
+                    # Begin at the largest approved auto range, not a blind narrow.
+                    self.states[role, harmonic] = AutorangeState(policy.maximum_full_scale_v)
         self.current_harmonic = 1
         self.expected_reserves = {role: value["configured_code"] for role, value in self.reserves.items()}
 
@@ -124,7 +143,9 @@ class HarmonicSensitivitySession:
             self._check(self._read(instruments, event["readbacks"]), harmonic, targets)
 
     def _targets(self, harmonic):
-        return {role: (sensitivity_code(self.setting(role, harmonic).sensitivity_full_scale_v),
+        return {role: (sensitivity_code(
+                        self.states[role, harmonic].current_full_scale_v if (role, harmonic) in self.states
+                        else self.setting(role, harmonic).sensitivity_full_scale_v),
                        RESERVE_MODE_CODES[self.setting(role, harmonic).reserve_mode.value])
                 if role in self.owned else
                 (self.ranges[role]["current_sensitivity_code"], self.expected_reserves[role])
@@ -153,7 +174,7 @@ class HarmonicSensitivitySession:
                 if role in self.owned:
                     config = self.configs[role]
                     choices = (config, *config.harmonic_settings)
-                    sensitivity = max(sensitivity, *(sensitivity_code(s.sensitivity_full_scale_v) for s in choices))
+                    sensitivity = max(sensitivity, *(sensitivity_code(s.autorange_max_full_scale_v or s.sensitivity_full_scale_v) for s in choices))
                     reserve = min(reserve, *(RESERVE_MODE_CODES[s.reserve_mode.value] for s in choices))
                 targets[role] = sensitivity, reserve
             self._apply(xx, xy, targets, harmonic, settle_s, event, cleanup=cleanup)
@@ -173,6 +194,7 @@ class HarmonicSensitivitySession:
                 xx.set_harmonic(harmonic)
                 xy.set_harmonic(harmonic)
                 self._settle(xx, xy, harmonic, settle_s, event)
+                record.setdefault("harmonic_transition_status", []).append(event["status"])
                 self.current_harmonic = harmonic
             self._apply(xx, xy, self._targets(harmonic), harmonic, settle_s,
                         event.setdefault("target_settings", {}))
@@ -180,3 +202,42 @@ class HarmonicSensitivitySession:
         except BaseException as exc:
             event["error"] = str(exc) or type(exc).__name__
             raise
+
+
+    def qualify(self, xx, xy, *, harmonic, settle_s, target_frequency_hz,
+                frequency_rel_tolerance, record):
+        """One existing bounded-auto controller, with state owned by (role, h)."""
+        from . import lockin_test as daily
+        policies = {role: policy for (role, h), policy in self.policies.items() if h == harmonic}
+        if not policies:
+            return
+        states = {role: self.states[role, harmonic] for role in policies}
+        audit = {"harmonic": harmonic, "started_unix_s": time.time(),
+                 "policies": {role: asdict(policy) for role, policy in policies.items()}}
+        record.setdefault("harmonic_autorange", []).append(audit)
+        try:
+            daily._apply_sweep_autorange(
+                xx, xy, sensitivity_setup=self.sensitivity_setup, policies=policies, states=states,
+                target_frequency_hz=target_frequency_hz, frequency_rel_tolerance=frequency_rel_tolerance,
+                settle_s=settle_s, record=audit, harmonic=harmonic,
+                verify_settings=lambda: self.verify(xx, xy, harmonic, audit))
+            audit["completed"] = True
+        except BaseException as exc:
+            audit["error"] = str(exc) or type(exc).__name__
+            raise
+        finally:
+            for role, state in states.items():
+                self.states[role, harmonic] = state
+            audit["states"] = {role: asdict(state) for role, state in states.items()}
+
+    def formal_problems(self, harmonic, xx, xy):
+        problems = []
+        for role, sample in (("lockin_xx", xx), ("lockin_xy", xy)):
+            policy = self.policies.get((role, harmonic))
+            if policy is None:
+                continue
+            amplitude = sample.reading.amplitude_v
+            scale = sensitivity_full_scale_v(self.ranges[role]["current_sensitivity_code"])
+            if not math.isfinite(amplitude) or amplitude < 0 or amplitude >= policy.target_occupancy * scale:
+                problems.append(f"{role} h{harmonic} formal sample exceeds bounded-auto occupancy; retain rejected raw sample")
+        return problems

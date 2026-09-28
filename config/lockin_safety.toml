@@ -21,5 +21,7 @@ autorange_ladders_v = [
 allowed_fixed_full_scales_v = [0.001, 0.002, 0.010, 0.020, 0.050, 0.100]
 autorange_ladders_v = [
   [0.001, 0.010],
+  # Explicit optional H2 ladder (Normal Reserve is configured separately).
+  [0.002, 0.010],
   [0.010, 0.020, 0.050],
 ]

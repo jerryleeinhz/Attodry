@@ -14,6 +14,70 @@ python -m attodry_control.lockin_test sweep-excitation
 python -m attodry_control.lockin_test sweep-frequency-excitation
 ```
 
+## 分谐波 sensitivity/Reserve 接口
+
+三类 sweep、temperature×excitation 和组合采集共用此接口。参数仍放在
+本机 `hardware.local.toml`；未增加或改变 notebook 的校准模型控件。
+先保持 `[lockin_xy]` 的 `sensitivity_mode = "fixed"` 及原来的基础量程/Reserve，
+再在文件末尾添加独立子表。例如，以下是这次讨论的 **候选固定设置**：
+
+```toml
+[lockin_xy.harmonic_settings.h1]
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.100
+reserve_mode = "low_noise"
+
+[lockin_xy.harmonic_settings.h2]
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.002
+reserve_mode = "normal"
+```
+
+`lockin_xx`、`h3` 使用同样结构。缺省阶数继承角色基础设置，子表缺省的
+固定档字段也继承基础值。空表、未知字段/阶数、非法 Reserve、未获允许的
+量程，以及同角色同时配置分段 `xx_full_scale_v`/`xy_full_scale_v` 都会预检拒绝。
+基础模式必须为 fixed；需要自动的阶数在对应子表明确配置，避免两个控制器
+同时修改一个 SENS。完全不写 `harmonic_settings` 时沿用原有行为。
+
+固定设置验证后，若要让 H2 在明确的 2 mV、10 mV 两档间自动选择，
+**用下面子表替换原来的 h2 子表**，H1 可继续固定：
+
+```toml
+[lockin_xy.harmonic_settings.h2]
+sensitivity_mode = "bounded_auto"
+sensitivity_full_scale_v = 0.002
+reserve_mode = "normal"
+autorange_min_full_scale_v = 0.002
+autorange_max_full_scale_v = 0.010
+autorange_target_occupancy = 0.85
+autorange_stable_samples = 2
+```
+
+自动阶梯由 `lockin_safety.toml` 明确给出，不能从固定量程白名单自行推导。
+配置中的 `sensitivity_full_scale_v` 等于自动下限；实际首次采集从该阶梯
+**最大档**开始。占用率达到 0.85 时逐档放宽，连续两次该谐波探测适合更小档
+才缩窄；计数与当前档位按 `(角色, 谐波)` 独立保留，组合采集也不会每次重置。
+达到最高档仍不满足条件时拒绝本次运行，不调用无界 Auto Gain。
+
+两台仪器仍成对切换 HARM。切换前先使用当前/已配置档中的宽档及较高保护的
+已配置 Reserve；完成谐波过渡后再施加目标小档。HARM 变化与 SENS/RMOD 变化
+分别执行状态检查和两段 `settle_s` 等待，必要的单次过载复查另加等待。
+因此启用分谐波量程会增加点间耗时；等待不等于样品物理稳态。
+
+H2 很小也不能跳过整路输入/储备/滤波过载检查。两台仪器（包括未选为正式
+输出的伴随通道）的状态都必须通过，持续异常则保留原始尝试并拒绝。Reserve
+固定在该阶数配置值，不会为获得更小量程而自行降低检查标准。
+
+新记录增加 `harmonic_settings_transitions`、`harmonic_setting_checks` 和
+`harmonic_autorange`；正式样本含 `settings_before`/`settings_after` 与
+`settings_verified`。HARM、实际 SENS/RMOD、时间常数、失败写入与过渡均可追溯。
+分谐波配置自动进入 measurement profile 及其指纹。旧记录缺少这些字段时
+保持未知，不用当前配置补填历史状态。
+
+结束或异常时先请求最小激励，确认宽档后切回 H1，最后恢复角色基础 SENS/RMOD。
+恢复失败时记录最后读回、将 cleanup 标记失败，并要求人工核查；不会把最后
+一个 H2 档误当基线。当前实现仅通过离线假仪器测试，真实验收仍需先固定再自动。
+
 ### 本机地址与版本更新
 
 `hardware.example.toml` 刻意只保留 XX/XY 地址占位符。请只在本机、被 Git 忽略的

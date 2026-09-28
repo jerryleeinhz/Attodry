@@ -1,6 +1,6 @@
 # 分谐波 Sensitivity：先固定量程验收，再增加变换量程
 
-日期：2026-09-28。状态：F0/F1 离线验收通过；继续实施 A1。
+日期：2026-09-28。状态：F0/F1/A1 实现与离线验收完成；真实仪器验收未进行。
 
 ## 1. 本次约定与阶段边界
 
@@ -44,8 +44,8 @@ Reserve 使用已有枚举，不以仪器编号区分角色，不自动调整参
 
 XY h1=100 mV/Low Noise、h2=2 mV/Normal 是前文数据分析给出的候选设置，
 不是对未来样品或全部激励范围的保证。本计划不把它们写成全项目默认值。
-当前受版本控制的 XY 白名单没有 2 mV 和 100 mV；固定阶段将显式增加和测试
-这两个候选固定档位，记录策略变更，不绕过已有白名单，也不扩大激励输出上限。
+固定阶段已将 XY 2 mV 和 100 mV 加入明确白名单并测试；它们是候选档位，
+不改变默认设置，不绕过白名单，也不扩大激励输出上限。
 允许哪些自动量程阶梯在自动阶段单独明确定义和验证，不由固定档列表隐式推导。
 
 ### 冲突处理
@@ -165,7 +165,25 @@ bounded_auto 状态、量程阶梯、上下限和缩窄计数。可以 H1 fixed�
 - [x] 修订计划：固定档位优先，固定通过后自动继续变换量程开发。
 - [x] F0：204 项硬件隔离测试通过。
 - [x] F1：219 项硬件隔离测试通过（含 10 项新增功能测试）。
-- [ ] A1：分谐波 bounded_auto 实现与离线验收。
+- [x] A1：最终相关测试 250 项通过，含 21 项分谐波功能测试。
 - [ ] 分阶段真实仪器验收（单独实验阶段）。
 
-F0/F1 由 `tools/run_guarded_tests.py` 验证，A1 在固定阶段通过后继续开发。
+F0/F1/A1 均通过 `tools/run_guarded_tests.py`，工具拦截真实 VISA/串口/厂商 DLL。
+固定阶段 219 项通过后才添加自动功能。最终相关测试命令：
+
+```powershell
+python -s tools/run_guarded_tests.py tests.test_config tests.test_sr830 tests.test_sr830_settings tests.test_lockin_autorange tests.test_lockin_harmonics tests.test_combination_hardware tests.test_temperature_excitation_scan tests.test_xy_sweep_analysis tests.test_frequency_calibration
+```
+
+实现补充：
+
+- `lockin_harmonics.py` 统一切换/核验，各谐波复用原有 bounded-auto 状态机。
+- 角色基础模式保留 fixed；各阶数可独立 fixed/auto，未覆盖阶数继承基础配置。
+- XY 新增独立允许的 2→10 mV 自动阶梯；首次从最大档开始，计数不会跨谐波混用。
+- `settings_before/after` 与失败审计保留实际回读，profile 哈希包含新配置。
+- 回读不符、部分 paired HARM 写入、Ctrl+C、过载、时间常数变化和恢复失败
+  均有故障注入覆盖。桥接无法确认时不继续 HARM 1 写入，也不声称恢复成功。
+- 全量测试尝试曾无进展而停止；采集测试单独 6 项通过。以上 250 项相关回归
+  是本次验收依据，不声称完整项目测试全部通过。
+
+站点配置、真实测量和 H1/H2 拟合公式均未在本任务中修改。

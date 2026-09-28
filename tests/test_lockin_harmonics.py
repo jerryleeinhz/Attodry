@@ -26,6 +26,14 @@ reserve_mode = "normal"
 '''
 
 
+AUTO = FIXED.replace('sensitivity_mode = "fixed"', 'sensitivity_mode = "bounded_auto"') + """
+autorange_min_full_scale_v = 0.002
+autorange_max_full_scale_v = 0.010
+autorange_target_occupancy = 0.85
+autorange_stable_samples = 2
+"""
+
+
 class HarmonicConfigTests(unittest.TestCase):
     simulation_text = config_tests.ConfigurationTests.simulation_text
     load_text = config_tests.ConfigurationTests.load_text
@@ -45,12 +53,23 @@ class HarmonicConfigTests(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(ConfigError):
                 self.load_text(self.simulation_text() + '\n' + invalid)
 
+    def test_auto_requires_explicit_safety_ladder_and_fixed_baseline(self):
+        config = self.load_text(self.simulation_text() + AUTO)
+        self.assertEqual(config.lockin_xy.harmonic_settings[1].autorange_full_scales_v, (.002, .010))
+        for invalid in (AUTO.replace('autorange_max_full_scale_v = 0.010', 'autorange_max_full_scale_v = 0.100'),
+                        AUTO.replace('autorange_stable_samples = 2', 'autorange_stable_samples = 1'),
+                        AUTO.replace('autorange_target_occupancy = 0.85', 'autorange_target_occupancy = 0.99'),
+                        AUTO.replace('autorange_max_full_scale_v = 0.010', ''),
+                        AUTO.replace('sensitivity_mode = "bounded_auto"', 'sensitivity_mode = "fixed"')):
+            with self.subTest(invalid=invalid), self.assertRaises(ConfigError):
+                self.load_text(self.simulation_text() + invalid)
+
 
 class HarmonicSweepTests(unittest.TestCase):
     setUp = fixtures.Sr830Tests.setUp
     _hardware_config = fixtures.Sr830Tests._hardware_config
 
-    def execute(self, command='sweep-frequency', *, extra=FIXED, mutate=None, config_edit=None):
+    def execute(self, command='sweep-frequency', *, extra=FIXED, mutate=None, config_edit=None, points_hz="17.777,1000"):
         path = self._hardware_config()
         source = path.read_text(encoding='utf-8') + extra
         if command == 'sweep-frequency-excitation':
@@ -65,7 +84,7 @@ class HarmonicSweepTests(unittest.TestCase):
         manager = fixtures.FakeResourceManager({'XX': xx, 'XY': xy})
         if mutate:
             mutate(xx, xy)
-        options = {'sweep-frequency': ['--points-hz', '17.777,1000'],
+        options = {'sweep-frequency': ['--points-hz', points_hz],
                    'sweep-excitation': ['--points-v', '0.004,0.008'],
                    'sweep-frequency-excitation': []}
         out, err = io.StringIO(), io.StringIO()
@@ -151,6 +170,42 @@ class HarmonicSweepTests(unittest.TestCase):
         self.assertEqual(xx.responses['HARM?'].strip(), '1')
         self.assertEqual(xy.responses['HARM?'].strip(), '1')
 
+    def test_failed_bridge_never_switches_back_to_h1_unconfirmed(self):
+        def mutate(xx, xy):
+            original = xy.write
+            def write(command):
+                if command == 'SENS 23' and xy.responses['HARM?'].strip() == '2':
+                    raise OSError('bridge range could not be confirmed')
+                return original(command)
+            xy.write = write
+        code, result, xx, xy, _ = self.execute(mutate=mutate)
+        self.assertNotEqual(code, 0)
+        self.assertFalse(result['cleanup']['verified'])
+        self.assertIn('manually verify', ' '.join(result['cleanup']['errors']))
+        self.assertEqual(xy.responses['HARM?'].strip(), '2')
+        self.assertEqual(float(xx.responses['SLVL?']), .004)
+        self.assertNotIn('HARM 1', xy.writes)
+
+    def test_manual_change_during_sample_keeps_unverified_raw_pair(self):
+        def mutate(xx, xy):
+            original = xy.query
+            h2_samples = 0
+            def query(command):
+                nonlocal h2_samples
+                result = original(command)
+                if command == 'SNAP? 1,2,3,4,9' and xy.responses['SENS?'].strip() == '18':
+                    h2_samples += 1
+                    if h2_samples == 2:  # First is the transition, second formal.
+                        xy.responses['SENS?'] = '17'
+                return result
+            xy.query = query
+        code, result, _, _, _ = self.execute(mutate=mutate)
+        self.assertNotEqual(code, 0)
+        raw = result['points'][0]['samples'][-1]
+        self.assertEqual(raw['harmonic'], 2)
+        self.assertFalse(raw['settings_verified'])
+        self.assertIn('lockin_xy', raw)
+
     def test_readback_mismatch_rejects_before_h2_formal(self):
         def mutate(xx, xy):
             original = xy.query
@@ -205,6 +260,108 @@ autorange_stable_samples = 2''').replace('sensitivity_full_scale_v = 0.020', 'se
                 run(['sweep-excitation', '--config', str(path)], resource_manager_factory=factory)
         factory.assert_not_called()
 
+    def test_auto_h2_narrows_only_after_its_own_two_probes_all_sweeps(self):
+        for command in ('sweep-frequency', 'sweep-excitation', 'sweep-frequency-excitation'):
+            with self.subTest(command=command):
+                code, result, _, _, _ = self.execute(command, extra=AUTO)
+                self.assertEqual(code, 0, result)
+                points = result['points']
+                h2 = [[s for s in p['samples'] if s['harmonic'] == 2][0] for p in points]
+                self.assertEqual([s['settings_before']['roles']['lockin_xy']['sensitivity_full_scale_v'] for s in h2[:2]], [.010, .002])
+                for p in points:
+                    h1 = next(s for s in p['samples'] if s['harmonic'] == 1)
+                    self.assertEqual(h1['settings_before']['roles']['lockin_xy']['sensitivity_full_scale_v'], .1)
+                    auto = p['harmonic_autorange'][0]
+                    self.assertEqual(auto['harmonic'], 2)
+                    self.assertTrue(all(q['lockin_xy']['reading']['harmonic'] == 2 for q in auto['autorange']['probes']))
+
+    def test_auto_harmonic_states_are_independent(self):
+        extra = AUTO.replace('sensitivity_full_scale_v = 0.100', """sensitivity_full_scale_v = 0.010
+sensitivity_mode = "bounded_auto"
+autorange_min_full_scale_v = 0.010
+autorange_max_full_scale_v = 0.050
+autorange_target_occupancy = 0.85
+autorange_stable_samples = 2""")
+        def mutate(xx, xy):
+            original = xy.query
+            def query(command):
+                if command == 'SNAP? 1,2,3,4,9':
+                    amplitude = .030 if xy.responses['HARM?'].strip() == '1' else .0003
+                    return f'{amplitude},0,{amplitude},0,{xy.shared_frequency["hz"]}'
+                return original(command)
+            xy.query = query
+        code, result, _, _, _ = self.execute(extra=extra, mutate=mutate)
+        self.assertEqual(code, 0, result)
+        for point in result['points']:
+            h1 = next(s for s in point['samples'] if s['harmonic'] == 1)
+            self.assertEqual(h1['settings_before']['roles']['lockin_xy']['sensitivity_full_scale_v'], .05)
+        self.assertEqual(result['points'][1]['harmonic_autorange'][1]['states']['lockin_xy']['current_full_scale_v'], .002)
+
+    def test_auto_widens_later_point_without_cross_harmonic_reset(self):
+        def mutate(xx, xy):
+            original = xy.query
+            def query(command):
+                if command == 'SNAP? 1,2,3,4,9' and xy.responses['HARM?'].strip() == '2':
+                    amplitude = .004 if xy.shared_frequency['hz'] > 500 else .0003
+                    return f'{amplitude},0,{amplitude},0,{xy.shared_frequency["hz"]}'
+                return original(command)
+            xy.query = query
+        code, result, _, xy, _ = self.execute(extra=AUTO, mutate=mutate, points_hz='17.777,100,1000')
+        self.assertEqual(code, 0, result)
+        scales = [next(s for s in p['samples'] if s['harmonic'] == 2)['settings_before']['roles']['lockin_xy']['sensitivity_full_scale_v'] for p in result['points']]
+        self.assertEqual(scales, [.01, .002, .01])
+        self.assertEqual(result['points'][2]['harmonic_autorange'][0]['autorange']['decisions'][0]['roles']['lockin_xy']['action'], 'widen')
+        self.assertNotIn('AGAN', xy.writes)
+
+    def test_auto_exhaustion_keeps_probe_out_of_formal_samples(self):
+        def mutate(xx, xy):
+            original = xy.query
+            def query(command):
+                if command == 'SNAP? 1,2,3,4,9' and xy.responses['HARM?'].strip() == '2':
+                    return f'.02,0,.02,0,{xy.shared_frequency["hz"]}'
+                return original(command)
+            xy.query = query
+        code, result, _, _, _ = self.execute(extra=AUTO, mutate=mutate)
+        self.assertNotEqual(code, 0)
+        self.assertTrue(result['cleanup']['verified'], result)
+        point = result['points'][0]
+        self.assertFalse(any(s['harmonic'] == 2 for s in point['samples']))
+        self.assertEqual(point['harmonic_autorange'][0]['autorange']['decisions'][0]['roles']['lockin_xy']['action'], 'fail')
+
+    def test_auto_small_h2_with_input_overload_never_accepted(self):
+        def mutate(xx, xy):
+            original = xy.query
+            def query(command):
+                if command == 'LIAS?' and xy.responses['SENS?'].strip() == '18':
+                    return '1'  # Whole-input reserve overload, despite tiny H2 SNAP.
+                return original(command)
+            xy.query = query
+        code, result, _, _, _ = self.execute(extra=AUTO, mutate=mutate)
+        self.assertNotEqual(code, 0)
+        self.assertTrue(result['cleanup']['verified'], result)
+        self.assertFalse(any(s['harmonic'] == 2 for s in result['points'][1]['samples']))
+        self.assertIn('input/reserve overload', result['error'])
+
+    def test_time_constant_change_after_range_write_is_rejected(self):
+        def mutate(xx, xy):
+            original = xy.write
+            def write(command):
+                result = original(command)
+                if command == 'SENS 18':
+                    xy.responses['OFLT?'] = '10'
+                return result
+            xy.write = write
+        code, result, _, _, _ = self.execute(extra=AUTO, mutate=mutate)
+        self.assertNotEqual(code, 0)
+        self.assertIn('time_constant_s', result['error'])
+        self.assertFalse(result['cleanup']['verified'])
+        self.assertFalse(any(s['harmonic'] == 2 for s in result['points'][1]['samples']))
+
+    def test_profile_hash_changes_when_harmonic_policy_changes(self):
+        _, fixed, _, _, _ = self.execute(extra=FIXED)
+        _, auto, _, _, _ = self.execute(extra=AUTO)
+        self.assertNotEqual(fixed['measurement_profile_ref'], auto['measurement_profile_ref'])
+
 
 class HarmonicCombinationTests(unittest.TestCase):
     setUp = combination.ElectricalCombinationTests.setUp
@@ -221,6 +378,15 @@ class HarmonicCombinationTests(unittest.TestCase):
         self.assertTrue(formal)
         self.assertTrue(all(p['settings_verified'] for p in formal))
         self.assertEqual({p['settings_before']['roles']['lockin_xy']['sensitivity_full_scale_v'] for p in formal}, {.1, .002, .01})
+
+    def test_combination_auto_state_survives_sample_calls(self):
+        self.write_config(extra=AUTO)
+        result = self.execute()
+        self.assertEqual(result['status'], 'completed', result)
+        formal = [data for name, data in self.events() if name == 'lockin_formal_pair' and data['harmonic'] == 2]
+        scales = [p['settings_before']['roles']['lockin_xy']['sensitivity_full_scale_v'] for p in formal]
+        self.assertEqual(scales[:2], [.01, .002])
+        self.assertTrue(all(scale == .002 for scale in scales[2:]))
 
 
 if __name__ == '__main__':

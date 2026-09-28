@@ -1589,7 +1589,10 @@ def _parse_lockin(
     )
 
 
-def _parse_harmonic_settings(table, role, name, safety_role, safety):
+def _parse_harmonic_settings(
+    table: Mapping[str, Any], role: LockinRole, name: str,
+    safety_role: LockinSafetyRoleConfig, safety: LockinSafetyConfig,
+) -> tuple[HarmonicSensitivityConfig, ...]:
     if "harmonic_settings" not in table:
         return ()
     settings = table["harmonic_settings"]
@@ -1612,8 +1615,6 @@ def _parse_harmonic_settings(table, role, name, safety_role, safety):
         merged = {k: v for k, v in table.items() if k != "harmonic_settings"}
         merged.update(override)
         parsed = _parse_lockin(merged, role, f"{label}.{key}", safety_role, safety)
-        if parsed.sensitivity_mode is not SensitivityMode.FIXED:
-            raise ConfigError(f"{label}.{key}: fixed validation must precede bounded_auto.")
         result.append(HarmonicSensitivityConfig(
             harmonic=int(key[1:]),
             **{field: getattr(parsed, field) for field in HarmonicSensitivityConfig.__dataclass_fields__

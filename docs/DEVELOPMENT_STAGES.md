@@ -2,16 +2,25 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
-## Harmonic sensitivity F0/F1 complete (offline; 2026-09-28)
+## Harmonic sensitivity F0/F1/A1 complete (offline; 2026-09-28)
 
-- F0: 204 guarded tests passed before implementation.
-- F1: 219 guarded tests passed after per-role/harmonic fixed SENS/RMOD.
-- Ten new tests cover strict configuration, inherited h3, all three sweeps,
-  combination acquisition, actual setting/profile audit, transition ordering,
-  readback failure, partial paired HARM writes, Ctrl+C and baseline cleanup.
-- Fixed XY 2 mV/100 mV are explicit candidates; excitation limits are unchanged.
-- A1 proceeds next under the approved plan. Real-instrument acceptance remains
-  a separate stage; no instrument connection or station deployment occurred.
+- F0 baseline: 204 guarded tests passed. F1 fixed gate: 219 passed before A1.
+- A1 adds explicit per-harmonic bounded_auto with independent policy/state;
+  initial maximum, occupancy 0.85, two qualifying probes before narrowing,
+  adjacent widening and rejection at the ladder limit. No SR830 AGAN.
+- Final relevant suite: 250 tests passed; 21 new tests cover configuration,
+  all three sweeps, combination state persistence, fixed/auto mixed modes,
+  range transition order, whole-input overload with tiny H2, partial writes,
+  Ctrl+C, failed cleanup bridges, changed time constant, setting changes during
+  formal reads, baseline restoration and profile fingerprints.
+- Formal samples carry confirmed settings before/after; probe/transition audits
+  retain rejected attempts. Existing configurations and historical records remain
+  compatible; absent historical settings are never filled from current TOML.
+- XY fixed 2 mV/100 mV and a separate optional 2→10 mV auto ladder are explicit
+  policy additions. Same-role harmonic/segment conflicts fail before opening.
+- Config example, daily instructions and [plan](LOCKIN_HARMONIC_SENSITIVITY_PLAN.md)
+  are updated. Station deployment and real-instrument fixed/auto acceptance remain
+  separate, unperformed stages. H1/H2 fitting formulas were not changed here.
 
 ## Rejected f × e calibration audit opt-in (offline; 2026-09-28)
 

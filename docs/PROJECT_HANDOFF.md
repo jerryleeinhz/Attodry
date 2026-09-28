@@ -4,18 +4,30 @@ Last updated: 2026-09-28
 
 ## Current stage
 
-### Harmonic sensitivity fixed-stage validation (offline; 2026-09-28)
+### Harmonic sensitivity fixed + bounded auto complete (offline; 2026-09-28)
 
-F0 passed 204 guarded offline tests. F1 then passed 219 tests, including ten
-new per-harmonic tests. Optional `lockin_xx/xy.harmonic_settings.h1/h2/h3`
-fixed sensitivity and Reserve now run through one shared session in all three
-standalone sweeps and the combination adapter. Actual HARM/SENS/RMOD/OFLT are
-verified around formal sampling; audited bridges widen before HARM changes.
-Partial writes, Ctrl+C and wrong readbacks retain attempts and use baseline
-cleanup. Fixed XY 2 mV/100 mV were explicitly added to the safety allowlist.
-A1 bounded-auto development now proceeds under the existing authorization.
-No real instruments were opened or station settings changed. Fitting remains
-in the side chat. See [the staged plan](LOCKIN_HARMONIC_SENSITIVITY_PLAN.md).
+F0 passed 204 guarded tests; F1 then passed 219 before automatic ranging was
+implemented. Final relevant suite: 250 tests passed, including 21 new
+per-harmonic tests and the existing calibration/record analysis regressions.
+`lockin_xx/xy.harmonic_settings.h1/h2/h3` supports fixed SENS/RMOD or explicit
+bounded_auto, with independent `(role, harmonic)` ladders and narrowing counts.
+Role baselines remain fixed for cleanup; absent overrides inherit that baseline.
+Conflicting per-segment range overrides are rejected before instrument opening.
+One shared session serves frequency, excitation, f×e and combination acquisition.
+
+The session widens before harmonic changes, verifies HARM/SENS/RMOD/OFLT around
+formal reads, and retains partial/failed transitions. Automatic mode starts at
+its approved maximum, reuses the existing controller, and rejects unresolved
+whole-input/reserve/filter overload even when H2 is small. Probes stay separate
+from formal samples. Cleanup requests minimum source, confirms a bridge before
+HARM 1, then restores TOML baseline SENS/RMOD; unconfirmed recovery remains failed.
+
+Explicit policy additions: XY fixed 2 mV/100 mV; optional XY 2→10 mV automatic
+ladder. Existing defaults and excitation limits are unchanged. Instructions:
+[daily operation](LOCKIN_DAILY_OPERATION.md#分谐波-sensitivityreserve-接口),
+[stage evidence](LOCKIN_HARMONIC_SENSITIVITY_PLAN.md).
+No real instruments were opened or station-local TOML edited. Physical acceptance
+is still pending and must start with fixed ranges. Fitting work stays in side chat.
 
 ### Explicit rejected-run calibration audit (offline; 2026-09-28)
 

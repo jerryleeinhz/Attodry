@@ -3604,6 +3604,8 @@ def _apply_sweep_autorange(
     frequency_rel_tolerance: float,
     settle_s: float,
     record: dict[str, object],
+    harmonic: int = 1,
+    verify_settings: Callable[[], object] | None = None,
 ) -> None:
     """Apply adjacent range changes, repeating widening within one point.
 
@@ -3616,6 +3618,7 @@ def _apply_sweep_autorange(
         return
     automatic_roles = frozenset(policies)
     autorange_record: dict[str, object] = {
+        "harmonic": harmonic,
         "enabled_roles": sorted(automatic_roles),
         "probes": [],
         "decisions": [],
@@ -3629,8 +3632,10 @@ def _apply_sweep_autorange(
     instruments = {"lockin_xx": lockin_xx, "lockin_xy": lockin_xy}
 
     while True:
-        xx = lockin_xx.read_harmonic_sample(1)
-        xy = lockin_xy.read_harmonic_sample(1)
+        if verify_settings is not None:
+            verify_settings()
+        xx = lockin_xx.read_harmonic_sample(harmonic)
+        xy = lockin_xy.read_harmonic_sample(harmonic)
         probe_problems = _autorange_probe_problems(
             xx,
             xy,
@@ -3649,8 +3654,8 @@ def _apply_sweep_autorange(
         probes.append(probe_record)
         if _sweep_overload_recheck_eligible(xx, xy, probe_problems):
             time.sleep(settle_s)
-            verification_xx = lockin_xx.read_harmonic_sample(1)
-            verification_xy = lockin_xy.read_harmonic_sample(1)
+            verification_xx = lockin_xx.read_harmonic_sample(harmonic)
+            verification_xy = lockin_xy.read_harmonic_sample(harmonic)
             verification_problems = _autorange_probe_problems(
                 verification_xx,
                 verification_xy,
@@ -3723,12 +3728,14 @@ def _apply_sweep_autorange(
             target_code = sensitivity_code(decision.state.current_full_scale_v)
             range_record["write_attempted"] = True
             range_record["autorange_write_attempted"] = True
-            instruments[role].set_sensitivity(target_code)
             transitions = range_record.get("autorange_transitions")
             if not isinstance(transitions, list):
                 raise ValueError(f"Sweep sensitivity setup has no transition list for {role}.")
             transitions.append(
                 {
+                    "attempted_unix_s": time.time(),
+                    "returned": False,
+                    "harmonic": harmonic,
                     "action": decision.action.value,
                     "target_sensitivity_code": target_code,
                     "target_full_scale_v": decision.state.current_full_scale_v,
@@ -3736,6 +3743,8 @@ def _apply_sweep_autorange(
                     "reason": decision.reason,
                 }
             )
+            instruments[role].set_sensitivity(target_code)
+            transitions[-1]["returned"] = True
         time.sleep(settle_s)
         for role, instrument in instruments.items():
             range_record = ranges.get(role)
@@ -3754,10 +3763,13 @@ def _apply_sweep_autorange(
                 )
             range_record["current_sensitivity_code"] = expected_code
 
+        if verify_settings is not None:
+            verify_settings()
         transition, transition_problems = _consume_sensitivity_transition(
             lockin_xx,
             lockin_xy,
             settle_s=settle_s,
+            harmonic=harmonic,
         )
         transition["autorange_actions"] = {
             role: decision.action.value for role, decision in changes.items()
@@ -3771,8 +3783,10 @@ def _apply_sweep_autorange(
                 "Unsafe autorange transition: " + "; ".join(transition_problems)
             )
         time.sleep(settle_s)
-        verification_xx = lockin_xx.read_harmonic_sample(1)
-        verification_xy = lockin_xy.read_harmonic_sample(1)
+        if verify_settings is not None:
+            verify_settings()
+        verification_xx = lockin_xx.read_harmonic_sample(harmonic)
+        verification_xy = lockin_xy.read_harmonic_sample(harmonic)
         verification_problems = _autorange_probe_problems(
             verification_xx,
             verification_xy,
@@ -4387,6 +4401,10 @@ def _capture_sweep_point(
         if harmonic_control is not None:
             harmonic_control.enter(lockin_xx, lockin_xy, harmonic=harmonic,
                                    settle_s=harmonic_settle_s, record=record)
+            harmonic_control.qualify(
+                lockin_xx, lockin_xy, harmonic=harmonic, settle_s=harmonic_settle_s,
+                target_frequency_hz=target_frequency_hz,
+                frequency_rel_tolerance=frequency_rel_tolerance, record=record)
         elif harmonic != 1:
             lockin_xx.set_harmonic(harmonic)
             lockin_xy.set_harmonic(harmonic)
@@ -4487,6 +4505,7 @@ def _capture_sweep_point(
                         "initial": initial_context,
                     }
             if harmonic_control is not None:
+                problems.extend(harmonic_control.formal_problems(harmonic, xx, xy))
                 sample_payload["settings_before"] = settings_before
                 # Retain the raw pair even if the post-read setting check fails.
                 sample_payload["settings_verified"] = False
@@ -4674,6 +4693,7 @@ def _consume_sensitivity_transition(
     allow_xx_output_overload: bool = True,
     allow_output_overload_roles: frozenset[str] = frozenset(),
     settle_s: float = 0.0,
+    harmonic: int = 1,
 ) -> tuple[dict[str, object], list[str]]:
     """Record a SENS transition and recheck input/filter overload once.
 
@@ -4681,8 +4701,8 @@ def _consume_sensitivity_transition(
     is therefore retained in the raw sample but ignored here, regardless of the
     legacy ``allow_*output_overload`` arguments.
     """
-    xx = lockin_xx.read_harmonic_sample(1)
-    xy = lockin_xy.read_harmonic_sample(1)
+    xx = lockin_xx.read_harmonic_sample(harmonic)
+    xy = lockin_xy.read_harmonic_sample(harmonic)
     problems: list[str] = []
     for sample in (xx, xy):
         role = sample.reading.role.value
@@ -4720,8 +4740,8 @@ def _consume_sensitivity_transition(
     ):
         transition["verification_required"] = True
         time.sleep(settle_s)
-        verification_xx = lockin_xx.read_harmonic_sample(1)
-        verification_xy = lockin_xy.read_harmonic_sample(1)
+        verification_xx = lockin_xx.read_harmonic_sample(harmonic)
+        verification_xy = lockin_xy.read_harmonic_sample(harmonic)
         verification_problems: list[str] = []
         for sample in (verification_xx, verification_xy):
             role = sample.reading.role.value
