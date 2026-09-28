@@ -129,13 +129,21 @@ class FrequencyCalibrationTests(unittest.TestCase):
             def __init__(self, *args, **kwargs):
                 self.options = kwargs.get("options", ())
                 self.value = kwargs.get("value")
+                self.children = args[0] if args else ()
+                self.outputs = ()
+
+            def append_display_data(self, value):
+                self.outputs += (("display", value),)
+
+            def append_stdout(self, value):
+                self.outputs += (("text", value),)
 
             def on_click(self, callback):
                 self.callback = callback
 
         widgets = types.SimpleNamespace(
             Dropdown=Widget, FloatText=Widget, Button=Widget,
-            HTML=Widget, VBox=Widget,
+            HTML=Widget, VBox=Widget, Output=Widget,
         )
         rows = (
             row(10, 0.1, 0.2 + 0.1j, point=0, scan="frequency"),
@@ -143,10 +151,13 @@ class FrequencyCalibrationTests(unittest.TestCase):
             row(10, 0.1, 0.01j, point=0, role="xy", harmonic=2, scan="frequency"),
             row(20, 0.1, 0.04j, point=1, role="xy", harmonic=2, scan="frequency"),
         )
+        displayed = []
         namespace = {
             "widgets": widgets, "Path": Path, "PROJECT_ROOT": Path.cwd(),
             "frequency_rows": rows, "combined_rows": (),
-            "display": lambda *_: None,
+            "display": displayed.append,
+            "plt": types.SimpleNamespace(close=lambda *_: None),
+            "html": __import__("html"),
         }
         exec(compile(cell, "calibration-cell", "exec"), namespace)
         namespace["plot_frequency_response"] = lambda *_: object()
@@ -156,12 +167,35 @@ class FrequencyCalibrationTests(unittest.TestCase):
         namespace["calibration_role_widget"].value = "xx"
         namespace["_calibration_build"](None)
         self.assertIsNotNone(namespace["calibration_response"])
+        h1_output = namespace["calibration_h1_output"]
+        h2_output = namespace["calibration_h2_output"]
+        lcr_output = namespace["calibration_lcr_output"]
+        for output in (h1_output, h2_output, lcr_output):
+            self.assertIn(output, displayed[0].children)
+        self.assertEqual(h1_output.outputs[0], ("display", namespace["calibration_response_figure"]))
+        self.assertIn("without an intercept", namespace["calibration_message"].value)
+        output_count = len(h1_output.outputs)
+        namespace["_calibration_build"](None)
+        self.assertEqual(len(h1_output.outputs), output_count)
         namespace["calibration_model_widget"].value = "excitation_squared"
         namespace["calibration_h2_role_widget"].value = "xy"
         namespace["calibration_voltage_widget"].value = 0.1
         namespace["_calibration_apply_h2"](None)
         self.assertEqual(len(namespace["calibration_h2_rows"]), 2)
         self.assertAlmostEqual(namespace["calibration_h2_rows"][1].corrected_v.imag, 0.01)
+        self.assertEqual(h2_output.outputs[0], ("display", namespace["calibration_h2_figure"]))
+        namespace["lcr_real_widget"].value = 100
+        namespace["lcr_imag_widget"].value = 0
+        namespace["lcr_model_widget"].value = "inverse_current_proxy"
+        namespace["_calibration_lcr"](None)
+        self.assertIn("ohm", lcr_output.outputs[-1][1])
+        namespace["calibration_run_widget"].value = "missing.json"
+        namespace["_calibration_build"](None)
+        self.assertIsNone(namespace["calibration_response"])
+        for output in (h1_output, h2_output, lcr_output):
+            self.assertEqual(output.outputs, ())
+        self.assertIn("Calibration unavailable", namespace["calibration_message"].value)
+        self.assertEqual(len(displayed), 1)  # No unbound callback display calls.
 
 
 if __name__ == "__main__":

@@ -2,6 +2,16 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## SR830 calibration output routing (offline; 2026-09-28)
+
+- Explicit displayed Output widgets receive H1/H2 figures and LCR text from
+  button callbacks; export paths use the visible status field. Reruns replace
+  old outputs, and rebuilding H1 clears dependent H2/LCR displays.
+- Frequency-only success text clarifies the V1/U estimate without an intercept;
+  calibration mathematics and acquisition data are unchanged.
+- Guarded calibration/analysis tests: 56 passed, including output placement,
+  rerun replacement and failed-rebuild clearing. No real hardware interaction.
+
 ## SR830 sweep notebook record-list layout (offline; 2026-09-28)
 
 - Frequency, excitation, and f × e selectors keep their existing checkbox

@@ -4,6 +4,15 @@ Last updated: 2026-09-28
 
 ## Current stage
 
+### Calibration callback output visibility (offline; 2026-09-28)
+
+The sweep notebook now routes H1/H2 figures and LCR text explicitly to displayed
+Output widgets instead of unbound button-callback output. Rebuilding H1 clears
+old dependent displays; figures remain available for export. Frequency-only
+success text now explicitly describes V1/U without an intercept. Guarded
+calibration and commissioning analysis tests: 56 passed. No hardware I/O;
+the user's notebook frontend still needs a rerun of the updated cell.
+
 ### SR830 sweep notebook record-list visibility (offline; 2026-09-28)
 
 The frequency, excitation, and f × e record selectors now show the filename
