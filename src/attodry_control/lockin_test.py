@@ -1472,11 +1472,11 @@ def _run_frequency_sweep(
                 settle_s=args.settle_s,
             )
             harmonic_control = HarmonicSensitivitySession.create(
-                config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup,
+                config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
             )
             if harmonic_control is not None:
                 harmonic_control.enter(
-                    lockin_xx, lockin_xy, harmonic=1, settle_s=args.settle_s,
+                    lockin_xx, lockin_xy, harmonic=harmonic_control.initial_harmonics(baseline_hz), settle_s=args.settle_s,
                     record=sensitivity_setup.setdefault("harmonic_initialization", {}),
                 )
             source_write_performed = not math.isclose(
@@ -1496,11 +1496,6 @@ def _run_frequency_sweep(
             )
             nominal_current_a_rms = source_readback_v / float(
                 excitation_path["nominal_total_resistance_ohm"]
-            )
-            autorange_policies, autorange_states = _new_sweep_autorange_controls(
-                config.lockin_xx,
-                config.lockin_xy,
-                sensitivity_setup=sensitivity_setup,
             )
             for point_index, target_hz in enumerate(points):
                 point_spec = args.point_specs[point_index]
@@ -1533,10 +1528,12 @@ def _run_frequency_sweep(
                 }
                 records.append(point_record)
                 if wrote_setting:
+                    harmonic_control.prepare_frequency(
+                        lockin_xx, lockin_xy, target_hz, args.settle_s, point_record)
                     lockin_xx.set_internal_reference_frequency(target_hz)
                     time.sleep(args.settle_s)
                     transition, transition_problems = _consume_frequency_transition(
-                        lockin_xx, lockin_xy
+                        lockin_xx, lockin_xy, harmonic=harmonic_control.current_harmonics
                     )
                     point_record["transition_status"] = transition
                     if transition_problems:
@@ -1582,17 +1579,9 @@ def _run_frequency_sweep(
                     lockin_xy_config=config.lockin_xy,
                     settle_s=args.settle_s,
                     record=point_record,
-                )
-                _apply_sweep_autorange(
-                    lockin_xx,
-                    lockin_xy,
-                    sensitivity_setup=sensitivity_setup,
-                    policies=autorange_policies,
-                    states=autorange_states,
-                    target_frequency_hz=actual_frequency_hz,
-                    frequency_rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
-                    settle_s=args.settle_s,
-                    record=point_record,
+                    harmonic=harmonic_control.current_harmonics,
+                    on_input_overload=lambda status: harmonic_control.diagnose_overload(
+                        lockin_xx, lockin_xy, status, args.settle_s, point_record),
                 )
                 _capture_sweep_point(
                     lockin_xx,
@@ -1827,18 +1816,13 @@ def _run_frequency_excitation_sweep(
                 settle_s=args.settle_s,
             )
             harmonic_control = HarmonicSensitivitySession.create(
-                config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup,
+                config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
             )
             if harmonic_control is not None:
                 harmonic_control.enter(
-                    lockin_xx, lockin_xy, harmonic=1, settle_s=args.settle_s,
+                    lockin_xx, lockin_xy, harmonic=harmonic_control.initial_harmonics(baseline_hz), settle_s=args.settle_s,
                     record=sensitivity_setup.setdefault("harmonic_initialization", {}),
                 )
-            autorange_policies, autorange_states = _new_sweep_autorange_controls(
-                config.lockin_xx,
-                config.lockin_xy,
-                sensitivity_setup=sensitivity_setup,
-            )
             for frequency_index, target_hz in enumerate(frequencies):
                 if frequency_index > 0:
                     lockin_xx.set_minimum_sine_output()
@@ -1858,10 +1842,12 @@ def _run_frequency_excitation_sweep(
                     target_hz, baseline_hz, rel_tol=0.0, abs_tol=1e-12
                 )
                 if wrote_frequency:
+                    harmonic_control.prepare_frequency(
+                        lockin_xx, lockin_xy, target_hz, args.settle_s, frequency_record)
                     lockin_xx.set_internal_reference_frequency(target_hz)
                     time.sleep(args.settle_s)
                     transition, transition_problems = _consume_frequency_transition(
-                        lockin_xx, lockin_xy
+                        lockin_xx, lockin_xy, harmonic=harmonic_control.current_harmonics
                     )
                     frequency_record["transition_status"] = transition
                     if transition_problems:
@@ -1955,17 +1941,9 @@ def _run_frequency_excitation_sweep(
                         lockin_xy_config=config.lockin_xy,
                         settle_s=args.settle_s,
                         record=point_record,
-                    )
-                    _apply_sweep_autorange(
-                        lockin_xx,
-                        lockin_xy,
-                        sensitivity_setup=sensitivity_setup,
-                        policies=autorange_policies,
-                        states=autorange_states,
-                        target_frequency_hz=xx_readback,
-                        frequency_rel_tolerance=1e-5,
-                        settle_s=args.settle_s,
-                        record=point_record,
+                        harmonic=harmonic_control.current_harmonics,
+                        on_input_overload=lambda status: harmonic_control.diagnose_overload(
+                            lockin_xx, lockin_xy, status, args.settle_s, point_record),
                     )
                     _capture_sweep_point(
                         lockin_xx,
@@ -2274,18 +2252,13 @@ def _execute_excitation_sweep_on_open_pair(
             settle_s=args.settle_s,
         )
         harmonic_control = HarmonicSensitivitySession.create(
-            config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup,
+            config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
         )
         if harmonic_control is not None:
             harmonic_control.enter(
-                lockin_xx, lockin_xy, harmonic=1, settle_s=args.settle_s,
+                lockin_xx, lockin_xy, harmonic=harmonic_control.initial_harmonics(baseline_hz), settle_s=args.settle_s,
                 record=sensitivity_setup.setdefault("harmonic_initialization", {}),
             )
-        autorange_policies, autorange_states = _new_sweep_autorange_controls(
-            config.lockin_xx,
-            config.lockin_xy,
-            sensitivity_setup=sensitivity_setup,
-        )
         for point_index, source_v in enumerate(points):
             point_spec = args.point_specs[point_index]
             wrote_setting = not math.isclose(
@@ -2353,17 +2326,9 @@ def _execute_excitation_sweep_on_open_pair(
                 lockin_xy_config=config.lockin_xy,
                 settle_s=args.settle_s,
                 record=point_record,
-            )
-            _apply_sweep_autorange(
-                lockin_xx,
-                lockin_xy,
-                sensitivity_setup=sensitivity_setup,
-                policies=autorange_policies,
-                states=autorange_states,
-                target_frequency_hz=xx_frequency_readback,
-                frequency_rel_tolerance=1e-5,
-                settle_s=args.settle_s,
-                record=point_record,
+                harmonic=harmonic_control.current_harmonics,
+                on_input_overload=lambda status: harmonic_control.diagnose_overload(
+                    lockin_xx, lockin_xy, status, args.settle_s, point_record),
             )
             _capture_sweep_point(
                 lockin_xx,
@@ -2579,7 +2544,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 12,
+        "schema_version": 13,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -2601,6 +2566,13 @@ def _measurement_config_snapshot(
         "status_recheck_policy": (
             "A first input/reserve or filter overload latch is retained as an audit "
             "candidate and re-read once after settling; a repeated latch fails closed."
+        ),
+        "harmonic_scheduling_policy": "independent_roles_v1",
+        "fixed_input_overload_diagnostic": (
+            "After confirmed input/reserve overload during fixed-range acquisition, "
+            "save an abort-only h1 snapshot of the affected instrument at unchanged "
+            "source/SENS/RMOD, then terminate and clean up. Overloaded values are "
+            "diagnostic only, never accepted or used for fitting."
         ),
         "setting_writes_enabled_by_command": True,
         "lockin_safety": asdict(config.lockin_safety),
@@ -3447,6 +3419,8 @@ def _apply_sweep_segment_ranges(
     lockin_xy_config: LockinConfig,
     settle_s: float,
     record: dict[str, object],
+    harmonic: int | Mapping[str, int] = 1,
+    on_input_overload: Callable[[dict[str, object]], None] | None = None,
 ) -> None:
     """Apply an optional fixed-range override at a named range segment.
 
@@ -3530,11 +3504,14 @@ def _apply_sweep_segment_ranges(
         lockin_xx,
         lockin_xy,
         allow_xx_output_overload=False,
+        harmonic=harmonic,
         settle_s=settle_s,
     )
     transition_record["status"] = transition
     sensitivity_setup["transition_status"] = transition
     if problems:
+        if on_input_overload is not None:
+            on_input_overload(transition)
         raise Sr830Error("Unsafe sweep segment sensitivity transition: " + "; ".join(problems))
     time.sleep(settle_s)
     for role, instrument in instruments.items():
@@ -3559,38 +3536,30 @@ def _sensitivity_record_int(
     return value
 
 
-def _new_sweep_autorange_controls(
-    lockin_xx_config: LockinConfig,
-    lockin_xy_config: LockinConfig,
-    *,
-    sensitivity_setup: dict[str, object],
-) -> tuple[dict[str, AutorangePolicy], dict[str, AutorangeState]]:
-    ranges = sensitivity_setup.get("ranges")
-    if not isinstance(ranges, dict):
-        raise ValueError("Sweep sensitivity setup must contain per-role range records.")
-    policies: dict[str, AutorangePolicy] = {}
-    states: dict[str, AutorangeState] = {}
-    for role, lockin in (
-        ("lockin_xx", lockin_xx_config),
-        ("lockin_xy", lockin_xy_config),
-    ):
-        policy = _autorange_policy_for_lockin(lockin)
-        if policy is None:
-            continue
-        range_record = ranges.get(role)
-        if not isinstance(range_record, dict):
-            raise ValueError(f"Sweep sensitivity setup is missing {role}.")
-        current_code = _sensitivity_record_int(
-            range_record, "current_sensitivity_code", role
-        )
-        current_full_scale_v = sensitivity_full_scale_v(current_code)
-        if current_full_scale_v not in policy.full_scales_v:
-            raise ValueError(
-                f"{role} initial autorange sensitivity is outside its configured bounds."
-            )
-        policies[role] = policy
-        states[role] = AutorangeState(current_full_scale_v)
-    return policies, states
+def _expected_harmonic(harmonic: int | Mapping[str, int], role: str) -> int:
+    return harmonic[role] if isinstance(harmonic, Mapping) else harmonic
+
+
+def _harmonic_audit_fields(harmonic: int | Mapping[str, int]) -> dict[str, object]:
+    if not isinstance(harmonic, Mapping):
+        return {"harmonic": harmonic}
+    values = set(harmonic.values())
+    return {"harmonic": next(iter(values)) if len(values) == 1 else None,
+            "harmonics_by_role": dict(harmonic)}
+
+
+def _read_sweep_pair(lockin_xx, lockin_xy, harmonic, record):
+    """Retain completed role reads if the companion read or status query fails."""
+    audit = {"captured_unix_s": time.time(), **_harmonic_audit_fields(harmonic)}
+    try:
+        xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
+        audit["lockin_xx"] = _audited_harmonic_sample_record(xx)
+        xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
+        return xx, xy
+    except BaseException as exc:
+        audit["error"] = str(exc) or type(exc).__name__
+        record.setdefault("partial_sample_reads", []).append(audit)
+        raise
 
 
 def _apply_sweep_autorange(
@@ -3604,8 +3573,9 @@ def _apply_sweep_autorange(
     frequency_rel_tolerance: float,
     settle_s: float,
     record: dict[str, object],
-    harmonic: int = 1,
+    harmonic: int | Mapping[str, int] = 1,
     verify_settings: Callable[[], object] | None = None,
+    on_input_overload: Callable[[dict[str, object]], None] | None = None,
 ) -> None:
     """Apply adjacent range changes, repeating widening within one point.
 
@@ -3618,7 +3588,7 @@ def _apply_sweep_autorange(
         return
     automatic_roles = frozenset(policies)
     autorange_record: dict[str, object] = {
-        "harmonic": harmonic,
+        **_harmonic_audit_fields(harmonic),
         "enabled_roles": sorted(automatic_roles),
         "probes": [],
         "decisions": [],
@@ -3634,8 +3604,7 @@ def _apply_sweep_autorange(
     while True:
         if verify_settings is not None:
             verify_settings()
-        xx = lockin_xx.read_harmonic_sample(harmonic)
-        xy = lockin_xy.read_harmonic_sample(harmonic)
+        xx, xy = _read_sweep_pair(lockin_xx, lockin_xy, harmonic, record)
         probe_problems = _autorange_probe_problems(
             xx,
             xy,
@@ -3654,8 +3623,8 @@ def _apply_sweep_autorange(
         probes.append(probe_record)
         if _sweep_overload_recheck_eligible(xx, xy, probe_problems):
             time.sleep(settle_s)
-            verification_xx = lockin_xx.read_harmonic_sample(harmonic)
-            verification_xy = lockin_xy.read_harmonic_sample(harmonic)
+            verification_xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
+            verification_xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
             verification_problems = _autorange_probe_problems(
                 verification_xx,
                 verification_xy,
@@ -3670,12 +3639,16 @@ def _apply_sweep_autorange(
                 "problems": verification_problems,
             }
             if verification_problems:
+                if on_input_overload is not None:
+                    on_input_overload(probe_record)
                 raise Sr830Error(
                     "Autorange probe rejected after overload recheck: "
                     + "; ".join(verification_problems)
                 )
             xx, xy, probe_problems = verification_xx, verification_xy, []
         if probe_problems:
+            if on_input_overload is not None:
+                on_input_overload(probe_record)
             raise Sr830Error("Autorange probe rejected: " + "; ".join(probe_problems))
 
         samples_by_role = {"lockin_xx": xx, "lockin_xy": xy}
@@ -3779,14 +3752,16 @@ def _apply_sweep_autorange(
         transitions.append(transition)
         autorange_record.setdefault("transition_status", transition)
         if transition_problems:
+            if on_input_overload is not None:
+                on_input_overload(transition)
             raise Sr830Error(
                 "Unsafe autorange transition: " + "; ".join(transition_problems)
             )
         time.sleep(settle_s)
         if verify_settings is not None:
             verify_settings()
-        verification_xx = lockin_xx.read_harmonic_sample(harmonic)
-        verification_xy = lockin_xy.read_harmonic_sample(harmonic)
+        verification_xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
+        verification_xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
         verification_problems = _autorange_probe_problems(
             verification_xx,
             verification_xy,
@@ -3805,6 +3780,8 @@ def _apply_sweep_autorange(
         verifications.append(verification_record)
         autorange_record.setdefault("verification", verification_record)
         if verification_problems:
+            if on_input_overload is not None:
+                on_input_overload(verification_record)
             raise Sr830Error(
                 "Autorange transition verification rejected: "
                 + "; ".join(verification_problems)
@@ -4394,34 +4371,31 @@ def _capture_sweep_point(
     raw_transitions = record["harmonic_transition_status"]
     if not isinstance(raw_transitions, list):
         raise TypeError("Sweep point harmonic transitions must be a list.")
+    if harmonic_control is None and harmonics != (1,):
+        raise ValueError("Multi-harmonic capture requires a role-aware session.")
+    if harmonic_control is not None:
+        # Prime each role's first valid selection before any formal sample. A
+        # role with one harmonic then never follows the companion's cycle.
+        targets = dict(harmonic_control.current_harmonics)
+        for role in ("xx", "xy"):
+            requested = [h for h in harmonics if role in selected_roles_by_harmonic.get(h, ())]
+            if requested:
+                targets["lockin_" + role] = requested[0]
+        harmonic_control.enter(lockin_xx, lockin_xy, harmonic=targets,
+                               settle_s=harmonic_settle_s, record=record)
     for harmonic in harmonics:
         selected_roles = selected_roles_by_harmonic.get(harmonic, ())
         if not selected_roles:
             raise ValueError(f"Harmonic {harmonic} has no selected formal role.")
         if harmonic_control is not None:
             harmonic_control.enter(lockin_xx, lockin_xy, harmonic=harmonic,
-                                   settle_s=harmonic_settle_s, record=record)
+                                   roles=selected_roles, settle_s=harmonic_settle_s, record=record)
             harmonic_control.qualify(
-                lockin_xx, lockin_xy, harmonic=harmonic, settle_s=harmonic_settle_s,
-                target_frequency_hz=target_frequency_hz,
+                lockin_xx, lockin_xy, harmonic=harmonic, roles=selected_roles,
+                settle_s=harmonic_settle_s, target_frequency_hz=target_frequency_hz,
                 frequency_rel_tolerance=frequency_rel_tolerance, record=record)
-        elif harmonic != 1:
-            lockin_xx.set_harmonic(harmonic)
-            lockin_xy.set_harmonic(harmonic)
-            time.sleep(harmonic_settle_s)
-            transition, transition_problems = _consume_and_verify_harmonic_transition(
-                lockin_xx,
-                lockin_xy,
-                harmonic=harmonic,
-                settle_s=harmonic_settle_s,
-                allow_input_reserve_recheck=True,
-            )
-            raw_transitions.append(transition)
-            if transition_problems:
-                raise Sr830Error(
-                    "Unsafe harmonic transition: " + "; ".join(transition_problems)
-                )
-            time.sleep(harmonic_settle_s)
+        expected_harmonics = ({"lockin_xx": 1, "lockin_xy": 1} if harmonic_control is None
+                              else dict(harmonic_control.current_harmonics))
         for sample_index in range(samples):
             if sample_index:
                 time.sleep(sample_interval_s)
@@ -4431,9 +4405,8 @@ def _capture_sweep_point(
                 else measurement_context("before", harmonic, sample_index)
             )
             settings_before = (None if harmonic_control is None else
-                harmonic_control.verify(lockin_xx, lockin_xy, harmonic, record))
-            xx = lockin_xx.read_harmonic_sample(harmonic)
-            xy = lockin_xy.read_harmonic_sample(harmonic)
+                harmonic_control.verify(lockin_xx, lockin_xy, expected_harmonics, record))
+            xx, xy = _read_sweep_pair(lockin_xx, lockin_xy, expected_harmonics, record)
             context_after = (
                 None
                 if measurement_context is None
@@ -4447,6 +4420,8 @@ def _capture_sweep_point(
             )
             sample_payload = {
                 "harmonic": harmonic,
+                "harmonics_by_role": expected_harmonics,
+                "sampling_policy": "independent_roles",
                 "sample_index": sample_index,
                 "captured_unix_s": time.time(),
                 "sweep_point": _sweep_point_progress_snapshot(record),
@@ -4469,8 +4444,8 @@ def _capture_sweep_point(
                         "before_status_recheck", harmonic, sample_index
                     )
                 )
-                verification_xx = lockin_xx.read_harmonic_sample(harmonic)
-                verification_xy = lockin_xy.read_harmonic_sample(harmonic)
+                verification_xx = lockin_xx.read_harmonic_sample(_expected_harmonic(expected_harmonics, "lockin_xx"))
+                verification_xy = lockin_xy.read_harmonic_sample(_expected_harmonic(expected_harmonics, "lockin_xy"))
                 verification_context_after = (
                     None
                     if measurement_context is None
@@ -4505,40 +4480,26 @@ def _capture_sweep_point(
                         "initial": initial_context,
                     }
             if harmonic_control is not None:
-                problems.extend(harmonic_control.formal_problems(harmonic, xx, xy))
+                problems.extend(harmonic_control.formal_problems(harmonic, xx, xy, roles=selected_roles))
                 sample_payload["settings_before"] = settings_before
                 # Retain the raw pair even if the post-read setting check fails.
                 sample_payload["settings_verified"] = False
             raw_samples.append(sample_payload)
             if harmonic_control is not None:
-                sample_payload["settings_after"] = harmonic_control.verify(
-                    lockin_xx, lockin_xy, harmonic, record)
-                sample_payload["settings_verified"] = True
+                try:
+                    sample_payload["settings_after"] = harmonic_control.verify(
+                        lockin_xx, lockin_xy, expected_harmonics, record)
+                    sample_payload["settings_verified"] = True
+                except BaseException as exc:
+                    problems.append("Formal setting verification failed: " + (str(exc) or type(exc).__name__))
+                    raise
             if on_formal_sample_recorded is not None:
                 on_formal_sample_recorded(sample_payload)
             if problems:
+                if harmonic_control is not None:
+                    harmonic_control.diagnose_overload(
+                        lockin_xx, lockin_xy, sample_payload, harmonic_settle_s, record)
                 raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
-    if harmonic_control is not None:
-        harmonic_control.enter(lockin_xx, lockin_xy, harmonic=1,
-                               settle_s=harmonic_settle_s, record=record)
-    elif harmonics[-1] != 1:
-        lockin_xx.set_harmonic(1)
-        lockin_xy.set_harmonic(1)
-        time.sleep(harmonic_settle_s)
-        transition, transition_problems = _consume_and_verify_harmonic_transition(
-            lockin_xx,
-            lockin_xy,
-            harmonic=1,
-            settle_s=harmonic_settle_s,
-            allow_input_reserve_recheck=True,
-        )
-        raw_transitions.append(transition)
-        if transition_problems:
-            raise Sr830Error(
-                "Unsafe harmonic restoration transition: "
-                + "; ".join(transition_problems)
-            )
-        time.sleep(harmonic_settle_s)
 
 
 def _restore_first_harmonic(instrument: Sr830) -> bool:
@@ -4552,12 +4513,12 @@ def _consume_harmonic_transition(
     lockin_xx: Sr830,
     lockin_xy: Sr830,
     *,
-    harmonic: int,
+    harmonic: int | Mapping[str, int],
 ) -> tuple[dict[str, object], list[str]]:
-    """Record expected filter/reference-range latches after a paired HARM write."""
+    """Audit both detectors at their expected harmonics after a HARM write."""
 
-    xx = lockin_xx.read_harmonic_sample(harmonic)
-    xy = lockin_xy.read_harmonic_sample(harmonic)
+    xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
+    xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
     problems: list[str] = []
     for sample in (xx, xy):
         role = sample.reading.role.value
@@ -4585,7 +4546,7 @@ def _consume_harmonic_transition(
         candidate_latches.append("lockin_xy.filter_overload")
     return (
         {
-            "harmonic": harmonic,
+            **_harmonic_audit_fields(harmonic),
             "captured_unix_s": time.time(),
             "expected_transient_latches": [
                 "filter_overload",
@@ -4604,11 +4565,11 @@ def _consume_and_verify_harmonic_transition(
     lockin_xx: Sr830,
     lockin_xy: Sr830,
     *,
-    harmonic: int,
+    harmonic: int | Mapping[str, int],
     settle_s: float,
     allow_input_reserve_recheck: bool,
 ) -> tuple[dict[str, object], list[str]]:
-    """Consume one HARM-transition sample and recheck transient overload latches.
+    """Consume one role-aware HARM-transition sample and recheck transient overload latches.
 
     LIAS bit 0 and filter overload are latched and can briefly assert while the
     SR830 changes its internal harmonic/filter path.  The first read is retained
@@ -4644,7 +4605,7 @@ def _consume_and_verify_harmonic_transition(
 
 
 def _consume_frequency_transition(
-    lockin_xx: Sr830, lockin_xy: Sr830
+    lockin_xx: Sr830, lockin_xy: Sr830, *, harmonic: int | Mapping[str, int] = 1
 ) -> tuple[dict[str, object], list[str]]:
     """Record and clear status from a deliberate FREQ transition.
 
@@ -4654,8 +4615,8 @@ def _consume_frequency_transition(
     followed by another settling interval; any repeated latch then fails normally.
     """
 
-    xx = lockin_xx.read_harmonic_sample(1)
-    xy = lockin_xy.read_harmonic_sample(1)
+    xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
+    xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
     problems: list[str] = []
     if xx.lia_status.reference_unlocked:
         problems.append("lockin_xx internal reference unlocked during transition")
@@ -4693,7 +4654,7 @@ def _consume_sensitivity_transition(
     allow_xx_output_overload: bool = True,
     allow_output_overload_roles: frozenset[str] = frozenset(),
     settle_s: float = 0.0,
-    harmonic: int = 1,
+    harmonic: int | Mapping[str, int] = 1,
 ) -> tuple[dict[str, object], list[str]]:
     """Record a SENS transition and recheck input/filter overload once.
 
@@ -4701,8 +4662,8 @@ def _consume_sensitivity_transition(
     is therefore retained in the raw sample but ignored here, regardless of the
     legacy ``allow_*output_overload`` arguments.
     """
-    xx = lockin_xx.read_harmonic_sample(harmonic)
-    xy = lockin_xy.read_harmonic_sample(harmonic)
+    xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
+    xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
     problems: list[str] = []
     for sample in (xx, xy):
         role = sample.reading.role.value
@@ -4740,8 +4701,8 @@ def _consume_sensitivity_transition(
     ):
         transition["verification_required"] = True
         time.sleep(settle_s)
-        verification_xx = lockin_xx.read_harmonic_sample(harmonic)
-        verification_xy = lockin_xy.read_harmonic_sample(harmonic)
+        verification_xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
+        verification_xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
         verification_problems: list[str] = []
         for sample in (verification_xx, verification_xy):
             role = sample.reading.role.value
@@ -4795,13 +4756,6 @@ def _restore_scan_state(
         ("restore lockin_xx to 4 mVrms", lockin_xx.set_minimum_sine_output)
     ]
     harmonic_restored = False
-    if restore_frequency:
-        actions.append(
-            (
-                f"restore lockin_xx to {baseline_hz:g} Hz",
-                lambda: lockin_xx.set_internal_reference_frequency(baseline_hz),
-            )
-        )
     reserve_actions: list[tuple[str, Callable[[], None]]] = []
     if restore_xx_reserve:
         if original_xx_reserve_mode is None:
@@ -4880,6 +4834,10 @@ def _restore_scan_state(
         time.sleep(settle_s)
     if restore_frequency:
         try:
+            if not bridge_ok or lockin_xx.read_harmonic() != 1 or lockin_xy.read_harmonic() != 1:
+                raise Sr830Error("Cannot restore frequency before verified h1; manually verify instruments")
+            lockin_xx.set_internal_reference_frequency(baseline_hz)
+            time.sleep(settle_s)
             transition, transition_problems = _consume_frequency_transition(
                 lockin_xx, lockin_xy
             )

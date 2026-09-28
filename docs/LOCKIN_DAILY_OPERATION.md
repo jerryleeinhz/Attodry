@@ -16,6 +16,47 @@ python -m attodry_control.lockin_test sweep-frequency-excitation
 
 ## 分谐波 sensitivity/Reserve 接口
 
+### 每台仪器只切换到自己选择的测量谐波（2026-09-28 修正）
+
+`frequency_*_harmonics`、`excitation_*_harmonics`、`combined_*_harmonics`
+现在同时控制采集和正式曲线。例：XX `[1]`、XY `[2]` 时，扫描期间 XX 保持
+h1、XY 保持 h2；只有同一角色选择多个谐波时，该仪器才逐阶切换。
+每个点结束不再无条件把两台恢复 h1。正常/异常结束仍先将 XX 输出降至 4 mVrms，
+再恢复并确认 h1、基准量程和 Reserve。若扫频即将超过某台当前谐波的 102 kHz
+检测上限，该台先停在 h1 并记录原因；被跳过的阶数不生成正式样本。
+
+两台仪器仍须接受输入、滤波器、参考锁定和错误检查，安全检查按各自实际谐波
+读取，不为了检查而改变另一台的谐波。原始样本中的 `harmonic` 是该组正式
+选择，`harmonics_by_role` 和每台 `reading.harmonic` 才是实际检测状态；
+`selected_roles` 继续决定正式分析通道。伴随安全读数不是额外测得的未选谐波。
+读取仍通过顺序 VISA 命令完成，不保证两个时间戳完全相同。历史原始记录不改写。
+
+### 固定量程输入过载：中止前的 h1 诊断
+
+扫描过程中，Input/Reserve overload 经一次等待复查仍存在时，若**发生过载的
+角色在该谐波使用 fixed 模式**，程序执行一次中止专用诊断：
+
+1. 保留原始过载读数和复查结果；记录当时的 SINE OUT、量程和 Reserve。
+2. 仅把过载的仪器切至 h1，保持当时的 SENS/RMOD 和激励幅值，不套用另一个
+   h1 量程覆盖，也不自动调档。若已经是 h1，则无需再写 HARM 或额外切换等待。
+3. 切换后等待两段既定 settle interval，读取一次 h1 的 X/Y/R/phase 与状态，
+   再核对量程和 Reserve 未变。随后必定结束扫描并执行最小输出 cleanup。
+
+诊断保存在原始 JSON 的 `pre_abort_h1_diagnostics` 列表：正式窗口过载时位于
+该点下；转换/量程资格检查过载时位于对应的转换或 autorange 审计对象下。
+其中 `original_sample` 是触发诊断的样本，`h1_sample` 是随后读回；还包含
+`sensitivity_full_scale_v`、`reserve_mode`、`source_readback_v_rms` 和完成/错误状态。
+该数据始终 `valid_for_analysis=false`，不进入正式曲线或拟合。过载时的 X/Y/R
+可能已限幅，不能当成准确的 h1 幅值或直接据此计算所需 Reserve。
+
+诊断失败/被中断也保留原始过载原因并执行 cleanup；不会重试扫描或把该点接受。
+bounded_auto 模式不执行这一额外 h1 诊断；复查已清除的瞬态、单独的 filter/output
+overload 也不触发它。只读 preflight 失败不因此新增写操作。
+纯文件 monitor 按实际角色/harmonic 标明 `INPUT/RESERVE OVERLOAD`、
+`FILTER OVERLOAD`、`OUTPUT OVERLOAD`；伴随角色的异常标为 diagnostic。
+
+### 配置示例
+
 三类 sweep、temperature×excitation 和组合采集共用此接口。参数仍放在
 本机 `hardware.local.toml`；未增加或改变 notebook 的校准模型控件。
 先保持 `[lockin_xy]` 的 `sensitivity_mode = "fixed"` 及原来的基础量程/Reserve，
@@ -37,7 +78,7 @@ reserve_mode = "normal"
 固定档字段也继承基础值。空表、未知字段/阶数、非法 Reserve、未获允许的
 量程，以及同角色同时配置分段 `xx_full_scale_v`/`xy_full_scale_v` 都会预检拒绝。
 基础模式必须为 fixed；需要自动的阶数在对应子表明确配置，避免两个控制器
-同时修改一个 SENS。完全不写 `harmonic_settings` 时沿用原有行为。
+同时修改一个 SENS。完全不写 `harmonic_settings` 的旧配置仍可用；自动量程状态也按角色和谐波分别保存。
 
 固定设置验证后，若要让 H2 在明确的 2 mV、10 mV 两档间自动选择，
 **用下面子表替换原来的 h2 子表**，H1 可继续固定：
@@ -482,6 +523,8 @@ LIAS bit 2 是未使用的 CH1/CH2 输出过载锁存；项目不使用 CH1/CH2 
 只保留该位的原始值，不用它拒绝样本或驱动 bounded-auto。
 分析脚本也按相同规则处理：只要正式样本没有 `problems` 且 bit 0/bit 1 清零，单独的
 bit 2 不会被默认筛选为 overload；原始 `lia_status.raw` 仍可用于审计。
+纯文件 monitor 会显示 OUTPUT OVERLOAD。此接受策略不保证数字 X/Y/R 未限幅；
+若读数固定在量程边缘，应调整量程后重新验证，不能把 completed 当成读数有效的证明。
 
 ## SR830 全部硬件量程与项目安全白名单
 
@@ -569,8 +612,8 @@ sensitivity_full_scale_v = 0.050
 | `frequency_source_voltage_v_rms` | 扫频期间 XX SINE OUT 的固定幅值，单位 Vrms；必须在 0.004--5.0 V。扫描开始前只设置一次并读回，所有频点保持不变；同一串联路径和器件电流/电压上限会在打开 VISA 前计算检查。 |
 | `excitation_ranges` | 规则同 `frequency_ranges`，但总范围为 0.004--5.0 Vrms。当前示例为 0.004--0.400 V 的 11 个线性点，再加 0.45--5.0 V 的 21 个线性点，基频固定为 17.777 Hz。 |
 | `xx_full_scale_v` / `xy_full_scale_v` | 可选的区间级固定量程覆盖；只能填写安全协议白名单中的 SR830 full scale（当前 1、10、20、50 mV，XX 另有 1 V）。省略时使用对应 `[lockin_xx]`/`[lockin_xy]` 的设置；`bounded_auto` 角色必须省略。量程只在区间边界切换，并记录读回和状态。 |
-| `frequency_xx_harmonics` / `frequency_xy_harmonics` | 分别选择扫频正式曲线中的 XX/XY 谐波。每项为升序组合，只能含 1、2、3；`[]` 表示该角色不进入正式曲线。两项合起来至少选一个。 |
-| `excitation_xx_harmonics` / `excitation_xy_harmonics` | 分别选择扫幅正式曲线中的 XX/XY 谐波；规则同上，且可与扫频不同。例：`excitation_xx_harmonics = []`、`excitation_xy_harmonics = [2]` 只输出 XY h2 曲线。 |
+| `frequency_xx_harmonics` / `frequency_xy_harmonics` | 分别选择扫频实际检测和正式曲线中的 XX/XY 谐波。每项为升序组合，只能含 1、2、3；`[]` 表示该角色不进入正式曲线。两项合起来至少选一个。 |
+| `excitation_xx_harmonics` / `excitation_xy_harmonics` | 分别选择扫幅实际检测和正式曲线中的 XX/XY 谐波；规则同上，且可与扫频不同。例：`excitation_xx_harmonics = []`、`excitation_xy_harmonics = [2]` 只输出 XY h2 曲线。 |
 | `combined_xx_harmonics` / `combined_xy_harmonics` | 频率×幅值二维扫描 `sweep-frequency-excitation` 的正式 XX/XY 谐波选择；省略时分别继承 `excitation_*`。二维扫描记录每个频率的实际读回值和每个幅值点，至少一项非空。 |
 | `frequency_harmonics` / `excitation_harmonics` | 旧版兼容字段；每个列表会同样应用到 XX 和 XY。二者都必须是非空升序组合，且不可与四个角色专用字段混用。 |
 | `harmonics` | 更旧的兼容字段；一个非空升序组合同时应用到两类扫描和两台仪器，且不可与任何新字段混用。新建或修改日常配置应使用四个角色专用字段。 |

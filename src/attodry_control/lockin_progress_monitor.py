@@ -144,8 +144,15 @@ class LockinProgressView:
             harmonic = self.sample.get("harmonic")
             sample_index = self.sample.get("sample_index")
             parts.append(f"h={harmonic if harmonic is not None else '?'} sample={_display_index(sample_index)}")
-            parts.append(_format_role("Vxx", self.sample.get("lockin_xx")))
-            parts.append(_format_role("Vxy", self.sample.get("lockin_xy")))
+            selected = self.sample.get("selected_roles", ("xx", "xy"))
+            for role in ("xx", "xy"):
+                audited = self.sample.get("lockin_" + role)
+                if role in selected:
+                    parts.append(_format_role("V" + role, audited))
+                elif isinstance(audited, Mapping):
+                    reading = audited.get("reading", {})
+                    if reading.get("overload") or reading.get("locked") is False:
+                        parts.append(_format_role("V" + role + " (diagnostic)", audited))
             problems = self.sample.get("problems")
             if isinstance(problems, list) and problems:
                 parts.append("problems=" + "; ".join(str(item) for item in problems))
@@ -202,8 +209,18 @@ def _format_role(label: str, audited_sample: object) -> str:
     if not isinstance(reading, Mapping):
         return f"{label}=--"
     status = "locked" if reading.get("locked") is True else "UNLOCKED"
-    if reading.get("overload") is True:
+    lia_status = audited_sample.get("lia_status", {})
+    flags = [label for key, label in (
+        ("input_or_reserve_overload", "INPUT/RESERVE OVERLOAD"),
+        ("filter_overload", "FILTER OVERLOAD"),
+        ("output_overload", "OUTPUT OVERLOAD"),
+    ) if isinstance(lia_status, Mapping) and lia_status.get(key) is True]
+    if flags:
+        status += "," + ",".join(flags)
+    elif reading.get("overload") is True:
         status += ",OVERLOAD"
+    if reading.get("harmonic") is not None:
+        label += f" h{reading['harmonic']}"
     return (
         f"{label}: R={_format_voltage(reading.get('amplitude_v'), ' V')} "
         f"phase={_format_voltage(reading.get('phase_deg'), ' deg')} [{status}]"

@@ -2,6 +2,34 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Independent role harmonics and pre-abort h1 diagnosis (offline; 2026-09-28)
+
+- Fixed the acquisition/selection mismatch: XX [1], XY [2] no longer causes
+  XX HARM 2 or repeated XY HARM 1 during normal acquisition. Each role keeps
+  its own HARM/SENS/RMOD state; multi-order selections cycle only that role.
+- Unified fixed, legacy bounded-auto and per-harmonic bounded-auto qualification
+  at the actual selected harmonic. Three standalone sweeps, temperature/excitation
+  and combination sessions reuse the same implementation. Segment ranges and
+  frequency transitions accept mixed detector harmonics; cleanup restores minimum
+  source and verified h1 before the baseline frequency.
+- At the operator's request, confirmed fixed-mode input/reserve overload gets
+  one abort-only h1 diagnostic at unchanged source/SENS/RMOD before cleanup.
+  The original failure is retained even if the diagnostic fails or is interrupted.
+  Diagnostic records are explicitly invalid for formal analysis; no scan retry.
+  Bounded-auto, cleared transient latches and filter/output-only trips do not
+  trigger this extra diagnostic. Read-only preflight stays write-free.
+- Both connected instruments retain safety checks; the file monitor names
+  actual role/harmonic and input/reserve, filter or output overload. Partial role
+  reads and failed post-read setting verification remain rejected audit evidence.
+- Schema 13 adds independent_roles_v1 and actual harmonic maps, preserving
+  selected_roles analysis filtering and legacy record loading. Historical data
+  and calibration models are unchanged.
+- 330 guarded offline tests passed, including the newly reproduced scheduling
+  regression, overload diagnosis/failed diagnosis/transient handling, fixed/auto
+  modes, frequency-limit parking, cleanup and combination/analysis/monitor tests.
+  No instruments were opened, no local hardware configuration was changed, and
+  physical acceptance/deployment remains a separate stage.
+
 ## Harmonic sensitivity F0/F1/A1 complete (offline; 2026-09-28)
 
 - F0 baseline: 204 guarded tests passed. F1 fixed gate: 219 passed before A1.

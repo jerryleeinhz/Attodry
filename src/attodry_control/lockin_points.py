@@ -112,14 +112,11 @@ class LockinPointSession:
         daily._configure_sweep_sensitivities(
             xx, xy, sensitivity_setup=self.sensitivity_setup, settle_s=self.args.settle_s)
         self.harmonic_control = daily.HarmonicSensitivitySession.create(
-            self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup)
+            self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup, self.harmonics_by_role)
         if self.harmonic_control is not None:
             self.harmonic_control.enter(
-                xx, xy, harmonic=1, settle_s=self.args.settle_s,
+                xx, xy, harmonic=self.harmonic_control.initial_harmonics(self.config.lockin_xx.frequency_hz), settle_s=self.args.settle_s,
                 record=self.sensitivity_setup.setdefault("harmonic_initialization", {}))
-        self.policies, self.states = daily._new_sweep_autorange_controls(
-            self.config.lockin_xx, self.config.lockin_xy,
-            sensitivity_setup=self.sensitivity_setup)
         self.event("lockin_configured", {"sensitivity": self.sensitivity_setup,
                                          "reserve": self.reserve_setup,
                                          "fixed": self.fixed_setup,
@@ -142,7 +139,9 @@ class LockinPointSession:
             xx, xy, sensitivity_setup=self.sensitivity_setup,
             point_spec=self.args.point_specs[index], lockin_xx_config=self.config.lockin_xx,
             lockin_xy_config=self.config.lockin_xy, settle_s=self.args.settle_s,
-            record=self.point_record,
+            record=self.point_record, harmonic=self.harmonic_control.current_harmonics,
+            on_input_overload=lambda status: self.harmonic_control.diagnose_overload(
+                xx, xy, status, self.args.settle_s, self.point_record),
         )
         self.sample_count = 0
         return self._read_coordinates()
@@ -165,13 +164,6 @@ class LockinPointSession:
         # Also when SMU is the inner axis: response/range may have changed.
         daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
         actual = self._read_coordinates()
-        daily._apply_sweep_autorange(
-            *self.pair, sensitivity_setup=self.sensitivity_setup,
-            policies=self.policies, states=self.states,
-            target_frequency_hz=actual["lockin_frequency_hz"],
-            frequency_rel_tolerance=1e-5, settle_s=self.args.settle_s,
-            record=self.point_record,
-        )
         self.event("lockin_point_qualification", self.point_record)
         self.sample_count = 0
 

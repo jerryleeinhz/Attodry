@@ -1841,7 +1841,7 @@ class Sr830Tests(unittest.TestCase):
             },
         )
         self.assertNotIn("measurement_config", result)
-        self.assertEqual(result["run_configuration"]["schema_version"], 12)
+        self.assertEqual(result["run_configuration"]["schema_version"], 13)
         self.assertEqual(
             result["run_configuration"]["sweep"]["run_name"],
             "replace_before_run",
@@ -1951,7 +1951,7 @@ class Sr830Tests(unittest.TestCase):
             [write for write in xx_resource.writes if write.startswith("SENS ")],
             ["SENS 22", "SENS 21", "SENS 21"],
         )
-        self.assertEqual(result["run_configuration"]["schema_version"], 12)
+        self.assertEqual(result["run_configuration"]["schema_version"], 13)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -2660,7 +2660,7 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(
             [sample["lockin_xx"]["reading"]["harmonic"] for sample in result["points"][0]["samples"]],
-            [1, 2, 3],
+            [1, 1, 3],
         )
         self.assertEqual(
             [sample["selected_roles"] for sample in result["points"][0]["samples"]],
@@ -2668,7 +2668,7 @@ class Sr830Tests(unittest.TestCase):
         )
         self.assertEqual(
             [write for write in xx_resource.writes if write.startswith("HARM ")],
-            ["HARM 2", "HARM 3", "HARM 1"],
+            ["HARM 3", "HARM 1"],
         )
 
     def test_cli_frequency_sweep_rejects_unselected_companion_status(self) -> None:
@@ -2751,12 +2751,12 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["run_configuration"]["schema_version"], 12)
+        self.assertEqual(result["run_configuration"]["schema_version"], 13)
         self.assertNotIn("measurement_config", result)
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(
             [transition["harmonic"] for transition in result["points"][0]["harmonic_transition_status"]],
-            [2, 3, 1],
+            [2, 3],
         )
         self.assertEqual(
             [sample["lockin_xx"]["reading"]["harmonic"] for sample in result["points"][0]["samples"]],

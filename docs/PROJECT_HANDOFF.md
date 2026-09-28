@@ -4,6 +4,31 @@ Last updated: 2026-09-28
 
 ## Current stage
 
+### Independent SR830 harmonics and fixed-overload h1 audit (offline; 2026-09-28)
+
+Role selections now control HARM writes, not only plotting. XX h1 + XY h2
+keeps each detector at its selected harmonic across points; only a role with
+multiple selected orders cycles. The same scheduler serves all three sweeps,
+temperature/excitation and combination capture, with per-role/harmonic fixed
+or bounded-auto settings. Both instruments remain status-checked at their own
+actual harmonics. Unsupported detectors park before a frequency-limit crossing;
+cleanup lowers excitation before restoring h1, then baseline frequency/ranges.
+
+On a confirmed input/reserve trip in fixed mode, one abort-only h1 snapshot
+of the affected role retains the current SENS/RMOD/source. Original overload,
+X/Y/R/phase/status/settings and failed diagnostic attempts remain audited;
+the run still aborts and cleans up. Auto mode and cleared transient latches do
+not trigger this extra h1 diagnostic. Diagnostic data are never formal data.
+The file monitor identifies actual role/harmonic and each overload type.
+
+Run configuration schema 13 records independent_roles_v1; selected_roles
+still gates formal analysis, while harmonics_by_role and nested readbacks
+identify companion safety samples. Old raw files are unchanged. A new regression
+first reproduced the unwanted XX HARM 2 writes; 330 guarded relevant tests now
+pass, including fault injection, partial reads, mixed harmonics/ranges, overload
+audits, frequency limits, combination acquisition and old/new record loading.
+No real hardware connection, station-local TOML modification or station deployment.
+
 ### Harmonic sensitivity fixed + bounded auto complete (offline; 2026-09-28)
 
 F0 passed 204 guarded tests; F1 then passed 219 before automatic ranging was
