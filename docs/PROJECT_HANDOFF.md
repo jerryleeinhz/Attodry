@@ -4,6 +4,16 @@ Last updated: 2026-09-28
 
 ## Current stage
 
+### Magnetic scan short command (offline; 2026-09-28)
+
+At the operator's request, `python -m attodry_control.magnetic_field_cli scan`
+now executes the default local TOML without separate authorization flags.
+Invoking scan is the execution request; describe remains offline. Legacy flags
+are accepted, single-target/integration/driver capability gates remain unchanged,
+and audit records distinguish `scan_command` from `explicit_flags`. No field
+limits, stability, timeout, or cleanup protections changed; no real hardware I/O.
+Guarded magnetic CLI/monitor/segments/attoDRY tests: 158 passed.
+
 ### Calibration callback output visibility (offline; 2026-09-28)
 
 The sweep notebook now routes H1/H2 figures and LCR text explicitly to displayed

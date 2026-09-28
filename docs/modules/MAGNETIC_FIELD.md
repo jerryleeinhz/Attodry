@@ -2,6 +2,28 @@
 
 ## 当前状态
 
+### 2026-09-28 简化 scan 命令
+
+在项目根目录运行即可读取 `config/hardware.local.toml` 并开始实机扫描：
+
+```powershell
+python -m attodry_control.magnetic_field_cli scan
+```
+
+**scan 是执行命令，会连接磁体并改变磁场，不是预览。** 不再需要三个
+`--authorize-*` 参数，也不弹出确认；旧参数仍兼容。其他路径的授权不变，
+包括 `single-target` 和四模块组合 CLI。非默认配置仍可指定 `--config`。
+先检查配置中的点列、限值和 cleanup 末态策略；需要只预览时运行：
+
+```powershell
+python -m attodry_control.magnetic_field_cli describe
+```
+
+describe 不连接设备。scan 保留配置校验、实际起点复核、限场、稳定性、
+超时、异常清理及人工核验要求；不修改物理 ramp 速度或任何硬件保护。
+审计将授权来源标记为 `scan_command`。本次仅假仪器测试，不是实机验收；
+以下旧记录中的独立 scan 授权参数要求由本条替代。
+
 ### 2026-09-28 固定模长角度点列（离线实现，尚未实机验收）
 
 `[magnetic_field_run]` 现可三选一：显式 `points`、单轴 `axis`+`segments`，

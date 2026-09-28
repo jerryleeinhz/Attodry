@@ -2,6 +2,17 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Magnetic scan command simplification (offline; 2026-09-28)
+
+- `scan` itself requests connection, configured ordered targets and cleanup;
+  separate authorization flags are optional legacy compatibility only.
+- Default config remains relative to the working directory. `describe` is the
+  offline preview; single-target and other module authorization is unchanged.
+- Audit records the execution-request source. Fake-DLL regression covers bare
+  scan with default config, verified cleanup, and pre-DLL unsafe-plan rejection.
+  Existing field/state/timeout/cleanup checks are retained; no real hardware I/O.
+- Guarded magnetic CLI/monitor/segments/attoDRY suite: 158 tests passed.
+
 ## SR830 calibration output routing (offline; 2026-09-28)
 
 - Explicit displayed Output widgets receive H1/H2 figures and LCR text from

@@ -38,9 +38,10 @@ DEFAULT_CONFIG_PATH = Path("config/hardware.local.toml")
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run a standalone attoDRY X/Z magnetic-field operation. This command "
-            "can connect to the controller and write field settings only when its "
-            "explicit authorization flags are present."
+            "Run a standalone attoDRY X/Z magnetic-field operation. The "
+            "scan command executes the configured field scan, including connection "
+            "and cleanup writes. Use describe for an offline preview. "
+            "single-target still requires explicit authorization flags."
         )
     )
     commands = parser.add_subparsers(dest="command", required=True)
@@ -54,7 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan = commands.add_parser(
         "scan",
-        help="Run the configured ordered point list, preserving duplicates.",
+        help="Connect and execute the configured ordered field scan; changes the magnetic field.",
+        description=(
+            "Connect and change the magnetic field using the configured ordered points "
+            "and cleanup policy, without an additional confirmation. Use describe "
+            "instead for an offline preview."
+        ),
     )
     for command in (single, scan):
         command.add_argument(
@@ -66,17 +72,19 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument(
             "--authorize-connection",
             action="store_true",
-            help="Authorize one attoDRY begin/connect/read/disconnect session.",
+            help=("Authorize one attoDRY begin/connect/read/disconnect session."
+                  if command is single else argparse.SUPPRESS),
         )
         command.add_argument(
             "--authorize-field-writes",
             action="store_true",
-            help="Authorize field-control, component-setpoint, and cleanup writes.",
+            help=("Authorize field-control, component-setpoint, and cleanup writes."
+                  if command is single else argparse.SUPPRESS),
         )
     scan.add_argument(
         "--authorize-ordered-field-scan",
         action="store_true",
-        help="Separately authorize every point in the configured ordered list.",
+        help=argparse.SUPPRESS,  # Accepted for compatibility with existing scripts.
     )
     return parser
 
@@ -129,6 +137,12 @@ def run(
         raise ValueError(
             "single-target requires exactly one expanded [magnetic_field_run] point."
         )
+    # Invoking scan is the operator's execution request, not an offline preview.
+    # Keep the driver's explicit capability gates and single-target CLI unchanged.
+    if args.command == "scan":
+        args.authorize_connection = True
+        args.authorize_field_writes = True
+        args.authorize_ordered_field_scan = True
     if not args.authorize_connection:
         raise AttoDryAuthorizationError(
             "attoDRY connection is not authorized; add --authorize-connection only "
@@ -138,11 +152,6 @@ def run(
         raise AttoDryAuthorizationError(
             "Magnetic-field writes are not authorized; add "
             "--authorize-field-writes only after the commissioning gate is approved."
-        )
-    if args.command == "scan" and not args.authorize_ordered_field_scan:
-        raise AttoDryAuthorizationError(
-            "The ordered field scan needs separate authorization; add "
-            "--authorize-ordered-field-scan only after every listed point is approved."
         )
 
     cryostat = config.cryostat
@@ -215,6 +224,9 @@ def run(
                         getattr(args, "authorize_ordered_field_scan", False)
                     ),
                 },
+                "authorization_source": (
+                    "scan_command" if args.command == "scan" else "explicit_flags"
+                ),
                 "cryostat_interface": {
                     "backend": cryostat.backend,
                     "com_port": cryostat.com_port,

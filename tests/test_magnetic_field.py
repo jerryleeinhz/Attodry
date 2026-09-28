@@ -642,22 +642,35 @@ class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
         self.assertEqual(loaded, [])
         self.assertFalse((path.parent / "field-output").exists())
 
-    def test_scan_requires_its_separate_authorization_before_dll_loading(self) -> None:
-        path = self.write_config(((0.25, 0.0), (0.0, 0.25)))
-        loaded: list[Path] = []
-
-        with self.assertRaises(AttoDryAuthorizationError):
-            run_magnetic_field(
-                [
-                    "scan",
-                    "--config",
-                    str(path),
-                    "--authorize-connection",
-                    "--authorize-field-writes",
-                ],
-                dll_loader=lambda candidate: loaded.append(Path(candidate)),
+    def test_scan_executes_default_config_without_authorization_flags(self) -> None:
+        path = self.write_config(((0.25, 0.0), (0.0, 0.25)), normal_end_policy="zero")
+        output = io.StringIO()
+        dll = FakeAttoDryDll()
+        with patch("attodry_control.magnetic_field_cli.DEFAULT_CONFIG_PATH", path), redirect_stdout(output):
+            code = run_magnetic_field(
+                ["scan"], dll_loader=lambda _: dll,
+                monotonic=StepClock(), sleeper=lambda _: None,
             )
+        summary = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(summary["completed"])
+        self.assertTrue(summary["zero_verified"])
+        progress = Path(summary["progress_jsonl"])
+        events, _ = read_jsonl_events(progress)
+        self.assertEqual(events[0]["authorization_source"], "scan_command")
+        self.assertEqual(events[0]["authorization_scope"], {
+            "connection": True, "field_writes": True, "ordered_field_scan": True,
+        })
+        self.assertEqual(read_progress_snapshot(progress)["integrity_errors"], [])
 
+    def test_bare_scan_rejects_unsafe_config_before_dll_loading(self) -> None:
+        path = self.write_config(((2.0, 2.5),))
+        loaded = []
+        with self.assertRaises((ConfigError, SafetyViolation)):
+            run_magnetic_field(
+                ["scan", "--config", str(path)],
+                dll_loader=lambda candidate: loaded.append(candidate),
+            )
         self.assertEqual(loaded, [])
         self.assertFalse((path.parent / "field-output").exists())
 

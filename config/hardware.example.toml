@@ -36,7 +36,8 @@ wait_timeout_s = 7200.0
 # `via_zero` uses the conservative zero detour selected by this tracked example.
 # The tracked example intentionally requests zero only. Select the first real
 # movement and max_step_t in ignored hardware.local.toml, then obtain the
-# separate connection/write/scan authorization required by the command.
+# operator approval for real movement. `magnetic_field_cli scan` executes this
+# configuration without extra authorization flags; use `describe` for preview.
 [magnetic_field_run]
 # 默认只请求零场。下面示例在本表内替换同名字段，不要追加第二个同名表/字段。
 # points、(axis + segments)、(magnitude_t + angle_segments) 三选一。
