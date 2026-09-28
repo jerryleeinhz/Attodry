@@ -180,3 +180,11 @@ def map_sr830_settings(
         filter_slope=filter_slope_code,
         sensitivity=sensitivity_code_value,
     )
+
+
+def time_constant_seconds(code: int) -> float:
+    """Decode a confirmed OFLT readback using the same discrete setting table."""
+    for seconds, value in _TIME_CONSTANT_CODES.items():
+        if value == code:
+            return seconds
+    raise ValueError(f"Invalid SR830 time constant code: {code}")

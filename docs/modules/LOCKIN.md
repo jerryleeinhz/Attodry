@@ -1,12 +1,13 @@
 # Lock-in module work package
 
-## 分谐波量程实施计划（2026-09-28）
+## 分谐波固定量程（离线通过；2026-09-28）
 
-操作者要求先验证固定量程，成功后自行继续增加变换量程，完成后统一报告。
-阶段为固定基线回归、分角色/谐波固定档位、分角色/谐波 bounded_auto；
-完整配置接口、阶段通过条件、审计与恢复顺序见
-[`LOCKIN_HARMONIC_SENSITIVITY_PLAN.md`](../LOCKIN_HARMONIC_SENSITIVITY_PLAN.md)。
-当前仅发布修订计划，F0/F1/A1 尚未完成；拟合模型在 side chat 独立讨论。
+可在 `lockin_xx/xy.harmonic_settings.h1/h2/h3` 覆盖固定 sensitivity/Reserve；
+未指定阶数继承角色基础设置，同角色分段量程覆盖冲突时预检拒绝。
+F0 204 项、F1 219 项硬件隔离测试通过；包括安全切换、实际设置审计、
+三类 sweep、组合采集和异常恢复。下一阶段继续按谐波独立 bounded_auto。
+接口与验收条件见 [分阶段计划](../LOCKIN_HARMONIC_SENSITIVITY_PLAN.md)。
+这次验收仅为离线软件验证，没有连接真实仪器或修改站点设置。
 
 ## 当前状态
 

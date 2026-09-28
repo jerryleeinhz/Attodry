@@ -53,6 +53,7 @@ class LockinPointSession:
         self.pair = None
         self.preflight = None
         self.writes_started = False
+        self.harmonic_control = None
         self.sensitivity_setup = None
         self.reserve_setup = None
         self.fixed_setup = None
@@ -110,6 +111,12 @@ class LockinPointSession:
         )
         daily._configure_sweep_sensitivities(
             xx, xy, sensitivity_setup=self.sensitivity_setup, settle_s=self.args.settle_s)
+        self.harmonic_control = daily.HarmonicSensitivitySession.create(
+            self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup)
+        if self.harmonic_control is not None:
+            self.harmonic_control.enter(
+                xx, xy, harmonic=1, settle_s=self.args.settle_s,
+                record=self.sensitivity_setup.setdefault("harmonic_initialization", {}))
         self.policies, self.states = daily._new_sweep_autorange_controls(
             self.config.lockin_xx, self.config.lockin_xy,
             sensitivity_setup=self.sensitivity_setup)
@@ -182,6 +189,7 @@ class LockinPointSession:
                 harmonic_settle_s=self.args.settle_s, samples=1,
                 sample_interval_s=self.args.sample_interval_s, record=record,
                 frequency_rel_tolerance=1e-5,
+                harmonic_control=self.harmonic_control,
                 measurement_context=measurement_context,
                 on_formal_sample_recorded=lambda payload: self.event("lockin_formal_pair", payload),
             )
@@ -210,6 +218,7 @@ class LockinPointSession:
             original_xy_reserve_mode=daily.RESERVE_MODE_CODES[self.config.lockin_xy.reserve_mode.value],
             restore_xx_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xx"),
             restore_xy_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xy"),
+            harmonic_control=self.harmonic_control,
             restore_frequency=False, settle_s=self.args.settle_s, writes_started=True,
             ignore_output_overload=True,
         )

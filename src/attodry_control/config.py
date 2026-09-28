@@ -197,6 +197,19 @@ class TemperatureExcitationOperationConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class HarmonicSensitivityConfig:
+    harmonic: int
+    sensitivity_mode: SensitivityMode
+    sensitivity_full_scale_v: float
+    reserve_mode: ReserveMode
+    autorange_min_full_scale_v: float | None = None
+    autorange_max_full_scale_v: float | None = None
+    autorange_target_occupancy: float | None = None
+    autorange_stable_samples: int | None = None
+    autorange_full_scales_v: tuple[float, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class LockinConfig:
     role: LockinRole
     model: str
@@ -219,6 +232,7 @@ class LockinConfig:
     autorange_stable_samples: int | None
     autorange_full_scales_v: tuple[float, ...] | None
     reserve_mode: ReserveMode
+    harmonic_settings: tuple[HarmonicSensitivityConfig, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1401,10 +1415,8 @@ def _parse_lockin(
                 "autorange_stable_samples",
             }
         )
-    _strict_keys(
-        table,
-        name,
-        expected,
+    _strict_keys_with_optional(
+        table, name, expected, {"harmonic_settings"},
     )
     model = _string(table["model"], f"{name}.model")
     if model != "SR830":
@@ -1573,7 +1585,41 @@ def _parse_lockin(
         autorange_stable_samples=autorange_stable_samples,
         autorange_full_scales_v=autorange_full_scales_v,
         reserve_mode=reserve_mode,
+        harmonic_settings=_parse_harmonic_settings(table, role, name, safety_role, safety),
     )
+
+
+def _parse_harmonic_settings(table, role, name, safety_role, safety):
+    if "harmonic_settings" not in table:
+        return ()
+    settings = table["harmonic_settings"]
+    label = f"{name}.harmonic_settings"
+    if not isinstance(settings, dict) or not settings:
+        raise ConfigError(f"{label} must be a non-empty table.")
+    if table["sensitivity_mode"] != "fixed":
+        raise ConfigError(f"{label} requires a fixed role baseline; set bounded_auto per harmonic.")
+    allowed = {"sensitivity_mode", "sensitivity_full_scale_v", "reserve_mode",
+               "autorange_min_full_scale_v", "autorange_max_full_scale_v",
+               "autorange_target_occupancy", "autorange_stable_samples"}
+    result = []
+    for key, override in sorted(settings.items()):
+        if key not in {"h1", "h2", "h3"}:
+            raise ConfigError(f"{label} only supports h1, h2, h3.")
+        if not isinstance(override, dict) or not override:
+            raise ConfigError(f"{label}.{key} must be a non-empty table.")
+        _strict_keys_with_optional(override, f"{label}.{key}", set(), allowed)
+        # Reuse the same hardware mapping, safety ladder and Reserve validation.
+        merged = {k: v for k, v in table.items() if k != "harmonic_settings"}
+        merged.update(override)
+        parsed = _parse_lockin(merged, role, f"{label}.{key}", safety_role, safety)
+        if parsed.sensitivity_mode is not SensitivityMode.FIXED:
+            raise ConfigError(f"{label}.{key}: fixed validation must precede bounded_auto.")
+        result.append(HarmonicSensitivityConfig(
+            harmonic=int(key[1:]),
+            **{field: getattr(parsed, field) for field in HarmonicSensitivityConfig.__dataclass_fields__
+               if field != "harmonic"},
+        ))
+    return tuple(result)
 
 
 def _validate_lockin_pair(xx: LockinConfig, xy: LockinConfig) -> None:
@@ -2222,6 +2268,8 @@ def _parse_sweep_range_full_scale(
 ) -> float | None:
     if field not in segment:
         return None
+    if lockin.harmonic_settings:
+        raise ConfigError(f"{segment_name}.{field} conflicts with harmonic_settings for lockin_{lockin.role.value}.")
     value = _positive_number(segment[field], f"{segment_name}.{field}")
     if value not in safety_role.allowed_fixed_full_scales_v:
         raise ConfigError(

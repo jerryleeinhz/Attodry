@@ -4,19 +4,18 @@ Last updated: 2026-09-28
 
 ## Current stage
 
-### Harmonic sensitivity implementation plan (2026-09-28)
+### Harmonic sensitivity fixed-stage validation (offline; 2026-09-28)
 
-The operator approved a staged approach: validate fixed sensitivity first, then
-continue independently with bounded range changes after the fixed-stage gate
-passes. The documented sequence is fixed baseline regression, per-role/harmonic
-fixed presets, then per-role/harmonic bounded_auto; routine implementation
-choices do not require repeated confirmation. F0/F1/A1 implementation and
-validation remain pending. Offline acceptance does not authorize or claim real
-instrument acceptance. H1/H2 fitting-model work is reserved for the side chat.
-See [the staged plan](LOCKIN_HARMONIC_SENSITIVITY_PLAN.md) for configuration,
-transition/cleanup ordering, audit fields, tests and Git/station boundaries.
-This checkpoint publishes the revised plan only; runtime and station settings
-are unchanged.
+F0 passed 204 guarded offline tests. F1 then passed 219 tests, including ten
+new per-harmonic tests. Optional `lockin_xx/xy.harmonic_settings.h1/h2/h3`
+fixed sensitivity and Reserve now run through one shared session in all three
+standalone sweeps and the combination adapter. Actual HARM/SENS/RMOD/OFLT are
+verified around formal sampling; audited bridges widen before HARM changes.
+Partial writes, Ctrl+C and wrong readbacks retain attempts and use baseline
+cleanup. Fixed XY 2 mV/100 mV were explicitly added to the safety allowlist.
+A1 bounded-auto development now proceeds under the existing authorization.
+No real instruments were opened or station settings changed. Fitting remains
+in the side chat. See [the staged plan](LOCKIN_HARMONIC_SENSITIVITY_PLAN.md).
 
 ### Explicit rejected-run calibration audit (offline; 2026-09-28)
 

@@ -2,19 +2,16 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
-## Harmonic sensitivity: fixed first, bounded range changes next (planned; 2026-09-28)
+## Harmonic sensitivity F0/F1 complete (offline; 2026-09-28)
 
-- Operator requested plan revision and origin push, with independent progression
-  after fixed-range validation succeeds; report completed work with evidence.
-- F0: existing fixed-range baseline regression. F1: optional XX/XY h1/h2/h3
-  fixed SENS/RMOD settings with verified transitions and cleanup. A1: bounded_auto
-  state and allowed ladders separated by role and harmonic, after F1 passes.
-- Fixed/automatic gates include configuration conflicts, actual setting readbacks,
-  transition versus formal data, failure/Ctrl+C recovery and legacy records.
-- Fixed XY 2 mV/100 mV are explicit candidate allowlist changes for implementation,
-  not policy edits or real measurements performed by this documentation commit.
-- Detailed plan: [LOCKIN_HARMONIC_SENSITIVITY_PLAN.md](LOCKIN_HARMONIC_SENSITIVITY_PLAN.md).
-  All implementation/test gates remain pending; fitting models stay in the side chat.
+- F0: 204 guarded tests passed before implementation.
+- F1: 219 guarded tests passed after per-role/harmonic fixed SENS/RMOD.
+- Ten new tests cover strict configuration, inherited h3, all three sweeps,
+  combination acquisition, actual setting/profile audit, transition ordering,
+  readback failure, partial paired HARM writes, Ctrl+C and baseline cleanup.
+- Fixed XY 2 mV/100 mV are explicit candidates; excitation limits are unchanged.
+- A1 proceeds next under the approved plan. Real-instrument acceptance remains
+  a separate stage; no instrument connection or station deployment occurred.
 
 ## Rejected f × e calibration audit opt-in (offline; 2026-09-28)
 

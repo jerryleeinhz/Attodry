@@ -22,6 +22,7 @@ from .config import (
     SweepPointConfig,
     load_config,
 )
+from .lockin_harmonics import HarmonicSensitivitySession
 from .lockin_autorange import (
     AutorangeAction,
     AutorangePolicy,
@@ -1410,6 +1411,7 @@ def _run_frequency_sweep(
         preflight_xx = None
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
+        harmonic_control = None
         reserve_setup: dict[str, object] | None = None
         fixed_setup: dict[str, object] | None = None
         frequency_setup: dict[str, object] | None = None
@@ -1469,6 +1471,14 @@ def _run_frequency_sweep(
                 sensitivity_setup=sensitivity_setup,
                 settle_s=args.settle_s,
             )
+            harmonic_control = HarmonicSensitivitySession.create(
+                config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup,
+            )
+            if harmonic_control is not None:
+                harmonic_control.enter(
+                    lockin_xx, lockin_xy, harmonic=1, settle_s=args.settle_s,
+                    record=sensitivity_setup.setdefault("harmonic_initialization", {}),
+                )
             source_write_performed = not math.isclose(
                 preflight_xx.sine_output_v,
                 frequency_source_v,
@@ -1596,6 +1606,7 @@ def _run_frequency_sweep(
                     samples=args.samples_per_point,
                     sample_interval_s=args.sample_interval_s,
                     record=point_record,
+                    harmonic_control=harmonic_control,
                     frequency_rel_tolerance=SWEEP_FREQUENCY_REL_TOLERANCE,
                     on_formal_sample_recorded=_sweep_progress_formal_sample_callback(
                         progress_writer, scan="frequency"
@@ -1633,6 +1644,7 @@ def _run_frequency_sweep(
                 restore_xy_reserve=_reserve_write_attempted(
                     reserve_setup, "lockin_xy"
                 ),
+                harmonic_control=harmonic_control,
                 restore_frequency=True,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
@@ -1759,6 +1771,7 @@ def _run_frequency_excitation_sweep(
         preflight_xx = None
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
+        harmonic_control = None
         reserve_setup: dict[str, object] | None = None
         fixed_setup: dict[str, object] | None = None
         frequency_setup: dict[str, object] | None = None
@@ -1813,6 +1826,14 @@ def _run_frequency_excitation_sweep(
                 sensitivity_setup=sensitivity_setup,
                 settle_s=args.settle_s,
             )
+            harmonic_control = HarmonicSensitivitySession.create(
+                config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup,
+            )
+            if harmonic_control is not None:
+                harmonic_control.enter(
+                    lockin_xx, lockin_xy, harmonic=1, settle_s=args.settle_s,
+                    record=sensitivity_setup.setdefault("harmonic_initialization", {}),
+                )
             autorange_policies, autorange_states = _new_sweep_autorange_controls(
                 config.lockin_xx,
                 config.lockin_xy,
@@ -1958,6 +1979,7 @@ def _run_frequency_excitation_sweep(
                         samples=args.samples_per_point,
                         sample_interval_s=args.sample_interval_s,
                         record=point_record,
+                        harmonic_control=harmonic_control,
                         frequency_rel_tolerance=1e-5,
                         on_formal_sample_recorded=_sweep_progress_formal_sample_callback(
                             progress_writer, scan="frequency_excitation"
@@ -1995,6 +2017,7 @@ def _run_frequency_excitation_sweep(
                 restore_xy_reserve=_reserve_write_attempted(
                     reserve_setup, "lockin_xy"
                 ),
+                harmonic_control=harmonic_control,
                 restore_frequency=True,
                 settle_s=args.settle_s,
                 writes_started=writes_started,
@@ -2194,6 +2217,7 @@ def _execute_excitation_sweep_on_open_pair(
     preflight_xx = None
     preflight_xy = None
     sensitivity_setup: dict[str, object] | None = None
+    harmonic_control = None
     reserve_setup: dict[str, object] | None = None
     fixed_setup: dict[str, object] | None = None
     frequency_setup: dict[str, object] | None = None
@@ -2249,6 +2273,14 @@ def _execute_excitation_sweep_on_open_pair(
             sensitivity_setup=sensitivity_setup,
             settle_s=args.settle_s,
         )
+        harmonic_control = HarmonicSensitivitySession.create(
+            config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup,
+        )
+        if harmonic_control is not None:
+            harmonic_control.enter(
+                lockin_xx, lockin_xy, harmonic=1, settle_s=args.settle_s,
+                record=sensitivity_setup.setdefault("harmonic_initialization", {}),
+            )
         autorange_policies, autorange_states = _new_sweep_autorange_controls(
             config.lockin_xx,
             config.lockin_xy,
@@ -2345,6 +2377,7 @@ def _execute_excitation_sweep_on_open_pair(
                 samples=args.samples_per_point,
                 sample_interval_s=args.sample_interval_s,
                 record=point_record,
+                harmonic_control=harmonic_control,
                 frequency_rel_tolerance=1e-5,
                 measurement_context=measurement_context,
                 on_formal_sample_recorded=on_formal_sample_recorded,
@@ -2371,6 +2404,7 @@ def _execute_excitation_sweep_on_open_pair(
             original_xy_reserve_mode=RESERVE_MODE_CODES[config.lockin_xy.reserve_mode.value],
             restore_xx_reserve=_reserve_write_attempted(reserve_setup, "lockin_xx"),
             restore_xy_reserve=_reserve_write_attempted(reserve_setup, "lockin_xy"),
+            harmonic_control=harmonic_control,
             restore_frequency=False,
             settle_s=args.settle_s,
             writes_started=writes_started,
@@ -3434,7 +3468,7 @@ def _apply_sweep_segment_ranges(
     requested = _point_range_full_scales(point_spec)
     changes: dict[str, int] = {}
     for role, lockin_config in role_configs.items():
-        if _autorange_policy_for_lockin(lockin_config) is not None:
+        if lockin_config.harmonic_settings or _autorange_policy_for_lockin(lockin_config) is not None:
             continue
         target_full_scale = requested[role]
         if target_full_scale is None:
@@ -4338,6 +4372,7 @@ def _capture_sweep_point(
     measurement_context: Callable[[str, int, int], Mapping[str, object] | None]
     | None = None,
     on_formal_sample_recorded: Callable[[Mapping[str, object]], None] | None = None,
+    harmonic_control: HarmonicSensitivitySession | None = None,
 ) -> None:
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
@@ -4349,7 +4384,10 @@ def _capture_sweep_point(
         selected_roles = selected_roles_by_harmonic.get(harmonic, ())
         if not selected_roles:
             raise ValueError(f"Harmonic {harmonic} has no selected formal role.")
-        if harmonic != 1:
+        if harmonic_control is not None:
+            harmonic_control.enter(lockin_xx, lockin_xy, harmonic=harmonic,
+                                   settle_s=harmonic_settle_s, record=record)
+        elif harmonic != 1:
             lockin_xx.set_harmonic(harmonic)
             lockin_xy.set_harmonic(harmonic)
             time.sleep(harmonic_settle_s)
@@ -4374,6 +4412,8 @@ def _capture_sweep_point(
                 if measurement_context is None
                 else measurement_context("before", harmonic, sample_index)
             )
+            settings_before = (None if harmonic_control is None else
+                harmonic_control.verify(lockin_xx, lockin_xy, harmonic, record))
             xx = lockin_xx.read_harmonic_sample(harmonic)
             xy = lockin_xy.read_harmonic_sample(harmonic)
             context_after = (
@@ -4446,12 +4486,23 @@ def _capture_sweep_point(
                         "after": verification_context_after,
                         "initial": initial_context,
                     }
+            if harmonic_control is not None:
+                sample_payload["settings_before"] = settings_before
+                # Retain the raw pair even if the post-read setting check fails.
+                sample_payload["settings_verified"] = False
             raw_samples.append(sample_payload)
+            if harmonic_control is not None:
+                sample_payload["settings_after"] = harmonic_control.verify(
+                    lockin_xx, lockin_xy, harmonic, record)
+                sample_payload["settings_verified"] = True
             if on_formal_sample_recorded is not None:
                 on_formal_sample_recorded(sample_payload)
             if problems:
                 raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
-    if harmonics[-1] != 1:
+    if harmonic_control is not None:
+        harmonic_control.enter(lockin_xx, lockin_xy, harmonic=1,
+                               settle_s=harmonic_settle_s, record=record)
+    elif harmonics[-1] != 1:
         lockin_xx.set_harmonic(1)
         lockin_xy.set_harmonic(1)
         time.sleep(harmonic_settle_s)
@@ -4714,6 +4765,7 @@ def _restore_scan_state(
     restore_xy_reserve: bool = False,
     verify_frequency_match: bool = True,
     ignore_output_overload: bool = False,
+    harmonic_control: HarmonicSensitivitySession | None = None,
 ) -> dict[str, object]:
     if not writes_started:
         return {"attempted": False, "verified": True, "errors": []}
@@ -4756,12 +4808,38 @@ def _restore_scan_state(
             action()
         except BaseException as exc:
             errors.append(f"{label}: {exc}")
+    harmonic_cleanup = {}
+    bridge_ok = True
+    if harmonic_control is not None:
+        try:
+            time.sleep(settle_s)
+            harmonic_control.prepare_bridge(lockin_xx, lockin_xy, settle_s, harmonic_cleanup, cleanup=True)
+        except BaseException as exc:
+            bridge_ok = False
+            errors.append(f"harmonic cleanup bridge failed; manually verify instruments: {exc}")
+        diagnostics["harmonic_cleanup"] = harmonic_cleanup
+        restore_sensitivity |= "lockin_xx" in harmonic_control.owned
+        restore_xy_sensitivity |= "lockin_xy" in harmonic_control.owned
+        # Reserve actions were assembled before the bridge; use baseline modes
+        # even if only the cleanup bridge changed Reserve.
+        existing_labels = {label for label, _ in reserve_actions}
+        for role, instrument, baseline in (
+            ("lockin_xx", lockin_xx, original_xx_reserve_mode),
+            ("lockin_xy", lockin_xy, original_xy_reserve_mode),
+        ):
+            label = f"restore {role} reserve mode"
+            if role in harmonic_control.owned and label not in existing_labels:
+                if baseline is None:
+                    errors.append(f"{role} baseline reserve mode unavailable")
+                else:
+                    reserve_actions.append((label, lambda i=instrument, b=baseline: i.set_reserve_mode(b)))
     for label, instrument in (
         ("restore lockin_xx to first harmonic", lockin_xx),
         ("restore lockin_xy to first harmonic", lockin_xy),
     ):
         try:
-            harmonic_restored = _restore_first_harmonic(instrument) or harmonic_restored
+            if bridge_ok:
+                harmonic_restored = _restore_first_harmonic(instrument) or harmonic_restored
         except BaseException as exc:
             errors.append(f"{label}: {exc}")
     transition: dict[str, object] | None = None
@@ -4847,7 +4925,7 @@ def _restore_scan_state(
     try:
         xx = lockin_xx.read_diagnostic(consume_status_latches=True)
         xy = lockin_xy.read_diagnostic(consume_status_latches=True)
-        diagnostics = {"lockin_xx": asdict(xx), "lockin_xy": asdict(xy)}
+        diagnostics.update({"lockin_xx": asdict(xx), "lockin_xy": asdict(xy)})
         errors.extend(
             _diagnostic_problems(
                 xx,
