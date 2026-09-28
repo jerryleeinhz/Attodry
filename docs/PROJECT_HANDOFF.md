@@ -4,6 +4,20 @@ Last updated: 2026-09-28
 
 ## Current stage
 
+### Harmonic sensitivity implementation plan (2026-09-28)
+
+The operator approved a staged approach: validate fixed sensitivity first, then
+continue independently with bounded range changes after the fixed-stage gate
+passes. The documented sequence is fixed baseline regression, per-role/harmonic
+fixed presets, then per-role/harmonic bounded_auto; routine implementation
+choices do not require repeated confirmation. F0/F1/A1 implementation and
+validation remain pending. Offline acceptance does not authorize or claim real
+instrument acceptance. H1/H2 fitting-model work is reserved for the side chat.
+See [the staged plan](LOCKIN_HARMONIC_SENSITIVITY_PLAN.md) for configuration,
+transition/cleanup ordering, audit fields, tests and Git/station boundaries.
+This checkpoint publishes the revised plan only; runtime and station settings
+are unchanged.
+
 ### Explicit rejected-run calibration audit (offline; 2026-09-28)
 
 The earlier completed-only calibration gate hid rejected f × e runs even after

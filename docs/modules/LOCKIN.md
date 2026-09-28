@@ -1,5 +1,13 @@
 # Lock-in module work package
 
+## 分谐波量程实施计划（2026-09-28）
+
+操作者要求先验证固定量程，成功后自行继续增加变换量程，完成后统一报告。
+阶段为固定基线回归、分角色/谐波固定档位、分角色/谐波 bounded_auto；
+完整配置接口、阶段通过条件、审计与恢复顺序见
+[`LOCKIN_HARMONIC_SENSITIVITY_PLAN.md`](../LOCKIN_HARMONIC_SENSITIVITY_PLAN.md)。
+当前仅发布修订计划，F0/F1/A1 尚未完成；拟合模型在 side chat 独立讨论。
+
 ## 当前状态
 
 双 SR830 独立器件验收、1/2/3 次谐波验收、17.777 Hz--100 kHz 有界谐波
