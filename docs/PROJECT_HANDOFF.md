@@ -4,6 +4,21 @@ Last updated: 2026-09-28
 
 ## Current stage
 
+### Explicit rejected-run calibration audit (offline; 2026-09-28)
+
+The earlier completed-only calibration gate hid rejected f × e runs even after
+the user explicitly loaded them for audit. The existing Allow rejected audit
+records option now also enables their clean formal data in calibration, labeled
+[AUDIT rejected]. Default behavior remains completed-only. Source status is
+preserved in derived rows, figures and manifests; failed formal samples are not
+promoted. Underpopulated f × e frequency groups are skipped only in rejected-run
+audit and reported explicitly. Disabling audit prevents downstream use/export.
+65 guarded tests passed. A real Jupyter kernel exercised the supplied rejected
+run through H1 fitting, H2 correction, figure exports, status/exclusion metadata
+and audit opt-out. That local verification used archived raw voltages because
+the supplied copy lacks its profile; the strict normal loader is unchanged.
+No hardware I/O. Pull the integration branch and restart the notebook kernel.
+
 ### Sweep calibration loaded-run synchronization (offline; 2026-09-28)
 
 The calibration list now synchronizes with frequency/f × e loading and point

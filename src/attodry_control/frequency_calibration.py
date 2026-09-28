@@ -36,6 +36,8 @@ class FrequencyResponse:
     reference_actual_frequency_hz: float
     points: tuple[ResponsePoint, ...]
     phase_shift_deg: float | None
+    source_record_status: str = "completed"
+    excluded_frequencies_hz: tuple[float, ...] = ()
 
     @property
     def reference_slope(self) -> complex:
@@ -88,6 +90,7 @@ class CalibratedH1:
     intercept_v: complex | None
     relative_q: complex
     corrected_v: complex
+    source_record_status: str = "completed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +109,7 @@ class CorrectedH2:
     h1_proxy_v: complex | None = None
     coefficient_per_v: complex | None = None
     coefficient_reason: str | None = None
+    source_record_status: str = "completed"
 
 
 def _finite_complex(value: complex) -> bool:
@@ -117,12 +121,15 @@ def estimate_frequency_response(
     *,
     role: str = "xx",
     reference_target_frequency_hz: float | None = None,
+    allow_rejected: bool = False,
 ) -> FrequencyResponse:
     """Estimate H1 response from one frequency or f×e run's clean formal data.
 
     Frequency sweeps use mean(V1/U); f×e uses a per-frequency complex line
     V1=b(f)U+a(f). A minimum of three distinct readback U values leaves a
-    residual degree of freedom for the intercept fit.
+    residual degree of freedom for the intercept fit. Explicit rejected-run
+    audit accepts only clean formal rows, preserves the rejected source status,
+    and reports skipped frequency groups with fewer than three excitation levels.
     """
 
     if role not in {"xx", "xy"}:
@@ -136,8 +143,13 @@ def estimate_frequency_response(
         raise ValueError("Use one frequency or f×e scan type for calibration.")
     if len(paths) != 1:
         raise ValueError("Select one calibration run; do not pool runs with possibly different phase settings.")
-    if any(row.record_status != "completed" or row.statuses != ("clean",) for row in selected):
-        raise ValueError("Calibration requires completed, clean formal h1 samples only.")
+    source_statuses = {row.record_status for row in selected}
+    allowed_statuses = {"completed", "rejected"} if allow_rejected else {"completed"}
+    if len(source_statuses) != 1 or not source_statuses <= allowed_statuses:
+        raise ValueError("Calibration requires a completed run; rejected-run audit needs explicit allow_rejected=True.")
+    source_status = next(iter(source_statuses))
+    if any(row.statuses != ("clean",) for row in selected):
+        raise ValueError("Calibration requires clean formal h1 samples, including in rejected-run audit.")
     phase_settings = {row.phase_shift_deg for row in selected if row.phase_shift_deg is not None}
     if len(phase_settings) > 1:
         raise ValueError("SR830 phase setting changed within the calibration run.")
@@ -166,6 +178,7 @@ def estimate_frequency_response(
             raise ValueError("Complex h1 reading must be finite.")
         by_frequency.setdefault(row.target_frequency_hz, []).append(row)
     points = []
+    excluded_frequencies = []
     for target, frequency_rows in sorted(by_frequency.items()):
         # Average repeated formal reads within a point before fitting, so a
         # longer formal window does not silently give one excitation more weight.
@@ -189,6 +202,9 @@ def estimate_frequency_response(
         else:
             distinct_u = {u for u, _ in observations}
             if len(distinct_u) < 3:
+                if source_status == "rejected":
+                    excluded_frequencies.append(target)
+                    continue
                 raise ValueError(f"f×e frequency {target:g} Hz needs at least three distinct SINE OUT readbacks for complex intercept fit.")
             mean_u = fmean(u for u, _ in observations)
             mean_z = sum((z for _, z in observations), 0j) / len(observations)
@@ -222,6 +238,8 @@ def estimate_frequency_response(
         reference_actual_frequency_hz=matches[0].actual_frequency_hz,
         points=tuple(points),
         phase_shift_deg=next(iter(phase_settings)) if phase_settings else None,
+        source_record_status=source_status,
+        excluded_frequencies_hz=tuple(excluded_frequencies),
     )
 
 
@@ -238,12 +256,15 @@ def calibrate_h1_samples(
     rebuilt = estimate_frequency_response(
         selected, role=response.role,
         reference_target_frequency_hz=response.reference_target_frequency_hz,
+        allow_rejected=response.source_record_status == "rejected",
     )
     if rebuilt != response:
         raise ValueError("H1 data or filters changed; rebuild the response first.")
     points = {point.target_frequency_hz: point for point in response.points}
     output = []
     for row in selected:
+        if row.target_frequency_hz not in points:
+            continue  # Already recorded as an underpopulated audit frequency.
         point = points[row.target_frequency_hz]
         raw = complex(row.x_v, row.y_v)
         offset = point.intercept_v if point.intercept_v is not None else 0j
@@ -254,6 +275,7 @@ def calibrate_h1_samples(
             frequency_hz=row.actual_frequency_hz, source_v_rms=row.sine_output_v_rms,
             raw_v=raw, fitted_v=point.slope_v_per_v * row.sine_output_v_rms + offset,
             intercept_v=point.intercept_v, relative_q=q, corrected_v=(raw - offset) / q,
+            source_record_status=row.record_status,
         ))
     return tuple(output)
 
@@ -303,7 +325,7 @@ def correct_h2(
         h1_proxy = None
         coefficient = None
         coefficient_reason = None
-        if row.record_status != "completed" or row.statuses != ("clean",):
+        if row.record_status != response.source_record_status or row.statuses != ("clean",):
             reason = "non-clean or incomplete formal sample"
         elif not _finite_complex(raw):
             reason = "non-finite raw h2"
@@ -345,6 +367,7 @@ def correct_h2(
             interpolated=interpolated, reason=reason,
             h1_proxy_v=h1_proxy, coefficient_per_v=coefficient,
             coefficient_reason=reason or coefficient_reason,
+            source_record_status=row.record_status,
         ))
     return tuple(output)
 
@@ -408,6 +431,8 @@ def plot_frequency_response(response: FrequencyResponse, *, x_scale: str = "log"
         style_axis(axis)
     method = "complex slope + intercept" if response.method == "frequency_excitation" else "mean(V1/U); intercept not identifiable"
     figure.suptitle(f"{response.role.upper()} h1 relative response · {method}\nReference {response.reference_actual_frequency_hz:g} Hz")
+    if response.source_record_status == "rejected":
+        figure.suptitle("AUDIT · rejected source run\n" + figure._suptitle.get_text())
     return figure
 
 
@@ -451,6 +476,8 @@ def plot_h1_calibration(rows: Sequence[CalibratedH1], *, x_scale: str = "log"):
         f"{rows[0].role.upper()} h1 fit and normalized samples\n"
         "A flat normalized mean follows from Q=b/b(ref); it does not validate the H2 model."
     )
+    if any(row.source_record_status == "rejected" for row in rows):
+        figure.suptitle("AUDIT · rejected source run\n" + figure._suptitle.get_text())
     return figure
 
 
@@ -504,6 +531,8 @@ def _plot_h2_comparison(
         note += f"; {zeros} zero magnitudes absent on log axes"
     formula = "H1_proxy=b(f)U; coefficient=H2/H1_proxy² (no current conversion)" if coefficient else "Corrected H2 = raw H2 / factor"
     figure.suptitle(f"{title}\n{formula}\n{note}", fontsize=10)
+    if any(row.source_record_status == "rejected" for row in rows):
+        figure.suptitle("AUDIT · rejected source run\n" + figure._suptitle.get_text(), fontsize=10)
     return figure
 
 

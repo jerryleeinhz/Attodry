@@ -50,6 +50,36 @@ class FrequencyCalibrationTests(unittest.TestCase):
                 rows.append(row(frequency, voltage, slope * voltage + intercept, point=len(rows)))
         return tuple(rows)
 
+    def test_rejected_calibration_requires_opt_in_and_preserves_provenance(self) -> None:
+        rows = tuple(replace(r, record_status="rejected") for r in self.combined_rows())
+        with self.assertRaisesRegex(ValueError, "completed"):
+            estimate_frequency_response(rows)
+        tail = replace(row(80, 0.1, 0.5j, point=99), record_status="rejected")
+        response = estimate_frequency_response((*rows, tail), allow_rejected=True)
+        self.assertEqual(response.source_record_status, "rejected")
+        self.assertEqual(response.excluded_frequencies_hz, (80,))
+        fitted = calibrate_h1_samples((*rows, tail), response)
+        self.assertEqual(len(fitted), len(rows))
+        self.assertTrue(all(r.source_record_status == "rejected" for r in fitted))
+        h2 = replace(row(20, 0.2, 0.01j, point=8, role="xy", harmonic=2), record_status="rejected")
+        bad = replace(h2, statuses=("overload",))
+        corrected = correct_h2((h2, bad), response, model="excitation_squared", role="xy")
+        self.assertAlmostEqual(corrected[0].corrected_v.imag, 0.0025)
+        self.assertEqual(corrected[0].source_record_status, "rejected")
+        self.assertIsNone(corrected[1].corrected_v)
+        self.assertIn("non-clean", corrected[1].reason)
+        with self.assertRaisesRegex(ValueError, "Reference"):
+            estimate_frequency_response((*rows, tail), allow_rejected=True, reference_target_frequency_hz=80)
+        with self.assertRaisesRegex(ValueError, "clean"):
+            estimate_frequency_response((*rows, replace(tail, statuses=("problem",))), allow_rejected=True)
+        with self.assertRaises(ValueError):
+            estimate_frequency_response(tuple(replace(r, record_status="diagnostic") for r in rows), allow_rejected=True)
+
+    def test_completed_calibration_still_rejects_underpopulated_frequency(self) -> None:
+        tail = row(80, 0.1, 0.5j, point=99)
+        with self.assertRaisesRegex(ValueError, "three distinct"):
+            estimate_frequency_response((*self.combined_rows(), tail), allow_rejected=True)
+
     def test_complex_intercept_and_relative_response(self) -> None:
         result = estimate_frequency_response(self.combined_rows(), role="xx")
         self.assertEqual(result.method, "frequency_excitation")

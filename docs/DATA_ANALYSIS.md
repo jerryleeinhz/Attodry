@@ -24,8 +24,19 @@ exclusions. The calibration Run list initializes from already-loaded rows and
 updates automatically on loading or applying point exclusions; **Refresh loaded
 runs** remains optional. Loading, exclusions and changing the selected run clear
 stale derived results. Empty lists explain missing/failed loads, all points
-excluded, or rejected audit records (including filenames). Rejected records
-remain available for raw audit but cannot define the completed-run calibration.
+excluded, or rejected audit records (including filenames). By default only
+completed records enter calibration. To inspect a rejected run's clean formal
+samples, explicitly enable the existing **Allow rejected audit records** option
+above, refresh the calibration list, and select its **[AUDIT rejected]** entry.
+The original record remains rejected. Audit f × e frequency groups with fewer
+than three distinct excitation readbacks are skipped and named in the fit
+message and manifest; completed-run fits still reject underpopulated groups.
+Other H1 quality/readback/phase checks remain strict. H2 correction inherits
+the selected source's status and still excludes non-clean samples. Audit labels
+appear on figures, and H1/H2 CSV plus the manifest retain source status.
+Disabling audit prevents further H2/LCR/export operations on that response;
+refreshing clears it from the list. A reference must belong to a retained
+measured frequency group; the notebook does not replace it automatically.
 Missing profile sidecars still produce a load error; no profile is invented.
 Select the calibration file, choose
 `Vxx h1` or `Vxy h1`, and click **Fit and plot h1 response**. `Ref Hz` must be a

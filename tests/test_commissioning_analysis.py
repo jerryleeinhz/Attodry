@@ -1138,9 +1138,17 @@ class CommissioningAnalysisTests(unittest.TestCase):
         exec("".join(notebook["cells"][-1]["source"]), scope)
         scope["_load_selected_records"](None)
         self.assertTrue(scope["combined_rows"])
-        self.assertEqual(scope["calibration_run_widget"].options, ())
+        self.assertEqual(scope["calibration_run_widget"].value, str(source))
+        self.assertIn("AUDIT", scope["calibration_run_widget"].options[0][0])
         self.assertIn("rejected", scope["calibration_message"].value)
         self.assertIn(source.name, scope["calibration_message"].value)
+        scope["calibration_response"] = object()
+        scope["include_rejected_widget"].value = False
+        scope["INCLUDE_REJECTED"] = False
+        scope["_calibration_refresh"]()
+        self.assertIsNone(scope["calibration_response"])
+        self.assertEqual(scope["calibration_run_widget"].options, ())
+        self.assertIn("Allow rejected audit records", scope["calibration_message"].value)
 
     def test_notebook_voltage_axis_loads_mixed_resistance_runs(self) -> None:
         first_payload = self._sweep(completed=True)

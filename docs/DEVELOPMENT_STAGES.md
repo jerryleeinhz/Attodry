@@ -2,6 +2,22 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Rejected f × e calibration audit opt-in (offline; 2026-09-28)
+
+- Reused the existing Allow rejected audit records control for calibration;
+  rejected sources appear with an explicit AUDIT label and remain rejected.
+- Default analysis requires completed runs. Audit keeps clean-formal,
+  readback, phase and single-source validation; H2 retains non-clean samples
+  uncorrected. Frequency groups with fewer than three distinct excitation
+  readbacks are skipped/reported only for rejected-source f × e audits.
+- Figures, derived H1/H2 CSV and manifests carry audit provenance. Disabling
+  audit blocks H2, LCR and export callbacks and refresh clears stale results.
+- Regression reproduced the user's loaded-but-hidden source before the fix.
+  All 65 guarded tests pass; real Jupyter callbacks on the supplied archived
+  raw voltages verified H1/H2, incomplete-frequency exclusion, reference
+  selection, exports, opt-out and unchanged raw-file hash. Strict profile
+  loading remains unchanged. No hardware operation or station sync.
+
 ## Sweep calibration record synchronization (offline; 2026-09-28)
 
 - Completed f × e and frequency rows automatically populate the calibration
