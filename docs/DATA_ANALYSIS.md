@@ -20,10 +20,18 @@ does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 
 At the end of `notebooks/sr830_commissioning_sweeps.ipynb`, first load one
 completed frequency or f × e file in the normal browser and apply any point
-exclusions. Click **Refresh loaded runs**, select the calibration file, choose
+exclusions. The calibration Run list initializes from already-loaded rows and
+updates automatically on loading or applying point exclusions; **Refresh loaded
+runs** remains optional. Loading, exclusions and changing the selected run clear
+stale derived results. Empty lists explain missing/failed loads, all points
+excluded, or rejected audit records (including filenames). Rejected records
+remain available for raw audit but cannot define the completed-run calibration.
+Missing profile sidecars still produce a load error; no profile is invented.
+Select the calibration file, choose
 `Vxx h1` or `Vxy h1`, and click **Fit and plot h1 response**. `Ref Hz` must be a
 measured requested frequency; 0 chooses the lowest. The figure plots relative
-gain `|Q|`, relative unwrapped phase `arg Q`, and complex residual RMS voltage.
+gain `|Q|`, relative unwrapped phase `arg Q`, and formal-read scatter RMS for
+frequency-only data (point-mean fit residual RMS for f × e).
 Frequency-only data use `b(f)=mean[(X+iY)/U]` and cannot identify an intercept.
 For f × e, each frequency fits `X+iY=b(f)U+a(f)` with complex intercept and
 at least three distinct SINE OUT readbacks. `U` is the recorded *actual*
@@ -33,6 +41,39 @@ their requested frequencies by more than 1% (minimum 0.1 Hz), are rejected
 for calibration rather than fitted under a mislabeled frequency.
 `Q(f)=b(f)/b(f0)` uses the selected measured reference. These are empirical
 transfer ratios, not automatically device impedance or proof of zero phase.
+
+The H1 button also displays raw and fitted formal samples as voltage/SINE OUT,
+and `(V1-a)/(U Q)`. A flat normalized mean is a consequence of using the same
+data to estimate Q, not independent validation or a fitted circuit response.
+The corrected phase is displayed on the branch nearest the measured reference
+phase, without forcing zero phase. Numerical rows are exported, not printed.
+`h1_derived.csv` includes raw, fitted and normalized complex voltages, actual U,
+intercept and Q; the manifest identifies the residual definition and formulas.
+
+If H1 voltage is accepted as a proxy for current, choose **H1 voltage proxy:
+H2 / H1_proxy² (1/V)**. It computes the complex coefficient
+`C2(f)=V2/[b(f)U]^2`, where U is the H2 sample's actual SINE OUT readback.
+The driven proxy excludes the fitted H1 intercept. With fixed U this is
+`V2/mean(V1)^2`; it uses no resistance or actual-current conversion and is
+independent of `Ref Hz`. This retains the H2 readout/filter response.
+Missing U/readback or calibration coverage yields a retained uncorrected row
+with a reason; no extrapolation is added. `h2_derived.csv` includes the proxy
+voltage and coefficient in 1/V separately from reference-scaled volts.
+
+H2 figures overlay raw magnitude on the blue left axis and derived magnitude
+on the orange right axis, with explicit units and independent natural scales.
+Phase uses a common wrapped-degree panel. The earlier **Comparison X-axis
+scale** selector also controls all calibration frequency axes (`auto` selects
+log frequency). Amplitude axes remain linear as in the preceding sweep plots;
+plot functions also support an explicit log magnitude for offline diagnostics,
+which records zero magnitudes as absent rather than inventing a positive floor.
+Axes and chosen quantities are archived in the export manifest.
+
+Reference normalization can make corrected volts very small if the chosen H1
+reference is weak. Changing that reference multiplies the whole complex curve
+by a constant; it cannot repair drift or a detector notch. Use complex X+iY
+averaging/fitting, inspect formal-repeat stability and instrumental filters,
+and do not infer a smooth frequency model's goodness from a zero V1/U residual.
 
 To apply h2 calibration, choose an excitation level, h2 role and **H2 model**.
 `Excitation squared` applies `V2/Q(f)^2` only if the h1 response represents the

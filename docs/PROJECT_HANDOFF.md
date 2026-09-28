@@ -4,6 +4,35 @@ Last updated: 2026-09-28
 
 ## Current stage
 
+### Sweep calibration loaded-run synchronization (offline; 2026-09-28)
+
+The calibration list now synchronizes with frequency/f × e loading and point
+exclusions, including rows loaded before the calibration cell runs. Run/data
+changes clear stale derived outputs. Empty-state messages identify rejected
+audit records by filename and explain load failures or excluded points.
+63 guarded tests passed, plus real Jupyter-widget load/fit/exclusion/reload
+checks using an offline f × e fixture. Rejected records remain excluded from
+calibration and missing profile sidecars remain errors. Raw voltage drift
+diagnostics were written outside Git. Restart/reload the edited notebook to
+replace old in-memory callbacks. No hardware I/O or station synchronization.
+
+### Voltage-based H1/H2 calibration display (offline; 2026-09-28)
+
+The sweep calibration section no longer prints every H1 fit row. It shows
+raw/fitted H1 and self-normalized H1, exports both, and labels frequency-only
+formal-repeat scatter correctly. Under the operator-confirmed H1 voltage proxy
+assumption, `V2/[b(f)U]^2` gives a reference-independent complex coefficient in
+1/V without current conversion; the f × e H1 intercept is excluded. H2 uses
+raw-left/derived-right amplitude axes and the existing comparison X-scale
+selector. Existing relative-voltage correction formulas remain available.
+61 guarded offline tests passed; a real Jupyter kernel verified widgets, MIME
+figures, clearing, shared scales and PNG/PDF/SVG/CSV exports on raw voltage
+rows. Missing profile sidecars still fail strict loading. Weak reference signals,
+detector notch filters and formal-repeat drift are interpretation limits;
+private audit results remain outside Git. Validation performed no instrument
+I/O or station sync. Restart the notebook kernel to load the edited analysis code.
+The separate unified-plotting drafts remain pending and preserved.
+
 ### Magnetic scan short command (offline; 2026-09-28)
 
 At the operator's request, `python -m attodry_control.magnetic_field_cli scan`

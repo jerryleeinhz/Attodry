@@ -2,6 +2,48 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Sweep calibration record synchronization (offline; 2026-09-28)
+
+- Completed f × e and frequency rows automatically populate the calibration
+  Run list, both when loaded before the cell and when reloaded afterwards.
+  Point exclusions and run changes invalidate prior figures and derived data.
+- Empty-state messages distinguish rejected audit files, excluded points,
+  unloaded files and load failures. Strict profile loading and the completed,
+  clean H1 requirement remain enforced; rejected data are not promoted.
+- Two regression tests first reproduced the empty-list/missing-explanation
+  defects. All 63 guarded calibration/analysis/notebook tests now pass.
+  A real Jupyter kernel additionally verified f × e loading, complex H1 fits,
+  H2 twin axes, exclusions, reloads, rejected-file messages and result clearing.
+- Offline raw-voltage diagnostics distinguish repeat drift from fit residuals;
+  station configuration and acquisition code were not changed.
+
+## Voltage-based frequency calibration diagnostics (offline; 2026-09-28)
+
+- H1 callbacks display figures and a compact summary; the per-frequency text
+  table is retained in exports only. A new figure shows raw/fitted H1 and
+  `(V1-a)/(U Q)`; fitted/normalized formal samples are exported with provenance.
+  The normalized mean is an in-sample identity, not independent validation.
+- Frequency-only `b=mean(V1/U)` keeps its no-intercept contract. Its RMS panel
+  now reports formal-repeat scatter instead of the identically zero residual
+  of the single point mean. f × e retains the complex slope/intercept fit.
+- For an operator-accepted H1 voltage current proxy, the new voltage-only
+  result is `V2/[b(f)U]^2` in 1/V. It excludes the H1 fitted intercept, uses the
+  H2 actual SINE OUT readback, and is independent of reference-frequency choice.
+  Existing reference-scaled voltage and same-channel readout modes remain.
+- H2 overlays raw magnitude on the blue left axis and the derived quantity on
+  the orange right axis, each with its own units/natural scale. Frequency axes
+  share the earlier Comparison X-axis scale selector; amplitudes stay linear
+  as in the sweep plots. Export records axes, quantities, formulas and samples.
+- 61 guarded calibration/analysis/notebook tests passed with `python -s` and
+  Matplotlib, no skips. A real Jupyter kernel verified figure-only H1 outputs,
+  both H2 twin-axis quantities, shared X scales, rerun clearing, raw-voltage
+  audit samples and PNG/PDF/SVG export. Rendered figures were inspected.
+  User-site NumPy conflicts with system Matplotlib; no dependencies changed.
+- Raw-voltage audits remain outside Git. Weak reference signals, differing
+  detector filters and formal-repeat drift can limit interpretation. Missing
+  profile sidecars are not reconstructed; strict normal loading is preserved.
+  Validation performed no hardware connection or station synchronization.
+
 ## Magnetic scan command simplification (offline; 2026-09-28)
 
 - `scan` itself requests connection, configured ordered targets and cleanup;

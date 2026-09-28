@@ -1090,6 +1090,58 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.assertEqual(len(scope["frequency_rows"]), 0)
         self.assertEqual(len(scope["excitation_rows"]), 2)
 
+    def test_calibration_tracks_loaded_combined_rows_and_exclusions(self) -> None:
+        payload = self._sweep(completed=True)
+        payload["scan"] = "frequency_excitation"
+        payload["measurement_config"] = self._measurement_config_path()
+        source = self._write_json("combined-calibration.json", payload)
+        scope = self._notebook_selector_scope(source.parent)
+        scope["excitation_x_axis_widget"].value = "sine_output_v_rms"
+        scope["combined_record_widget"].value = (str(source),)
+        scope["_load_selected_records"](None)
+        notebook = json.loads((PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb").read_text(encoding="utf-8"))
+        exec("".join(notebook["cells"][-1]["source"]), scope)
+        self.assertEqual(scope["calibration_run_widget"].value, str(source))
+        self.assertEqual(scope["_calibration_source_rows"](), scope["combined_rows"])
+
+        scope["calibration_response"] = object()
+        scope["calibration_h1_output"].outputs = ("previous figure",)
+        scope["combined_excluded_frequencies_widget"].value = tuple(
+            value for _, value in scope["combined_excluded_frequencies_widget"].options
+        )
+        scope["_apply_point_exclusions"](None)
+        self.assertEqual(scope["calibration_run_widget"].options, ())
+        self.assertIsNone(scope["calibration_response"])
+        self.assertEqual(scope["calibration_h1_output"].outputs, ())
+        self.assertIn("point exclusions", scope["calibration_message"].value)
+
+        # Loading after the calibration cell has run updates it without Refresh.
+        scope["_load_selected_records"](None)
+        self.assertEqual(scope["calibration_run_widget"].value, str(source))
+        scope["load_sweep_sample_files"] = lambda *a, **k: (_ for _ in ()).throw(ValueError("missing profile"))
+        scope["_load_selected_records"](None)
+        self.assertEqual(scope["calibration_run_widget"].options, ())
+        self.assertIn("missing profile", scope["calibration_message"].value)
+
+    def test_calibration_explains_rejected_audit_records(self) -> None:
+        payload = self._sweep(completed=False)
+        payload["scan"] = "frequency_excitation"
+        payload["measurement_config"] = self._measurement_config_path()
+        source = self._write_json("combined-rejected.json", payload)
+        scope = self._notebook_selector_scope(source.parent)
+        scope["completed_only_widget"].value = False
+        scope["include_rejected_widget"].value = True
+        scope["excitation_x_axis_widget"].value = "sine_output_v_rms"
+        scope["_refresh_records"]()
+        scope["combined_record_widget"].value = (str(source),)
+        notebook = json.loads((PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb").read_text(encoding="utf-8"))
+        exec("".join(notebook["cells"][-1]["source"]), scope)
+        scope["_load_selected_records"](None)
+        self.assertTrue(scope["combined_rows"])
+        self.assertEqual(scope["calibration_run_widget"].options, ())
+        self.assertIn("rejected", scope["calibration_message"].value)
+        self.assertIn(source.name, scope["calibration_message"].value)
+
     def test_notebook_voltage_axis_loads_mixed_resistance_runs(self) -> None:
         first_payload = self._sweep(completed=True)
         first_payload["scan"] = "excitation"
@@ -1523,6 +1575,9 @@ def _fake_notebook_widgets() -> types.ModuleType:
             self.value = kwargs.get("value", ())
             self.layout = kwargs.get("layout")
 
+        def observe(self, callback: object, names: str) -> None:
+            self.observer = callback
+
         def on_click(self, callback: object) -> None:
             self.callback = callback
 
@@ -1538,6 +1593,8 @@ def _fake_notebook_widgets() -> types.ModuleType:
     widgets.SelectMultiple = Widget
     widgets.Button = Widget
     widgets.Dropdown = Widget
+    widgets.FloatText = Widget
+    widgets.Output = Widget
     widgets.HTML = Widget
     widgets.HBox = Widget
     widgets.VBox = Widget
