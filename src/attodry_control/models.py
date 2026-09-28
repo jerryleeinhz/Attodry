@@ -38,9 +38,13 @@ class VectorField:
         if not math.isfinite(angle_deg_from_z):
             raise ValueError("Magnetic-field angle must be finite.")
         angle_rad = math.radians(angle_deg_from_z)
+        # Exact cardinal requests must remain single-axis targets. Tiny trig
+        # residues must not bypass the exact-zero field-envelope contract.
+        sine = 0.0 if angle_deg_from_z % 180.0 == 0.0 else math.sin(angle_rad)
+        cosine = 0.0 if (angle_deg_from_z - 90.0) % 180.0 == 0.0 else math.cos(angle_rad)
         return cls(
-            bx_t=magnitude_t * math.sin(angle_rad),
-            bz_t=magnitude_t * math.cos(angle_rad),
+            bx_t=magnitude_t * sine,
+            bz_t=magnitude_t * cosine,
         )
 
 

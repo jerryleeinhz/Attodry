@@ -10,7 +10,7 @@ import sys
 from typing import Sequence
 
 from .field_audit import SCHEMA_VERSION, read_jsonl_events
-from .field_segments import expand_field_segments
+from .field_segments import expand_angle_segments, expand_field_segments
 from .models import VectorField
 from .safety import FIELD_LIMIT_POLICY, MagnetLimits, validate_vector_field
 
@@ -251,22 +251,38 @@ def _integrity_errors(
 def _segment_plan_errors(events: list[dict[str, object]]) -> list[str]:
     started = events[0]
     archived = started["segment_plan"]
+    common_keys = {"version", "axis", "segments", "point_segment_indices"}
     if (
         not isinstance(archived, dict)
-        or set(archived) != {"version", "axis", "segments", "point_segment_indices"}
-        or type(archived.get("version")) is not int or archived["version"] != 1
+        or type(archived.get("version")) is not int
+        or (
+            archived["version"] == 1 and set(archived) != common_keys
+        )
+        or (
+            archived["version"] == 2
+            and set(archived) != common_keys | {"magnitude_t", "angles_deg"}
+        )
+        or archived["version"] not in (1, 2)
         or started.get("field_limit_policy") != FIELD_LIMIT_POLICY
     ):
         return ["segment_plan declaration is invalid"]
     try:
         limits = MagnetLimits(**started["limits"])
-        plan = expand_field_segments(archived["axis"], archived["segments"], limits)
+        if archived["version"] == 1:
+            plan = expand_field_segments(archived["axis"], archived["segments"], limits)
+        else:
+            if archived["axis"] != "angle_deg_from_z":
+                return ["segment_plan angle axis is invalid"]
+            plan = expand_angle_segments(
+                archived["magnitude_t"], archived["segments"], limits
+            )
     except (KeyError, TypeError, ValueError) as exc:
         return [f"segment_plan is invalid: {exc}"]
     indices = archived["point_segment_indices"]
     if (
         not isinstance(indices, list) or any(type(i) is not int for i in indices)
         or indices != list(plan.point_segment_indices)
+        or (plan.angles_deg is not None and archived["angles_deg"] != list(plan.angles_deg))
         or started.get("ordered_points") != [asdict(point) for point in plan.points]
     ):
         return ["segment_plan expansion disagrees with archived ordered_points/indices"]
@@ -283,6 +299,10 @@ def _segment_plan_errors(events: list[dict[str, object]]) -> list[str]:
             type(event.get("segment_index")) is not int
             or event["segment_index"] != segment_index
             or event.get("sweep_direction") != plan.segments[segment_index].direction
+            or (plan.angles_deg is not None and (
+                type(event.get("requested_angle_deg")) not in (int, float)
+                or event["requested_angle_deg"] != plan.angles_deg[point_index]
+            ))
         ):
             errors.append("segment_plan point metadata disagrees with its segment")
     return errors

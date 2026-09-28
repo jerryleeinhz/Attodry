@@ -1206,6 +1206,12 @@ class CommissioningAnalysisTests(unittest.TestCase):
                 label,
                 f"{path.name} | 2 formal samples | XX h1/h2, XY h2",
             )
+            row = scope[widget_name]._rows.children[0]
+            self.assertEqual(row.layout["flex"], "0 0 auto")
+            self.assertEqual(row.layout["height"], "auto")
+            rendered_label = row.children[0].value
+            self.assertIn(path.name, rendered_label)
+            self.assertIn("2 formal samples · XX h1/h2, XY h2", rendered_label)
 
     def test_notebook_combined_exclusions_remove_requested_rows_and_columns(self) -> None:
         payload = self._sweep(completed=True)
@@ -1515,6 +1521,7 @@ def _fake_notebook_widgets() -> types.ModuleType:
             self.children = args[0] if args else ()
             self.options = kwargs.get("options", ())
             self.value = kwargs.get("value", ())
+            self.layout = kwargs.get("layout")
 
         def on_click(self, callback: object) -> None:
             self.callback = callback

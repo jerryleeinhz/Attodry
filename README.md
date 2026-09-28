@@ -222,10 +222,14 @@ python -m attodry_control.lockin_progress_monitor `
 
 可直接复制的 M4 单目标、M5 多段正扫/往返和纯 Z 语法示例均在
 [`config/hardware.example.toml`](config/hardware.example.toml) 的 `[magnetic_field_run]`
-注释区。在原表内替换同名字段，不要重复追加表；`points` 与 `axis`+`segments`
-二选一。分段使用 T，`min < max`，`points`（含两端点）或正 `step` 二选一；
+注释区。在原表内替换同名字段，不要重复追加表；显式 `points`、
+`axis`+`segments`、`magnitude_t`+`angle_segments` 三选一。普通 X/Z 分段使用 T，
+`min < max`，`points`（含两端点）或正 `step` 二选一；
 step 必须整除跨度。`direction` 为 `ascending`（默认）或 `descending`，按段顺序
-拼接且保留重复端点，最多展开 10000 个目标。X/Z 单轴之外仍使用显式点列。
+拼接且保留重复端点，最多展开 10000 个目标。固定模长角度段用度：
+`min_deg`/`max_deg`，二选一的 `step_deg`/`points`，从 +Z 向 +X 为正角度，
+自动生成 `Bx=B sin θ`、`Bz=B cos θ`。仅正式目标点的模长固定；分量依次写入的
+转场过程不保证连续恒模长旋转，故不能据此把转场轨迹当成角度测量数据。
 普通往返回线使用 `direct`；`via_zero` 会在目标之间经零场，改变磁场历史。
 分段 step 是正式目标间距，`max_step_t` 是独立的内部安全 waypoint 步长。
 
@@ -237,7 +241,7 @@ python -m attodry_control.magnetic_field_cli describe --config config/hardware.l
 
 输出完整点列、段编号、方向、限值及清理策略。静态路径以零场为起点，不代替连接后的
 实际状态复核。新 JSONL 保存 `segment_plan` 和每个点的段编号/方向；文件 monitor
-重新展开并校验，未声明分段的旧记录仍按旧格式读取。
+重新展开并校验；角度段还保存请求角度，未声明分段的旧记录仍按旧格式读取。
 M4 X/Z 单目标及 M5 各轴正负往返、0.05 T 十三点离散圆周已有完成和回零证据。
 通过范围仅限本次小场测试，不自动授权新点列、扩大场强或多仪器联合实验。
 

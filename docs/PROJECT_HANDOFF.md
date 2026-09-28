@@ -1,8 +1,30 @@
 # Project handoff
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 ## Current stage
+
+### SR830 sweep notebook record-list visibility (offline; 2026-09-28)
+
+The frequency, excitation, and f × e record selectors now show the filename
+and sample-count/channel summary on separate lines. Checkbox rows use
+non-shrinking, content-sized layout inside the scrolling list, preventing
+overlap when many long records are present. Selection/exclusion semantics and
+raw files are unchanged; no hardware interaction was performed.
+
+### Magnetic hysteresis configuration and fixed-magnitude angle segments (offline; 2026-09-28)
+
+Ordinary hysteresis uses two identical signed-range X/Z segments in ascending
+then descending order with `direct`; duplicate reversal endpoints are retained.
+The new mutually exclusive `magnitude_t` + `angle_segments` mode accepts
+ascending/descending degree grids, expands formal targets using angle from +Z
+toward +X, and preserves segment/direction metadata. Angle plan v2 stores
+requested angles for monitor integrity checking; the four-module combination
+axis consumes the same expanded points. Existing v1 and explicit-point records
+remain compatible. All new tests are fake/offline, and no actual field was set.
+Only the formal targets have fixed requested magnitude; the X/Z component-write
+path does not guarantee a continuous constant-radius trajectory. Local TOML
+and hardware validation remain separate, with no new real-magnet authorization.
 
 ### SR830 f × e phase comparison (offline complete; 2026-09-26)
 

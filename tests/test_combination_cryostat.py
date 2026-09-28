@@ -222,6 +222,24 @@ segments = [
         self.assertEqual([r["axes.magnetic.direction"] for r in rows],
                          ["ascending", "ascending", "descending", "descending"])
 
+    def test_constant_magnitude_angles_feed_existing_combination_axis(self):
+        source = re.sub(r"(?m)^points = \[.*?^\]", '''magnitude_t = 0.01
+angle_segments = [
+  { min_deg = 0, max_deg = 90, points = 2 },
+  { min_deg = 0, max_deg = 90, points = 2, direction = "descending" },
+]''', self.base, count=1, flags=re.DOTALL)
+        self.write_config(("magnetic",), source=source)
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        rows = load_combination_rows(self.database)
+        self.assertEqual(
+            [(r["requested.field_x_t"], r["requested.field_z_t"]) for r in rows],
+            [(0, .01), (.01, 0), (.01, 0), (0, .01)],
+        )
+        self.assertEqual([r["axes.magnetic.segment"] for r in rows], ["0", "0", "1", "1"])
+        self.assertEqual([r["axes.magnetic.direction"] for r in rows],
+                         ["ascending", "ascending", "descending", "descending"])
+
     def test_float32_boundary_rejected_without_connection(self):
         # Exact decimal hypot=3, but binary32 component rounding exceeds 3.
         source = self.base.replace('{ bx_t = 0.0, bz_t = 0.0 },', '{ bx_t = 1.8, bz_t = 2.4 },')

@@ -43,8 +43,10 @@ note = "填写本次接线与样品说明"
 各设备/谐波是顺序读取，不能称为同时采样。
 
 温度点来自 `[temperature_scan]`；没有该表时用 `temperature_run.target_k`
-作为一个固定点。磁场来自 `[magnetic_field_run]` 的 ordered points 或 segments，
+作为一个固定点。磁场来自 `[magnetic_field_run]` 的 ordered points、单轴
+segments 或固定模长 angle_segments，
 保留重复端点、反向段、段号和条件索引；`direct`/`via_zero` 策略不自动替换。
+角度段按 `Bx=B sin θ, Bz=B cos θ` 展开正式目标，但转场路径不保证恒模长。
 内层磁场每次从上轮终点返回首点也按配置的路径执行，可能改变磁场历史，
 请在离线预览中确认这种嵌套是否符合实验目的。
 

@@ -9,7 +9,7 @@ import tomllib
 from typing import Any, Mapping
 
 from .lockin_autorange import AutorangePolicy
-from .field_segments import FieldSegmentPlan, expand_field_segments
+from .field_segments import FieldSegmentPlan, expand_angle_segments, expand_field_segments
 from .models import LockinRole, VectorField
 from .safety import (
     CONFIRMED_EXPERIMENT_VECTOR_MAX_T,
@@ -1067,20 +1067,38 @@ def _parse_magnetic_field_run(
             "note",
             "output_directory",
         },
-        {"points", "segments", "axis"},
+        {"points", "segments", "axis", "magnitude_t", "angle_segments"},
     )
-    if ("points" in table) == ("segments" in table):
-        raise ConfigError(f"{name} requires exactly one of points or segments.")
+    if sum(key in table for key in ("points", "segments", "angle_segments")) != 1:
+        raise ConfigError(
+            f"{name} requires exactly one of points, segments, or angle_segments."
+        )
     segment_plan = None
     if "segments" in table:
+        if "magnitude_t" in table:
+            raise ConfigError(f"{name}.magnitude_t is only allowed with angle_segments.")
         try:
             segment_plan = expand_field_segments(table.get("axis"), table["segments"], limits)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
+        points = list(segment_plan.points)
+    elif "angle_segments" in table:
+        if "axis" in table:
+            raise ConfigError(f"{name}.axis is only allowed with segments.")
+        if "magnitude_t" not in table:
+            raise ConfigError(f"{name}.magnitude_t is required with angle_segments.")
+        try:
+            segment_plan = expand_angle_segments(
+                table["magnitude_t"], table["angle_segments"], limits
+            )
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
         points = list(segment_plan.points)
     else:
         if "axis" in table:
             raise ConfigError(f"{name}.axis is only allowed with segments.")
+        if "magnitude_t" in table:
+            raise ConfigError(f"{name}.magnitude_t is only allowed with angle_segments.")
         raw_points = table["points"]
         if not isinstance(raw_points, list) or not raw_points:
             raise ConfigError(

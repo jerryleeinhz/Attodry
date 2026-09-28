@@ -2,6 +2,28 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## SR830 sweep notebook record-list layout (offline; 2026-09-28)
+
+- Frequency, excitation, and f × e selectors keep their existing checkbox
+  behavior and scrollable sections. Each file row now keeps its natural height
+  instead of flex-shrinking inside the 240px scroll area; filename and formal
+  sample/channel summary appear on separate lines so long entries do not overlap.
+- Only presentation changed; record discovery, audit defaults, selections,
+  exclusions, raw data, and acquisition are unchanged. Guarded notebook tests
+  and code-cell syntax validation cover this update; no instrument I/O.
+
+## Magnetic fixed-magnitude angle segments (offline; 2026-09-28)
+
+- Added an exclusive `magnitude_t` + `angle_segments` configuration mode beside
+  explicit points and X/Z linear segments. Ordered, reversible degree grids
+  expand to `Bx=B sin θ`, `Bz=B cos θ`; cardinal angles preserve exact zero
+  components, and every target/path remains under existing safety checks.
+- Angle plan v2 archives requested angles and segment mapping in JSONL; monitor
+  re-expands and detects altered plans or point metadata. Combination scans reuse
+  the same expanded axis, including repeated turnaround endpoints.
+- This is discrete-target constant magnitude, not a continuous circular ramp or
+  rate controller. No physical magnet commands were issued for this feature.
+
 ## SR830 f × e phase comparison (offline complete; 2026-09-26)
 
 - For a single selected f × e record, the sweep notebook now adds a separate

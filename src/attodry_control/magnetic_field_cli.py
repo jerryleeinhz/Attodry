@@ -179,6 +179,8 @@ def run(
             event = {
                 **event, "segment_index": segment_index,
                 "sweep_direction": segment_plan.segments[segment_index].direction,
+                **({"requested_angle_deg": segment_plan.angles_deg[point_index]}
+                   if segment_plan.angles_deg is not None else {}),
             }
         try:
             writer.append(event)
