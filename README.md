@@ -2,6 +2,10 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
+锁相扫描新增可选过载继续采集策略（默认仍中止），保留原始过载与按测量路的
+有效性标记；配置见 [日常操作说明](docs/LOCKIN_DAILY_OPERATION.md)。
+高阻器件的 XX 测量衰减接法与限制见 [衰减设计说明](docs/LOCKIN_XX_ATTENUATION.md)。
+
 四模块集成检查点（2026-09-14）：已在隔离分支合并 Temperature/Lock-in、
 Three-SMU direct points 和 Magnetic。新增任意组合的**模拟执行器**、统一 SQLite
 记录、只读 run/condition/attempt/cleanup 监控，以及

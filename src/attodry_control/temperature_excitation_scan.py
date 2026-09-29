@@ -29,6 +29,7 @@ from .config import (
     load_temperature_excitation_operation_config,
 )
 from .lockin_test import (
+    _annotate_sweep_quality,
     _execute_excitation_sweep_on_open_pair,
     _load_resource_manager_factory,
     _measurement_config_snapshot,
@@ -391,6 +392,8 @@ def run(
                         "requested_temperature_k": target_k,
                         "completed": excitation_record["completed"],
                         "outcome": excitation_record["outcome"],
+                        "data_quality": excitation_record.get("data_quality"),
+                        "completion_message": excitation_record.get("completion_message"),
                         "measurement_window_temperature": condition_statistics,
                         "cleanup": excitation_record["cleanup"],
                         "error": excitation_record["error"],
@@ -430,12 +433,15 @@ def run(
         summary["disconnected"] = True
         summary["completed"] = True
         summary["outcome"] = "completed"
+        _annotate_sweep_quality(summary)
         writer.append(
             {
                 "event": "scan_finished",
                 "captured_unix_s": wall_time(),
                 "completed": True,
                 "outcome": "completed",
+                "data_quality": summary["data_quality"],
+                "completion_message": summary["completion_message"],
                 "final_state": summary["final_state"],
             }
         )
@@ -923,6 +929,8 @@ def _write_formal_samples_csv(csv_path: Path, summary: Mapping[str, object]) -> 
         "frequency_hz",
         "lia_status_raw",
         "error_status",
+        "valid_for_analysis",
+        "problems_json",
     )
     with csv_path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
@@ -953,9 +961,9 @@ def _write_formal_samples_csv(csv_path: Path, summary: Mapping[str, object]) -> 
                     selected = sample.get("selected_roles")
                     roles = (
                         tuple(
-                            role
+                            role if role.startswith("lockin_") else "lockin_" + role
                             for role in selected
-                            if role in {"lockin_xx", "lockin_xy"}
+                            if role in {"xx", "xy", "lockin_xx", "lockin_xy"}
                         )
                         if isinstance(selected, list)
                         else ("lockin_xx", "lockin_xy")
@@ -1006,6 +1014,9 @@ def _write_formal_samples_csv(csv_path: Path, summary: Mapping[str, object]) -> 
                             "phase_deg": reading.get("phase_deg"),
                             "frequency_hz": reading.get("frequency_hz"),
                             "lia_status_raw": status.get("raw"),
+                            "valid_for_analysis": sample.get("valid_for_analysis_by_role", {}).get(role),
+                            "problems_json": json.dumps(sample.get("problems_by_role", {}).get(
+                                role, sample.get("problems", [])), ensure_ascii=False),
                             "error_status": audited.get(
                                 "error_status", reading.get("error_status")
                             ),

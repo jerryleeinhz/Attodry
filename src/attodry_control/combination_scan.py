@@ -228,6 +228,7 @@ def run_simulated_combination(
 
 def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) -> dict:
     """Internal engine; backend entry points own pre-I/O validation."""
+    from .lockin_overload import reading_allows_continuation
     conditions = plan.conditions()
     if not isinstance(run_id, str) or not run_id.strip():
         raise ValueError("run_id must be nonempty")
@@ -284,7 +285,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) ->
                         if reading.get("module") != module:
                             raise ValueError("Reading belongs to the wrong module")
                         reads.append(reading)
-                        if reading.get("clean") is not True or reading.get("problems"):
+                        if not reading_allows_continuation(reading):
                             # Preserve partial reads and stop later acquisition.
                             break
                 except BaseException as exc:
@@ -318,11 +319,11 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) ->
                 fresh = all(datetime.fromisoformat(start) <=
                             datetime.fromisoformat(r["captured_at_utc"]) <=
                             datetime.fromisoformat(finish) for r in reads)
-                clean = (finite and set(actual) == expected_keys and all(
-                    r.get("clean") is True and not r.get("problems") for r in reads)
+                acquisition_accepted = (finite and set(actual) == expected_keys and all(
+                    reading_allows_continuation(r) for r in reads)
                     and expected_measured <= set(measurements) and fresh)
                 if "magnetic" in modules and finite:
-                    clean = clean and math.hypot(actual.get("field_x_t", math.inf),
+                    acquisition_accepted = acquisition_accepted and math.hypot(actual.get("field_x_t", math.inf),
                                                 actual.get("field_z_t", math.inf)) <= 3
                 if finite and set(actual) == expected_keys:
                     try:
@@ -330,19 +331,21 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) ->
                             key: value for key, value in actual.items() if key in MODULE_KEYS[module]
                         }),)) for module in modules)).validate()
                     except ValueError:
-                        clean = False
+                        acquisition_accepted = False
                 if not finite:
                     # Raw problematic values are already auditable via emit; JSON
                     # rejects non-finite numbers, so a malformed backend fails closed.
                     raise ValueError("Non-finite formal readback")
+                clean = acquisition_accepted and all(r.get("clean") is True for r in reads)
                 sample = {
+                    "acquisition_accepted": acquisition_accepted,
                     "started_at_utc": start, "finished_at_utc": finish,
                     "actual": actual, "measurements": measurements, "reads": reads,
                     "clean": clean, "simulated": snapshot["mode"] == "simulation",
                 }
                 store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
                 emit("formal_sample", {"sample_index": sample_index, "clean": clean})
-                if not clean:
+                if not acquisition_accepted:
                     raise ValueError("Formal sample is incomplete or unclean")
             store.finish_attempt(run_id, condition["condition_id"], attempt,
                                  expected_samples=plan.samples_per_condition)
@@ -389,4 +392,14 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) ->
               "failed" if primary is not None or cleanup_errors else "completed")
     error = f"{type(primary).__name__}: {primary}" if primary else None
     store.finish_run(run_id, status, cleanup, error)
-    return {"run_id": run_id, "status": status, "cleanup": cleanup, "error": error}
+    from .lockin_overload import overload_summary
+    import json
+    payloads = [json.loads(r[0]) for r in store.connection.execute(
+        "SELECT payload_json FROM combination_samples WHERE run_id=?", (run_id,))]
+    summary = overload_summary([p["reads"] for p in payloads])
+    completion_message = ("completed with overload points; inspect per-channel validity"
+                          if status == "completed" and summary["data_quality"] == "overload_recorded"
+                          else status)
+    emit("data_quality_summary", {**summary, "completion_message": completion_message})
+    return {"run_id": run_id, "status": status, "cleanup": cleanup, "error": error,
+            "overload_summary": summary, "completion_message": completion_message}

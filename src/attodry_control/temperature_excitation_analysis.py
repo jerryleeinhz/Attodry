@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import asdict, dataclass, fields
 import math
 from pathlib import Path
@@ -466,6 +467,11 @@ def _summary_sample_row(
     lia_status = instrument.get("lia_status")
     if not isinstance(reading, Mapping) or not isinstance(lia_status, Mapping):
         raise ValueError(f"lockin_{role} sample is missing reading/status data.")
+    per_role = sample.get("problems_by_role")
+    if isinstance(per_role, Mapping) and f"lockin_{role}" in per_role:
+        problems = tuple(str(p) for p in per_role[f"lockin_{role}"])
+    if sample.get("valid_for_analysis_by_role", {}).get(f"lockin_{role}") is False and not problems:
+        problems = ("Recorded invalid for analysis",)
     raw = _integer(lia_status.get("raw", 0), "lia_status.raw")
     error_status = _integer(instrument.get("error_status", 0), "error_status")
     statuses = _sample_statuses(
@@ -509,12 +515,18 @@ def _load_formal_csv(path: Path) -> tuple[TemperatureExcitationSample, ...]:
             role = _normalize_role(raw_row.get("role"))
             raw_status = _integer(raw_row.get("lia_status_raw", 0), "lia_status_raw")
             error_status = _integer(raw_row.get("error_status", 0), "error_status")
+            problems_value = json.loads(raw_row.get("problems_json") or "[]")
+            if not isinstance(problems_value, list):
+                raise ValueError("Formal CSV problems_json must be a list")
+            problems = tuple(str(p) for p in problems_value)
+            if raw_row.get("valid_for_analysis") == "False" and not problems:
+                problems = ("Recorded invalid for analysis",)
             statuses = _sample_statuses(
                 reading={},
                 lia_status={},
                 raw=raw_status,
                 error_status=error_status,
-                problems=(),
+                problems=problems,
             )
             current = _finite_float(
                 raw_row.get("nominal_current_a_rms"), "nominal_current_a_rms"
@@ -569,7 +581,7 @@ def _load_formal_csv(path: Path) -> tuple[TemperatureExcitationSample, ...]:
                     lia_status_raw=raw_status,
                     error_status=error_status,
                     statuses=statuses,
-                    problems=(),
+                    problems=problems,
                 )
             )
     return tuple(rows)

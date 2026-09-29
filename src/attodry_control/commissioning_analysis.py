@@ -3928,6 +3928,12 @@ def _commissioning_sample(
     else:
         overload = bool(reading.get("overload"))
     error_status = int(instrument.get("error_status", 0))
+    per_role = sample.get("problems_by_role")
+    if isinstance(per_role, dict) and f"lockin_{role}" in per_role:
+        problems = tuple(str(p) for p in per_role[f"lockin_{role}"])
+    validity = sample.get("valid_for_analysis_by_role", {})
+    if validity.get(f"lockin_{role}") is False and not problems:
+        problems = ("Recorded invalid for analysis",)
     statuses: list[str] = []
     if problems:
         statuses.append("problem")

@@ -1473,6 +1473,7 @@ def _run_frequency_sweep(
             )
             harmonic_control = HarmonicSensitivitySession.create(
                 config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
+                overload_policy=config.lockin_sweep.overload_policy,
             )
             if harmonic_control is not None:
                 harmonic_control.enter(
@@ -1580,6 +1581,7 @@ def _run_frequency_sweep(
                     settle_s=args.settle_s,
                     record=point_record,
                     harmonic=harmonic_control.current_harmonics,
+                    overload_policy=harmonic_control.overload,
                     on_input_overload=lambda status: harmonic_control.diagnose_overload(
                         lockin_xx, lockin_xy, status, args.settle_s, point_record),
                 )
@@ -1817,6 +1819,7 @@ def _run_frequency_excitation_sweep(
             )
             harmonic_control = HarmonicSensitivitySession.create(
                 config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
+                overload_policy=config.lockin_sweep.overload_policy,
             )
             if harmonic_control is not None:
                 harmonic_control.enter(
@@ -1942,6 +1945,7 @@ def _run_frequency_excitation_sweep(
                         settle_s=args.settle_s,
                         record=point_record,
                         harmonic=harmonic_control.current_harmonics,
+                        overload_policy=harmonic_control.overload,
                         on_input_overload=lambda status: harmonic_control.diagnose_overload(
                             lockin_xx, lockin_xy, status, args.settle_s, point_record),
                     )
@@ -2253,6 +2257,7 @@ def _execute_excitation_sweep_on_open_pair(
         )
         harmonic_control = HarmonicSensitivitySession.create(
             config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
+            overload_policy=config.lockin_sweep.overload_policy,
         )
         if harmonic_control is not None:
             harmonic_control.enter(
@@ -2327,6 +2332,7 @@ def _execute_excitation_sweep_on_open_pair(
                 settle_s=args.settle_s,
                 record=point_record,
                 harmonic=harmonic_control.current_harmonics,
+                overload_policy=harmonic_control.overload,
                 on_input_overload=lambda status: harmonic_control.diagnose_overload(
                     lockin_xx, lockin_xy, status, args.settle_s, point_record),
             )
@@ -2425,6 +2431,7 @@ def _execute_excitation_sweep_on_open_pair(
         "interface_clear": interface_clear,
         "error": None if failure is None else str(failure),
     }
+    _annotate_sweep_quality(result)
     return result, failure
 
 
@@ -2476,6 +2483,7 @@ def _measurement_config_snapshot(
         ),
         "harmonics": _requested_sweep_harmonics(args),
         "harmonics_by_role": _requested_sweep_harmonics_by_role(args),
+        "overload_policy": config.lockin_sweep.overload_policy,
         "sensitivity_modes": {
             "lockin_xx": config.lockin_xx.sensitivity_mode.value,
             "lockin_xy": config.lockin_xy.sensitivity_mode.value,
@@ -2544,7 +2552,7 @@ def _measurement_config_snapshot(
             EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
         )
     return {
-        "schema_version": 13,
+        "schema_version": 14,
         "scan": scan,
         "source": "resolved_hardware_toml",
         "readback_location": "preflight and per-point records",
@@ -2555,8 +2563,8 @@ def _measurement_config_snapshot(
         "frequency_readback_policy": (
             "Sweep frequency requests and SR830 FREQ?/SNAP? readbacks are both "
             "recorded; display quantization or XX/XY differences are not rejected. "
-            "Only non-finite, out-of-range, unlock, input/reserve overload, filter "
-            "overload, and instrument-error conditions fail closed."
+            "Non-finite, out-of-range, unlock and instrument errors fail closed. "
+            "Overloads follow the explicitly recorded overload_policy during acquisition."
         ),
         "output_overload_policy": (
             "SR830 LIAS bit 2 (CH1/CH2 output overload) is retained in raw status "
@@ -2565,11 +2573,12 @@ def _measurement_config_snapshot(
         ),
         "status_recheck_policy": (
             "A first input/reserve or filter overload latch is retained as an audit "
-            "candidate and re-read once after settling; a repeated latch fails closed."
+            "candidate and re-read once after settling; a repeated latch follows "
+            "overload_policy (default abort). Setup/cleanup remain strict."
         ),
         "harmonic_scheduling_policy": "independent_roles_v1",
         "fixed_input_overload_diagnostic": (
-            "After confirmed input/reserve overload during fixed-range acquisition, "
+            "Before aborting confirmed input/reserve overload during fixed-range acquisition, "
             "save an abort-only h1 snapshot of the affected instrument at unchanged "
             "source/SENS/RMOD, then terminate and clean up. Overloaded values are "
             "diagnostic only, never accepted or used for fitting."
@@ -2627,12 +2636,22 @@ def _sweep_outcome(
     return "rejected"
 
 
+def _annotate_sweep_quality(result):
+    from .lockin_overload import overload_summary
+    result["overload_summary"] = overload_summary(result.get("points", result.get("temperature_conditions", [])))
+    result["data_quality"] = result["overload_summary"]["data_quality"]
+    result["completion_message"] = ("completed with overload points; inspect per-role validity"
+        if result.get("completed") and result["data_quality"] == "overload_recorded"
+        else str(result.get("outcome")))
+
+
 def _emit_sweep_result(
     record_directory: Path,
     result: dict[str, object],
     *,
     progress_writer: _JsonlProgressWriter | None = None,
 ) -> None:
+    _annotate_sweep_quality(result)
     stored_result: dict[str, object] | None = None
     try:
         stored_result = _save_sweep_result(record_directory, result)
@@ -2651,6 +2670,8 @@ def _emit_sweep_result(
                 "scan": result.get("scan"),
                 "completed": result.get("completed"),
                 "outcome": result.get("outcome"),
+                "data_quality": result.get("data_quality"),
+                "completion_message": result.get("completion_message"),
                 "cleanup_verified": (
                     cleanup.get("verified") if isinstance(cleanup, Mapping) else None
                 ),
@@ -3421,6 +3442,7 @@ def _apply_sweep_segment_ranges(
     record: dict[str, object],
     harmonic: int | Mapping[str, int] = 1,
     on_input_overload: Callable[[dict[str, object]], None] | None = None,
+    overload_policy=None,
 ) -> None:
     """Apply an optional fixed-range override at a named range segment.
 
@@ -3509,6 +3531,8 @@ def _apply_sweep_segment_ranges(
     )
     transition_record["status"] = transition
     sensitivity_setup["transition_status"] = transition
+    if overload_policy is not None:
+        problems = overload_policy.apply(transition, problems)
     if problems:
         if on_input_overload is not None:
             on_input_overload(transition)
@@ -3576,6 +3600,7 @@ def _apply_sweep_autorange(
     harmonic: int | Mapping[str, int] = 1,
     verify_settings: Callable[[], object] | None = None,
     on_input_overload: Callable[[dict[str, object]], None] | None = None,
+    overload_policy=None,
 ) -> None:
     """Apply adjacent range changes, repeating widening within one point.
 
@@ -3638,6 +3663,8 @@ def _apply_sweep_autorange(
                 "lockin_xy": _audited_harmonic_sample_record(verification_xy),
                 "problems": verification_problems,
             }
+            if overload_policy is not None:
+                verification_problems = overload_policy.apply(probe_record["verification"], verification_problems)
             if verification_problems:
                 if on_input_overload is not None:
                     on_input_overload(probe_record)
@@ -3646,12 +3673,18 @@ def _apply_sweep_autorange(
                     + "; ".join(verification_problems)
                 )
             xx, xy, probe_problems = verification_xx, verification_xy, []
+        if overload_policy is not None:
+            probe_problems = overload_policy.apply(probe_record, probe_problems)
         if probe_problems:
             if on_input_overload is not None:
                 on_input_overload(probe_record)
             raise Sr830Error("Autorange probe rejected: " + "; ".join(probe_problems))
 
         samples_by_role = {"lockin_xx": xx, "lockin_xy": xy}
+        if any(samples_by_role[role].lia_status.input_or_reserve_overload or
+               samples_by_role[role].lia_status.filter_overload for role in policies):
+            autorange_record["diagnostic_skip"] = "continued overload: gain decision unavailable; retain approved range"
+            return
         changes: dict[str, AutorangeDecision] = {}
         failures: list[str] = []
         decision_record: dict[str, object] = {"captured_unix_s": time.time(), "roles": {}}
@@ -3751,6 +3784,8 @@ def _apply_sweep_autorange(
         assert isinstance(transitions, list)
         transitions.append(transition)
         autorange_record.setdefault("transition_status", transition)
+        if overload_policy is not None:
+            transition_problems = overload_policy.apply(transition, transition_problems)
         if transition_problems:
             if on_input_overload is not None:
                 on_input_overload(transition)
@@ -3779,6 +3814,8 @@ def _apply_sweep_autorange(
         assert isinstance(verifications, list)
         verifications.append(verification_record)
         autorange_record.setdefault("verification", verification_record)
+        if overload_policy is not None:
+            verification_problems = overload_policy.apply(verification_record, verification_problems)
         if verification_problems:
             if on_input_overload is not None:
                 on_input_overload(verification_record)
@@ -3786,6 +3823,10 @@ def _apply_sweep_autorange(
                 "Autorange transition verification rejected: "
                 + "; ".join(verification_problems)
             )
+        if any(s.lia_status.input_or_reserve_overload or s.lia_status.filter_overload
+               for r, s in (("lockin_xx", verification_xx), ("lockin_xy", verification_xy)) if r in policies):
+            autorange_record["diagnostic_skip"] = "continued overload after range change; retain approved range"
+            return
         widening_roles = {
             role for role, decision in changes.items()
             if decision.action is AutorangeAction.WIDEN
@@ -4493,13 +4534,15 @@ def _capture_sweep_point(
                 except BaseException as exc:
                     problems.append("Formal setting verification failed: " + (str(exc) or type(exc).__name__))
                     raise
+            blocking = (problems if harmonic_control is None else
+                        harmonic_control.overload.annotate_sample(sample_payload))
             if on_formal_sample_recorded is not None:
                 on_formal_sample_recorded(sample_payload)
-            if problems:
+            if blocking:
                 if harmonic_control is not None:
                     harmonic_control.diagnose_overload(
                         lockin_xx, lockin_xy, sample_payload, harmonic_settle_s, record)
-                raise Sr830Error("Sweep sample rejected: " + "; ".join(problems))
+                raise Sr830Error("Sweep sample rejected: " + "; ".join(blocking))
 
 
 def _restore_first_harmonic(instrument: Sr830) -> bool:

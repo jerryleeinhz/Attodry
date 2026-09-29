@@ -1,5 +1,20 @@
 # Hardware and safety guide
 
+## Opt-in SR830 overload acquisition policy (2026-09-29)
+
+At the user's request, `lockin_sweep.overload_policy` may explicitly allow
+continued acquisition with invalid overload readings. `abort` remains the
+default. `continue_unselected` only permits an unselected instrument's overload;
+`record_continue` retains selected overloaded samples for diagnostic use.
+Neither option excuses communication, reference unlock, configuration/readback,
+excitation/environment or magnetic-limit failures. Initial preflight/setup and
+final cleanup retain their strict checks. No inferred zero after communication
+loss, automatic retry, or increased limit/range/reserve is introduced.
+
+Keep raw faults and explicit per-role validity. Acquisition completion is not
+proof of clean measurements. See [operation details](LOCKIN_DAILY_OPERATION.md)
+and [high-impedance XX attenuation notes](LOCKIN_XX_ATTENUATION.md).
+
 ## Magnet coordinates and limits
 
 Integration boundary (2026-09-14): the new four-module offline coordinator keeps

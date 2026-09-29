@@ -21,6 +21,27 @@ NOTEBOOK = PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb"
 
 
 class TemperatureExcitationAnalysisTests(unittest.TestCase):
+    def test_continued_overload_role_quality_survives_json_and_csv(self):
+        from attodry_control.lockin_overload import OverloadPolicy
+        from attodry_control.temperature_excitation_scan import _write_formal_samples_csv
+        payload = self._summary()
+        sample = payload["temperature_conditions"][0]["excitation"]["points"][0]["samples"][0]
+        sample["selected_roles"] = ["xx", "xy"]
+        sample["lockin_xx"]["lia_status"] = {"raw": 1, "input_or_reserve_overload": True}
+        sample["problems"] = ["lockin_xx input/reserve overload"]
+        OverloadPolicy("record_continue").annotate_sample(sample)
+        summary_path = self._write_summary(payload)
+        csv_path = self.root / "quality_formal_samples.csv"
+        _write_formal_samples_csv(csv_path, payload)
+        for path in (summary_path, csv_path):
+            with self.subTest(path=path.name):
+                clean = load_temperature_excitation_samples(path)
+                raw = load_temperature_excitation_samples(path, sample_statuses=None)
+                self.assertEqual(len(raw), 32)
+                self.assertEqual(len(clean), 31)
+                flagged = [r for r in raw if r.statuses != ("clean",)]
+                self.assertEqual([r.role for r in flagged], ["xx"])
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(dir=PROJECT_ROOT)
         self.addCleanup(self.temporary.cleanup)

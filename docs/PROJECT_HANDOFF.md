@@ -4,6 +4,40 @@ Last updated: 2026-09-29
 
 ## Current stage
 
+### Explicit overload continuation (offline; 2026-09-29)
+
+User-approved acquisition exception: optional `lockin_sweep.overload_policy`
+accepts `abort` (default), `continue_unselected` (only a role with no selected
+harmonics), or `record_continue` (diagnostic). One settled recheck remains.
+All three standalone sweeps, temperature/excitation and combination use the same
+policy, including HARM, segment-range and bounded-auto qualification transitions.
+Confirmed overloaded auto probes retain the approved range and log an unavailable
+gain decision; they do not use clipped amplitude to choose gain. Other occupancy,
+setting/readback, communication, unlock, instrument-error, source/environment and
+magnetic limits still fail closed. Preflight/baseline setup and cleanup remain strict.
+
+Raw faults/settings/rechecks remain intact. Schema-14 sweep records add per-role
+analysis validity and separate blocking/continued problems, plus a visible final
+overload summary. Continuing does not invoke the abort-only h1 diagnostic.
+Combination records distinguish acquisition acceptance from `clean=false` data;
+default analysis excludes diagnostic rows, while audit retains them. Clean XY
+data can survive an allowed companion XX overload. Temperature JSON and CSV carry
+role-specific quality; CSV now normalizes independent-role short names.
+Output-only overload retains the existing acquisition policy and is conservatively
+excluded from new sample analysis.
+
+Verification: 399 related hardware-isolated regression tests passed. After adding
+the temperature completion/CSV checks, all 38 affected policy/temperature/monitor
+tests passed (two additional cases; 401 distinct cases covered overall).
+Tests used Python -s, NumPy 1.26.4, Matplotlib 3.9.2 and preloaded Windows
+console/widget libraries before the existing hardware import/DLL guard.
+No instrument connections, station deployment or real overload acceptance test.
+Usage: [LOCKIN_DAILY_OPERATION.md](LOCKIN_DAILY_OPERATION.md).
+Electrical design notes: [LOCKIN_XX_ATTENUATION.md](LOCKIN_XX_ATTENUATION.md);
+a high-resistance device at 100 kHz requires loading/capacitance assessment before
+selecting an input attenuator. No wiring change or product purchase is implied.
+
+
 ### Combination and unified plotting completed (offline; 2026-09-29)
 
 Both analysis notebooks now use one tested dashboard: per-channel formal-status

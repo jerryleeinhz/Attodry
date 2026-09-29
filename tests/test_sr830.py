@@ -1841,7 +1841,7 @@ class Sr830Tests(unittest.TestCase):
             },
         )
         self.assertNotIn("measurement_config", result)
-        self.assertEqual(result["run_configuration"]["schema_version"], 13)
+        self.assertEqual(result["run_configuration"]["schema_version"], 14)
         self.assertEqual(
             result["run_configuration"]["sweep"]["run_name"],
             "replace_before_run",
@@ -1951,7 +1951,7 @@ class Sr830Tests(unittest.TestCase):
             [write for write in xx_resource.writes if write.startswith("SENS ")],
             ["SENS 22", "SENS 21", "SENS 21"],
         )
-        self.assertEqual(result["run_configuration"]["schema_version"], 13)
+        self.assertEqual(result["run_configuration"]["schema_version"], 14)
 
     def test_frequency_sweep_saves_preflight_rejection(self) -> None:
         config_path = self._hardware_config()
@@ -2751,7 +2751,7 @@ class Sr830Tests(unittest.TestCase):
             result["points"][0]["nominal_current_a_rms"],
             0.004 / 100550.0,
         )
-        self.assertEqual(result["run_configuration"]["schema_version"], 13)
+        self.assertEqual(result["run_configuration"]["schema_version"], 14)
         self.assertNotIn("measurement_config", result)
         self.assertEqual(len(result["points"][0]["samples"]), 3)
         self.assertEqual(

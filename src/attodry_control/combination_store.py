@@ -168,8 +168,13 @@ class CombinationStore:
                     "WHERE run_id=? AND condition_id=? AND attempt_index=?",
                     (run_id, condition_id, attempt),
                 ).fetchall()
+                from .lockin_overload import reading_allows_continuation
+                payloads = [json.loads(row[0]) for row in samples]
                 if len(samples) != expected_samples or not all(
-                    json.loads(row[0]).get("clean") is True for row in samples
+                    p.get("clean") is True or (
+                        p.get("acquisition_accepted") is True and p.get("reads")
+                        and all(reading_allows_continuation(r) for r in p["reads"]))
+                    for p in payloads
                 ):
                     raise ValueError("Cannot promote incomplete or unclean samples")
             cursor = self.connection.execute(

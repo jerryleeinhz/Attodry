@@ -14,6 +14,58 @@ python -m attodry_control.lockin_test sweep-excitation
 python -m attodry_control.lockin_test sweep-frequency-excitation
 ```
 
+## 过载后继续采集（2026-09-29）
+
+在已有 `[lockin_sweep]` 中添加一行，三种策略选一种：
+
+```toml
+overload_policy = "record_continue"
+```
+
+| 策略 | 行为 |
+| --- | --- |
+| `abort`（省略时默认） | Input/Reserve 或 Filter overload 经原有一次等待复查仍存在则中止。 |
+| `continue_unselected` | 只允许**整个扫描中没有选择任何谐波**的仪器过载后继续；选中的仪器仍中止。 |
+| `record_continue` | 两台仪器的 Input/Reserve、Filter overload 都可保留原始记录并继续；过载读数无效。 |
+
+例如只测 Vxy h2，并允许未测的 XX 过载：
+
+```toml
+[lockin_sweep] # 修改已有表，不要重复创建
+excitation_xx_harmonics = []
+excitation_xy_harmonics = [2]
+overload_policy = "continue_unselected"
+```
+
+频率扫描使用 `frequency_*_harmonics`；f×e 使用 `combined_*_harmonics`。
+若仍选择 XX h1，但希望 XX 过载时也完成扫描，使用 `record_continue`。
+此模式覆盖频率、激励、f×e、温度×激励及 combination 的共享采集路径。
+
+边界和审计语义：
+
+- 这是**采集阶段的数据质量例外**。起始 preflight、基线设置和最终 cleanup
+  仍要求原有严格检查；如果一开始已经过载，仍需先调好设置再启动。
+- 原有一次等待复查保留。谐波/分段量程转换后同样记录策略决定。
+- `problems`、原始 LIAS、X/Y/R/phase、SENS/RMOD/HARM 和复查结果保留；新增
+  `blocking_problems`、`continued_overload_problems`、`problems_by_role`、
+  `valid_for_analysis_by_role`。持续过载不会在扫描途中临时切回 h1；只有真正
+  中止的固定量程 input/reserve trip 才执行原来的 abort-only h1 诊断。
+- 自动量程遇到已获准继续的持续输入/滤波过载时，保留当前获准档位并记录
+  `diagnostic_skip`，不根据失真的 R 猜测增益；正常无过载时原有有界量程算法继续使用。
+  量程边界、占用率不合格、设置回读失败仍可中止；不会放宽已批准的自动范围。
+- 通信、失锁、非有限/越界读数、仪器错误、设置异常及磁场/温度/激励安全检查不豁免。
+- `completed` 只表示扫描和 cleanup 完成。结果与进度报告包含 `overload_summary`
+  和 `completion_message`；有过载时明确显示 `completed with overload points`。
+  JSON 配置 schema 14（旧文件仍可读）。XY 清洁读数不会仅因获准继续的 XX 过载被标成过载。
+- sweep 的正常 `clean` 分析筛选及校准拒绝无效点；原始 Python 加载 API 保留其审计用途。
+  combination SQLite 保留 `acquisition_accepted=true, clean=false` 的诊断样本；
+  条件 `accepted` 代表采集完成，不代表全部数据有效。默认加载排除这些样本，
+  Audit 可查看原始值并按通道质量筛选。output-only bit 2 仍按原规则不中止，
+  新样本的分析有效性采用保守排除，不能靠它证明饱和值真实。
+
+XX 测量放大器过载不等于 SINE OUT 激励过载；这也不能单凭状态位证明 XY 信号
+无串扰。XY 自身 input/reserve overload 即使只测 h2，也不能保证 h2 准确。
+
 ## 分谐波 sensitivity/Reserve 接口
 
 ### 每台仪器只切换到自己选择的测量谐波（2026-09-28 修正）
@@ -34,7 +86,7 @@ h1、XY 保持 h2；只有同一角色选择多个谐波时，该仪器才逐阶
 ### 固定量程输入过载：中止前的 h1 诊断
 
 扫描过程中，Input/Reserve overload 经一次等待复查仍存在时，若**发生过载的
-角色在该谐波使用 fixed 模式**，程序执行一次中止专用诊断：
+角色在该谐波使用 fixed 模式**且当前策略要求中止，程序执行一次中止专用诊断：
 
 1. 保留原始过载读数和复查结果；记录当时的 SINE OUT、量程和 Reserve。
 2. 仅把过载的仪器切至 h1，保持当时的 SENS/RMOD 和激励幅值，不套用另一个
@@ -100,13 +152,14 @@ autorange_stable_samples = 2
 才缩窄；计数与当前档位按 `(角色, 谐波)` 独立保留，组合采集也不会每次重置。
 达到最高档仍不满足条件时拒绝本次运行，不调用无界 Auto Gain。
 
-两台仪器仍成对切换 HARM。切换前先使用当前/已配置档中的宽档及较高保护的
+各台仪器只切换自己的已选 HARM。切换前先使用当前/已配置档中的宽档及较高保护的
 已配置 Reserve；完成谐波过渡后再施加目标小档。HARM 变化与 SENS/RMOD 变化
 分别执行状态检查和两段 `settle_s` 等待，必要的单次过载复查另加等待。
 因此启用分谐波量程会增加点间耗时；等待不等于样品物理稳态。
 
 H2 很小也不能跳过整路输入/储备/滤波过载检查。两台仪器（包括未选为正式
-输出的伴随通道）的状态都必须通过，持续异常则保留原始尝试并拒绝。Reserve
+输出的伴随通道）的状态均须记录；默认持续异常则保留原始尝试并拒绝。
+显式继续模式仅按上节规则豁免采集中止，不将过载读数变为有效。Reserve
 固定在该阶数配置值，不会为获得更小量程而自行降低检查标准。
 
 新记录增加 `harmonic_settings_transitions`、`harmonic_setting_checks` 和

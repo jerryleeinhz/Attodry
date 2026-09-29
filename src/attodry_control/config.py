@@ -301,6 +301,7 @@ class LockinSweepConfig:
     max_device_voltage_v_rms: float
     external_50_ohm_termination: bool
     output_directory: Path
+    overload_policy: str = "abort"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1669,6 +1670,7 @@ def _parse_lockin_sweep(
             "excitation_xy_harmonics",
             "combined_xx_harmonics",
             "combined_xy_harmonics",
+            "overload_policy",
         },
     )
     frequency_points_present = "frequency_points_hz" in table
@@ -1882,7 +1884,12 @@ def _parse_lockin_sweep(
         table["approximate_device_resistance_ohm"],
         f"{name}.approximate_device_resistance_ohm",
     )
+    from .lockin_overload import OVERLOAD_POLICIES
+    overload_policy = table.get("overload_policy", "abort")
+    if overload_policy not in OVERLOAD_POLICIES:
+        raise ConfigError(f"{name}.overload_policy must be one of {OVERLOAD_POLICIES}")
     return LockinSweepConfig(
+        overload_policy=overload_policy,
         frequency_points_hz=frequency_points_hz,
         frequency_ranges=frequency_ranges,
         frequency_point_specs=frequency_point_specs,

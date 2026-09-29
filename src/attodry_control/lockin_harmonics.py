@@ -10,6 +10,7 @@ import time
 import math
 from dataclasses import asdict
 
+from .lockin_overload import OverloadPolicy
 from .lockin_autorange import AutorangePolicy, AutorangeState
 from .sr830_settings import SensitivityMode
 
@@ -19,16 +20,17 @@ from .sr830_settings import sensitivity_code, sensitivity_full_scale_v, time_con
 
 class HarmonicSensitivitySession:
     @classmethod
-    def create(cls, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None):
-        return cls(xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role)
+    def create(cls, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None, overload_policy="abort"):
+        return cls(xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role, overload_policy)
 
-    def __init__(self, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None):
+    def __init__(self, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None, overload_policy="abort"):
         self.configs = {"lockin_xx": xx, "lockin_xy": xy}
         self.sensitivity_setup = sensitivity_setup
         self.ranges = sensitivity_setup["ranges"]
         self.reserves = reserve_setup["roles"]
         selections = harmonics_by_role or {"xx": (1, 2, 3), "xy": (1, 2, 3)}
         self.selected = {"lockin_" + role: tuple(values) for role, values in selections.items()}
+        self.overload = OverloadPolicy(overload_policy, self.selected)
         self.owned = {role for role, config in self.configs.items()
                       if self.selected[role] and (config.harmonic_settings or
                           config.sensitivity_mode is SensitivityMode.BOUNDED_AUTO)}
@@ -98,6 +100,7 @@ class HarmonicSensitivitySession:
         transition, problems = daily._consume_and_verify_harmonic_transition(
             xx, xy, harmonic=harmonic, settle_s=settle_s, allow_input_reserve_recheck=True)
         event["status"] = transition
+        problems = self.overload.apply(transition, problems)
         if problems:
             self.diagnose_overload(xx, xy, transition, settle_s, event)
             raise Sr830Error("Unsafe harmonic settings transition: " + "; ".join(problems))
@@ -258,6 +261,7 @@ class HarmonicSensitivitySession:
                 xx, xy, sensitivity_setup=self.sensitivity_setup, policies=policies, states=states,
                 target_frequency_hz=target_frequency_hz, frequency_rel_tolerance=frequency_rel_tolerance,
                 settle_s=settle_s, record=audit, harmonic=self.current_harmonics,
+                overload_policy=self.overload,
                 on_input_overload=lambda status: self.diagnose_overload(xx, xy, status, settle_s, audit),
                 verify_settings=lambda: self.verify(xx, xy, self.current_harmonics, audit))
             # Preserve the first legacy auto audit view; per-harmonic entries
@@ -325,6 +329,15 @@ class HarmonicSensitivitySession:
                 continue
             policy = self.policies.get((role, harmonic))
             if policy is None:
+                continue
+            faults = []
+            if sample.lia_status.input_or_reserve_overload:
+                faults.append(f"{role} input/reserve overload")
+            if sample.lia_status.filter_overload:
+                faults.append(f"{role} filter overload")
+            if faults and not self.overload.partition(faults)[0]:
+                # A saturated value cannot justify a new automatic gain. It
+                # remains invalid diagnostic data at the current approved range.
                 continue
             amplitude = sample.reading.amplitude_v
             scale = sensitivity_full_scale_v(self.ranges[role]["current_sensitivity_code"])

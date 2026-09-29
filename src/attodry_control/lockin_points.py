@@ -112,7 +112,8 @@ class LockinPointSession:
         daily._configure_sweep_sensitivities(
             xx, xy, sensitivity_setup=self.sensitivity_setup, settle_s=self.args.settle_s)
         self.harmonic_control = daily.HarmonicSensitivitySession.create(
-            self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup, self.harmonics_by_role)
+            self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup, self.harmonics_by_role,
+            overload_policy=self.config.lockin_sweep.overload_policy)
         if self.harmonic_control is not None:
             self.harmonic_control.enter(
                 xx, xy, harmonic=self.harmonic_control.initial_harmonics(self.config.lockin_xx.frequency_hz), settle_s=self.args.settle_s,
@@ -140,6 +141,7 @@ class LockinPointSession:
             point_spec=self.args.point_specs[index], lockin_xx_config=self.config.lockin_xx,
             lockin_xy_config=self.config.lockin_xy, settle_s=self.args.settle_s,
             record=self.point_record, harmonic=self.harmonic_control.current_harmonics,
+            overload_policy=self.harmonic_control.overload,
             on_input_overload=lambda status: self.harmonic_control.diagnose_overload(
                 xx, xy, status, self.args.settle_s, self.point_record),
         )
@@ -194,8 +196,19 @@ class LockinPointSession:
                 reading = sample["lockin_" + role]["reading"]
                 for metric in ("x_v", "y_v", "amplitude_v", "phase_deg"):
                     measured[f"lockin_{role}_h{sample['harmonic']}_{metric}"] = reading[metric]
+        from .lockin_overload import overload_summary
+        summary = overload_summary(record)
+        clean = all(s["valid_for_analysis_by_role"]["lockin_" + role]
+                    for s in record["samples"] for role in s["selected_roles"])
+        problems = [p for s in record["samples"] for role in s["selected_roles"]
+                    for p in s["problems_by_role"]["lockin_" + role]]
+        # Output-only flags already allowed by acquisition are conservatively
+        # excluded by channel analysis, without changing the legacy trip policy.
+        continued = any(s["continued_overload_problems"] for s in record["samples"])
         return {"module": "lockin", "captured_at_utc": utc_now(), "actual": actual,
-                "measurements": measured, "clean": True, "problems": [], "status": record}
+                "measurements": measured, "clean": not problems,
+                "valid_for_analysis": clean, "overload_summary": summary,
+                "overload_continuation": continued, "problems": problems, "status": record}
 
     def cleanup(self):
         if not self.writes_started:

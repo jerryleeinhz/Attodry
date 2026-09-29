@@ -94,10 +94,10 @@ class LockinProgressView:
             self.phase = "point completed"
         elif event_name == "excitation_finished":
             self.phase = "lockin excitation finished"
-            self.outcome = _optional_text(event.get("outcome"))
+            self.outcome = _optional_text(event.get("completion_message") or event.get("outcome"))
         elif event_name == "scan_finished":
             self.phase = "scan finished"
-            self.outcome = _optional_text(event.get("outcome"))
+            self.outcome = _optional_text(event.get("completion_message") or event.get("outcome"))
 
     def _update_flat_point(self, event: Mapping[str, Any]) -> None:
         fields = (

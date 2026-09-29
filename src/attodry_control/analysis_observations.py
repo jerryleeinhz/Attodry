@@ -54,6 +54,10 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
                               "error_status": legacy.get("error_status")}, {}))
     confirmed_status = False
     for reading, sample in evidence:
+        if sample.get("valid_for_analysis_by_role", {}).get(role) is False:
+            issues.append("recorded_invalid_for_analysis")
+        if sample.get("problems_by_role", {}).get(role):
+            issues.append("formal_problem")
         lia = reading.get("lia_status") or {}
         raw = lia.get("raw")
         confirmed_status |= type(raw) is int
