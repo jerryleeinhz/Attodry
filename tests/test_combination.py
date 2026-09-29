@@ -440,8 +440,10 @@ class CombinationTests(unittest.TestCase):
     def test_notebook_refresh_load_exclusions_and_missing_channels(self):
         try:
             import ipywidgets
+            import matplotlib
+            matplotlib.use("Agg")
         except ImportError:
-            self.skipTest("optional ipywidgets unavailable")
+            self.skipTest("optional notebook dependencies unavailable")
         self.execute()
         notebook = json.loads((ROOT / "notebooks/combination_analysis.ipynb").read_text(encoding="utf-8"))
         sources = ["".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "code"]
@@ -452,17 +454,27 @@ class CombinationTests(unittest.TestCase):
             exec(sources[0], namespace)
             namespace["DATA_DIRECTORY"] = self.directory
             exec(sources[1], namespace)
-            self.assertEqual(len(namespace["files"].options), 1)
-            namespace["files"].value = (namespace["files"].options[0][1],)
-            namespace["load_selected"]()
-            self.assertEqual(len(namespace["excluded"].options), 6)
-            self.assertEqual(len(namespace["loaded_rows"]), 6)
-            namespace["excluded"].value = (namespace["excluded"].options[0][1],)
-            exec(sources[2], namespace)
-            self.assertEqual(sum(len(s.rows) for s in namespace["selection"]), 5)
-            # A single-module dataset lacking Lock-in/SMU channels should explain,
-            # not raise or connect hardware.
-            namespace["loaded_rows"] = [{"accepted": True, "actual.temperature_k": 2}]
-            exec(sources[2], namespace)
-            self.assertEqual(namespace["selection"], ())
-            exec(sources[3], namespace)  # Export remains explicitly disabled.
+            dashboard = namespace["dashboard"]
+            self.assertEqual(len(dashboard.catalog), 1)
+            card = dashboard.cards[0]
+            card["sources"].set_sources(dashboard.catalog, [str(self.path)])
+            dashboard._card_changed(card)
+            self.assertEqual(len(dashboard._selected_rows(card)), 6)
+            self.assertEqual(len(card["excluded"].options), 6)
+            card["excluded"].value = (card["excluded"].options[0][1],)
+            self.assertEqual(len(dashboard._card_spec(card)["excluded_sample_ids"]), 1)
+            # Preserve the general SMU/lock-in combinations and independent card axes.
+            dashboard.add_plot("curve", {"source_paths": [str(self.path)],
+                "x": "measured.smu_bias_voltage_v", "y": "measured.smu_bias_current_a",
+                "group_by": "requested.lockin_excitation_v_rms"})
+            curve = dashboard.cards[-1]
+            dashboard._render_card(curve)
+            self.assertIsNotNone(curve["rendered"])
+            self.assertEqual(len(curve["rendered"]["data"]["rows"]), 6)
+            # An absent harmonic stays absent in the four-channel result.
+            card["x"].value = "measured.smu_bias_voltage_v"
+            card["group"].value = "requested.lockin_excitation_v_rms"
+            dashboard._render_card(card)
+            self.assertIsNotNone(card["rendered"])
+            self.assertEqual(card["rendered"]["data"]["report"]["channels"][
+                "measured.lockin_xy_h2_amplitude_v"]["displayed_point_count"], 0)

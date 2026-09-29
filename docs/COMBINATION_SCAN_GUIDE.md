@@ -263,18 +263,15 @@ missing original timestamps/sequence/attempt IDs stay absent. This adapter does
 not add rejected-condition loading beyond the old loader's contract; inspect
 the original JSONL for that audit. It does not invent SMU or magnetic data.
 
-`notebooks/combination_analysis.ipynb` is the new common read-only entry:
-set DATA_DIRECTORY once, refresh/select/load sources, inspect available columns,
-optionally exclude exact sample IDs, choose X/Y/group/filter, then plot/export.
-Old Notebooks remain for their specialized phase, fit, map and commissioning
-views. Their science models were not replaced by a generic fitter.
-
-Export creates a new directory, selected-sample CSV and selection manifest with
-IDs, filters, exclusions, protected group keys, selection hash and analysis-source
-hash; optional PNG/PDF accompany it. No raw file is overwritten. Figure integrity
-follows the scientific-visualization skill's preservation/missing-data/redundant-
-encoding guidance and reuses the project's scoped plotting style. This is not a
-journal-specific figure or compliance claim.
+`notebooks/combination_analysis.ipynb` now uses the shared unified plotting dashboard,
+opening a four-channel Vxx/Vxy h1/h2 card with mean ± SD by default. Curve and
+XY–Z cards, source selection, exact sample exclusions, per-channel overload filtering,
+statistics, setup save/restore and exports are available from widgets.
+See [DATA_ANALYSIS.md](DATA_ANALYSIS.md#unified-and-combination-plotting) for the
+workflow and statistical/quality contract. `unified_plotting.ipynb` uses the same
+implementation and opens a general curve card. The Python raw-row example above
+retains its original no-aggregation behavior. Specialized calibration notebooks
+and acquisition models are separate from this plotting change.
 
 ## Resume and safety boundaries
 

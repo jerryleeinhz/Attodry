@@ -14,6 +14,67 @@ python -m pip install -e ".[analysis]"
 The project pins matplotlib 3.10.9 for reproducible offline wheelhouses. Analysis
 does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 
+## Unified and combination plotting
+
+`notebooks/unified_plotting.ipynb` opens a general curve card;
+`notebooks/combination_analysis.ipynb` opens a four-channel Lock-in card.
+Both use the same read-only `attodry_control.unified_plotting` implementation.
+Restart an existing notebook kernel after updating the code, then run both cells.
+
+1. Set **Data directory**, click **Refresh records**, and check the source files.
+2. Choose **X/Y**, or **Component** (R, X, Y, phase) for the four-channel view.
+   It places Vxx h1/h2 above Vxy h1/h2; a varying actual Bx/Bz is selected when available.
+   Add independent curve, four-channel or XY–Z cards as needed.
+3. Choose **Raw observations**, **Mean ± SD**, or **Mean ± SEM**. Four-channel cards
+   default to SD. Means combine only formal repeats in the same source/run/condition/
+   attempt and recorded coordinate context. Runs, scan repetitions, directions,
+   segments and revisited conditions stay distinct. SD uses ddof=1; SEM=SD/sqrt(n)
+   assumes independent repeats, and is not a confidence interval. n=1 has no error bar.
+   Phase uses a circular mean with sample SD of wrapped angular residuals; an
+   undefined circular mean remains missing. Each panel and the statistics CSV report n.
+4. **Quality: Exclude flagged channels** uses that role/harmonic's formal status:
+   input/reserve, filter and output overload, unlocked reference, instrument error,
+   failed settings verification and recorded full-scale exceedance. Transition
+   probes are not formal evidence. Vxy h1 overload does not discard Vxy h2.
+   Unknown status is retained and counted, never inferred to be clear.
+   **AUDIT: include flagged** shows suspect values with visible labels. Loading a
+   rejected/problem source additionally requires the top-level audit checkbox.
+5. Group a varying condition with **Stack/group** or constrain it with **Add
+   fixed-condition filter**; unresolved changing acquisition coordinates stop
+   rendering. Empty Keep means no retained values. **Exclude IDs** removes exact
+   observations from the plot only. Exclusions/missing values break lines rather
+   than bridging them; no missing datum is filled with zero. Logs reject nonpositive
+   values and error intervals crossing zero. XY–Z shows raw measured points only,
+   reports overlaps and applies no interpolation. Generic CSV units/independent
+   dimensions are not inferred; without recorded condition IDs it supports Raw only.
+6. **Render this plot** or **Render all plots**, then **Export figures + data**.
+   Edits clear the old figure and export state; changed files (including SQLite
+   WAL changes) require refresh/re-render. Failed refresh cannot keep stale sources.
+7. **Save/Load setup** records sources, axes, filters, statistics, exclusions and audit
+   choices. Missing source files produce an error. Setup/export files are never
+   overwritten.
+
+Sources: combination SQLite, archived Three-SMU metadata+CSV, SR830 sweep JSON,
+temperature–excitation summaries/formal CSV, and ordinary CSV. Project loaders
+retain their completed/accepted/clean defaults; summary/formal CSV pairs are
+deduplicated. Source checkboxes show wrapped file names. The specialized SR830,
+temperature and Three-SMU notebooks keep their existing science models.
+
+Exports contain 600-dpi PNG, vector PDF/SVG, `selected_samples.csv` (contributing
+raw observations), `plotted_statistics.csv` (displayed means/gaps, n, SD, SEM,
+group and contributing sample IDs), and `plot_manifest.json` (selection,
+quality/manual exclusions, missing counts, source paths and implementation hashes).
+Four-channel exports identify `plot_channel`: a wide source observation can
+contribute once to each valid channel. A gap row has n=0, not a measured zero.
+Raw source records are never rewritten. The older Python `select_series`/
+`plot_series`/`export_selection` API remains a raw-observation API; the enhanced
+quality/statistics/export behavior is in `render_plot` and the two notebooks.
+
+This is voltage plotting and qualification, not H1→H2 frequency-response calibration.
+Small repeat scatter does not prove absence of clipping, drift or systematic error.
+Install the analysis extra in the kernel environment; JupyterLab also needs a
+compatible `jupyterlab_widgets` frontend in its server environment.
+
 ## Standalone SR830 commissioning sweeps
 
 ### Relative complex frequency-response calibration

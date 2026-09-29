@@ -6,6 +6,9 @@
 Three-SMU direct points 和 Magnetic。新增任意组合的**模拟执行器**、统一 SQLite
 记录、只读 run/condition/attempt/cleanup 监控，以及
 [`combination_analysis.ipynb`](notebooks/combination_analysis.ipynb)。
+通用多维离线绘图见新增的
+[`unified_plotting.ipynb`](notebooks/unified_plotting.ipynb)：可从多个模块数据源
+选择记录、配置曲线/XY–Z/四通道磁场图，按通道排除过载，显示均值±SD/SEM，保存绘图设置并导出图像、原始样本、统计表和审计清单。两个 notebook 共用这一分析实现；各模块专用拟合仍保留。
 SMU 外层、激励内层的数据可按激励重组为 SMU I–V；每个组合点都重新采样。
 2026-09-24：真实驱动执行器已完成限定范围的联合实机验证：两种电学嵌套顺序各 4 点，
 以及 Temperature × ordered Magnetic × gate SMU × Lock-in excitation 的 24 点扫描，

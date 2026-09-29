@@ -1,5 +1,28 @@
 # Development stages
 
+## Combination and unified plotting completed (offline; 2026-09-29)
+
+Both analysis notebooks now use one tested dashboard: per-channel formal-status
+exclusions, raw/mean±SD/mean±SEM, four-channel field panels, manual sample exclusions,
+independent curves/maps, setup save/restore and figures/raw/statistics/audit exports.
+Source/axis/filter callbacks preserve selections, empty filters select nothing,
+changed files invalidate exports and failed refresh clears stale sources. Missing
+observations break traces; repeats are pooled only within their recorded condition,
+never across runs, segments, directions or revisits. Phase statistics are circular.
+Unknown quality remains explicit. The original raw-row Python API is retained.
+
+Verification: 124 relevant offline tests (28 focused quality/statistics/UI tests
+and 96 existing combination/legacy/scientific-plotting regressions); actual JupyterLab
+with ipywidgets 8.1.7 exercised data selection, rendering, audit/SEM switching,
+setup save/restore and PNG/PDF/SVG+CSV/manifest export. A local archived 81-condition,
+243-repeat field dataset gave 81 n=3 points in each unflagged channel. Its 243 XY h1
+formal output-overload samples were excluded independently; XY h2 remained present.
+Input SQLite content hash was unchanged. Real data and UI artifacts remain outside Git.
+Local verification used Matplotlib 3.9.2; the project's pinned 3.10.9 dependency is
+unchanged. Hardware drivers/settings were not used; no station deployment was made.
+H1→H2 calibration remains a separate scientific-model discussion. Usage and exact
+uncertainty/quality semantics: [DATA_ANALYSIS.md](DATA_ANALYSIS.md#unified-and-combination-plotting).
+
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
 ## Independent role harmonics and pre-abort h1 diagnosis (offline; 2026-09-28)
@@ -251,6 +274,22 @@ Update this file whenever a feature is completed. A stage is complete only when 
   report-plotting error because this local interpreter lacks Matplotlib;
   other tests passed or skipped. No live instrument connection, command, or
   hardware acceptance was performed in this stage.
+
+## Unified multi-source plotting UI (historical draft; superseded 2026-09-29)
+
+- Added a read-only adapter/UI for combination SQLite, Three-SMU run folders,
+  SR830 sweeps, temperature–excitation results, and generic CSV tables.
+- The new notebook supports independent curve/group and XY–Z color-map cards,
+  explicit fixed-condition filters, audit opt-in, multiple figures, setup save/load,
+  and PNG/PDF/SVG plus selected-row/provenance export. Existing specialized
+  notebooks remain unchanged.
+- Plotting uses actual measured coordinates, explicit red–blue Z normalization,
+  no interpolation or aggregation, and refuses unresolved changing conditions.
+  Matching temperature summary/CSV outputs are deduplicated; generic CSV units
+  remain unspecified.
+- Offline tests and rendered-notebook validation have not been run in this
+  implementation turn; do not consider this stage complete until reviewed and
+  validated.
 
 ## SR830 browser selection and axis exclusions (2026-09-24)
 

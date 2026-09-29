@@ -1,8 +1,31 @@
 # Project handoff
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
 ## Current stage
+
+### Combination and unified plotting completed (offline; 2026-09-29)
+
+Both analysis notebooks now use one tested dashboard: per-channel formal-status
+exclusions, raw/mean±SD/mean±SEM, four-channel field panels, manual sample exclusions,
+independent curves/maps, setup save/restore and figures/raw/statistics/audit exports.
+Source/axis/filter callbacks preserve selections, empty filters select nothing,
+changed files invalidate exports and failed refresh clears stale sources. Missing
+observations break traces; repeats are pooled only within their recorded condition,
+never across runs, segments, directions or revisits. Phase statistics are circular.
+Unknown quality remains explicit. The original raw-row Python API is retained.
+
+Verification: 124 relevant offline tests (28 focused quality/statistics/UI tests
+and 96 existing combination/legacy/scientific-plotting regressions); actual JupyterLab
+with ipywidgets 8.1.7 exercised data selection, rendering, audit/SEM switching,
+setup save/restore and PNG/PDF/SVG+CSV/manifest export. A local archived 81-condition,
+243-repeat field dataset gave 81 n=3 points in each unflagged channel. Its 243 XY h1
+formal output-overload samples were excluded independently; XY h2 remained present.
+Input SQLite content hash was unchanged. Real data and UI artifacts remain outside Git.
+Local verification used Matplotlib 3.9.2; the project's pinned 3.10.9 dependency is
+unchanged. Hardware drivers/settings were not used; no station deployment was made.
+H1→H2 calibration remains a separate scientific-model discussion. Usage and exact
+uncertainty/quality semantics: [DATA_ANALYSIS.md](DATA_ANALYSIS.md#unified-and-combination-plotting).
 
 ### Independent SR830 harmonics and fixed-overload h1 audit (offline; 2026-09-28)
 
@@ -96,7 +119,7 @@ rows. Missing profile sidecars still fail strict loading. Weak reference signals
 detector notch filters and formal-repeat drift are interpretation limits;
 private audit results remain outside Git. Validation performed no instrument
 I/O or station sync. Restart the notebook kernel to load the edited analysis code.
-The separate unified-plotting drafts remain pending and preserved.
+The separate unified-plotting draft was completed in the 2026-09-29 checkpoint above.
 
 ### Magnetic scan short command (offline; 2026-09-28)
 
@@ -226,6 +249,19 @@ frequency. Focused guarded fake-resource, analysis, and notebook tests passed
 unrelated report-plotting error because this local interpreter lacks
 Matplotlib. Real instrument verification remains for the operator; no hardware
 was connected.
+
+### Unified multi-source plotting UI (historical draft; superseded 2026-09-29)
+
+New `notebooks/unified_plotting.ipynb` and `attodry_control.unified_plotting`
+provide a read-only common plotting layer for combination SQLite, legacy
+Three-SMU folders, SR830 sweeps, temperature–excitation records, and generic
+CSV. Independent cards select multiple sources, X/Y, optional curve grouping or
+Z color, and filters for otherwise-varying conditions. XY–Z maps show measured
+points only; exports include PNG/PDF/SVG, selected samples, and provenance.
+Temperature summary/formal-CSV pairs are deduplicated; the specialized notebooks
+are retained. No hardware path is imported. Tests and rendered UI validation
+were not run in this turn, so this remains an implementation checkpoint rather
+than a completed/validated stage.
 
 ### SR830 browser checkboxes and combined-axis exclusions (2026-09-24)
 

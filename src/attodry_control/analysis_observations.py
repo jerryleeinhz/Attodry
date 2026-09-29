@@ -1,0 +1,152 @@
+"""Offline channel qualification and statistics of repeated formal observations."""
+from __future__ import annotations
+
+from collections import Counter
+import math
+import re
+import statistics
+from typing import Mapping, Sequence
+
+
+def finite(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def observation_id(row):
+    return {k: row[k] for k in (
+        "source_path", "run_id", "condition_id", "attempt_index", "sample_index",
+        "repeat_index", "row_index", "role", "harmonic",
+    ) if k in row}
+
+
+def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
+    """Use only the selected channel's formal status, never transition probes.
+
+    Output overload is a conservative analysis exclusion even though acquisition
+    can accept it. Missing status is explicitly unknown, not an inferred pass.
+    """
+    match = re.fullmatch(r"measured\.(lockin_(xx|xy))_h(\d+)_(x_v|y_v|amplitude_v|phase_deg)", column)
+    if not match:
+        return "unclassified", ()
+    role, short_role, order, _ = match.groups()
+    harmonic = int(order)
+    issues = []
+    evidence = []
+    status = row.get("status.lockin") or {}
+    for sample in status.get("samples", ()):
+        reading = sample.get(role) or {}
+        values = reading.get("reading") or {}
+        actual_harmonic = values.get("harmonic", (sample.get("harmonics_by_role") or {}).get(role, sample.get("harmonic")))
+        if actual_harmonic != harmonic:
+            continue
+        selected = sample.get("selected_roles")
+        if selected is not None and short_role not in selected and role not in selected:
+            issues.append("not_selected_channel")
+            continue
+        if sample.get("settings_verified") is False:
+            issues.append("settings_unverified")
+        evidence.append((reading, sample))
+    # Legacy long-row adapters retain role-specific status on that one row.
+    if not evidence and row.get("role") in (role, short_role) and row.get("harmonic") == harmonic:
+        legacy = row.get("status." + role, row)
+        if "lia_status_raw" in legacy or "error_status" in legacy:
+            evidence.append(({"lia_status": {"raw": legacy.get("lia_status_raw")},
+                              "error_status": legacy.get("error_status")}, {}))
+    confirmed_status = False
+    for reading, sample in evidence:
+        lia = reading.get("lia_status") or {}
+        raw = lia.get("raw")
+        confirmed_status |= type(raw) is int
+        for name, mask in (("input_or_reserve_overload", 1), ("filter_overload", 2),
+                           ("output_overload", 4), ("reference_unlocked", 8)):
+            if lia.get(name) is True or (type(raw) is int and raw & mask):
+                issues.append(name)
+        if reading.get("error_status") not in (None, 0):
+            issues.append("instrument_error")
+        values = reading.get("reading") or {}
+        if values.get("locked") is False:
+            issues.append("reference_unlocked")
+        if values.get("overload") is True and not any("overload" in s for s in issues):
+            issues.append("overload")
+        for stage in ("settings_before", "settings_after"):
+            settings = (sample.get(stage) or {}).get("roles", {}).get(role, {})
+            full_scale = settings.get("sensitivity_full_scale_v")
+            if finite(full_scale) and full_scale > 0:
+                readings = [row.get(f"measured.{role}_h{harmonic}_{field}") for field in ("x_v", "y_v", "amplitude_v")]
+                if any(finite(v) and abs(v) > full_scale for v in readings):
+                    issues.append("exceeds_full_scale")
+    unique = tuple(dict.fromkeys(issues))
+    return ("flagged" if unique else "clear" if confirmed_status else "unknown"), unique
+
+
+def qualify_observations(rows: Sequence[Mapping], columns: Sequence[str], policy="exclude"):
+    if policy not in ("exclude", "include"):
+        raise ValueError("Quality policy must be exclude or include.")
+    kept, excluded, flagged = [], [], []
+    unknown = 0
+    for row in rows:
+        findings = {key: channel_quality(row, key) for key in columns}
+        issues = {key: list(reasons) for key, (_, reasons) in findings.items() if reasons}
+        unknown += any(state == "unknown" for state, _ in findings.values())
+        if issues:
+            entry = {"sample": observation_id(row), "reasons": issues}
+            flagged.append(entry)
+            if policy == "exclude":
+                excluded.append(entry)
+                continue
+        kept.append(dict(row))
+    counts = Counter(reason for item in flagged for reasons in item["reasons"].values() for reason in set(reasons))
+    return tuple(kept), {"quality_policy": policy, "flagged_row_count": len(flagged),
+                         "excluded_quality_count": len(excluded), "unknown_status_count": unknown,
+                         "quality_reason_counts": dict(counts), "flagged_samples": flagged,
+                         "excluded_samples": excluded}
+
+
+def repeat_statistics(rows: Sequence[Mapping], *, x: str, y: str, mode="mean_sd"):
+    """Aggregate only identical formal condition identities, preserving revisits.
+
+    Scalar mean/SD use ddof=1. Phase uses a circular mean and sample SD of
+    wrapped angular deviations. SEM assumes independent repeats; no CI claim.
+    n=1 has undefined SD/SEM. Antipodal phase means remain undefined.
+    """
+    if mode not in ("raw", "mean_sd", "mean_sem"):
+        raise ValueError("Statistics must be raw, mean_sd or mean_sem.")
+    if mode == "raw":
+        return tuple({"x": r.get(x), "y": r.get(y), "n": 1, "sd": None, "sem": None,
+                      "error": None, "sample_ids": [observation_id(r)]} for r in rows)
+    groups = {}
+    for row in rows:
+        if row.get("condition_id") is None:
+            raise ValueError("Repeat statistics require a recorded condition_id; use Raw observations for this source.")
+        identity_keys = ["source_path", "run_id", "condition_id", "attempt_index", "repeat_index", "role", "harmonic"]
+        identity_keys += sorted(k for k in row if k.startswith(("requested.", "axes.")))
+        identity = tuple((k, repr(row.get(k))) for k in identity_keys)
+        groups.setdefault(identity, []).append(row)
+    points = []
+    for group in groups.values():
+        valid = [r for r in group if finite(r.get(x)) and finite(r.get(y))]
+        if not valid:
+            xs = [r[x] for r in group if finite(r.get(x))]
+            points.append({"x": statistics.fmean(xs) if xs else None, "y": None,
+                           "n": 0, "sd": None, "sem": None, "error": None,
+                           "sample_ids": [observation_id(r) for r in group]})
+            continue
+        values = [float(r[y]) for r in valid]
+        n = len(values)
+        circular = y.endswith("phase_deg")
+        if circular:
+            cosine = statistics.fmean(math.cos(math.radians(v)) for v in values)
+            sine = statistics.fmean(math.sin(math.radians(v)) for v in values)
+            mean = math.degrees(math.atan2(sine, cosine)) if math.hypot(cosine, sine) > 1e-12 else None
+            residuals = [(v - mean + 180) % 360 - 180 for v in values] if mean is not None else []
+            sd = math.sqrt(sum(v*v for v in residuals)/(n-1)) if n > 1 and residuals else None
+        else:
+            mean = statistics.fmean(values)
+            sd = statistics.stdev(values) if n > 1 else None
+        sem = sd / math.sqrt(n) if sd is not None else None
+        points.append({"x": statistics.fmean(r[x] for r in valid), "y": mean, "n": n,
+                       "x_min": min(r[x] for r in valid), "x_max": max(r[x] for r in valid),
+                       "sd": sd, "sem": sem, "error": sd if mode == "mean_sd" else sem,
+                       "phase_statistics": "circular mean; wrapped residual sample SD" if circular else None,
+                       "sample_ids": [observation_id(r) for r in valid]})
+    return tuple(points)
