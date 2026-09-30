@@ -4,6 +4,34 @@ Last updated: 2026-09-30
 
 ## Current stage
 
+### Keithley 2400 compliance initialization (offline; 2026-09-30)
+
+The shared Three-SMU adapter now confirms output OFF and zero source before
+configuration, temporary sense-range preparation and each compliance attempt.
+It records range-sync state and confirms source/both measurement AUTO settings.
+When the present nominal sense range is incompatible with the requested
+compliance's 0.1% floor, it temporarily selects the minimum sense range while
+OFF, verifies it, then programs the original approved limit. AUTO is restored
+and queried again before output may be enabled; compliance, ranges, V/I format,
+zero/OFF state and the error queue must all pass final verification.
+
+Only a first compliance-setting error queue consisting solely of +822 permits
+one audited preparation/retry. Repeated +822, unrelated/mixed errors, lost
+zero/OFF state, ignored settings or communication failures stop configuration.
+No limit is increased and no experimental acquisition is retried. Initial and
+configuration error queues are bounded and retained rather than silently cleared.
+Successful configure events include configuration_audit; failed configuration
+events retain its partial commands/readbacks/errors separately from cleanup in
+both standalone raw JSONL and combination SQLite. Historical records remain valid.
+
+Verification: 157 guarded offline tests passed, including 19 new stateful adapter,
+fault, standalone and combination audit cases. The regression reproduces the
+reported 100 nA request / 1 uA retained compliance with a simulated old 1 mA range;
+that old range is a test hypothesis, not a confirmed instrument setting from the
+user's log. No hardware connection, station deployment or real 100 nA acceptance
+was performed. Existing TOML limits and daily commands are unchanged.
+See [THREE_SMU_DAILY_OPERATION.md](THREE_SMU_DAILY_OPERATION.md).
+
 ### Combination launch and frequency/excitation grids (offline; 2026-09-30)
 
 User-approved CLI simplification: `python -m attodry_control.combination_cli run`

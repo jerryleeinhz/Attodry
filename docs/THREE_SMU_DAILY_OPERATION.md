@@ -86,6 +86,31 @@ compliance 上限可到所选 range 的约 1.05 倍，且 compliance 不能低�
 程序不把 `max_abs_*` 四舍五入成某个 range，而是写入该数值作为 compliance 并查询仪器实际
 接受的值；实际值高于批准边界即拒绝。
 
+初始化时自动量程不保证立即清除旧 measurement range 对 compliance 的限制。共享
+adapter（单一扫描与 combination 共用）按下面顺序处理：
+
+1. 读回确认 output OFF、当前 source 为零；保存并检查原有错误队列。
+2. 配置 source/实际 V-I 测量，读回 range-sync 状态，并开启和确认源/测量 AUTO。
+3. 若当前 nominal measurement range 的 0.1% 大于请求的 compliance，则在零输出下临时
+   设置最小 sense range（current 1 µA，voltage 0.2 V），查询确认后写入原来的保护值。
+4. 查询实际 compliance 和错误队列；只有首次设置产生的错误全为 `+822 Too small for
+   sense range`，才在再次确认零输出后准备量程并重试一次。混合错误、第二次 822、
+   通信失败或设置未生效均停止；程序不会自动放大 `max_abs_*`。
+5. 恢复并读回 AUTO，重新检查 compliance、量程、V/I 格式和零输出状态，全部通过后才
+   允许开启输出。临时档位只用于初始化，正式采集仍使用自动量程。
+
+例如从旧的 1 mA 测量档请求 100 nA 保护值会受到 1 µA 下限约束；量程准备用于解决
+这种兼容性问题。`RANG?` 可能读回 nominal range 的 1.05 倍，0.1% 判据使用对应 nominal
+档位。原报错里“readback 1e-6 A”是保护值读回，不是测到了 1 µA 栅极漏电。
+旧档位是可能原因；没有设置前的 range 记录时，不能认定仪器当时确实是 1 mA 档。
+
+配置命令、读回及消费的错误码写入 `configuration_audit`。成功位于 `configure` 的
+`configuration_readback`；失败位于独立 `configure_failed` 事件（单扫 raw.jsonl /
+组合 SQLite events），已确认的 +822 不再留到清理时才被首次发现。主故障与 cleanup
+结果分别保留；未知状态仍要求人工核验，不自动重启实验。
+这次修改只经过硬件隔离测试，目标电脑仍需单独授权的零输出配置验收。
+依据：[Keithley 2400 手册，第 18-68 页](https://download.tek.com/manual/2400S-900-01_K-Sep2011_User.pdf)。
+
 `nplc = 1.0` 表示一个电网周期。芬兰 50 Hz 下一个周期为 20 ms；不要写 `nplc = 0.020`。
 `delay_s` 是设完一个正式点后、读取 formal sample 前的唯一软件等待时间。
 

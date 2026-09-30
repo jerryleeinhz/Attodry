@@ -49,12 +49,19 @@ class FakeQcodesInstrument:
         self.responses = {
             "*IDN?": "KEITHLEY,MODEL 2400,1234,1.0",
             ":SOUR:FUNC?": "VOLT",
-            ":SOUR:VOLT?": "0.125",
-            ":OUTP?": "1",
+            ":SOUR:VOLT?": "0.0",
+            ":SOUR:CURR?": "0.0",
+            ":OUTP?": "0",
             ":READ?": "0.125,0.0005",
             ":SENS:CURR:PROT?": "0.001",
             ":SOUR:VOLT:RANG?": "1.0",
             ":SENS:CURR:RANG?": "0.001",
+            ":SENS:CURR:PROT:RSYN?": "0",
+            ":SENS:VOLT:PROT:RSYN?": "0",
+            ":SOUR:VOLT:RANG:AUTO?": "1",
+            ":SOUR:CURR:RANG:AUTO?": "1",
+            ":SENS:CURR:RANG:AUTO?": "1",
+            ":SENS:VOLT:RANG:AUTO?": "1",
             ":SENS:VOLT:PROT?": "10.0",
             ":SOUR:CURR:RANG?": "0.001",
             ":SENS:VOLT:RANG?": "10.0",
@@ -131,6 +138,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 instrument = FakeQcodesInstrument()
                 adapter = QcodesKeithley2400("smu_bias", instrument)
+                adapter.authorize_status_consumption()
                 state = adapter.configure(replace(config(), source_mode=mode))
                 self.assertIn(("write", ":SENS:FUNC:CONC ON"), instrument.calls)
                 self.assertIn(("write", ':SENS:FUNC "VOLT","CURR"'), instrument.calls)
@@ -149,13 +157,16 @@ class Keithley2400AdapterTests(unittest.TestCase):
                 instrument.responses[command] = response
                 adapter = QcodesKeithley2400("smu_bias", instrument)
                 with self.assertRaisesRegex(Exception, "V/I measurement"):
+                    adapter.authorize_status_consumption()
                     adapter.configure(config())
                 self.assertNotIn(("output", "on"), instrument.calls)
 
     def test_read_rechecks_measurement_functions_before_consuming_values(self):
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
         adapter.configure(config())
+        instrument.responses[":OUTP?"] = "1"
         instrument.responses[":SENS:FUNC?"] = '"CURR:DC"'
         instrument.calls.clear()
         with self.assertRaisesRegex(Exception, "V/I measurement"):
@@ -165,6 +176,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
     def test_configured_read_never_triggers_when_output_is_off(self):
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
         adapter.configure(config())
         instrument.responses[":OUTP?"] = "0"
         instrument.calls.clear()
@@ -175,7 +187,9 @@ class Keithley2400AdapterTests(unittest.TestCase):
     def test_read_rejects_unexpected_extra_elements(self):
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
         adapter.configure(config())
+        instrument.responses[":OUTP?"] = "1"
         instrument.responses[":READ?"] = "0.125,0.0005,250"
         with self.assertRaisesRegex(Exception, "VOLT,CURR format"):
             adapter.read()
@@ -189,6 +203,8 @@ class Keithley2400AdapterTests(unittest.TestCase):
 
     def test_preflight_is_query_only(self) -> None:
         instrument = FakeQcodesInstrument()
+        instrument.responses[":OUTP?"] = "1"
+        instrument.responses[":SOUR:VOLT?"] = "0.125"
         adapter = QcodesKeithley2400("smu_bias", instrument)
         state = adapter.preflight()
         self.assertTrue(state.output_enabled)
@@ -211,6 +227,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
     def test_configuration_preserves_range_nplc_and_four_wire_settings(self) -> None:
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
         adapter.configure(config())
         self.assertIn(("mode", "VOLT"), instrument.calls)
         self.assertIn(("compliancei", 1e-3), instrument.calls)
@@ -225,11 +242,13 @@ class Keithley2400AdapterTests(unittest.TestCase):
         instrument.fail_write = ":SENS:CURR:RANG:AUTO ON"
         adapter = QcodesKeithley2400("smu_bias", instrument)
         with self.assertRaises(OSError):
+            adapter.authorize_status_consumption()
             adapter.configure(config())
 
     def test_bias_current_source_uses_voltage_compliance_and_matching_ranges(self) -> None:
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
         adapter.configure(replace(config(), source_mode=SourceMode.CURRENT))
         self.assertIn(("mode", "CURR"), instrument.calls)
         self.assertIn(("compliancev", 10.0), instrument.calls)
@@ -239,7 +258,9 @@ class Keithley2400AdapterTests(unittest.TestCase):
     def test_read_includes_trip_output_source_and_status(self) -> None:
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
         adapter.configure(config())
+        instrument.responses[":OUTP?"] = "1"
         adapter.authorize_status_consumption()
         reading = adapter.read()
         self.assertEqual(reading.voltage_v, 0.125)
@@ -254,11 +275,13 @@ class Keithley2400AdapterTests(unittest.TestCase):
         instrument.responses[":SENS:CURR:PROT?"] = "0.002"
         adapter = QcodesKeithley2400("smu_bias", instrument)
         with self.assertRaisesRegex(Exception, "compliance readback"):
+            adapter.authorize_status_consumption()
             adapter.configure(config())
 
     def test_set_source_checks_absolute_limit_before_driver_write(self) -> None:
         instrument = FakeQcodesInstrument()
         adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
         adapter.configure(config())
         before = list(instrument.calls)
         with self.assertRaisesRegex(Exception, "max_abs"):

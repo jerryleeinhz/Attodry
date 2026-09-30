@@ -164,8 +164,17 @@ second user-entered boundary. Voltage-source roles derive current compliance fro
 `max_abs_current_a`; current-source roles derive voltage compliance from
 `max_abs_voltage_v`. The adapter queries compliance and source/measurement ranges
 after configuration and fails closed if the compliance readback exceeds the
-approved absolute limit. Source and measurement autorange are required because
-the current schema has no fixed-range fields.
+approved absolute limit. Source and measurement autorange are required for
+formal acquisition because the current schema has no fixed-range fields.
+
+The user-approved 2400 initialization exception (2026-09-30) permits a temporary
+minimum sense range only after confirmed source zero/output OFF, to satisfy the
+manual's nominal-range 0.1% compliance floor. AUTO and compliance are queried
+again before output enable. Only a first +822-only compliance-setting rejection
+permits one audited range-preparation/retry with fresh zero/OFF confirmation.
+Other/repeated errors and communication failures fail closed. This is neither a
+raised protection limit nor an acquisition retry. Initial/configuration error
+queues and partial command/readback audits are retained separately from cleanup.
 
 The Three-SMU path intentionally has no software ramp, source min/max, readback
 tolerance, separate leakage threshold, or per-device settle time. A formal point

@@ -426,7 +426,17 @@ class ThreeSmuSession:
                 "preconfigure_zero",
                 {"role": role, "state": _jsonable(asdict(zero_state))},
             )
-            configuration = adapter.configure(config)
+            try:
+                configuration = adapter.configure(config)
+            except BaseException as exc:
+                try:
+                    recorder.event("configure_failed", {
+                        "role": role, "error": f"{type(exc).__name__}: {exc}",
+                        "configuration_audit": list(getattr(adapter, "configuration_audit", ())),
+                    })
+                except BaseException as audit_error:
+                    exc.add_note(f"SMU configuration audit failed: {audit_error}")
+                raise
             adapter.set_source(0.0)
             self.last_commanded[role] = 0.0
             configured_state = adapter.preflight()

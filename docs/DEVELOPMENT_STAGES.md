@@ -1,5 +1,29 @@
 # Development stages
 
+## Keithley 2400 compliance initialization (offline; 2026-09-30)
+
+- Fixed the shared adapter's initialization order for existing range-dependent
+  compliance. Zero source/output OFF are read back before configuration and each
+  temporary range/compliance write. Source and both sense AUTO settings are
+  verified; incompatible sense range is temporarily prepared at the minimum
+  nominal range without increasing the requested absolute protection limit.
+- Compliance is written/read back, then AUTO is restored/read back and compliance,
+  ranges, actual V/I functions/format, zero/OFF and instrument errors are rechecked.
+  The documented 0.1% floor uses nominal range, including 105% RANG? readbacks.
+- Only one +822-only compliance rejection permits a bounded audited retry while
+  zero/OFF. Repeated/mixed errors, ignored writes, lost AUTO/zero/OFF, invalid
+  compliance and communication errors fail closed before output enable.
+- Bounded initial/configuration error-queue reads retain every response. Partial
+  configuration_audit is saved on failure in standalone and combination raw events;
+  the primary initialization failure remains separate from later cleanup results.
+  No new TOML setting, hardware resume or historical record migration.
+- 157 guarded offline tests passed, including 19 new stateful range/protection,
+  fault and standalone/combination audit regressions. No real instrument access,
+  station deployment or acceptance scan. A separately authorized output-OFF
+  initialization/readback check remains needed on the control computer.
+
+Operator details: [THREE_SMU_DAILY_OPERATION.md](THREE_SMU_DAILY_OPERATION.md).
+
 ## Combination launch and frequency/excitation grids (offline; 2026-09-30)
 
 - Added the short interactive `combination_cli run` entry: default local TOML,
