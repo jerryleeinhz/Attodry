@@ -32,6 +32,9 @@ from tests.test_attodry import FakeAttoDryDll, StepClock
 from tests.test_magnetic_field import _MagneticConfigFixture
 from tests import test_combination_cryostat as hardware_fixture
 from attodry_control.combination_analysis import load_combination_rows
+from attodry_control.combination_hardware import load_hardware_combination
+from attodry_control.combination_launch import launch_summary
+from attodry_control.combination_terminal import launch_text
 
 
 class FieldReadbackRegressionTests(unittest.TestCase):
@@ -179,6 +182,38 @@ class FieldPolicyCliTests(_MagneticConfigFixture, unittest.TestCase):
 
 
 class FieldPolicyCombinationTests(unittest.TestCase):
+    def test_configured_limits_and_whole_plan_mode_reject_before_station_open(self):
+        for points, limits in [
+            ([(3.01, 0)], MagnetLimits()),
+            ([(0, 9.01)], MagnetLimits()),
+            ([(0, 8.9)], MagnetLimits(3, 6, 3)),
+            ([(0, 4), (1, 0)], MagnetLimits()),
+            ([(0.0001, 4)], MagnetLimits()),
+            ([(2.2, 2.2)], MagnetLimits()),
+            ([(0, 2), (0.1, 0)], MagnetLimits(3, 9, 1)),
+        ]:
+            plan = CombinationPlan((ScanAxis("magnetic", tuple(AxisPoint(
+                {"field_x_t": x, "field_z_t": z}) for x, z in points)),), magnet_limits=limits)
+            station = SimulatedCombinationStation()
+            with self.subTest(points=points, limits=limits), tempfile.TemporaryDirectory() as directory:
+                with CombinationStore(Path(directory) / "scan.sqlite") as store, self.assertRaises(ValueError):
+                    run_simulated_combination(plan, store, "invalid", station=station)
+                self.assertEqual(station.operations, [])
+
+    def test_new_snapshot_cannot_bypass_legacy_envelope_or_omit_readback_contract(self):
+        from attodry_control.combination_scan import _run_combination
+        plan = CombinationPlan((ScanAxis("magnetic", (
+            AxisPoint({"field_x_t": 0, "field_z_t": 8.9}),)),))
+        for version in ("universal-3T", "unknown", "planned-axis-configured-v2"):
+            snapshot = plan.snapshot()
+            snapshot["field_limit_policy"] = version
+            snapshot.pop("field_readback_policy")
+            station = SimulatedCombinationStation()
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as directory:
+                with CombinationStore(Path(directory) / "scan.sqlite") as store, self.assertRaises(ValueError):
+                    _run_combination(plan, store, "invalid", station=station, snapshot=snapshot)
+                self.assertEqual(station.operations, [])
+
     def test_formal_sample_uses_run_mode_and_records_margin(self):
         class ResidualStation(SimulatedCombinationStation):
             def read(self, module):
@@ -242,6 +277,121 @@ class FieldPolicyHardwareCombinationTests(unittest.TestCase):
             self.assertAlmostEqual(row["actual.field_z_t"], 0.0003)
             self.assertEqual(row["status.magnetic"]["field_readback_policy"]["mode"], "single_x")
             self.assertTrue(row["status.magnetic"]["field_readback_assessment"]["inactive_axis_nonzero"])
+
+    def test_single_z_high_field_with_lockin_and_hold_preserves_raw_x(self):
+        self.base = self.base.replace('normal_end_field_policy = "zero"',
+                                      'normal_end_field_policy = "hold"')
+        self.points([(0, 8.9)], ("magnetic", "lockin"))
+        self.dll.bz_t = self.dll.setpoint_z_t = 8.9
+        self.dll.bx_t = 0.0003
+        self.dll.field_control = 1
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        rows = load_combination_rows(self.database)
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertAlmostEqual(row["actual.field_x_t"], 0.0003)
+            self.assertEqual(row["status.magnetic"]["field_readback_policy"]["mode"], "single_z")
+        action = next(a for a in result["cleanup"]["actions"] if a["module"] == "magnetic")
+        self.assertTrue(action["result"]["verified"])
+        self.assertAlmostEqual(action["result"]["state"]["field"]["bz_t"], 8.9, places=5)
+        self.assertNotIn("sweep_zero", self.dll.events)
+
+    def test_single_z_hysteresis_preserves_duplicate_turn_and_zero_finish(self):
+        self.base = self.base.replace('normal_end_field_policy = "hold"',
+                                      'normal_end_field_policy = "zero"')
+        self.points([(0, -8.9), (0, 8.9), (0, 8.9), (0, -8.9)], ("magnetic", "lockin"))
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        rows = load_combination_rows(self.database)
+        self.assertEqual([r["requested.field_z_t"] for r in rows], [-8.9] * 2 + [8.9] * 4 + [-8.9] * 2)
+        action = next(a for a in result["cleanup"]["actions"] if a["module"] == "magnetic")
+        self.assertTrue(action["result"]["verified"])
+        self.assertEqual(action["result"]["state"]["field"], {"bx_t": 0.0, "bz_t": 0.0})
+        self.assertTrue(any(k == "cryostat_recovery_started" and
+            v["field_readback_policy"]["mode"] == "single_z" and
+            v["field_readback_policy"]["axis_readback_limits_t"]["z"] == 9
+            for k, v in self.events()))
+
+    def test_high_z_electrical_failure_still_verifies_owned_zero_and_output_off(self):
+        self.points([(0, 8.9)], ("magnetic", "smu"))
+        def modify(adapter):
+            original = adapter.read
+            def read():
+                result = original()
+                if adapter.read_count == 2:
+                    raise RuntimeError("Injected electrical acquisition failure")
+                return result
+            adapter.read = read
+        self.modify_adapter = modify
+        result = self.execute()
+        self.assertEqual(result["status"], "failed", result)
+        self.assertIn("Injected electrical", result["error"])
+        self.assertFalse(self.adapters["smu_bias"].output)
+        action = next(a for a in result["cleanup"]["actions"] if a["module"] == "magnetic")
+        self.assertTrue(action["result"]["verified"])
+        self.assertEqual(action["result"]["state"]["field"], {"bx_t": 0.0, "bz_t": 0.0})
+        self.assertTrue(result["cleanup"]["manual_verification_required"])
+
+    def test_high_z_excess_or_cross_axis_fault_cannot_certify_zero(self):
+        for attribute, value in (("bz_t", 9.0001), ("bx_t", 0.0006)):
+            self.dll = FakeAttoDryDll()
+            self.points([(0, 8.9)], ("magnetic", "smu"))
+            def modify(adapter):
+                original = adapter.read
+                def read():
+                    result = original()
+                    if adapter.read_count == 2:
+                        setattr(self.dll, attribute, value)
+                    return result
+                adapter.read = read
+            self.modify_adapter = modify
+            with self.subTest(attribute=attribute):
+                result = self.execute(attribute)
+                self.assertEqual(result["status"], "failed", result)
+                self.assertIn("readback", result["error"])
+                self.assertNotIn("sweep_zero", self.dll.events)
+                action = next(a for a in result["cleanup"]["actions"] if a["module"] == "magnetic")
+                self.assertFalse(action["clean"])
+                self.assertTrue(result["cleanup"]["manual_verification_required"])
+
+    def test_high_z_communication_failure_retains_last_readback_for_manual_review(self):
+        self.points([(0, 8.9)], ("magnetic", "smu"))
+        def modify(adapter):
+            original = adapter.read
+            def read():
+                result = original()
+                if adapter.read_count == 2:
+                    self.dll.return_codes["get_field_z"] = 1
+                return result
+            adapter.read = read
+        self.modify_adapter = modify
+        result = self.execute()
+        self.assertEqual(result["status"], "failed", result)
+        action = next(a for a in result["cleanup"]["actions"] if a["module"] == "magnetic")
+        self.assertFalse(action["clean"])
+        self.assertIn("last_confirmed_state_not_current", action["result"])
+        self.assertTrue(result["cleanup"]["manual_verification_required"])
+
+    def test_offline_high_z_summary_and_reduced_toml_limit(self):
+        self.points([(0, 9)], ("magnetic", "lockin"))
+        config = load_hardware_combination(self.path)
+        self.assertEqual(config.plan.magnet_limits.hardware_z_max_t, 9)
+        summary = launch_summary(config, self.database, "offline")
+        self.assertNotIn("field_resultant_limit_t", summary)
+        text = launch_text(summary, width=200)
+        self.assertIn("Field target: single Z | |Bz| <= 9 T", text)
+        self.assertNotIn("Field: resultant <= 3", text)
+        self.assertEqual(self.dll.events, [])
+        self.base = self.base.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 6.0')
+        self.points([(0, 5.9)], ("magnetic", "lockin"))
+        reduced = load_hardware_combination(self.path)
+        self.assertEqual(reduced.plan.magnet_limits.hardware_z_max_t, 6)
+        self.assertEqual(reduced.snapshot["field_readback_policy"]["axis_readback_limits_t"]["z"], 6)
+        self.points([(0, 8.9)], ("magnetic", "lockin"))
+        with self.assertRaises(ValueError):
+            load_hardware_combination(self.path)
+        self.assertEqual(self.dll.events, [])
 
     def test_complete_vector_mode_persists_across_pure_axis_leaf_points(self):
         self.points([(0, 0.1), (0.1, 0)])

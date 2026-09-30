@@ -4,7 +4,37 @@ Last updated: 2026-09-30
 
 ## Current stage
 
+### Combination configured single-axis limits follow-up (offline; 2026-09-30)
+
+The operator pointed out that a pure-Z combination should use its TOML 9 T
+ceiling. Removed the extra Z3 T cap from the hardware loader, Cartesian plan,
+formal acceptance and launch summary. An immutable MagnetLimits accompanies the
+plan; snapshot `planned-axis-configured-v2` archives the exact configured limits
+and matching complete-plan readback policy. Single X/Z uses configured ceilings
+(at most X3 T/Z9 T); a plan using both axes still limits every target to resultant
+<=3 T, including pure endpoints. Reduced TOML limits and float32/corner checks
+remain. Z nominal ceilings >3 T receive no extra readback margin.
+
+Owned pure-Z zero/disable recovery uses the factory Z9 T envelope and the same
+independent 0.5 mT inactive-X guard with X setpoint exactly zero. Other magnetic
+modes retain the vector recovery envelope. Recovery cannot continue scanning;
+unknown communication, over-9 T or excessive inactive X requires manual review.
+Successful electrical-fault recovery retains failed run status and raw audits.
+Temperature-only ambient checks and historical universal-3T records stay strict.
+
+Verification: 353 related guarded tests passed (138.763 s), including 8 new
+regression cases; 49 targeted tests also passed. The high-Z rejection was
+reproduced before the fix. The operator's supplied TOML now parses offline as
+single_z: 62 magnetic points from -8.9 through +8.9
+back to -8.9 T, 11 excitation points, 682 conditions, normal hold(-8.9 T). Original
+attachment hash unchanged. DLL loaders/hardware imports were blocked, fake devices
+only. No real instrument connection, LK_setup deployment or scan/replay performed.
+The user authorized pushing this follow-up to origin/codex/integration-four-module-scan.
+
 ### Planned-axis field readback policy (offline; 2026-09-30)
+
+Historical checkpoint; the extra integrated 3 T nominal cap below is superseded
+by the configured single-axis follow-up above.
 
 The operator explicitly approved replacing actual-zero classification with a
 complete-plan single X/single Z/vector mode. Single-axis requires every inactive

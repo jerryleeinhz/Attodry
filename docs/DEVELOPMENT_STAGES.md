@@ -1,6 +1,31 @@
 # Development stages
 
+## Combination configured single-axis limits follow-up (offline; 2026-09-30)
+
+- Corrected the extra integrated Z3 T cap after the operator's TOML question.
+  Single-X/single-Z combinations now use configured limits (at most X3 T/Z9 T).
+  Whole-plan vector targets, including pure endpoints, remain resultant <=3 T;
+  reduced configuration limits and strict float32/corner checks are preserved.
+- Plan carries immutable MagnetLimits; new snapshots declare
+  `planned-axis-configured-v2` with the matching readback policy. Coordinator
+  acceptance and launch preview use those same limits; no new TOML keys.
+  Z ceilings >3 T receive no readback margin. Legacy universal-3T records are not
+  reinterpreted or automatically resumed/replayed.
+- Pure-Z owned zero/disable recovery accepts at most factory Z9 T, exact-zero X
+  setpoint and bounded inactive-X readback. Fault/communication/control/unknown
+  state guards remain; verified cleanup cannot erase a failed/manual-review run.
+  Temperature-only ambient and other magnetic recovery envelopes remain intact.
+- 353 related guarded tests passed in 138.763 s, including 8 new regressions;
+  49 targeted tests also passed. Real imports and DLL loaders blocked,
+  fake DLL/VISA only. High-Z rejection reproduced before fix;
+  related module regression passed. Supplied TOML parses as 682 conditions
+  without changing the original. No deployment, hardware writes or replay.
+  The user authorized push to origin/codex/integration-four-module-scan.
+
 ## Planned-axis field readback policy (offline; 2026-09-30)
+
+Historical checkpoint; its extra integrated 3 T nominal cap is superseded by the
+configured single-axis follow-up above.
 
 - User-approved protocol: complete requested plan fixes single X/single Z/vector;
   every inactive-axis target must be zero for single mode. Fixed nonzero other

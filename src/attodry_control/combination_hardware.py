@@ -18,7 +18,7 @@ from .three_smu import ThreeSmuSession
 from .three_smu_config import load_three_smu_operation_config, validate_plan_targets, SourceMode, ScanMode
 from .cryostat_points import CryostatPointSession
 from .models import VectorField
-from .safety import plan_ordered_field_transitions
+from .safety import MagnetLimits, plan_ordered_field_transitions
 
 
 def _json(value):
@@ -111,8 +111,10 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if temperature is not None or magnetic is not None:
         selected = temperature or magnetic
         limits = selected.magnet.limits
-        effective = replace(limits, hardware_x_max_t=min(limits.hardware_x_max_t, 3.0),
-                            hardware_z_max_t=min(limits.hardware_z_max_t, 3.0))
+        # A selected magnetic plan supplies its complete-plan axis policy.
+        # Temperature-only operation keeps the existing ambient 3 T envelope.
+        effective = (limits if magnetic is not None else
+                     replace(limits, hardware_z_max_t=min(limits.hardware_z_max_t, 3.0)))
         cryostat = SimpleNamespace(project=project, cryostat=selected.cryostat,
             magnet=replace(selected.magnet, limits=effective),
             temperature_stability=(temperature.temperature_stability if temperature is not None
@@ -120,7 +122,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         hardware["effective_cryostat"] = {name: asdict(value) for name, value in vars(cryostat).items()}
         if magnetic is not None:
             # Offline check exact float32 endpoints and every component corner
-            # under the universal integrated envelope, not standalone pure-Z 9T.
+            # under the configured nominal limits; the parser already checked
+            # complete-plan single-axis/vector classification.
             plan_ordered_field_transitions(VectorField(0.0, 0.0), magnetic.run.points,
                 magnetic.run.max_step_t, magnetic.run.transition_policy, effective)
     if "smu" in order:
@@ -168,11 +171,9 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if len(set(addresses)) != len(addresses):
         raise ValueError("All active resources, including SMU and SR830 roles, must be distinct")
     plan = CombinationPlan(tuple(axes[m] for m in order), table["samples_per_condition"],
-                           table["repeats"], table["run_name"], table["note"])
+                           table["repeats"], table["run_name"], table["note"],
+                           magnet_limits=cryostat.magnet.limits if cryostat else MagnetLimits())
     snapshot = plan.snapshot()
-    if magnetic is not None:
-        snapshot["field_readback_policy"] = plan.magnetic_readback_policy(
-            cryostat.magnet.limits).snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     lockin_mode=mode,
                     hardware=_json(hardware), config_path=str(path),

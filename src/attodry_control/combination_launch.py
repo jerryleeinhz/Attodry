@@ -87,7 +87,9 @@ def launch_summary(config, database, run_id):
         "cleanup": config.snapshot["cleanup_policy"], "hardware_resume": False}
     if config.magnetic is not None:
         summary["field_transition_policy"] = config.magnetic.run.transition_policy.value
-        summary["field_resultant_limit_t"] = 3.0
+        policy = config.snapshot["field_readback_policy"]
+        if policy["mode"] == "vector":
+            summary["field_resultant_limit_t"] = policy["limits"]["experiment_vector_max_t"]
         summary["field_readback_policy"] = config.snapshot["field_readback_policy"]
     if config.smu is not None:
         summary["smu"] = {role: {"source_mode": device.source_mode.value,

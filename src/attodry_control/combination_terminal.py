@@ -128,9 +128,15 @@ def launch_text(summary, width=None):
             lines.append("Segment SENS precedence: excitation > frequency > baseline; harmonic settings apply.")
         if lockin["skipped_harmonics_by_frequency"]:
             lines.append("Skipped harmonics: " + json.dumps(lockin["skipped_harmonics_by_frequency"]))
-    if "field_resultant_limit_t" in summary:
-        lines.append(f"Field: resultant <= {summary['field_resultant_limit_t']} T | Transition: {summary['field_transition_policy']}")
+    if "field_transition_policy" in summary:
         policy = summary.get("field_readback_policy")
+        if policy is not None and policy["mode"] != "vector":
+            axis = "X" if policy["mode"] == "single_x" else "Z"
+            nominal = policy["limits"][f"hardware_{axis.lower()}_max_t"]
+            lines.append(f"Field target: single {axis} | |B{axis.lower()}| <= {nominal:g} T"
+                         f" | Inactive target: 0 T | Transition: {summary['field_transition_policy']}")
+        else:
+            lines.append(f"Field: resultant <= {summary['field_resultant_limit_t']} T | Transition: {summary['field_transition_policy']}")
         if policy is not None:
             axes = policy["axis_readback_limits_t"]
             vector = policy["vector_readback_limit_t"]

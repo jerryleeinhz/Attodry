@@ -269,7 +269,7 @@ class CombinationTests(unittest.TestCase):
     def test_invalid_plans_rejected_before_database_run_and_open(self):
         invalid = [
             CombinationPlan(()), CombinationPlan((axes()["smu"], axes()["smu"])),
-            CombinationPlan((ScanAxis("magnetic", (AxisPoint({"field_x_t": 0, "field_z_t": 3.01}),)),)),
+            CombinationPlan((ScanAxis("magnetic", (AxisPoint({"field_x_t": 0, "field_z_t": 9.01}),)),)),
             CombinationPlan((ScanAxis("magnetic", (AxisPoint({"field_x_t": 0}),)),)),
             CombinationPlan((ScanAxis("smu", (AxisPoint({"smu_bias_v": float("nan")}),)),)),
             CombinationPlan((ScanAxis("smu", (AxisPoint({"smu_bias_v": True}),)),)),

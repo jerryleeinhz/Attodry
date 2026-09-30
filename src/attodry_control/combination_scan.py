@@ -26,6 +26,7 @@ MODULE_KEYS = {
     "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
 }
 SMU_ROLES = ("smu_bias", "gate_top", "gate_bottom")
+COMBINATION_FIELD_LIMIT_POLICY = "planned-axis-configured-v2"
 
 
 def _audit_value(value: object) -> object:
@@ -61,8 +62,11 @@ class CombinationPlan:
     repeats: int = 1
     run_name: str = ""
     note: str = ""
+    magnet_limits: MagnetLimits = MagnetLimits()
 
     def validate(self) -> None:
+        if not isinstance(self.magnet_limits, MagnetLimits):
+            raise ValueError("Combination magnet limits must be validated MagnetLimits")
         if not isinstance(self.run_name, str) or not isinstance(self.note, str):
             raise ValueError("Run name and note must be strings")
         modules = [axis.module for axis in self.axes]
@@ -97,30 +101,29 @@ class CombinationPlan:
                     raise ValueError("Coordinates must be finite real numbers")
                 if axis.module == "temperature" and point.values["temperature_k"] <= 0:
                     raise ValueError("Temperature must be positive")
-                if axis.module == "magnetic":
-                    if math.hypot(point.values["field_x_t"], point.values["field_z_t"]) > 3:
-                        raise ValueError("Integrated field resultant must be <= 3 T")
                 if axis.module == "lockin":
                     if not 0.004 <= point.values["lockin_excitation_v_rms"] <= 5:
                         raise ValueError("SR830 excitation must be in 0.004..5 V RMS")
                     if not 0.001 <= point.values["lockin_frequency_hz"] <= 102000:
                         raise ValueError("SR830 frequency is out of range")
+        # Classify the complete ordered plan, never an individual pure-axis leaf.
+        self.magnetic_readback_policy()
 
     def snapshot(self) -> dict:
         self.validate()
         policy = self.magnetic_readback_policy()
-        return {**asdict(self), "mode": "simulation", "field_limit_policy": "universal-3T",
+        return {**asdict(self), "mode": "simulation", "field_limit_policy": COMBINATION_FIELD_LIMIT_POLICY,
                 **({"field_readback_policy": policy.snapshot()} if policy is not None else {}),
                 "record_contract": "combination-v1",
                 "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
 
-    def magnetic_readback_policy(self, limits=None):
+    def magnetic_readback_policy(self):
         axis = next((a for a in self.axes if a.module == "magnetic"), None)
         if axis is None:
             return None
         return FieldReadbackPolicy.from_targets(
             tuple(VectorField(p.values["field_x_t"], p.values["field_z_t"]) for p in axis.points),
-            limits or MagnetLimits(3.0, 3.0, 3.0))
+            self.magnet_limits)
 
     def conditions(self) -> list[dict]:
         self.validate()
@@ -249,11 +252,23 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
     field_policy = None
     if "field_readback_policy" in snapshot:
         field_policy = FieldReadbackPolicy.from_snapshot(snapshot["field_readback_policy"])
-        planned_policy = plan.magnetic_readback_policy(field_policy.limits)
+        planned_policy = plan.magnetic_readback_policy()
         if planned_policy is None or field_policy.snapshot() != planned_policy.snapshot():
             raise ValueError("Field policy differs from the complete target plan")
-        if max(field_policy.limits.hardware_x_max_t, field_policy.limits.hardware_z_max_t) > 3:
-            raise ValueError("Integrated nominal axis limits cannot exceed 3 T")
+    if plan.magnetic_readback_policy() is not None:
+        if snapshot.get("field_limit_policy") == COMBINATION_FIELD_LIMIT_POLICY:
+            if field_policy is None:
+                raise ValueError("Configured field targets require their archived readback policy")
+        else:
+            # Historical combinations retain their universal 3 T contract.
+            if snapshot.get("field_limit_policy") not in {None, "universal-3T"}:
+                raise ValueError("Unsupported archived combination field limit policy")
+            for point in next(a for a in plan.axes if a.module == "magnetic").points:
+                if math.hypot(point.values["field_x_t"], point.values["field_z_t"]) > 3:
+                    raise ValueError("Legacy combination target exceeds its archived 3 T envelope")
+            if field_policy is not None and max(field_policy.limits.hardware_x_max_t,
+                                               field_policy.limits.hardware_z_max_t) > 3:
+                raise ValueError("Legacy combination axis limits cannot exceed 3 T")
     if not isinstance(run_id, str) or not run_id.strip():
         raise ValueError("run_id must be nonempty")
     completed = store.begin_run(run_id, snapshot, conditions, resume=resume)

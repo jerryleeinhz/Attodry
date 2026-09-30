@@ -26,9 +26,10 @@ hardware_z_max_t = 9.0
 # A plan using both axes (even at separate points) uses the resultant ceiling throughout.
 # Approved readback policy (2026-09-30): 0.5 mT margin at nominal limits <=3 T;
 # single-axis inactive readback independently <=0.5 mT, raw values retained.
-# Standalone Z9 T is not extended; integrated nominal axes/resultant stay <=3 T.
+# Standalone AND combination single-Z use this configured Z ceiling, at most 9 T.
+# Z limits >3 T get no readback margin; vector-plan nominal resultant stays <=3 T.
 # Fixed readback bounds are archived by code; field_tolerance_t is a stability check,
-# not permission to request >3 T or increase this margin. Offline, uncommissioned policy.
+# not permission to exceed nominal targets or increase margin. Offline, uncommissioned policy.
 experiment_vector_max_t = 3.0
 field_tolerance_t = 0.001
 stable_range_t = 0.0005

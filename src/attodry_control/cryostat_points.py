@@ -64,7 +64,11 @@ class CryostatPointSession:
     @property
     def active_field_policy(self):
         if self.recovery_action is not None and self.field_policy is not None:
-            return FieldReadbackPolicy(FieldScanMode.VECTOR, self.field_readback_limits)
+            # Only the already-owned zero/disable action can use factory limits.
+            # Pure-Z recovery keeps X's independent residual guard at high Z.
+            mode = (FieldScanMode.SINGLE_Z if self.field_policy.mode is FieldScanMode.SINGLE_Z
+                    else FieldScanMode.VECTOR)
+            return FieldReadbackPolicy(mode, self.field_readback_limits)
         return self.field_policy
 
     @property
@@ -76,6 +80,8 @@ class CryostatPointSession:
         # A scan trip must not prevent an already-owned controller from zeroing.
         # This is only a readback envelope for zero/disable, never target permission.
         if self.recovery_action is not None:
+            if self.field_policy is not None and self.field_policy.mode is FieldScanMode.SINGLE_Z:
+                return MagnetLimits()
             return MagnetLimits(3.0, 3.0, 3.0)
         return self.config.magnet.limits
 
@@ -95,8 +101,8 @@ class CryostatPointSession:
             self.recovery_action = None
 
     def validate_state(self, state):
-        # Nominal targets remain <=3 T on both axes. Complete-plan policy
-        # applies the approved, separate actual-readback bounds.
+        # Configured nominal targets and complete-plan readback bounds are
+        # separate. Zero/disable recovery never permits another scan target.
         if self.recovery_action is not None:
             try:
                 if self.field_policy is None:

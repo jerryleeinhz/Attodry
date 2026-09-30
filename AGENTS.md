@@ -12,7 +12,7 @@ Project rules:
 
 - Treat all hardware operations as safety critical and fail closed.
 - Do not connect to real instruments or issue write commands unless the user explicitly authorizes that stage.
-- Preserve strict nominal targets and exact float32 commands: standalone X <=3 T / Z <=9 T; integrated axes and resultant <=3 T. A complete plan using both axes, even at separate points, is vector mode and its targets always satisfy resultant <=3 T.
+- Preserve strict nominal targets and exact float32 commands: standalone and combination single-X/single-Z plans use the configured X/Z limits (at most X 3 T / Z 9 T). A complete plan using both axes, even at separate points, is vector mode and all targets satisfy the configured resultant limit (at most 3 T).
 - Operator-approved readback policy (2026-09-30): derive single X/single Z/vector mode from the complete requested plan; single-axis requires every inactive-axis target exactly zero. Actual readbacks use a fixed 0.5 mT margin at nominal limits <=3 T, vector magnitude <=nominal+0.5 mT, and an independent inactive-axis +/-0.5 mT guard. Record both raw axes and the versioned policy; do not round residuals to zero. Standalone Z9 T is not extended. Generic diagnostics and historical records retain their declared rules. This software change is not real commissioning or permission to deploy/replay an experiment.
 - Never infer that the field is zero after a communication failure. Record the last confirmed readback and require manual verification.
 - Configure the two SR830 units by semantic role (`lockin_xx`, `lockin_xy`), not by model-specific numbered slots.

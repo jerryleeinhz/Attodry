@@ -86,8 +86,8 @@ class CryostatCombinationTests(unittest.TestCase):
         with redirect_stdout(output):
             self.assertEqual(cli(["describe-hardware", "--config", str(self.path)]), 0)
         plan = json.loads(output.getvalue())["plan"]
-        self.assertEqual(plan["field_limit_policy"], "universal-3T")
-        self.assertEqual(plan["hardware"]["effective_cryostat"]["magnet"]["limits"]["hardware_z_max_t"], 3)
+        self.assertEqual(plan["field_limit_policy"], "planned-axis-configured-v2")
+        self.assertEqual(plan["hardware"]["effective_cryostat"]["magnet"]["limits"]["hardware_z_max_t"], 9)
         self.assertEqual(self.dll.events, [])
 
     def test_ordered_magnetic_duplicates_reversal_and_temperature_requalification(self):
@@ -129,7 +129,7 @@ class CryostatCombinationTests(unittest.TestCase):
         self.assertEqual([r["requested.temperature_k"] for r in rows], [2, 2.1] * 3)
 
     def test_preflight_limits_and_static_temperature_reset_reject(self):
-        source = self.base.replace('bz_t = 0.0 },', 'bz_t = 3.01 },')
+        source = self.base.replace('bz_t = 0.0 },', 'bz_t = 9.01 },')
         self.write_config(("magnetic",), source=source)
         with self.assertRaises(ValueError):
             load_hardware_combination(self.path)

@@ -29,8 +29,10 @@ The active software coordinate system is X/Z:
 - X is the 3 T transverse coil called Y in the factory system sheet.
 - No mechanical rotator is controlled.
 
-Nominal requests and exact float32 commands retain the 2026-09-11 standalone
-X 3 T / Z 9 T envelope. Combination nominal axes and resultant stay <=3 T:
+Nominal requests and exact float32 commands use the configured X/Z limits,
+bounded by the 2026-09-11 X 3 T / Z 9 T envelope. The 2026-09-30 combination
+follow-up removes its extra single-Z 3 T cap; whole-plan vector targets remain
+within the configured resultant limit (at most 3 T):
 
 ```text
 abs(Bx) <= 3 T
@@ -54,9 +56,10 @@ Actual readback limits are separate from command limits:
 | Single Z | abs(Bz) <= configured Z limit + margin | abs(Bx) <=0.0005 T |
 | Vector | each axis within its configured limit + margin; hypot(Bx,Bz) <= configured vector limit + 0.0005 T | Both raw axes retained |
 
-Axis margin is 0.0005 T only for nominal limits <=3 T; larger standalone Z limits,
+Axis margin is 0.0005 T only for nominal limits <=3 T; larger Z limits,
 including 9 T, get no margin. Thus 3 T becomes 3.0005 T **for actual readbacks**.
-Combination still rejects a 4/9 T Z target. Reduced configured limits are retained
+Pure-Z combination plans may request 4/9 T within their configured Z ceiling.
+Reduced configured limits are retained
 and receive the same fixed readback margin. The exact DLL binary32 representation
 of 0.0005 T is accepted at the inactive-axis boundary; its effective threshold
 (0.0005000000237487257 T) is archived. No readback is rounded to zero.
@@ -85,6 +88,14 @@ corner using the declared readback policy before writes. Existing cleanup gates
 remain; failed communication cannot certify zero. Magnet temperature/readiness,
 factory charging parameters and APS100 sweep rates are unchanged. Discrete
 checks do not establish a continuous physical trajectory.
+
+Combination snapshots now declare `planned-axis-configured-v2`; historical
+`universal-3T` acquisitions retain their archived envelope. Owned zero/disable
+recovery for a pure-Z plan can read up to the factory 9 T Z ceiling while still
+requiring X setpoint zero and actual X within the independent 0.5 mT guard.
+Other magnetic modes retain the recovery vector envelope of 3.0005 T and strict
+3 T setpoints. Recovery cannot resume scanning or certify zero after unknown
+communication, disabled field control or out-of-envelope readbacks.
 
 Angle is reported relative to +Z:
 

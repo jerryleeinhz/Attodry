@@ -135,9 +135,10 @@ SINE OUT target/readback 和名义电流；formal sample 继续归档 Vxx/Vxy ph
 
 ## 集成时重点测试
 
-- 目标、执行中的中间状态和实际读回满足 2026-09-11 确认限值：纯 X 最高 3 T、
-  纯 Z 最高 9 T；双轴同时非零时 `sqrt(Bx^2 + Bz^2) <= 3 T`。严格零才算单轴，
-  不因容差忽略非零分量；离散读回仍不能证明连续物理轨迹。
+- 目标及精确float32命令使用配置上限：纯X最多3 T、纯Z最多9 T。模式按完整计划
+  判定，另一轴目标全部严格零才算单轴；vector的全部目标模长最多3 T。
+  实际读回按归档的`planned-axis-readback-v2`检查，原始两轴不置零；组合的
+  `planned-axis-configured-v2`已移除额外单轴Z3 T限制。离散读回仍不能证明连续轨迹。
 - Lock-in X/Y/R/phase/harmonic/frequency 及设置上下文完整保存。
 - 两台 SR830 顺序读取事实未丢失，转换样本不进入 accepted 曲线。
 - 温度/磁场稳定均要求控制状态、error、窗口、容差和 timeout。

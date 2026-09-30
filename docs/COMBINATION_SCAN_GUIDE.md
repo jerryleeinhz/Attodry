@@ -72,13 +72,18 @@ segments 或固定模长 angle_segments，
 正式窗口同时检查温漂、磁场误差和范围。它是**同步前后夹取，不是连续监控**，
 无法证明阻塞 VISA 调用期间没有短暂异常；不另开 DLL/VISA 后台读取线程。
 
-集成路径的有效X/Z标称上限、目标模长及精确float32命令/中间命令角点仍<=3 T。
+集成路径按完整计划使用TOML的标称限值：single X最多3 T、single Z最多9 T，
+vector的全部目标模长最多3 T（包括纯轴端点）。降低的配置上限仍生效；精确float32
+命令和两个候选中间命令角点仍严格检查。组合入口不再额外把单轴Z收紧至3 T。
 2026-09-30读回协议从**完整磁场计划**确定single X / single Z / vector，不随每个
 点或实时读回切换。单轴要求另一轴全部目标为零；固定非零另一轴、先X后Z都算vector。
-新磁场运行的实际读回边界为配置标称值+0.5 mT（3 T→3.0005 T），单轴另一轴
+标称上限<=3 T时实际读回边界为该值+0.5 mT（3 T→3.0005 T），单轴另一轴
 独立限制±0.5 mT并保留原值。正式窗口、转场和hold使用同一声明；目标上限、
 场稳定性、设备错误/控制/通信检查不放宽。终端预览及SQLite保存模式/阈值/评估。
-这里不开放纯Z4/9 T；只选温度而没有磁场计划时保持原严格场边界。
+纯Z计划可按配置使用4/9 T，Z上限>3 T时没有额外读回余量，9 T仍为9 T。
+只选温度而没有磁场计划时保持原严格3 T场边界。
+新组合快照声明`field_limit_policy="planned-axis-configured-v2"`，同时保存实际
+配置限值及读回策略；历史`universal-3T`记录不重新解释或自动重跑。
 新协议仅离线验证，尚未实机验收；历史日志按各自归档的规则解释。
 
 Lock-in 模式与参数来源：
@@ -197,9 +202,11 @@ hold 是保留控制器当前目标/控制状态，不是 persistent-mode 命令
 
 联合清理的越界恢复（2026-09-24；2026-09-30读回协议更新）：正常扫描/hold按本次
 归档的标称限值及读回协议检查，目标写入保持严格。只有已接管轴的monitored-zero /
-failure-disable动作才允许读取超出较小实验限值或单轴另一轴保护的状态；有新磁场
-协议时恢复读回按vector模长<=3.0005 T，目标/设定值仍<=3 T。无磁场计划时仍严格
-<=3 T；不会提高扫描目标限值，也不会继续扫描。
+failure-disable动作才允许读取超出较小实验限值的状态。pure-Z恢复采用single Z：
+Z实际读回/设定值最多9 T，X设定值必须零、实际读回仍独立限制±0.5 mT。
+single X或vector恢复按vector模长<=3.0005 T，目标/设定值仍<=3 T。
+无磁场计划时仍严格<=3 T。超出恢复边界、非有限值或通信失败不能证明回零，
+必须人工核验；恢复边界不会提高正式扫描目标限值，也不能用于继续扫描。
 非有限/不完整读回、设备 error 和未知控制状态仍拒绝；回零要求磁场控制已开启，
 不因 cleanup 自动开启它。回零超时后仍独立尝试关闭已设置的温控。
 新增 recovery-action、readback envelope 和首次 scan-limit violation 审计。
@@ -377,10 +384,10 @@ and acquisition models are separate from this plotting change.
 - Magnetic resume is deliberately rejected even if cleanup succeeded. Recovery
   needs a separately approved path/history policy; never automatically jump over
   ordered field points or insert a via-zero route.
-- Integrated nominal targets and exact float32 commands retain resultant <=3 T,
-  including pure Z. The 2026-09-30 archived readback policy allows the fixed
-  0.5 mT margin and independent single-axis inactive guard described above.
-  Standalone Z9 T targets remain unavailable through the integrated path.
+- Integrated single-axis targets and exact float32 commands use configured X/Z
+  ceilings (at most X3 T/Z9 T). A whole-plan vector scan retains resultant <=3 T,
+  including pure-axis endpoints. Readback margin and inactive-axis guards are
+  separate, versioned and archived; Z ceilings >3 T receive no extra margin.
 
 ## Remaining acceptance work
 
