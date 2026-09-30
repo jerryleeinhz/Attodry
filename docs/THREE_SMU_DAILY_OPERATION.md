@@ -86,6 +86,12 @@ compliance 上限可到所选 range 的约 1.05 倍，且 compliance 不能低�
 程序不把 `max_abs_*` 四舍五入成某个 range，而是写入该数值作为 compliance 并查询仪器实际
 接受的值；实际值高于批准边界即拒绝。
 
+2026-09-30确认的本次100 nA错误原因是QCoDeS参数使用 `{:f}`：
+请求1e-7 A被实际发送为0.000000，而不是100 nA。共享adapter现用高精度科学计数法
+SCPI直接写入current/voltage PROT，并把同一发送字符串记录到configuration_audit；
+不修改系统QCoDeS包，不把保护值提高到1 µA。读回超过批准值仍中止。
+这是离线回归已覆盖的精度修复，实机输出OFF初始化验证仍需单独授权。
+
 初始化时自动量程不保证立即清除旧 measurement range 对 compliance 的限制。共享
 adapter（单一扫描与 combination 共用）按下面顺序处理：
 

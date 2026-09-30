@@ -4,6 +4,38 @@ Last updated: 2026-09-30
 
 ## Current stage
 
+### Compliance precision and combination operator CLI (offline; 2026-09-30)
+
+Confirmed root cause from the reported control-computer driver/file audit:
+QCoDeS compliance {:f} converts 100 nA to 0.000000. This supersedes the earlier
+old-range hypothesis for that specific run. Current and voltage PROT now use
+the existing transport with a scientific literal that preserves the requested
+float, and audit exactly that wire command. Zero/OFF, nominal sense-range
+preparation, one +822-only retry, AUTO, compliance/error/readback checks remain;
+the requested protection limit is never increased.
+
+Approved daily combination run now prints width-aware horizontal tables and
+starts without asking for RUN; command invocation authorizes selected modules.
+XY disconnection is declared in TOML and still strictly validated. Backend
+authorization guards, config/safety hash checks, duplicate rejection, field
+limits and cleanup are unchanged. Legacy flags work; authorization_method is
+run_command or explicit_flags in the saved launch snapshot.
+
+After a run row commits and before connection, an atomic project run_data index
+records absolute DB/ID/config, registration time and PID/host. Plain monitor
+selects that verified index, else the configured DB's newest registered row.
+Explicit DB/ID still work; selection stays fixed. Monitoring is files/SQLite
+only, bounded current snapshots, process_liveness=unknown, no repeated unchanged
+output or hardware queries. Small index disk failure stops before connection.
+JSON mode retains complete output, and SQLite raw audits are unchanged. Failed
+run markers stay separate from each module's successful reset readback.
+
+Verification: 192 relevant guarded offline tests passed (hardware imports/DLL loads blocked). No real instrument connection, LK_setup
+deployment or experimental scan performed. Real 100 nA output-OFF initialization
+acceptance remains pending and requires separate stage authorization.
+Usage: [COMBINATION_SCAN_GUIDE.md](COMBINATION_SCAN_GUIDE.md) and
+[THREE_SMU_DAILY_OPERATION.md](THREE_SMU_DAILY_OPERATION.md).
+
 ### Keithley 2400 compliance initialization (offline; 2026-09-30)
 
 The shared Three-SMU adapter now confirms output OFF and zero source before
@@ -41,13 +73,9 @@ working-directory semantics. Optional `combination_scan.run_id` defaults to an
 automatic UTC microsecond timestamp plus sanitized run name. Duplicate IDs reject
 before connection; there is no hardware resume or overwrite.
 
-The CLI displays the requested axes, order, coordinates, groups, selected harmonics,
-ranges/Reserve, overload and cleanup policies, paths and ID. Interactive `RUN`
-confirms that summary and physical XY SINE OUT disconnection when Lock-in is active.
-Cancellation/EOF creates no database and opens no instruments. Existing complete
-explicit authorization flags support unattended operation; partial flags and missing
-noninteractive authorization reject. TOML/safety changes during confirmation reject;
-the database snapshot retains the summary and confirmation method.
+The original interactive confirmation workflow in this milestone is superseded
+by the command-authorized CLI and automatic monitor described above. Requested
+axes, role settings and cleanup remain audited; file changes before connection reject.
 
 Optional `combination_scan.lockin_mode` selects excitation (legacy default), frequency,
 or frequency_excitation, reusing the corresponding daily sweep grid and role/harmonic

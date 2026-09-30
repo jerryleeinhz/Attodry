@@ -18,8 +18,13 @@ SMU 外层、激励内层的数据可按激励重组为 SMU I–V；每个组合
 以及 Temperature × ordered Magnetic × gate SMU × Lock-in excitation 的 24 点扫描，
 共 32 点有效且清理确认。温度/磁场共用连接，监控仅读 SQLite；64 种模块子集/顺序
 全部经过假仪器测试，并非逐一实机验收。2026-09-30新增Lock-in frequency/f×e模式和
-`python -m attodry_control.combination_cli run`短命令，启动时显示摘要并交互确认；
+`python -m attodry_control.combination_cli run`短命令，显示横向摘要后直接运行（命令本身授权，不再输入RUN）；
 新增扫频路径完成离线验证，实机验收待执行。硬件resume仍未支持。
+`python -m attodry_control.combination_cli monitor`自动跟踪最新已登记运行，
+仅读文件/SQLite；`--json`保留完整终端结构输出。配置和操作见
+[组合扫描说明](docs/COMBINATION_SCAN_GUIDE.md)。
+2400小compliance值已绕开QCoDeS的六位小数格式化，保留发送精度并核对读回；
+实机100 nA初始化验收仍待授权执行。
 温控采用读回稳定判据，目标 2.1 K 不等于每点实测均为 2.1 K；必须使用保存的实际温度。
 范围、最终仪器状态及遗留限制见
 [`MULTI_AXIS_ACCEPTANCE_20260924.md`](docs/MULTI_AXIS_ACCEPTANCE_20260924.md)。

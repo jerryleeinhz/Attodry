@@ -109,7 +109,7 @@ $env:PYTHONPATH = (Resolve-Path .\src).Path
 python -m attodry_control.combination_cli describe-hardware
 ```
 
-日常交互式启动从项目目录执行：
+日常启动从项目目录执行：
 
 ```powershell
 python -m attodry_control.combination_cli run
@@ -118,28 +118,57 @@ python -m attodry_control.combination_cli run
 默认配置为当前工作目录下的 config/hardware.local.toml；找不到即报错，不搜索其他实验配置。
 数据库从 `[project].database_path` 读取，相对路径相对该TOML所在目录；例如
 `../run_data/combination/scan.sqlite`。命令行 `--database` 覆盖它，保持原先相对工作目录的语义。
-父目录在确认后自动创建。一份SQLite可以容纳多次不同run ID的扫描。
+父目录在校验后自动创建。一份SQLite可以容纳多次不同run ID的扫描。
 `run_name`是可重复的实验名称，`run_id`标识一次运行，在同一数据库内不可重复。
 省略run_id或填写auto会生成UTC微秒时间戳+净化的run_name；也可在TOML写固定ID，
 或用 `--run-id` 临时覆盖。重复ID拒绝，不能覆盖记录或重放磁场历史。
 
-启动前离线展示配置与数据库绝对路径、run name/ID、外到内循环、点数/首末目标/段方向、
-总条件和采样数、正式谐波、量程/Reserve（包括谐波覆盖）、过载策略及cleanup。
-输入RUN才连接仪器，RUN同时确认本次写入/状态消费和XY SINE OUT物理断开（启用lockin时）。
-空输入、其他文字、EOF均取消；Ctrl+C按CLI中断退出。取消不创建数据库或连接设备。
-确认期间TOML或lockin_safety变化会拒绝，需重新启动审阅。
+启动时用横向表格显示段/方向/转折点、总条件/每条件组数、谐波、SENS/Reserve、
+SMU保护限值、TC、过载与正常/异常清理策略，以及完整路径和run ID。长网格显示
+首末/转折点、不同值数量和ordered grid，不声称非均匀网格有统一步长；完整点序
+仍在SQLite配置快照中。窄终端自动折行，保护值和错误不会截断。
 
-SSH后台/定时启动保留显式授权命令，不等待终端输入：
+**执行run命令本身就是本次选中模块的连接、写入和状态消费授权，不再输入RUN。**
+启用Lock-in时，TOML的 `lockin_xy.sine_output_connected = false` 是操作者的物理
+断线声明；true会在连接前拒绝。接线变更后必须更新声明并核验实物。
+要先检查计划，使用 `describe-hardware`（完全离线），然后再执行run。
+连接前复核TOML和lockin_safety哈希，文件变动即拒绝。重复run ID仍拒绝；
+没有新增硬件resume或自动重放。旧授权参数与其别名继续接受，但不再必填。
+
+另开终端只读监控最新一次已登记运行：
 
 ```powershell
-python -m attodry_control.combination_cli run --config config/hardware.local.toml --database run_data/combination/scan.sqlite --run-id UNIQUE_RUN_ID --authorize-combination --authorize-cryostat --confirm-xy-sine-disconnected
-python -m attodry_control.combination_cli monitor --database run_data/combination/scan.sqlite --run-id UNIQUE_RUN_ID
+python -m attodry_control.combination_cli monitor
+python -m attodry_control.combination_cli monitor --once
 ```
 
-提供授权开关时必须完整：`--authorize-combination`（旧 electrical-combination别名保留），
-启用温度/磁场时加 `--authorize-cryostat`，启用Lock-in时加 `--confirm-xy-sine-disconnected`。
-部分开关或非交互环境缺少授权时在连接/创建数据库前拒绝，避免后台等待输入。
-完整旧命令也先打印相同摘要；SQLite配置快照保存摘要与确认方式。
+启动在数据库run行成功提交后、连接设备前，原子写入小型索引
+`run_data/latest-combination-run.json`（项目config目录的上级；TOML不在config内时
+用其所在目录）。它保存绝对数据库路径、run ID、登记时间、config路径、PID和host，
+不保存整段数据，也不占用大块共享内存。路径在run_data内，不提交Git。
+离线预览、未通过校验或重复ID不更新它；索引写入故障在连接前停止。
+只有索引确实匹配数据库已登记run才采用它；缺失/损坏/目标删除时，回退
+TOML的project.database_path，在该数据库按created_at_utc选择最新run。
+不按sqlite/WAL修改时间猜测，也不扫描整个磁盘。
+
+选中的数据库和ID会显示并固定跟踪，期间不会跳到后续新run。
+`--database`显式指定其他库；只给数据库时选库内最新run，`--run-id`选择历史run。
+显式路径+ID可在没有TOML时监控。monitor不解析仪器配置、不连接设备、不查询状态队列，
+只保留当前有限快照。没有新事件时不反复输出同一块摘要。
+active只是数据库状态，process liveness目前显示unknown；保存的PID不是存活证明，
+应结合最新事件时间/进度判断，不能推断磁场为零或输出已关闭。
+
+```powershell
+python -m attodry_control.combination_cli run --json
+python -m attodry_control.combination_cli monitor --json --once
+python -m attodry_control.combination_cli monitor --database run_data/combination/scan.sqlite --run-id EXISTING_RUN_ID
+```
+
+run的 `--json`打印完整summary和result；monitor打印完整快照。
+默认结束摘要分别显示主错误、每模块reset验证和人工review标记。
+整体failed/cleanup.clean=false与单个模块成功归零复位可以同时成立，不要混淆。
+SQLite保持完整配置、原始拒绝尝试和清理审计，简短输出不改变数据有效性判定。
+
 授权不是操作系统提权，也不能代替接线的物理核验。XX 内参考/XY TTL、
 初始 4 mV/h1、输入与滤波读回必须符合配置；需要改面板固定设置时，先单独
 `apply-toml`。off SMU 不访问。未选温度/磁场轴不写入，但共享 DLL 的 full-state

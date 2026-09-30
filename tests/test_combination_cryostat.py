@@ -70,11 +70,15 @@ class CryostatCombinationTests(unittest.TestCase):
                 dll=self.dll, smu_adapter_factory=self.factory)
         self.assertEqual(self.dll.events, [])
         self.assertEqual(self.adapters, {})
-        other = self.directory / "must-not-create.sqlite"
-        with self.assertRaisesRegex(ValueError, "authorize-cryostat"):
-            cli(["run", "--config", str(self.path), "--database", str(other),
-                 "--run-id", "no", "--authorize-combination"])
-        self.assertFalse(other.exists())
+        # The CLI run command authorizes selected axes; direct backend calls
+        # still require explicit cryostat authorization.
+        other = self.directory / "command.sqlite"
+        with patch("attodry_control.combination_hardware.run_hardware_combination",
+                return_value={"status": "completed"}) as runner, redirect_stdout(io.StringIO()):
+            self.assertEqual(cli(["run", "--json", "--config", str(self.path),
+                "--database", str(other), "--run-id", "command"]), 0)
+        self.assertTrue(runner.call_args.kwargs["authorize_cryostat"])
+        self.assertEqual(self.dll.events, [])
 
     def test_describe_four_axes_is_offline(self):
         self.write_config(("temperature", "smu", "magnetic", "lockin"))

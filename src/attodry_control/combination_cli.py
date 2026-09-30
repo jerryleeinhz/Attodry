@@ -6,7 +6,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
-import sys
+import sqlite3
 import time
 import tomllib
 
@@ -64,18 +64,21 @@ def run(argv: list[str] | None = None) -> int:
         "describe-hardware", help="Offline validation of selected four-module hardware axes")
     hardware_description.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
     hardware_run = commands.add_parser(
-        "run", help="REAL selected-module writes and status consumption; separately authorized")
+        "run", help="Authorize and run REAL selected-module writes/status reads using the TOML")
     hardware_run.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
     hardware_run.add_argument("--database", type=Path, help="Override project.database_path")
     hardware_run.add_argument("--run-id", help="Override combination_scan.run_id (default: auto)")
     hardware_run.add_argument("--authorize-combination", "--authorize-electrical-combination",
                               dest="authorize_electrical_combination", action="store_true")
     hardware_run.add_argument("--authorize-cryostat", action="store_true",
-                              help="Additionally authorize selected temperature/field axis writes")
+                              help="Legacy authorization flag; run already authorizes selected axes")
     hardware_run.add_argument("--confirm-xy-sine-disconnected", action="store_true")
+    hardware_run.add_argument("--json", action="store_true", help="Full structured summary/result")
     monitor = commands.add_parser("monitor", help="Read SQLite; never query instruments")
-    monitor.add_argument("--database", type=Path, required=True)
-    monitor.add_argument("--run-id", required=True)
+    monitor.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
+    monitor.add_argument("--database", type=Path, help="Override the latest registered database")
+    monitor.add_argument("--run-id", help="Override the latest registered run ID")
+    monitor.add_argument("--json", action="store_true", help="Full structured snapshots")
     monitor.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
     if args.command in {"describe-hardware", "run"}:
@@ -89,49 +92,37 @@ def run(argv: list[str] | None = None) -> int:
         database, run_id = resolve_launch(config, args.database, args.run_id)
         check_run_destination(database, run_id)
         summary = launch_summary(config, database, run_id)
-        print("REAL combination scan - review requested settings:", flush=True)
-        print(json.dumps(summary, ensure_ascii=False, indent=2, default=str), flush=True)
+        from .combination_terminal import launch_text, snapshot_text
+        from .combination_registry import register_run
+        print(json.dumps(summary, ensure_ascii=False, indent=2, default=str)
+              if args.json else launch_text(summary), flush=True)
+        # The approved daily run command itself authorizes the selected modules.
+        # Legacy flags remain accepted; backend guards and TOML wiring stay strict.
         explicit = (args.authorize_electrical_combination
                     and (config.lockin is None or args.confirm_xy_sine_disconnected)
                     and (config.cryostat is None or args.authorize_cryostat))
-        if not explicit:
-            supplied_flags = (args.authorize_electrical_combination or
-                              args.confirm_xy_sine_disconnected or args.authorize_cryostat)
-            if supplied_flags or not sys.stdin.isatty():
-                missing = []
-                if not args.authorize_electrical_combination:
-                    missing.append("--authorize-combination")
-                if config.lockin is not None and not args.confirm_xy_sine_disconnected:
-                    missing.append("--confirm-xy-sine-disconnected")
-                if config.cryostat is not None and not args.authorize_cryostat:
-                    missing.append("--authorize-cryostat")
-                raise ValueError("Explicit/non-interactive launch requires " + " ".join(missing))
-            prompt = "Type RUN to authorize the displayed hardware writes/status reads"
-            if config.lockin is not None:
-                prompt += " and confirm XY SINE OUT is physically disconnected"
-            try:
-                confirmed = input(prompt + ": ") == "RUN"
-            except EOFError:
-                confirmed = False
-            if not confirmed:
-                print("Cancelled before database creation or hardware connection.")
-                return 0
-        # Confirmation applies to the displayed, already validated configuration.
+        # Recheck the displayed, validated files immediately before connection.
         if hashlib.sha256(config.path.read_bytes()).hexdigest() != config.snapshot["config_sha256"]:
-            raise ValueError("Configuration changed during confirmation; launch again to review it")
+            raise ValueError("Configuration changed during launch; launch again to review it")
         if config.lockin is not None and hashlib.sha256(
                 config.path.with_name("lockin_safety.toml").read_bytes()).hexdigest() != \
                 config.snapshot["hardware"]["lockin"]["safety_sha256"]:
-            raise ValueError("Lock-in safety configuration changed during confirmation")
+            raise ValueError("Lock-in safety configuration changed during launch")
         config = replace(config, snapshot={**config.snapshot, "launch": {
-            "summary": summary, "authorization_method": "explicit_flags" if explicit else "interactive_RUN"}})
+            "summary": summary, "authorization_method": "explicit_flags" if explicit else "run_command"}})
         database.parent.mkdir(parents=True, exist_ok=True)
         with CombinationStore(database) as store:
             result = run_hardware_combination(
                 config, store, run_id, authorize_hardware=True,
-                confirm_xy_sine_disconnected=config.lockin is not None,
-                authorize_cryostat=config.cryostat is not None)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+                confirm_xy_sine_disconnected=(config.lockin is not None
+                    and not config.lockin.lockin_xy.sine_output_connected),
+                authorize_cryostat=config.cryostat is not None,
+                on_registered=lambda store, selected: register_run(config.path, store, selected))
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            snapshot = run_snapshot(database, run_id)
+            print(snapshot_text({**snapshot, **result}), flush=True)
         return 0 if result["status"] == "completed" else 2
     if args.command == "describe":
         plan = load_plan(args.config)
@@ -143,9 +134,19 @@ def run(argv: list[str] | None = None) -> int:
             result = run_simulated_combination(plan, store, args.run_id, resume=args.resume)
         print(json.dumps(result, indent=2))
         return 0 if result["status"] == "completed" else 2
+    from .combination_registry import resolve_monitor
+    from .combination_terminal import snapshot_text
+    database, run_id = resolve_monitor(args.config, args.database, args.run_id)
+    # Resolve once. Do not silently switch when a newer run registers.
+    if not args.json:
+        print("Database: " + str(database), flush=True)
+    previous = None
     while True:
-        snapshot = run_snapshot(args.database, args.run_id)
-        print(json.dumps(snapshot, ensure_ascii=False), flush=True)
+        snapshot = {**run_snapshot(database, run_id), "database": str(database)}
+        encoded = json.dumps(snapshot, ensure_ascii=False)
+        if encoded != previous:
+            print(encoded if args.json else snapshot_text(snapshot), flush=True)
+            previous = encoded
         if args.once or snapshot["status"] != "active":
             return 0
         time.sleep(1)
@@ -156,7 +157,7 @@ def main() -> None:
         raise SystemExit(run())
     except KeyboardInterrupt:
         raise SystemExit(130) from None
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, sqlite3.Error) as exc:
         raise SystemExit(str(exc)) from exc
 
 

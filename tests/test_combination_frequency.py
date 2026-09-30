@@ -212,37 +212,35 @@ class CombinationFrequencyTests(unittest.TestCase):
         self.assertEqual(summary["cleanup"]["lockin"],
                          "4mV_h1_restore_baseline_frequency_ranges_reserve")
 
-    def test_cancel_or_eof_creates_no_database_and_no_connections(self):
-        self.configure()
-        for response in ("", "no", EOFError()):
-            mock = {"side_effect": response} if isinstance(response, Exception) else {"return_value": response}
-            with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", **mock), \
-                    redirect_stdout(io.StringIO()), patch("attodry_control.combination_hardware.run_hardware_combination") as runner:
-                self.assertEqual(cli(["run", "--config", str(self.path), "--database", str(self.database)]), 0)
-                runner.assert_not_called()
-            self.assertFalse(self.database.exists())
-
-    def test_noninteractive_missing_authorization_no_database(self):
-        self.configure()
-        with patch("sys.stdin.isatty", return_value=False), redirect_stdout(io.StringIO()), \
-                self.assertRaisesRegex(ValueError, "confirm-xy-sine-disconnected"):
-            cli(["run", "--config", str(self.path), "--database", str(self.database), "--authorize-combination"])
-        self.assertFalse(self.database.exists())
-
-    def test_interactive_and_explicit_launch_pass_resolved_audit_to_runner(self):
+    def test_command_authorization_in_tty_and_background_never_prompts(self):
         self.configure(extra='run_id = "from-toml"\n')
-        self.path.write_text(self.path.read_text(encoding="utf-8").replace('../run_data/combination/scan.sqlite', str(self.database).replace('\\', '/')), encoding="utf-8")
-        for explicit in (False, True):
-            flags = ["--authorize-combination", "--confirm-xy-sine-disconnected"] if explicit else []
-            with patch("sys.stdin.isatty", return_value=not explicit), patch("builtins.input", return_value="RUN") as prompt, \
-                    redirect_stdout(io.StringIO()), patch("attodry_control.combination_hardware.run_hardware_combination",
-                    return_value={"status": "completed"}) as runner:
-                self.assertEqual(cli(["run", "--config", str(self.path)] + flags), 0)
-                config, _, run_id = runner.call_args.args
-                self.assertEqual(run_id, "from-toml")
-                self.assertEqual(config.snapshot["launch"]["authorization_method"],
-                                 "explicit_flags" if explicit else "interactive_RUN")
-                self.assertEqual(prompt.called, not explicit)
+        for tty, flags in ((True, []), (False, []), (False, ["--authorize-combination"]),
+                (False, ["--authorize-combination", "--confirm-xy-sine-disconnected"])):
+            with self.subTest(tty=tty, flags=flags):
+                with patch("sys.stdin.isatty", return_value=tty), patch("builtins.input") as prompt, \
+                        redirect_stdout(io.StringIO()), patch("attodry_control.combination_hardware.run_hardware_combination",
+                        return_value={"status": "completed"}) as runner:
+                    self.assertEqual(cli(["run", "--json", "--config", str(self.path),
+                                          "--database", str(self.database)] + flags), 0)
+                    config, _, run_id = runner.call_args.args
+                    self.assertEqual(run_id, "from-toml")
+                    self.assertEqual(config.snapshot["launch"]["authorization_method"],
+                        "explicit_flags" if "--confirm-xy-sine-disconnected" in flags else "run_command")
+                    self.assertTrue(runner.call_args.kwargs["authorize_hardware"])
+                    self.assertTrue(runner.call_args.kwargs["confirm_xy_sine_disconnected"])
+                    prompt.assert_not_called()
+
+    def test_connected_xy_sine_rejects_before_database_or_io(self):
+        source = self.base.replace("[lockin_xy]\n", "[lockin_xy]\n", 1)
+        i = source.index("[lockin_xy]")
+        source = source[:i] + source[i:].replace("sine_output_connected = false",
+                                               "sine_output_connected = true", 1)
+        self.configure(source=source)
+        with patch("attodry_control.combination_hardware.run_hardware_combination") as runner, \
+                self.assertRaises(ValueError):
+            cli(["run", "--config", str(self.path), "--database", str(self.database)])
+        runner.assert_not_called()
+        self.assertFalse(self.database.exists())
 
     def test_duplicate_run_fails_before_confirmation_or_hardware(self):
         self.configure()
@@ -253,17 +251,18 @@ class CombinationFrequencyTests(unittest.TestCase):
         prompt.assert_not_called()
         runner.assert_not_called()
 
-    def test_config_change_during_confirmation_refuses_launch(self):
+    def test_config_change_during_display_refuses_launch(self):
         self.configure()
-        def change(_):
+        from attodry_control.combination_terminal import launch_text
+        def change(summary):
             self.path.write_text(self.path.read_text(encoding="utf-8") + "\n# changed\n", encoding="utf-8")
-            return "RUN"
-        with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=change), \
+            return launch_text(summary)
+        with patch("attodry_control.combination_terminal.launch_text", side_effect=change), \
                 redirect_stdout(io.StringIO()), self.assertRaisesRegex(ValueError, "changed during"):
             cli(["run", "--config", str(self.path), "--database", str(self.database)])
         self.assertFalse(self.database.exists())
 
-    def test_plain_run_reads_default_toml_and_persists_confirmation(self):
+    def test_plain_run_reads_default_toml_and_persists_command_authorization(self):
         self.configure(order=("lockin",), extra='run_id = "short-command"\n')
         directory = self.directory / "config"
         directory.mkdir()
@@ -276,12 +275,16 @@ class CombinationFrequencyTests(unittest.TestCase):
         def execute(config, store, run_id, **kwargs):
             return run_hardware_combination(config, store, run_id,
                 manager_factory=lambda: self.manager, **kwargs)
-        with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="RUN"), \
+        with patch("sys.stdin.isatty", return_value=True), patch("builtins.input") as prompt, \
                 redirect_stdout(io.StringIO()), patch("attodry_control.combination_hardware.run_hardware_combination", side_effect=execute):
             self.assertEqual(cli(["run"]), 0)
+            prompt.assert_not_called()
+        from attodry_control.combination_registry import resolve_monitor
+        self.assertEqual(resolve_monitor(directory / "hardware.local.toml"),
+                         (self.database, "short-command"))
         with closing(open_readonly(self.database)) as connection:
             row = connection.execute("SELECT plan_json,status FROM combination_runs WHERE run_id='short-command'").fetchone()
         self.assertEqual(row["status"], "completed")
         launch = json.loads(row["plan_json"])["launch"]
-        self.assertEqual(launch["authorization_method"], "interactive_RUN")
+        self.assertEqual(launch["authorization_method"], "run_command")
         self.assertEqual(launch["summary"]["total_conditions"], 4)

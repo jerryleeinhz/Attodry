@@ -229,7 +229,8 @@ def run_simulated_combination(
                             snapshot=plan.snapshot(), resume=resume)
 
 
-def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) -> dict:
+def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
+                     on_registered=None) -> dict:
     """Internal engine; backend entry points own pre-I/O validation."""
     from .lockin_overload import reading_allows_continuation
     conditions = plan.conditions()
@@ -249,8 +250,12 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False) ->
         store.event(run_id, kind, {**context, **payload})
 
     try:
+        # Only a successfully committed run may become the monitor default.
+        # Registration failure stops before opening any instrument.
         if hasattr(station, "set_event_sink"):
             station.set_event_sink(emit)
+        if on_registered is not None:
+            emit("launch_registered", on_registered(store, run_id))
         emit("run_started", {"resume": resume, "plan": snapshot})
         emit("preflight", station.open(modules))
         previous_indices: tuple | None = None

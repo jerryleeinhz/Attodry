@@ -23,11 +23,11 @@ class RangeSensitiveInstrument(FakeQcodesInstrument):
         self.extra_compliance_error = None
         self.ignore_range = False
         self.ignore_auto = False
-        self.compliancei = self.set_compliance
-        self.compliancev = self.set_compliance
+        self.compliancei = lambda value: self.set_compliance(float(f"{value:f}"))
+        self.compliancev = lambda value: self.set_compliance(float(f"{value:f}"))
 
     def set_compliance(self, value):
-        name = 'compliancei' if self.source_mode is SourceMode.VOLTAGE else 'compliancev'
+        name = 'applied_compliance'
         self.calls.append((name, value))
         if value * (1 + 1e-9) < self.range * .001 or self.reject_compliance:
             if self.reject_compliance:
@@ -54,6 +54,9 @@ class RangeSensitiveInstrument(FakeQcodesInstrument):
     def write(self, command):
         super().write(command)
         sense = 'CURR' if self.source_mode is SourceMode.VOLTAGE else 'VOLT'
+        protection = f':SENS:{sense}:PROT '
+        if command.startswith(protection):
+            self.set_compliance(float(command[len(protection):]))
         prefix = f':SENS:{sense}:RANG '
         if command.startswith(prefix) and not self.ignore_range:
             self.range = float(command[len(prefix):])
@@ -68,6 +71,42 @@ def adapter_for(instrument):
 
 
 class ComplianceInitializationTests(unittest.TestCase):
+    def test_legacy_qcodes_format_reproduces_100na_rounding_to_zero(self):
+        instrument = RangeSensitiveInstrument()
+        instrument.range = 1e-6
+        instrument.compliancei(1e-7)
+        self.assertIn(("applied_compliance", 0.0), instrument.calls)
+        self.assertTrue(instrument.errors[0].startswith("822"))
+
+    def test_wire_precision_preserves_small_and_fractional_limits_in_both_modes(self):
+        for mode, limits in ((SourceMode.VOLTAGE, (1e-9, 1e-7, 1.23456789e-6)),
+                             (SourceMode.CURRENT, (.0002, .00123456789, 1.23456789))):
+            for limit in limits:
+                with self.subTest(mode=mode, limit=limit):
+                    instrument = RangeSensitiveInstrument(mode=mode)
+                    sense = "CURR" if mode is SourceMode.VOLTAGE else "VOLT"
+                    settings = replace(config(), source_mode=mode, **{
+                        "max_abs_current_a" if sense == "CURR" else "max_abs_voltage_v": limit})
+                    result = adapter_for(instrument).configure(settings)
+                    command = f":SENS:{sense}:PROT {limit:.17e}"
+                    self.assertIn(("write", command), instrument.calls)
+                    self.assertEqual(float(command.split()[-1]), limit)
+                    self.assertEqual(result.compliance_limit, limit)
+                    self.assertTrue(any(a.get("request") == command
+                        for a in result.configuration_audit), result.configuration_audit)
+
+    def test_protection_wire_write_failure_is_audited_without_retry(self):
+        instrument = RangeSensitiveInstrument()
+        command = f":SENS:CURR:PROT {1e-7:.17e}"
+        instrument.fail_write = command
+        adapter = adapter_for(instrument)
+        with self.assertRaises(OSError):
+            adapter.configure(replace(config(), max_abs_current_a=1e-7))
+        self.assertEqual(instrument.calls.count(("write", command)), 1)
+        self.assertTrue(any(a.get("request") == command and "OSError" in a.get("error", "")
+                            for a in adapter.configuration_audit))
+        self.assertNotIn(("output", "on"), instrument.calls)
+
     def test_100na_from_old_1ma_range_is_prepared_before_compliance(self):
         instrument = RangeSensitiveInstrument()
         adapter = adapter_for(instrument)
@@ -77,7 +116,7 @@ class ComplianceInitializationTests(unittest.TestCase):
         self.assertEqual(instrument.errors, [])
         self.assertNotIn(('output', 'on'), instrument.calls)
         prepare = next(i for i, c in enumerate(instrument.calls) if c[0]=='write' and c[1].startswith(':SENS:CURR:RANG '))
-        compliance = instrument.calls.index(('compliancei', 1e-7))
+        compliance = instrument.calls.index(('applied_compliance', 1e-7))
         self.assertLess(prepare, compliance)
 
     def test_compatible_nominal_range_does_not_get_unnecessary_range_write(self):
@@ -93,7 +132,7 @@ class ComplianceInitializationTests(unittest.TestCase):
         adapter = adapter_for(instrument)
         result = adapter.configure(replace(config(), max_abs_current_a=1e-7))
         self.assertEqual(result.compliance_limit, 1e-7)
-        self.assertEqual(instrument.calls.count(('compliancei', 1e-7)), 2)
+        self.assertEqual(instrument.calls.count(('applied_compliance', 1e-7)), 2)
         self.assertTrue(any('822' in str(e.get('readback','')) for e in result.configuration_audit))
         self.assertEqual(instrument.errors, [])  # Configuration error never leaks into cleanup.
 
@@ -109,7 +148,7 @@ class ComplianceInitializationTests(unittest.TestCase):
                 adapter = adapter_for(instrument)
                 with self.assertRaisesRegex(Keithley2400Error, "output OFF and zero"):
                     adapter.configure(replace(config(), max_abs_current_a=1e-7))
-                self.assertEqual(instrument.calls.count(("compliancei", 1e-7)), 1)
+                self.assertEqual(instrument.calls.count(("applied_compliance", 1e-7)), 1)
                 self.assertEqual(
                     instrument.calls.count(("write", ":SENS:CURR:RANG 1e-06")), 1
                 )
@@ -124,7 +163,7 @@ class ComplianceInitializationTests(unittest.TestCase):
         adapter = adapter_for(instrument)
         with self.assertRaisesRegex(Keithley2400Error, 'compliance_attempt_2'):
             adapter.configure(replace(config(), max_abs_current_a=1e-7))
-        self.assertEqual(instrument.calls.count(('compliancei', 1e-7)), 2)
+        self.assertEqual(instrument.calls.count(('applied_compliance', 1e-7)), 2)
         self.assertEqual(instrument.errors, [])
         self.assertNotIn(('output','on'), instrument.calls)
         self.assertEqual(adapter.configuration_audit[-1]['stage'], 'configuration_failed')
@@ -136,7 +175,7 @@ class ComplianceInitializationTests(unittest.TestCase):
         adapter = adapter_for(instrument)
         with self.assertRaisesRegex(Keithley2400Error, '-222'):
             adapter.configure(replace(config(), max_abs_current_a=1e-7))
-        self.assertEqual(instrument.calls.count(('compliancei',1e-7)), 1)
+        self.assertEqual(instrument.calls.count(('applied_compliance',1e-7)), 1)
         self.assertEqual(instrument.errors, [])
 
     def test_ignored_range_preparation_stops_before_compliance(self):
@@ -144,7 +183,7 @@ class ComplianceInitializationTests(unittest.TestCase):
         instrument.ignore_range = True
         with self.assertRaisesRegex(Keithley2400Error, 'compatible compliance range'):
             adapter_for(instrument).configure(replace(config(), max_abs_current_a=1e-7))
-        self.assertFalse(any(c[0]=='compliancei' for c in instrument.calls))
+        self.assertFalse(any(c[0]=='applied_compliance' for c in instrument.calls))
 
     def test_output_on_or_nonzero_source_never_gets_configuration_writes(self):
         for setting in ('output','volt'):
@@ -168,7 +207,8 @@ class ComplianceInitializationTests(unittest.TestCase):
         self.assertEqual(result.compliance_limit,.0002)
         self.assertTrue(instrument.auto)
         self.assertIn(('write',':SENS:VOLT:RANG 0.2'),instrument.calls)
-        self.assertFalse(any(c[0]=='compliancei' for c in instrument.calls))
+        self.assertFalse(any(c[0]=='write' and c[1].startswith(':SENS:CURR:PROT ')
+                             for c in instrument.calls))
 
     def test_communication_failure_is_not_retried_and_partial_audit_survives(self):
         instrument = RangeSensitiveInstrument()
@@ -178,7 +218,7 @@ class ComplianceInitializationTests(unittest.TestCase):
             adapter.configure(replace(config(),max_abs_current_a=1e-7))
         self.assertEqual(instrument.calls.count(('write',instrument.fail_write)),1)
         self.assertTrue(any('OSError' in e.get('error','') for e in adapter.configuration_audit))
-        self.assertFalse(any(c[0]=='compliancei' for c in instrument.calls))
+        self.assertFalse(any(c[0]=='applied_compliance' for c in instrument.calls))
 
     def test_autorange_readback_mismatch_is_blocking(self):
         instrument = RangeSensitiveInstrument()
@@ -186,7 +226,7 @@ class ComplianceInitializationTests(unittest.TestCase):
         instrument.ignore_auto = True
         with self.assertRaisesRegex(Keithley2400Error,'autorange was not confirmed'):
             adapter_for(instrument).configure(config())
-        self.assertFalse(any(c[0]=='compliancei' for c in instrument.calls))
+        self.assertFalse(any(c[0]=='applied_compliance' for c in instrument.calls))
 
     def test_nonterminating_error_queue_is_bounded_and_blocks_writes(self):
         class BrokenQueue(RangeSensitiveInstrument):
@@ -220,7 +260,7 @@ class ComplianceInitializationTests(unittest.TestCase):
         instrument = LostAuto()
         with self.assertRaisesRegex(Keithley2400Error,'autorange was not confirmed'):
             adapter_for(instrument).configure(replace(config(),max_abs_current_a=1e-7))
-        self.assertEqual(instrument.calls.count(('compliancei',1e-7)),1)
+        self.assertEqual(instrument.calls.count(('applied_compliance',1e-7)),1)
         self.assertNotIn(('output','on'),instrument.calls)
 
     def test_100na_readback_silently_clamped_to_1ua_is_still_blocking(self):

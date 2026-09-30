@@ -1,5 +1,24 @@
 # Development stages
 
+## Compliance precision and combination operator CLI (offline; 2026-09-30)
+
+- Fixed the confirmed QCoDeS six-decimal compliance rounding: scientific SCPI
+  current/voltage PROT literals preserve small/fractional requested limits and
+  match saved wire-command audit. Existing zero/OFF, range/AUTO/error/compliance
+  checks and bounded +822-only retry remain. No increased maximum or acquisition retry.
+- Combination run command authorizes its selected modules, no repeated RUN input.
+  TOML wiring validation, backend guards, file hash checks, duplicate rejection,
+  <=3 T resultant and cleanup remain; old flags accepted and method recorded.
+- Atomic project-local latest-run index is published only after DB registration,
+  before hardware opens. Plain monitor validates it or reads configured DB latest
+  created_at_utc row; explicit overrides remain. Fixed selection, file-only bounded
+  snapshots, unknown liveness and unchanged-output suppression; no live instruments.
+- Default width-aware launch/monitor/final tables preserve direction/turns, limits,
+  harmonic/segment overrides, faults and reset/manual-review distinctions.
+  Optional JSON output and complete SQLite raw/rejected audit remain.
+- 192 relevant guarded offline tests passed (hardware imports/DLL loads blocked). No control-computer deployment, real instrument connection
+  or acceptance scan. Real output-OFF 100 nA readback acceptance still pending.
+
 ## Keithley 2400 compliance initialization (offline; 2026-09-30)
 
 - Fixed the shared adapter's initialization order for existing range-dependent
@@ -26,7 +45,7 @@ Operator details: [THREE_SMU_DAILY_OPERATION.md](THREE_SMU_DAILY_OPERATION.md).
 
 ## Combination launch and frequency/excitation grids (offline; 2026-09-30)
 
-- Added the short interactive `combination_cli run` entry: default local TOML,
+- Added the short `combination_cli run` entry (original interactive workflow superseded above): default local TOML,
   TOML-relative project database, automatic or explicit run ID and command-line
   overrides. Run names remain reusable labels; duplicate database run IDs reject.
 - The offline summary displays axes/order/coordinates/counts, role harmonics,

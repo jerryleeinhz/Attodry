@@ -250,9 +250,11 @@ class QcodesKeithley2400:
         self._prepare_compliance_range(sense, requested, force=False)
         for attempt in range(2):
             stage = f"compliance_attempt_{attempt + 1}"
-            setter = self.instrument.compliancei if sense == "CURR" else self.instrument.compliancev
             self._require_configuration_idle(config.source_mode, stage)
-            step(stage, f":SENS:{sense}:PROT {requested:.12g}", lambda: setter(requested))
+            # QCoDeS' {:f} parameter rounds 100 nA to zero. Send and audit
+            # the same round-trip-safe scientific literal through its transport.
+            command = f":SENS:{sense}:PROT {requested:.17e}"
+            step(stage, command, lambda: self.write(command))
             actual = step(stage, f":SENS:{sense}:PROT?",
                           lambda: self._query_float(f":SENS:{sense}:PROT?", "compliance"))
             errors = self._configuration_errors(stage)

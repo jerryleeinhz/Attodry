@@ -362,7 +362,8 @@ class HardwareCombinationStation:
 def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
                                confirm_xy_sine_disconnected=False,
                                authorize_cryostat=False, dll=None, monotonic=None,
-                               smu_adapter_factory=None, manager_factory=None, sleep=None):
+                               smu_adapter_factory=None, manager_factory=None, sleep=None,
+                               on_registered=None):
     if not authorize_hardware:
         raise ValueError("Explicit combined connection/write/status-consumption authorization required")
     if config.lockin is not None and not confirm_xy_sine_disconnected:
@@ -376,7 +377,8 @@ def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
         "combined_connection_writes_status_consumption": True,
         "xy_sine_disconnected": confirm_xy_sine_disconnected,
         "cryostat_connection_and_selected_axis_writes": authorize_cryostat}}
-    return _run_combination(config.plan, store, run_id, station=station, snapshot=snapshot)
+    return _run_combination(config.plan, store, run_id, station=station, snapshot=snapshot,
+                            on_registered=on_registered)
 
 
 # Compatibility for callers of the earlier electrical-only milestone.

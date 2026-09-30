@@ -312,8 +312,11 @@ formal samples；rejected 只能显式 audit opt-in。
 Combination 的 `run` 默认读取当前目录下 `config/hardware.local.toml`，数据库来自
 `[project].database_path`（相对 TOML 所在目录）；CLI `--database` 覆盖时相对工作目录。
 `[combination_scan].run_id = "auto"` 或省略时生成 UTC 时间戳和净化的 `run_name`；
-`run_name` 可重复，数据库中的 run ID 不可重复。交互启动先显示扫描摘要，输入 `RUN`
-才连接设备；无人值守启动保留完整显式授权开关，部分授权不回退到交互提示。
+`run_name` 可重复，数据库中的 run ID 不可重复。执行 `run` 命令本身授权本次选中模块；
+横向摘要后直接运行，不重复输入RUN。XY断线声明来自TOML；连接前仍校验配置/安全哈希。
+`monitor` 默认读项目的原子最新运行索引，回退配置数据库的最新登记行；
+显式数据库/ID保留。只读监控不能把active或存档PID当成进程存活。
+run/monitor默认紧凑显示，`--json`保留完整输出，SQLite原始审计不变。
 选择 `lockin_mode` 后复用 `[lockin_sweep]` 的对应模式网格和谐波，不另填一套频率/激励点。
 具体配置、确认和清理语义见 [COMBINATION_SCAN_GUIDE.md](COMBINATION_SCAN_GUIDE.md)。
 

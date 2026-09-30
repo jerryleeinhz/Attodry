@@ -5,6 +5,7 @@ from contextlib import closing
 from dataclasses import asdict
 from datetime import datetime, timezone
 import re
+import itertools
 from pathlib import Path
 
 from .combination_store import open_readonly
@@ -38,7 +39,21 @@ def check_run_destination(database, run_id):
 
 def _points(values):
     return values if len(values) <= 16 else {
-        "count": len(values), "first": values[:8], "last": values[-8:]}
+        "count": len(values), "first": values[:8], "last": values[-8:], "min": min(values), "max": max(values)}
+
+
+def _route(values):
+    turns = [values[0]]
+    previous_sign = 0
+    for before, after in zip(values, values[1:]):
+        sign = (after > before) - (after < before)
+        if sign and previous_sign and sign != previous_sign:
+            turns.append(before)
+        if sign:
+            previous_sign = sign
+    if len(values) > 1:
+        turns.append(values[-1])
+    return turns
 
 
 def launch_summary(config, database, run_id):
@@ -52,7 +67,17 @@ def launch_summary(config, database, run_id):
             "requested_coordinates": coordinates,
             "first_target": axis.points[0].values, "last_target": axis.points[-1].values,
             "segments_and_directions": list(dict.fromkeys(
-                (p.segment, p.direction) for p in axis.points))})
+                (p.segment, p.direction) for p in axis.points)),
+            "segments": [{"segment": segment, "direction": direction,
+                "points": len(points),
+                "coordinates": {key: _points(list(dict.fromkeys(p.values[key] for p in points)))
+                                for key in points[0].values},
+                "first_target": points[0].values, "last_target": points[-1].values,
+                "routes": {key: _route([p.values[key] for p in points])
+                           for key in points[0].values} if axis.module != "lockin" else {}}
+                for (segment, direction), group in itertools.groupby(
+                    axis.points, key=lambda p: (p.segment, p.direction))
+                for points in [list(group)]]})
     summary = {"config": str(config.path), "config_sha256": config.snapshot["config_sha256"],
         "database": str(database), "run_name": config.plan.run_name, "run_id": run_id,
         "note": config.plan.note, "outer_to_inner": [a.module for a in config.plan.axes],
@@ -79,9 +104,21 @@ def launch_summary(config, database, run_id):
             "overload_policy": config.lockin.lockin_sweep.overload_policy,
             "settle_time_constants": config.lockin.lockin_sweep.settle_time_constants,
             "baseline_frequency_hz": config.lockin.lockin_xx.frequency_hz,
-            "roles": {role: {"sensitivity_full_scale_v": device.sensitivity_full_scale_v,
+            "segment_sensitivity_overrides": {
+                name: [{"segment_index": segment, "xx_full_scale_v": xx, "xy_full_scale_v": xy}
+                       for segment, xx, xy in dict.fromkeys(
+                           (p.segment_index, p.xx_full_scale_v, p.xy_full_scale_v)
+                           for p in getattr(config.lockin.lockin_sweep, name)
+                           if p.xx_full_scale_v is not None or p.xy_full_scale_v is not None)]
+                for name in ("frequency_point_specs", "excitation_point_specs")
+                if config.lockin_mode == "frequency_excitation"
+                    or name.startswith(config.lockin_mode)},
+            "roles": {role: {"sensitivity_mode": device.sensitivity_mode.value,
+                "sensitivity_full_scale_v": device.sensitivity_full_scale_v,
                 "reserve_mode": device.reserve_mode.value,
                 "time_constant_s": device.time_constant_s,
+                "autorange_min_full_scale_v": device.autorange_min_full_scale_v,
+                "autorange_max_full_scale_v": device.autorange_max_full_scale_v,
                 "harmonic_settings": [asdict(s) for s in device.harmonic_settings]}
                 for role, device in (("lockin_xx", config.lockin.lockin_xx),
                                      ("lockin_xy", config.lockin.lockin_xy))}}

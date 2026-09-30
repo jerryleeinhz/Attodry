@@ -130,6 +130,17 @@ physically disconnected. The ordinary diagnostic path sends queries only;
 reading `LIAS?` or `ERRS?` is separately opted in because those queries consume
 latched status bits.
 
+The user-approved daily combination CLI policy (2026-09-30) treats invoking
+combination_cli run as authorization for its validated selected modules, including
+status consumption. No repeated RUN prompt or mandatory CLI authorization flags.
+When Lock-in is selected, TOML lockin_xy.sine_output_connected=false is the
+operator's wiring declaration; true rejects before connection. Backend entry
+points retain explicit authorization guards. Configuration/safety hash rechecks,
+preflight, target limits, <=3 T resultant, error handling and cleanup remain.
+describe-hardware is offline; monitor reads only saved files/SQLite and never
+connects instruments. Removing a redundant prompt is not a new commissioning
+authorization or permission to deploy/run experiments through this development task.
+
 ## Exception handling
 
 The agreed default for a caught exception or `Ctrl+C` is zero field. Cleanup order is electrical outputs first, then magnet zero request, then final state logging and disconnect.
@@ -175,6 +186,14 @@ permits one audited range-preparation/retry with fresh zero/OFF confirmation.
 Other/repeated errors and communication failures fail closed. This is neither a
 raised protection limit nor an acquisition retry. Initial/configuration error
 queues and partial command/readback audits are retained separately from cleanup.
+
+Compliance programming uses a round-trip-safe scientific SCPI literal through
+the existing QCoDeS transport, for both current and voltage protection. The same
+literal is retained in configuration_audit. QCoDeS compliance setters using
+{:f} round 100 nA to 0.000000; this is a confirmed software cause of +822 in the
+reported run, distinct from range compatibility. Actual compliance readback and
+all zero/OFF, AUTO and error-queue guards still apply; the fix never raises the
+requested maximum. A real output-OFF acceptance check is still pending.
 
 The Three-SMU path intentionally has no software ramp, source min/max, readback
 tolerance, separate leakage threshold, or per-device settle time. A formal point

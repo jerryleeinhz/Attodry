@@ -230,7 +230,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
         adapter.authorize_status_consumption()
         adapter.configure(config())
         self.assertIn(("mode", "VOLT"), instrument.calls)
-        self.assertIn(("compliancei", 1e-3), instrument.calls)
+        self.assertIn(("write", f":SENS:CURR:PROT {1e-3:.17e}"), instrument.calls)
         self.assertIn(("nplci", 1.0), instrument.calls)
         self.assertIn(("nplcv", 1.0), instrument.calls)
         self.assertIn(("write", ":SOUR:VOLT:RANG:AUTO ON"), instrument.calls)
@@ -251,7 +251,7 @@ class Keithley2400AdapterTests(unittest.TestCase):
         adapter.authorize_status_consumption()
         adapter.configure(replace(config(), source_mode=SourceMode.CURRENT))
         self.assertIn(("mode", "CURR"), instrument.calls)
-        self.assertIn(("compliancev", 10.0), instrument.calls)
+        self.assertIn(("write", f":SENS:VOLT:PROT {10.0:.17e}"), instrument.calls)
         self.assertIn(("write", ":SOUR:CURR:RANG:AUTO ON"), instrument.calls)
         self.assertIn(("write", ":SENS:VOLT:RANG:AUTO ON"), instrument.calls)
 
