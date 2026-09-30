@@ -47,6 +47,14 @@ note = "填写本次接线与样品说明"
 由 `samples_per_condition` 决定每叶完整采样次数。一份采样包含所选谐波，
 各设备/谐波是顺序读取，不能称为同时采样。
 
+磁场实际读回统一使用 `[magnet].readback_tolerance_t = 0.0015`：
+到点、正式采样、保持按每轴误差判定，单轴另一轴读回也使用该值；
+回零要求 `hypot(Bx,Bz) <= 0.0015 T` 并完成稳定 dwell。
+用该字段替换旧 `field_tolerance_t`，不能同时填写。
+`setpoint_ack_tolerance_t = 0.0001` 单独控制设定值寄存器确认，
+30 秒不是整段扫到高场的等待上限。实际每段稳定等待沿用 `wait_timeout_s`。
+不改变标称上限或原有 0.5 mT 边界余量；完整策略和两个原始轴都随运行归档。
+
 温度点来自 `[temperature_scan]`；没有该表时用 `temperature_run.target_k`
 作为一个固定点。磁场来自 `[magnetic_field_run]` 的 ordered points、单轴
 segments 或固定模长 angle_segments，

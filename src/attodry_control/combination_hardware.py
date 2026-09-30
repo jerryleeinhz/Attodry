@@ -172,7 +172,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         raise ValueError("All active resources, including SMU and SR830 roles, must be distinct")
     plan = CombinationPlan(tuple(axes[m] for m in order), table["samples_per_condition"],
                            table["repeats"], table["run_name"], table["note"],
-                           magnet_limits=cryostat.magnet.limits if cryostat else MagnetLimits())
+                           magnet_limits=cryostat.magnet.limits if cryostat else MagnetLimits(),
+                           readback_tolerance_t=cryostat.magnet.readback_tolerance_t if cryostat else None)
     snapshot = plan.snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     lockin_mode=mode,

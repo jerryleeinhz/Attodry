@@ -377,8 +377,12 @@ output_directory = "../run_data/magnetic_field_commissioning"
   而不是 vendor controller 的连续直线运动；实现仍不测量或控制相邻稳定 waypoint 之间的
   continuous physical path，因此不能据此宣称 constant-angle、constant-magnitude、实际
   straight-line trajectory、ramp rate 或任意其它 physical-path 性质。
-- `max_step_t` 必须大于 1e-5 T 的 setpoint acknowledgement resolution；配置的
-  `field_tolerance_t` 不得超过已确认的 1 mT 上限。
+- `max_step_t` 必须大于原有 1e-5 T 的命令步进下限；精确 float32 命令与角点
+  校验保持严格。新 `readback_tolerance_t = 0.0015` 统一实际到点/保持/正式采样误差、
+  单轴另一轴读回和回零模长（均须稳定 dwell）。旧 `field_tolerance_t` 仍只允许
+  <=1 mT，二者必须选一个。设定值确认单独使用
+  `setpoint_ack_tolerance_t = 0.0001`（最大0.1 mT），30秒 ACK 与每段实际稳定
+  `wait_timeout_s` 分开；不会要求 -8.9 T 在30秒内达到。
 - tracked `hardware.example.toml` 故意只给零场点；它不是首次真实运动参数。
 - `output_directory` 相对所选 TOML 解析。一个运行只写一个 canonical JSONL；没有另一个
   summary JSON 或 CSV 可以取代它。
@@ -392,7 +396,7 @@ output_directory = "../run_data/magnetic_field_commissioning"
    和 `via_zero` 是记录在配置、point event 与 plan 中的两个不同请求，不能相互替代。
 2. 连接初始化状态只接受严格的 0/1。连接后读取完整状态，拒绝非零 error、超限
    actual field 或超限 setpoint。field control 使用 read-before-toggle；执行 OFF→ON
-   takeover 前，actual field 必须在 configured（且不大于 1 mT）tolerance 内匹配 latent
+   takeover 前，actual field 必须在 configured（新接口不大于1.5 mT，旧接口1 mT）tolerance 内匹配 latent
    setpoint，而且因 controller 内部轴顺序未知，两种 actual/setpoint mixed corners 都要
    满足上述单轴/双轴限值。否则不发送 toggle。toggle 后第一条 acknowledgement readback 的
    elapsed 使用真实计时并受 acknowledgement timeout 约束，不能固定记为零或越过 deadline。

@@ -78,7 +78,8 @@ def execute_ordered_field_points(
 ) -> tuple[FieldPointResult, ...]:
     """Execute an explicit X/Z point list without sorting or deduplication."""
 
-    readback_policy = field_readback_policy or FieldReadbackPolicy.from_targets(points, driver.limits)
+    readback_policy = field_readback_policy or FieldReadbackPolicy.from_targets(
+        points, driver.limits, getattr(driver, "readback_tolerance_t", None))
     if readback_policy.limits != driver.limits:
         raise ValueError("Field policy limits differ from the driver's nominal limits.")
     targets = tuple(readback_policy.validate_target(point) for point in points)
@@ -299,7 +300,7 @@ def _validate_state(
         raise AttoDryError(f"attoDRY field operation reported error code {state.error_code}.")
     if require_control and not state.field_control_enabled:
         raise AttoDryError("Field control is not confirmed enabled.")
-    if expected_setpoint is not None and not _field_matches(
+    if expected_setpoint is not None and not getattr(driver, "_field_matches", _field_matches)(
         state.field_setpoint, expected_setpoint
     ):
         raise AttoDryError("Vector-field setpoint does not match the requested target.")

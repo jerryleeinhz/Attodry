@@ -40,6 +40,10 @@ abs(Bz) <= 9 T
 if Bx != 0 and Bz != 0: sqrt(Bx^2 + Bz^2) <= 3 T
 ```
 
+The current explicit `readback_tolerance_t` configuration archives
+`planned-axis-readback-v3`. It retains the following complete-plan classification;
+legacy `field_tolerance_t` configurations and v2 records retain their original rules.
+
 `planned-axis-readback-v2` fixes mode from the **complete requested point list**:
 
 - `single_x`: at least one nonzero X target; every Z target exactly zero.
@@ -48,7 +52,7 @@ if Bx != 0 and Bz != 0: sqrt(Bx^2 + Bz^2) <= 3 T
   switch across separate points, and an all-zero plan. Every vector-plan target
   satisfies the nominal resultant limit, even pure-axis endpoints.
 
-Actual readback limits are separate from command limits:
+The legacy v2 actual readback limits are separate from command limits:
 
 | Mode | Actual readback acceptance | Other axis |
 |---|---|---|
@@ -72,10 +76,34 @@ Nonzero inactive readbacks and nominal-limit excursions inside the accepted
 margin are explicit audit flags. An inactive-axis value beyond the bound still
 aborts; it does not silently switch the run to vector mode.
 
-The fixed 0.5 mT margin is the operator's software acceptance policy, not a
-manufacturer-specified worst-case residual-field error. `field_tolerance_t`
-continues to control target/stability/verified-zero checks and cannot increase
-this margin. Generic diagnostics without a complete magnetic plan retain strict
+The fixed 0.5 mT boundary margin is the operator's software acceptance policy,
+not a manufacturer-specified worst-case residual-field error. New configuration:
+
+```toml
+[magnet]
+readback_tolerance_t = 0.0015
+setpoint_ack_tolerance_t = 0.0001
+```
+
+Replace `field_tolerance_t` with `readback_tolerance_t`; providing both rejects.
+The unified positive tolerance, capped at the approved 1.5 mT, is used for each
+actual-axis target error, arrival dwell, formal sampling and hold, and the
+single-axis inactive readback guard. Verified zero instead requires the **actual
+vector norm** <= that same value for the full stable dwell. X=Z=1.2 mT is within
+each component tolerance but its 1.70 mT norm cannot certify zero. Both raw axes
+are preserved. This does not extend nominal command limits, the 0.5 mT active-axis/
+vector boundary margin, or the unextended high-Z ceiling. Actual ramp samples are
+not rejected merely for distance to the destination; arrival waits for convergence.
+
+Setpoint acknowledgement is a separate component comparison, default and maximum
+0.1 mT, with the existing 30 s command timeout. It confirms controller register
+receipt, not physical arrival. Actual stability timeout remains independently
+configured per wait. Exact float32 command bits and strict endpoint/corner/step
+validation remain; register quantization never changes the requested command.
+Attempts/results archive both tolerances and confirmed setpoint errors.
+Legacy `field_tolerance_t` remains capped at 1 mT and retains the v2 inactive
+guard. Old saved driver acknowledgement protocols remain unchanged.
+Generic diagnostics without a complete magnetic plan retain strict
 legacy checks. Historical records without the new version retain their archived
 rules; unknown or inconsistent declarations cannot certify completion.
 

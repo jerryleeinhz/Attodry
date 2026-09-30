@@ -27,6 +27,7 @@ from .magnetic_field import execute_ordered_field_points
 from .models import CryostatState, VectorField
 from .safety import (
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
+    APPROVED_READBACK_TOLERANCE_MAX_T,
     FIELD_LIMIT_POLICY,
     FieldReadbackPolicy,
     validate_vector_field,
@@ -118,7 +119,8 @@ def run(
     config_path = args.config.resolve()
     config = load_magnetic_field_operation_config(config_path)
     points = config.run.points
-    readback_policy = FieldReadbackPolicy.from_targets(points, config.magnet.limits)
+    readback_policy = FieldReadbackPolicy.from_targets(
+        points, config.magnet.limits, config.magnet.readback_tolerance_t)
     if args.command == "describe":
         print(json.dumps({
             "hardware_connected": False,
@@ -134,6 +136,8 @@ def run(
             "normal_scan_end_field_policy": config.cleanup.normal_end_field_policy.value,
             "single_target_end_field_policy": "zero",
             "field_stability": asdict(config.magnet.stability),
+            "setpoint_ack_tolerance_t": config.magnet.setpoint_ack_tolerance_t,
+            "command_ack_timeout_s": FIELD_COMMAND_ACK_TIMEOUT_S,
         }, indent=2))
         return 0
     if args.command == "single-target" and len(points) != 1:
@@ -261,7 +265,7 @@ def run(
                 },
                 "driver_field_protocol": {
                     "setpoint_readback_tolerance_t": (
-                        FIELD_SETPOINT_READBACK_TOLERANCE_T
+                        config.magnet.setpoint_ack_tolerance_t
                     ),
                     "command_ack_timeout_s": FIELD_COMMAND_ACK_TIMEOUT_S,
                 },
@@ -303,6 +307,8 @@ def run(
             temperature_max_k=cryostat.temperature_max_k,
             limits=config.magnet.limits,
             field_stability=config.magnet.stability,
+            readback_tolerance_t=config.magnet.readback_tolerance_t,
+            setpoint_ack_tolerance_t=config.magnet.setpoint_ack_tolerance_t,
             temperature_stability=config.magnet.stability,
             connection_authorized=True,
             writes_authorized=True,
@@ -578,14 +584,16 @@ def _request_monitored_zero(
         },
     )
     tolerance = driver.field_stability.criteria.tolerance
-    if tolerance is None or tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T:
+    maximum = (CONFIRMED_FIELD_TOLERANCE_MAX_T
+               if driver.readback_tolerance_t is None else APPROVED_READBACK_TOLERANCE_MAX_T)
+    if tolerance is None or tolerance > maximum:
         raise AttoDryError(
             "Monitored zero requires a configured field tolerance no greater "
-            f"than {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
+            f"than {maximum:g} T."
         )
     if state.field.magnitude_t > tolerance:
         raise AttoDryError("Actual field is outside configured zero tolerance.")
-    if state.field_setpoint.magnitude_t > tolerance:
+    if not driver._field_matches(state.field_setpoint, VectorField(0, 0)):
         raise AttoDryError("Field setpoint is outside configured zero tolerance.")
     return state
 
@@ -613,13 +621,13 @@ def _validate_hold_state(
             state.field_setpoint.bx_t,
             expected.bx_t,
             rel_tol=0.0,
-            abs_tol=FIELD_SETPOINT_READBACK_TOLERANCE_T,
+            abs_tol=getattr(driver, "setpoint_ack_tolerance_t", FIELD_SETPOINT_READBACK_TOLERANCE_T),
         )
         and math.isclose(
             state.field_setpoint.bz_t,
             expected.bz_t,
             rel_tol=0.0,
-            abs_tol=FIELD_SETPOINT_READBACK_TOLERANCE_T,
+            abs_tol=getattr(driver, "setpoint_ack_tolerance_t", FIELD_SETPOINT_READBACK_TOLERANCE_T),
         )
     ):
         raise AttoDryError("Held field setpoint no longer matches the final target.")

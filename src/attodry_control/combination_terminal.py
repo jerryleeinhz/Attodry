@@ -144,6 +144,12 @@ def launch_text(summary, width=None):
                          f" | |Bz| <= {axes['z']:.7g} T"
                          + (f" | |B| <= {vector:.7g} T" if vector is not None else "")
                          + " | Nominal targets unchanged")
+            if "readback_tolerance_t" in policy:
+                tolerance = _number(policy["readback_tolerance_t"], "T")
+                lines.append(f"Field qualification: each axis error <= {tolerance}"
+                             f" | Verified zero: |B| <= {tolerance} + stable dwell"
+                             + (f" | Setpoint ACK: {_number(summary['field_setpoint_ack_tolerance_t'], 'T')}"
+                                if "field_setpoint_ack_tolerance_t" in summary else ""))
     finish_names = {"zero_disable": "zero/OFF", "4mV_restore_ranges_h1": "4 mV/h1; restore SENS/Reserve",
                     "4mV_h1_restore_baseline_frequency_ranges_reserve":
                         "4 mV/h1; restore frequency/SENS/Reserve",

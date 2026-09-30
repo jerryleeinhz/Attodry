@@ -351,7 +351,8 @@ def _field_command_audit_errors(
             try:
                 readback_policy = FieldReadbackPolicy.from_snapshot(started["field_readback_policy"])
                 planned = FieldReadbackPolicy.from_targets(
-                    tuple(VectorField(**p) for p in started["ordered_points"]), limits)
+                    tuple(VectorField(**p) for p in started["ordered_points"]), limits,
+                    readback_policy.readback_tolerance_t)
                 if readback_policy.snapshot() != planned.snapshot():
                     raise ValueError("Archived readback policy differs from the complete target plan.")
             except (ValueError, KeyError, TypeError) as exc:

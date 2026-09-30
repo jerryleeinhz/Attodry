@@ -202,6 +202,8 @@ def run(
         temperature_max_k=cryostat.temperature_max_k,
         limits=config.magnet.limits,
         field_stability=config.magnet.stability,
+        readback_tolerance_t=config.magnet.readback_tolerance_t,
+        setpoint_ack_tolerance_t=config.magnet.setpoint_ack_tolerance_t,
         temperature_stability=config.temperature_stability,
         connection_authorized=True,
         writes_authorized=True,

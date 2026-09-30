@@ -251,7 +251,10 @@ class FieldPolicyCombinationTests(unittest.TestCase):
 
 class FieldPolicyHardwareCombinationTests(unittest.TestCase):
     """Exercise the actual session/driver/cleanup path with fake transports only."""
-    setUp = hardware_fixture.CryostatCombinationTests.setUp
+    def setUp(self):
+        hardware_fixture.CryostatCombinationTests.setUp(self)
+        # These regressions explicitly retain the archived v2/0.5 mT policy.
+        self.base = self.base.replace("readback_tolerance_t = 0.0015", "field_tolerance_t = 0.001")
     write_config = hardware_fixture.CryostatCombinationTests.write_config
     factory = hardware_fixture.CryostatCombinationTests.factory
     events = hardware_fixture.CryostatCombinationTests.events

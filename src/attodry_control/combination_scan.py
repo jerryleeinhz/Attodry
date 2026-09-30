@@ -63,6 +63,7 @@ class CombinationPlan:
     run_name: str = ""
     note: str = ""
     magnet_limits: MagnetLimits = MagnetLimits()
+    readback_tolerance_t: float | None = None
 
     def validate(self) -> None:
         if not isinstance(self.magnet_limits, MagnetLimits):
@@ -123,7 +124,7 @@ class CombinationPlan:
             return None
         return FieldReadbackPolicy.from_targets(
             tuple(VectorField(p.values["field_x_t"], p.values["field_z_t"]) for p in axis.points),
-            self.magnet_limits)
+            self.magnet_limits, self.readback_tolerance_t)
 
     def conditions(self) -> list[dict]:
         self.validate()

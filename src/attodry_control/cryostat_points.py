@@ -59,7 +59,8 @@ class CryostatPointSession:
         self.recovery_action = None
         self.recovery_scan_limits_violated = False
         self.field_policy = (FieldReadbackPolicy.from_targets(
-            magnetic.run.points, config.magnet.limits) if magnetic is not None else None)
+            magnetic.run.points, config.magnet.limits, config.magnet.readback_tolerance_t)
+            if magnetic is not None else None)
 
     @property
     def active_field_policy(self):
@@ -68,7 +69,8 @@ class CryostatPointSession:
             # Pure-Z recovery keeps X's independent residual guard at high Z.
             mode = (FieldScanMode.SINGLE_Z if self.field_policy.mode is FieldScanMode.SINGLE_Z
                     else FieldScanMode.VECTOR)
-            return FieldReadbackPolicy(mode, self.field_readback_limits)
+            return FieldReadbackPolicy(mode, self.field_readback_limits,
+                                       self.field_policy.readback_tolerance_t)
         return self.field_policy
 
     @property
@@ -227,7 +229,8 @@ class CryostatPointSession:
                     state.field_setpoint, self.field_target):
                 raise AttoDryError("Magnetic control/setpoint changed during measurement")
             if (abs(state.field.bx_t - self.field_target.bx_t) > tolerance or
-                    abs(state.field.bz_t - self.field_target.bz_t) > tolerance):
+                    abs(state.field.bz_t - self.field_target.bz_t) > tolerance or
+                    (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance)):
                 raise AttoDryError("Magnetic readback outside target tolerance")
         if self.temperature_target is not None and self.baseline_temperature is not None:
             criteria = self.config.temperature_stability.criteria
@@ -322,7 +325,8 @@ class CryostatPointSession:
                     raise AttoDryError("Field hold setpoint changed")
                 tolerance = self.config.magnet.stability.criteria.tolerance
                 if (abs(state.field.bx_t - self.field_target.bx_t) > tolerance or
-                        abs(state.field.bz_t - self.field_target.bz_t) > tolerance):
+                        abs(state.field.bz_t - self.field_target.bz_t) > tolerance or
+                        (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance)):
                     raise AttoDryError("Field hold readback outside tolerance")
         return {"attempted": True, "verified": True, "policy": policy, "state": asdict(state),
                 "scan_limits_violated": self.recovery_scan_limits_violated}

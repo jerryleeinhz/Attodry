@@ -1,8 +1,38 @@
 # Project handoff
 
-Last updated: 2026-09-30
+Last updated: 2026-10-01
 
 ## Current stage
+
+### Unified magnetic readback/zero tolerance and register ACK (offline; 2026-10-01)
+
+Operator-approved follow-up to the LK_setup run's 44.4 uT register quantization
+and 0.7 mT inactive-X cleanup trip. New magnet.readback_tolerance_t, positive and
+at most 0.0015 T, is the single value for actual-axis target errors, arrival
+dwell, formal brackets, hold, inactive single-axis readback and verified-zero
+actual vector norm. Zero still needs the full stable window; X=Z=1.2 mT fails
+the 1.5 mT norm criterion. Both raw axes remain. Legacy field_tolerance_t retains
+its <=1 mT criteria and v2 inactive guard; configuring both keys rejects.
+
+Register acknowledgement is separate: setpoint_ack_tolerance_t defaults to and
+is capped at 0.0001 T, with the existing 30 s ACK deadline. Physical arrival
+uses each existing wait_timeout_s. Exact float32 commands, nominal ceilings,
+mixed corners, step guards and the independent 0.5 mT boundary margin remain.
+All driver creation paths receive the resolved config. New v3 snapshots and
+command audits retain thresholds, raw readbacks, exact commands and ACK errors;
+file monitors read archived policy rather than today's TOML. Launch/describe
+previews expose the resolved settings. No scan replay or automatic restart.
+
+Verification: 373 related guarded offline tests passed in 142.712 s, including
+13 new quantization, config, zero-norm, failure, legacy-audit and combination
+cases. The quantized ACK timeout and missing config interface were reproduced
+before source changes. Fake DLL/VISA only; real loaders/imports blocked.
+Final focused configuration/preview/legacy-policy rerun: 56 passed (38.145 s).
+Final driver/executor rerun after the small-step skip guard: 138 passed
+(30.575 s), including all 14 new tolerance tests. A wider ACK does not skip newly
+requested small commands; the original skip/step guard remains separate.
+No LK_setup deployment, instrument connection or new experiment performed.
+Delivery requested to origin/codex/integration-four-module-scan.
 
 ### Combination configured single-axis limits follow-up (offline; 2026-09-30)
 

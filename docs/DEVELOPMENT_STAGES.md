@@ -1,5 +1,30 @@
 # Development stages
 
+## Unified magnetic tolerance and setpoint ACK (offline; 2026-10-01)
+
+- One explicit magnet.readback_tolerance_t (max 1.5 mT) governs each actual-axis
+  target error, arrival dwell, formal brackets, hold, inactive-axis guard and
+  verified-zero actual norm. Components below the threshold cannot certify zero
+  if their norm exceeds it. Stable range/dwell and control/error/communication
+  gates stay active; failed runs remain failed/manual-review after verified reset.
+- Separate setpoint_ack_tolerance_t (default/max 0.1 mT) handles the observed
+  44.4 uT register quantization without changing the exact float32 command.
+  ACK timeout remains 30 s; each actual convergence wait uses its own existing
+  wait_timeout_s. Nominal target/corner/step limits and fixed 0.5 mT boundary
+  margin are independent. Temperature and all magnetic driver entry points
+  propagate the same resolved settings.
+- Legacy field_tolerance_t remains <=1 mT with archived v2 interpretation.
+  Both keys together reject; new v3 policy/audits record thresholds, actual
+  raw axes and command-to-register errors. Updated template, preview and guides.
+- 373 related guarded tests passed (142.712 s), including 13 new regression
+  cases. Quantized ACK timeout and missing new config reproduced before fixes.
+  Final focused configuration/preview/legacy-policy rerun: 56 passed (38.145 s).
+  Final driver/executor rerun after retaining the original small-step skip guard:
+  138 passed (30.575 s), including all 14 new tolerance tests.
+  Fake DLL/VISA only, real hardware imports/loaders blocked.
+  No deployment, real I/O, retry or magnetic history replay. User authorized
+  commit/push to origin/codex/integration-four-module-scan.
+
 ## Combination configured single-axis limits follow-up (offline; 2026-09-30)
 
 - Corrected the extra integrated Z3 T cap after the operator's TOML question.

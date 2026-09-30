@@ -25,13 +25,16 @@ hardware_z_max_t = 9.0
 # Complete plan selects single X/Z only when all other-axis targets are exactly zero.
 # A plan using both axes (even at separate points) uses the resultant ceiling throughout.
 # Approved readback policy (2026-09-30): 0.5 mT margin at nominal limits <=3 T;
-# single-axis inactive readback independently <=0.5 mT, raw values retained.
+# Single-axis inactive readback uses readback_tolerance_t; raw values retained.
 # Standalone AND combination single-Z use this configured Z ceiling, at most 9 T.
 # Z limits >3 T get no readback margin; vector-plan nominal resultant stays <=3 T.
-# Fixed readback bounds are archived by code; field_tolerance_t is a stability check,
-# not permission to exceed nominal targets or increase margin. Offline, uncommissioned policy.
+# Operator-approved unified actual target/hold/formal and zero-norm tolerance.
+# Replaces legacy field_tolerance_t: choose one key, never both.
+# This does not increase nominal limits or the separate 0.5 mT boundary margin.
 experiment_vector_max_t = 3.0
-field_tolerance_t = 0.001
+readback_tolerance_t = 0.0015
+# Setpoint register acknowledgement (not actual arrival); <=0.1 mT, timeout 30 s.
+setpoint_ack_tolerance_t = 0.0001
 stable_range_t = 0.0005
 stable_dwell_s = 10.0
 poll_interval_s = 1.0

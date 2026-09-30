@@ -91,6 +91,7 @@ def launch_summary(config, database, run_id):
         if policy["mode"] == "vector":
             summary["field_resultant_limit_t"] = policy["limits"]["experiment_vector_max_t"]
         summary["field_readback_policy"] = config.snapshot["field_readback_policy"]
+        summary["field_setpoint_ack_tolerance_t"] = config.magnetic.magnet.setpoint_ack_tolerance_t
     if config.smu is not None:
         summary["smu"] = {role: {"source_mode": device.source_mode.value,
             "max_abs_voltage_v": device.max_abs_voltage_v,

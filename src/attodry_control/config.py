@@ -14,6 +14,8 @@ from .models import LockinRole, VectorField
 from .safety import (
     CONFIRMED_EXPERIMENT_VECTOR_MAX_T,
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
+    APPROVED_READBACK_TOLERANCE_MAX_T,
+    FIELD_SETPOINT_ACK_TOLERANCE_T,
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
     FieldTransitionPolicy,
     MagnetLimits,
@@ -147,6 +149,8 @@ class TemperatureOperationConfig:
 class MagnetConfig:
     limits: MagnetLimits
     stability: StabilityConfig
+    readback_tolerance_t: float | None = None
+    setpoint_ack_tolerance_t: float = FIELD_SETPOINT_ACK_TOLERANCE_T
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,19 +532,19 @@ def _parse_cryostat(
 
 def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
     name = "magnet"
-    _strict_keys(
+    _strict_keys_with_optional(
         table,
         name,
         {
             "hardware_x_max_t",
             "hardware_z_max_t",
             "experiment_vector_max_t",
-            "field_tolerance_t",
             "stable_range_t",
             "stable_dwell_s",
             "poll_interval_s",
             "wait_timeout_s",
         },
+        {"field_tolerance_t", "readback_tolerance_t", "setpoint_ack_tolerance_t"},
     )
     experiment_limit = _positive_number(
         table["experiment_vector_max_t"], f"{name}.experiment_vector_max_t"
@@ -562,14 +566,23 @@ def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
         )
     except ValueError as exc:
         raise ConfigError(f"Invalid magnet limits: {exc}") from exc
-    stability = _parse_stability(table, name, value_prefix="field_")
+    if ("field_tolerance_t" in table) == ("readback_tolerance_t" in table):
+        raise ConfigError("magnet requires exactly one of readback_tolerance_t or legacy field_tolerance_t.")
+    unified = "readback_tolerance_t" in table
+    key = "readback_tolerance_t" if unified else "field_tolerance_t"
+    tolerance = _positive_number(table[key], f"{name}.{key}")
+    maximum = APPROVED_READBACK_TOLERANCE_MAX_T if unified else CONFIRMED_FIELD_TOLERANCE_MAX_T
+    if tolerance > maximum:
+        raise ConfigError(f"magnet.{key} cannot exceed the approved {maximum:g} T zero-field criterion.")
+    stability = _parse_stability({**table, "field_tolerance_t": tolerance}, name, value_prefix="field_")
     tolerance = stability.criteria.tolerance
-    if tolerance is None or tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T:
-        raise ConfigError(
-            "magnet.field_tolerance_t cannot exceed the confirmed "
-            f"{CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T zero-field criterion."
-        )
-    return MagnetConfig(limits=limits, stability=stability)
+    ack = _positive_number(table.get("setpoint_ack_tolerance_t", FIELD_SETPOINT_ACK_TOLERANCE_T),
+                           f"{name}.setpoint_ack_tolerance_t")
+    if ack > FIELD_SETPOINT_ACK_TOLERANCE_T:
+        raise ConfigError("magnet.setpoint_ack_tolerance_t cannot exceed 0.0001 T.")
+    return MagnetConfig(limits=limits, stability=stability,
+                        readback_tolerance_t=tolerance if unified else None,
+                        setpoint_ack_tolerance_t=ack)
 
 
 def _parse_stability(

@@ -67,7 +67,11 @@ Bx != 0 且 Bz != 0 时：sqrt(Bx^2 + Bz^2) <= 3 T
 单轴要求另一轴全部目标严格为零，固定非零另一轴或同一计划先X后Z都算vector。
 vector目标的模长始终受 `[magnet].experiment_vector_max_t` 限制，包含纯轴端点。
 实际读回在不超过3 T的标称边界上加0.5 mT容差（3 T→3.0005 T）；单轴的另一轴
-独立限制为±0.5 mT，仍记录原值。Z标称上限大于3 T时不加读回余量，9 T仍为9 T。
+旧策略独立限制为±0.5 mT，仍记录原值。新配置用
+`readback_tolerance_t = 0.0015` 替换 `field_tolerance_t`，统一到点、正式采样、
+保持和另一轴读回容差；回零要求实际合场模长≤同一个1.5 mT并完成稳定dwell。
+`setpoint_ack_tolerance_t = 0.0001` 单独确认寄存器，保留30秒ACK超时；
+实际稳定等待使用原 `wait_timeout_s`。Z标称上限大于3 T时不加读回余量，9 T仍为9 T。
 这不是厂商精度保证，也不改变目标上限、场稳定性/误差/控制/通信保护。通用诊断
 和旧记录沿用原规则；新规则仅离线验证，尚未实机验收。详见
 [磁场安全协议](docs/HARDWARE_AND_SAFETY.md#magnet-coordinates-and-limits)。

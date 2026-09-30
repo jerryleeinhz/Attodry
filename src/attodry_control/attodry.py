@@ -18,6 +18,8 @@ from .models import CryostatState, VectorField
 from .safety import (
     AxisWriteOrder,
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
+    APPROVED_READBACK_TOLERANCE_MAX_T,
+    FIELD_SETPOINT_ACK_TOLERANCE_T,
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
     FieldTransitionPlan,
     FieldTransitionPolicy,
@@ -194,15 +196,30 @@ class AttoDryDriver:
         temperature_stability: StabilityConfig,
         connection_authorized: bool,
         writes_authorized: bool,
+        readback_tolerance_t: float | None = None,
+        setpoint_ack_tolerance_t: float = FIELD_SETPOINT_ACK_TOLERANCE_T,
     ) -> None:
         field_tolerance = field_stability.criteria.tolerance
+        maximum = (CONFIRMED_FIELD_TOLERANCE_MAX_T if readback_tolerance_t is None
+                   else APPROVED_READBACK_TOLERANCE_MAX_T)
+        if readback_tolerance_t is not None and (
+            type(readback_tolerance_t) not in (float, int)
+            or not math.isfinite(readback_tolerance_t)
+            or not 0 < readback_tolerance_t <= maximum
+            or readback_tolerance_t != field_tolerance
+        ):
+            raise ValueError("Unified readback and stability tolerances must match and be at most 0.0015 T.")
+        if (type(setpoint_ack_tolerance_t) not in (float, int)
+                or not math.isfinite(setpoint_ack_tolerance_t)
+                or not 0 < setpoint_ack_tolerance_t <= FIELD_SETPOINT_ACK_TOLERANCE_T):
+            raise ValueError("Setpoint acknowledgement tolerance must be positive and at most 0.0001 T.")
         if (
             field_tolerance is None
-            or field_tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T
+            or field_tolerance > maximum
         ):
             raise ValueError(
                 "AttoDryDriver field tolerance must be configured and cannot "
-                f"exceed {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
+                f"exceed {maximum:g} T."
             )
         configure_attodry_signatures(dll)
         self.dll = dll
@@ -216,6 +233,8 @@ class AttoDryDriver:
         # Generic diagnostics and historical entry points retain strict limits.
         self.field_readback_policy: FieldReadbackPolicy | None = None
         self.field_stability = field_stability
+        self.readback_tolerance_t = readback_tolerance_t
+        self.setpoint_ack_tolerance_t = setpoint_ack_tolerance_t
         self.temperature_stability = temperature_stability
         self.connection_authorized = connection_authorized
         self.writes_authorized = writes_authorized
@@ -252,6 +271,8 @@ class AttoDryDriver:
             temperature_max_k=cryostat.temperature_max_k,
             limits=config.magnet.limits,
             field_stability=config.magnet.stability,
+            readback_tolerance_t=config.magnet.readback_tolerance_t,
+            setpoint_ack_tolerance_t=config.magnet.setpoint_ack_tolerance_t,
             temperature_stability=config.temperature_stability,
             connection_authorized=connection_authorized,
             writes_authorized=writes_authorized,
@@ -492,13 +513,15 @@ class AttoDryDriver:
             if not enabled:
                 return
             tolerance = self.field_stability.criteria.tolerance
+            maximum = (CONFIRMED_FIELD_TOLERANCE_MAX_T if self.readback_tolerance_t is None
+                       else APPROVED_READBACK_TOLERANCE_MAX_T)
             if (
                 tolerance is None
-                or tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T
+                or tolerance > maximum
             ):
                 raise AttoDryError(
                     "Field-control takeover requires a configured field tolerance "
-                    f"no greater than {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
+                    f"no greater than {maximum:g} T."
                 )
             mismatch = math.hypot(
                 state.field.bx_t - state.field_setpoint.bx_t,
@@ -597,18 +620,18 @@ class AttoDryDriver:
                 raise AttoDryError(
                     "Supplied transition plan target does not match the requested field."
                 )
-            if not self._field_matches(plan.start_command, plan_start):
+            if plan.start_command != float32_field(plan_start):
                 raise AttoDryError(
                     "Supplied transition plan start does not match the planning start."
                 )
-            if not self._field_matches(
-                plan.target_command, float32_field(checked)
-            ):
+            if plan.target_command != float32_field(checked):
                 raise AttoDryError(
                     "Supplied transition plan target is not the exact float32 command."
                 )
 
-        if self._field_matches(state.field_setpoint, plan.target_command):
+        # A wider register ACK must not skip newly requested small field steps.
+        if self._field_matches(state.field_setpoint, plan.target_command,
+                               tolerance_t=FIELD_SETPOINT_READBACK_TOLERANCE_T):
             if on_sample is not None:
                 on_sample(state, 0.0, "setpoint_already_confirmed", None)
             return state
@@ -1038,7 +1061,7 @@ class AttoDryDriver:
             if (
                 tolerance is None
                 or confirmed.field.magnitude_t > tolerance
-                or confirmed.field_setpoint.magnitude_t > tolerance
+                or not self._field_matches(confirmed.field_setpoint, zero)
             ):
                 raise AttoDryError(
                     "Zero-field actual or setpoint readback is outside the configured "
@@ -1235,18 +1258,19 @@ class AttoDryDriver:
         return (validate_vector_field(target, self.limits) if policy is None
                 else policy.validate_target(target))
 
-    @staticmethod
-    def _field_matches(actual: VectorField, expected: VectorField) -> bool:
+    def _field_matches(self, actual: VectorField, expected: VectorField, *,
+                       tolerance_t: float | None = None) -> bool:
+        tolerance = self.setpoint_ack_tolerance_t if tolerance_t is None else tolerance_t
         return math.isclose(
             actual.bx_t,
             expected.bx_t,
             rel_tol=0.0,
-            abs_tol=FIELD_SETPOINT_READBACK_TOLERANCE_T,
+            abs_tol=tolerance,
         ) and math.isclose(
             actual.bz_t,
             expected.bz_t,
             rel_tol=0.0,
-            abs_tol=FIELD_SETPOINT_READBACK_TOLERANCE_T,
+            abs_tol=tolerance,
         )
 
     def _wait_stable(
@@ -1336,7 +1360,8 @@ class AttoDryDriver:
             command_kind=command_kind,
             dll_symbol=dll_symbol,
             callback=callback,
-            payload=dict(payload),
+            payload={**dict(payload), "setpoint_ack_tolerance_t": self.setpoint_ack_tolerance_t,
+                     "readback_tolerance_t": self.field_stability.criteria.tolerance},
         )
         callback(
             {
@@ -1384,6 +1409,12 @@ class AttoDryDriver:
         }
         if state is not None:
             event["state"] = asdict(state)
+            expected = command.payload.get("expected_setpoint")
+            if isinstance(expected, dict):
+                event["setpoint_error_t"] = {
+                    "x": state.field_setpoint.bx_t - expected["bx_t"],
+                    "z": state.field_setpoint.bz_t - expected["bz_t"],
+                }
         if error is not None:
             event.update(self._field_command_error_payload(error))
         command.callback(event)
