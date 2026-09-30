@@ -154,6 +154,27 @@ class PlotTests(unittest.TestCase):
         _, data = render_plot(rows, dict(x=X, y=Y, group_by='requested.lockin_excitation_v_rms'))
         self.assertEqual(len(data['rows']), 2)
 
+    def test_mixed_sample_status_uses_channel_quality_not_dimension_guard(self):
+        rows = [
+            {**observation(i, value=i + 1., flag=1 if i == 1 else 0),
+             'sample_status': 'problem' if i == 1 else 'clean',
+             'accepted': i != 1}
+            for i in range(3)
+        ]
+        before = copy.deepcopy(rows)
+        spec = dict(x=X, y=Y, statistics='mean_sd', curve_style='line')
+        audit_figure, audit = render_plot(rows, {**spec, 'quality_policy': 'include'})
+        self.assertEqual(len(audit['rows']), 3)
+        self.assertEqual(audit['report']['flagged_row_count'], 1)
+        self.assertIn('flagged samples included', audit_figure.axes[0].get_title())
+        clear_figure, clear = render_plot(rows, spec)
+        self.assertEqual(len(clear['rows']), 2)
+        self.assertEqual(clear['report']['excluded_quality_count'], 1)
+        self.assertTrue(math.isnan(clear_figure.axes[0].lines[0].get_ydata()[1]))
+        _, filtered = render_plot(rows, {**spec, 'filters': {'sample_status': ['clean']}})
+        self.assertEqual(len(filtered['rows']), 2)
+        self.assertEqual(rows, before)
+
     def test_log_errors_cannot_be_silently_clipped(self):
         rows = [observation(1, i, v) for i, v in enumerate((.01, 10., .01))]
         with self.assertRaisesRegex(ValueError, 'crossing zero'):

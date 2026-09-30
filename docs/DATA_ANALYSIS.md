@@ -16,6 +16,19 @@ does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 
 ## Unified and combination plotting
 
+Sample status is quality metadata, not a changing scan coordinate: mixed clean/problem
+rows are handled by **Quality** and do not require a fixed-status filter. You can still
+add a **Sample status** filter to deliberately select one status. To select one run
+within a SQLite database, add a **run id** fixed-condition filter and keep that ID;
+**Exclude IDs** is only for individual observations. Sample index starts at zero
+within each condition, so one group per condition appears as sample 0 throughout.
+
+To plot both clean and problem formal samples, enable the top-level
+**Include rejected/problem records where supported**, choose **AUDIT: include flagged**,
+and remove any **Sample status** filter. Missing measurements remain gaps, not invented
+values. For gate/excitation curves, group by target gate voltage to avoid splitting
+each curve at small gate-readback variations; measured values remain in the export.
+
 `notebooks/unified_plotting.ipynb` opens a general curve card;
 `notebooks/combination_analysis.ipynb` opens a four-channel Lock-in card.
 Both use the same read-only `attodry_control.unified_plotting` implementation.

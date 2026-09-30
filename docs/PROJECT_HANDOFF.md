@@ -4,6 +4,20 @@ Last updated: 2026-09-30
 
 ## Current stage
 
+### Mixed sample-status plotting fix (offline; 2026-09-30)
+
+Sample status is quality metadata, not an acquisition coordinate. Mixed clean/problem
+formal rows no longer trigger the unresolved-dimension guard; the existing channel
+quality policy still excludes flagged readings or explicitly includes them for audit.
+Explicit status filters, missing-data gaps, raw provenance and actual scan-coordinate
+guards remain. A regression first reproduced the reported Sample status failure.
+Verification: 36 guarded plotting tests passed. Read-only rendering of the supplied
+latest failed gate/excitation run selected 11 formal rows and plotted 10 available
+XX h1 values; the incomplete row remains a gap. Input SQLite SHA256 was unchanged.
+Delivery branch: codex/integration-four-module-scan. No hardware access,
+acquisition change or station deployment performed.
+
+
 ### Compliance precision and combination operator CLI (offline; 2026-09-30)
 
 Confirmed root cause from the reported control-computer driver/file audit:

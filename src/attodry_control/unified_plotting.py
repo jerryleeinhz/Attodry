@@ -555,7 +555,7 @@ def _condition_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     }
     condition.update(
         key for key in keys
-        if key in {"role", "harmonic", "scan_type", "sample_status", "source_kind"}
+        if key in {"role", "harmonic", "scan_type", "source_kind"}
     )
     return tuple(sorted(condition))
 
