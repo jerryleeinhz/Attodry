@@ -1,5 +1,37 @@
 # Development stages
 
+## Combination launch and frequency/excitation grids (offline; 2026-09-30)
+
+- Added the short interactive `combination_cli run` entry: default local TOML,
+  TOML-relative project database, automatic or explicit run ID and command-line
+  overrides. Run names remain reusable labels; duplicate database run IDs reject.
+- The offline summary displays axes/order/coordinates/counts, role harmonics,
+  SENS/Reserve, overload/cleanup and absolute paths before one exact `RUN` confirmation.
+  Cancellation/EOF, incomplete unattended authorization, duplicate IDs and changed
+  configuration/safety never open instruments or create an acquisition database.
+  Existing complete flags retain unattended operation; the summary/method are audited.
+- Optional `lockin_mode` reuses excitation, frequency or frequency_excitation grids
+  and mode-specific role settings. Legacy configuration remains excitation-only.
+  f×e uses frequency outer/U inner and bounded grid expansion. Segment overrides,
+  supported-harmonic selection and explicit missing high-order data follow daily sweeps.
+- Every frequency change, including an outer reset, confirms the 4 mV bridge,
+  parks incompatible detectors, checks both frequency readbacks and keeps the
+  approved source/environment/status constraints. Exceptions retain raw transition
+  evidence; cleanup restores 4 mV/h1/baseline frequency/ranges/Reserve.
+  The integrated vector-field <=3 T invariant is unchanged; no automatic hardware resume.
+- SQLite snapshots/condition metadata retain target and readback frequency/U plus
+  frequency/excitation indices and segments. No historical database migration.
+  Both notebooks document archived-coordinate curves, grouping and f×U maps;
+  tests reject unresolved changing coordinates rather than pooling frequencies.
+- 371 guarded related tests passed, including 20 new feature cases and existing
+  combination/cryostat, SR830/settings/harmonic/auto/overload, temperature-excitation,
+  configuration and scientific/unified plotting regressions. Final cleanup-summary
+  change also passed the focused 20-case rerun; both notebook schemas validate.
+  No physical instrument access, station deployment or new experiment. New scan
+  modes require a separately authorized bounded hardware acceptance stage.
+
+Configuration and operator workflow: [COMBINATION_SCAN_GUIDE.md](COMBINATION_SCAN_GUIDE.md).
+
 ## Explicit overload continuation (offline; 2026-09-29)
 
 User-approved acquisition exception: optional `lockin_sweep.overload_policy`

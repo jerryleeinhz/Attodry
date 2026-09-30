@@ -17,7 +17,9 @@ SMU 外层、激励内层的数据可按激励重组为 SMU I–V；每个组合
 2026-09-24：真实驱动执行器已完成限定范围的联合实机验证：两种电学嵌套顺序各 4 点，
 以及 Temperature × ordered Magnetic × gate SMU × Lock-in excitation 的 24 点扫描，
 共 32 点有效且清理确认。温度/磁场共用连接，监控仅读 SQLite；64 种模块子集/顺序
-全部经过假仪器测试，并非逐一实机验收。Lock-in frequency 轴和硬件 resume 仍未支持。
+全部经过假仪器测试，并非逐一实机验收。2026-09-30新增Lock-in frequency/f×e模式和
+`python -m attodry_control.combination_cli run`短命令，启动时显示摘要并交互确认；
+新增扫频路径完成离线验证，实机验收待执行。硬件resume仍未支持。
 温控采用读回稳定判据，目标 2.1 K 不等于每点实测均为 2.1 K；必须使用保存的实际温度。
 范围、最终仪器状态及遗留限制见
 [`MULTI_AXIS_ACCEPTANCE_20260924.md`](docs/MULTI_AXIS_ACCEPTANCE_20260924.md)。

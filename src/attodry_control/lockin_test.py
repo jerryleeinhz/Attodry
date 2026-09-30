@@ -2127,7 +2127,14 @@ def _run_excitation_sweep(
 def prepare_configured_excitation_sweep(
     config_path: str | Path, config: object
 ) -> tuple[argparse.Namespace, dict[str, object], tuple[float, ...], dict[str, float]]:
-    """Resolve one configured excitation cycle without loading or opening VISA.
+    """Compatibility entry for temperature/excitation and existing callers."""
+    return prepare_configured_lockin_sweep(config_path, config, scan="excitation")
+
+
+def prepare_configured_lockin_sweep(
+    config_path: str | Path, config: object, *, scan: str
+) -> tuple[argparse.Namespace, dict[str, object], tuple[float, ...], dict[str, float]]:
+    """Resolve a configured Lock-in mode without loading or opening VISA.
 
     The combined temperature/Lock-in runner supplies its narrow configuration view
     directly, so unrelated gate/SMU tables are never a prerequisite for this
@@ -2135,13 +2142,15 @@ def prepare_configured_excitation_sweep(
     """
 
     resolved_path = Path(config_path).resolve()
-    args = build_parser().parse_args(
-        ["sweep-excitation", "--config", str(resolved_path)]
-    )
+    command = {"excitation": "sweep-excitation", "frequency": "sweep-frequency",
+               "frequency_excitation": "sweep-frequency-excitation"}.get(scan)
+    if command is None:
+        raise ValueError(f"Unsupported Lock-in point mode: {scan}")
+    args = build_parser().parse_args([command, "--config", str(resolved_path)])
     lockin_config = _require_lockin_sweep_config(config)
     visa = lockin_config.visa
     if visa is None:
-        raise ValueError("Temperature/excitation scans require a VISA configuration.")
+        raise ValueError("Lock-in points require a VISA configuration.")
     settings: dict[str, object] = {
         "config": lockin_config,
         "config_path": resolved_path,
@@ -2160,8 +2169,17 @@ def prepare_configured_excitation_sweep(
                 f"{role} requires a station-local VISA address before a sweep can run."
             )
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
-    _resolve_sweep_settings(args, settings, scan="excitation")
-    points = _validate_increasing_points(args.points_v, "excitation")
+    _resolve_sweep_settings(args, settings, scan=scan)
+    if scan == "frequency":
+        sweep = lockin_config.lockin_sweep
+        points = (sweep.frequency_source_voltage_v_rms,)
+        # Point execution uses the same source/readback safety helper in all modes.
+        args.series_resistance_ohm = sweep.external_series_resistance_ohm
+        args.device_resistance_ohm = sweep.approximate_device_resistance_ohm
+        args.max_device_current_a = sweep.max_device_current_a_rms
+        args.max_device_voltage_v = sweep.max_device_voltage_v_rms
+    else:
+        points = _validate_increasing_points(args.points_v, "excitation")
     safety = _validate_excitation_safety(args, points)
     _sweep_baseline_source_voltage(settings)
     return args, settings, points, safety

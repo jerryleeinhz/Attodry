@@ -6,7 +6,7 @@ This module deliberately imports no DLL, VISA, or device adapter.
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import itertools
 import hashlib
@@ -42,6 +42,7 @@ class AxisPoint:
     values: dict[str, float]
     segment: str = "main"
     direction: str = "ordered"
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,8 @@ class CombinationPlan:
                     requested.update(point.values)
                     axes[axis.module] = {"index": index, "segment": point.segment,
                                          "direction": point.direction}
+                    if point.metadata:
+                        axes[axis.module]["grid"] = point.metadata
                 sequence = len(conditions)
                 conditions.append({
                     "condition_id": f"condition-{sequence:06d}", "sequence_index": sequence,

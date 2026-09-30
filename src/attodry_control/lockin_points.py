@@ -1,15 +1,29 @@
-"""Single-owner excitation points using the daily SR830 safety engine.
+"""Single-owner frequency/excitation points using the daily SR830 safety engine.
 
 No resource is opened by construction. Settings, bounded autorange and harmonic
 sampling reuse lockin_test; a point never performs whole-sweep cleanup.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, replace
 
 from . import lockin_test as daily
 from .combination_store import utc_now
 from .sr830 import DualSr830Controller
+
+
+@dataclass(frozen=True)
+class LockinGridPoint:
+    frequency_hz: float
+    source_v_rms: float
+    frequency_index: int
+    excitation_index: int
+    frequency_segment: int | None
+    excitation_segment: int | None
+    range_spec: object
+
+    def metadata(self):
+        return {key: value for key, value in asdict(self).items() if key != "range_spec"}
 
 
 class _AuditedInstrument:
@@ -42,10 +56,12 @@ class _AuditedInstrument:
 
 
 class LockinPointSession:
-    def __init__(self, config_path, config, event, *, manager_factory=None):
+    def __init__(self, config_path, config, event, *, manager_factory=None,
+                 mode="excitation"):
         self.config = config
+        self.mode = mode
         self.args, self.settings, self.points, self.safety = (
-            daily.prepare_configured_excitation_sweep(config_path, config)
+            daily.prepare_configured_lockin_sweep(config_path, config, scan=mode)
         )
         self.event = event
         self.manager_factory = manager_factory
@@ -62,10 +78,27 @@ class LockinPointSession:
         self.sample_count = 0
         self.harmonics_by_role = daily._requested_sweep_harmonics_by_role(self.args)
         self.harmonics = daily._requested_sweep_harmonics(self.args)
-        # The electrical milestone is fixed-frequency excitation, not frequency scan.
-        daily._validate_harmonic_detection_frequencies(
-            (config.lockin_xx.frequency_hz,), self.harmonics
-        )
+        self.target_frequency_hz = config.lockin_xx.frequency_hz
+        sweep = config.lockin_sweep
+        fixed = daily.SweepPointConfig(config.lockin_xx.frequency_hz, None, None, None)
+        frequency_specs = ((fixed,) if mode == "excitation" else sweep.frequency_point_specs)
+        excitation_specs = ((daily.SweepPointConfig(self.points[0], None, None, None),)
+                            if mode == "frequency" else sweep.excitation_point_specs)
+        if len(frequency_specs) * len(excitation_specs) > 100000:
+            raise ValueError("Offline Lock-in grid exceeds 100000 conditions")
+        self.grid = tuple(LockinGridPoint(f.value, u.value, fi, ui,
+            f.segment_index, u.segment_index,
+            replace(f, value=u.value) if mode == "frequency" else u if mode == "excitation"
+            else daily._combined_point_spec(f, u))
+            for fi, f in enumerate(frequency_specs) for ui, u in enumerate(excitation_specs))
+        self.skip_unsupported = mode != "excitation" and sweep.skip_unsupported_harmonics
+        self.skipped_by_frequency = {}
+        for frequency in frequency_specs:
+            # Includes the all-selected-orders-unsupported case before any I/O.
+            _, skipped = daily._harmonics_for_frequency(frequency.value, self.harmonics,
+                                                       skip_unsupported=self.skip_unsupported)
+            self.skipped_by_frequency[str(frequency.value)] = skipped
+        self.point_harmonics = self.harmonics
 
     def open(self):
         factory = self.manager_factory or daily._load_resource_manager_factory()
@@ -107,7 +140,8 @@ class LockinPointSession:
             lockin_xx_config=self.config.lockin_xx, lockin_xy_config=self.config.lockin_xy,
             original_xx_sensitivity=before_xx.sensitivity,
             original_xy_sensitivity=before_xy.sensitivity,
-            initial_full_scale_overrides=daily._initial_sweep_range_overrides(self.args.point_specs),
+            initial_full_scale_overrides=daily._initial_sweep_range_overrides(
+                (self.grid[0].range_spec,)),
         )
         daily._configure_sweep_sensitivities(
             xx, xy, sensitivity_setup=self.sensitivity_setup, settle_s=self.args.settle_s)
@@ -123,22 +157,58 @@ class LockinPointSession:
                                          "fixed": self.fixed_setup,
                                          "frequency": self.frequency_setup})
 
-    def set_point(self, source_v):
-        if source_v not in self.points:
-            raise ValueError("Excitation point is outside the validated configured grid")
-        index = self.points.index(source_v)
+    def set_point(self, source_v, frequency_hz=None, *, point_index=None):
+        target_hz = self.config.lockin_xx.frequency_hz if frequency_hz is None else frequency_hz
+        if point_index is None:
+            point_index = next((i for i, p in enumerate(self.grid)
+                if (p.source_v_rms, p.frequency_hz) == (source_v, target_hz)), -1)
+        if not 0 <= point_index < len(self.grid):
+            raise ValueError("Lock-in point is outside the validated configured grid")
+        point = self.grid[point_index]
+        if (point.source_v_rms, point.frequency_hz) != (source_v, target_hz):
+            raise ValueError("Lock-in grid index and coordinates differ")
         xx, xy = self.pair
         daily._validate_excitation_safety(self.args, (source_v,))
-        xx.set_sine_output(source_v)
-        daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
         self.point_record = {
-            "point_index": index, "source_v_rms": source_v,
-            "target_frequency_hz": self.config.lockin_xx.frequency_hz,
+            "point_index": point_index, "source_v_rms": source_v,
+            "target_frequency_hz": target_hz, **point.metadata(),
+            "range_spec": asdict(point.range_spec),
             "samples": [], "harmonic_transition_status": [],
         }
+        try:
+            daily._verify_frequency_readbacks(self.target_frequency_hz,
+                xx.read_reference_frequency(), xy.read_reference_frequency(),
+                rel_tolerance=1e-5,
+                absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+            if target_hz != self.target_frequency_hz:
+                xx.set_minimum_sine_output()
+                daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
+                minimum = xx.read_sine_output()
+                self.point_record["source_before_frequency_v_rms"] = minimum
+                if abs(minimum - daily.MINIMUM_SINE_OUTPUT_V) > 1e-9:
+                    raise ValueError("4 mV bridge before frequency change was not confirmed")
+                self.harmonic_control.prepare_frequency(xx, xy, target_hz,
+                                                        self.args.settle_s, self.point_record)
+                self.point_record["frequency_write_attempted"] = True
+                xx.set_internal_reference_frequency(target_hz)
+                daily.time.sleep(self.args.settle_s)
+                transition, problems = daily._consume_frequency_transition(
+                    xx, xy, harmonic=self.harmonic_control.current_harmonics)
+                self.point_record["frequency_transition_status"] = transition
+                if problems:
+                    raise daily.Sr830Error("Unsafe frequency transition: " + "; ".join(problems))
+                self.target_frequency_hz = target_hz
+                daily.time.sleep(self.args.settle_s)
+            # Verify frequency before restoring the requested source amplitude.
+            self._read_coordinates()
+            xx.set_sine_output(source_v)
+            daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
+        except BaseException:
+            self.event("lockin_point_transition", self.point_record)
+            raise
         daily._apply_sweep_segment_ranges(
             xx, xy, sensitivity_setup=self.sensitivity_setup,
-            point_spec=self.args.point_specs[index], lockin_xx_config=self.config.lockin_xx,
+            point_spec=point.range_spec, lockin_xx_config=self.config.lockin_xx,
             lockin_xy_config=self.config.lockin_xy, settle_s=self.args.settle_s,
             record=self.point_record, harmonic=self.harmonic_control.current_harmonics,
             overload_policy=self.harmonic_control.overload,
@@ -154,12 +224,16 @@ class LockinPointSession:
         safety = daily._validate_excitation_safety(self.args, (source,))
         frequency, companion = xx.read_reference_frequency(), xy.read_reference_frequency()
         daily._verify_frequency_readbacks(
-            self.config.lockin_xx.frequency_hz, frequency, companion,
+            self.target_frequency_hz, frequency, companion,
             rel_tolerance=1e-5, absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
         self.point_record.update(source_readback_v_rms=source,
                                  actual_frequency_hz=frequency,
                                  frequency_readback_hz={"lockin_xx": frequency, "lockin_xy": companion},
                                  source_readback_safety=safety)
+        self.point_harmonics, skipped = daily._harmonics_for_frequency(
+            max(self.target_frequency_hz, frequency, companion), self.harmonics,
+            skip_unsupported=self.skip_unsupported)
+        self.point_record["skipped_harmonics"] = skipped
         return {"lockin_excitation_v_rms": source, "lockin_frequency_hz": frequency}
 
     def qualify(self):
@@ -177,9 +251,9 @@ class LockinPointSession:
         try:
             daily._capture_sweep_point(
                 *self.pair, target_frequency_hz=actual["lockin_frequency_hz"],
-                harmonics=self.harmonics,
+                harmonics=self.point_harmonics,
                 selected_roles_by_harmonic=daily._roles_by_harmonic(
-                    self.harmonics, self.harmonics_by_role),
+                    self.point_harmonics, self.harmonics_by_role),
                 harmonic_settle_s=self.args.settle_s, samples=1,
                 sample_interval_s=self.args.sample_interval_s, record=record,
                 frequency_rel_tolerance=1e-5,
@@ -224,7 +298,7 @@ class LockinPointSession:
             restore_xx_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xx"),
             restore_xy_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xy"),
             harmonic_control=self.harmonic_control,
-            restore_frequency=False, settle_s=self.args.settle_s, writes_started=True,
+            restore_frequency=self.mode != "excitation", settle_s=self.args.settle_s, writes_started=True,
             ignore_output_overload=True,
         )
         if (self.fixed_setup and self.fixed_setup.get("verified")

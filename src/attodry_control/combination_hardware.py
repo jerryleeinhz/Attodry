@@ -43,6 +43,9 @@ class HardwareCombinationConfig:
     temperature: object | None = None
     magnetic: object | None = None
     cryostat: object | None = None
+    database_path: Path | None = None
+    run_id: str = "auto"
+    lockin_mode: str = "excitation"
 
 
 def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
@@ -59,9 +62,16 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if project.mode is not RunMode.HARDWARE:
         raise ValueError("Hardware combination requires project.mode='hardware'")
     table = configuration._table(document, "combination_scan")
-    configuration._strict_keys(
+    configuration._strict_keys_with_optional(
         table, "combination_scan",
-        {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"})
+        {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"},
+        {"lockin_mode", "run_id"})
+    mode = table.get("lockin_mode", "excitation")
+    if not isinstance(mode, str) or mode not in {"excitation", "frequency", "frequency_excitation"}:
+        raise ValueError("combination_scan.lockin_mode must be excitation, frequency or frequency_excitation")
+    run_id = table.get("run_id", "auto")
+    if not isinstance(run_id, str) or not run_id.strip() or run_id != run_id.strip():
+        raise ValueError("combination_scan.run_id must be a nonempty string without outer whitespace")
     if table["backend"] != "hardware":
         raise ValueError("Hardware combination requires backend='hardware'")
     order = table["order"]
@@ -139,13 +149,17 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         lockin = SimpleNamespace(
             lockin_xx=xx, lockin_xy=xy, lockin_safety=safety, lockin_sweep=sweep,
             visa=configuration._parse_visa(configuration._table(document, "visa")))
-        prepared = LockinPointSession(path, lockin, lambda *_: None)
+        prepared = LockinPointSession(path, lockin, lambda *_: None, mode=mode)
         axes["lockin"] = ScanAxis("lockin", tuple(AxisPoint({
-            "lockin_excitation_v_rms": spec.value, "lockin_frequency_hz": xx.frequency_hz},
-            str(spec.segment_index) if spec.segment_index is not None else "main",
-            "ascending") for spec in prepared.args.point_specs))
+            "lockin_excitation_v_rms": point.source_v_rms, "lockin_frequency_hz": point.frequency_hz},
+            (f"f{point.frequency_segment}:e{point.excitation_segment}" if mode != "excitation"
+             else str(point.excitation_segment) if point.excitation_segment is not None else "main"),
+            "ascending", point.metadata()) for point in prepared.grid))
         hardware["lockin"] = {name: asdict(getattr(lockin, name)) for name in vars(lockin)}
         hardware["lockin"]["safety_sha256"] = hashlib.sha256(safety_path.read_bytes()).hexdigest()
+        hardware["lockin"]["point_mode"] = mode
+        hardware["lockin"]["harmonics_by_role"] = prepared.harmonics_by_role
+        hardware["lockin"]["skipped_harmonics_by_frequency"] = prepared.skipped_by_frequency
     addresses = []
     if smu is not None:
         addresses += [h.address.strip().upper() for h in smu.hardware.by_role().values()]
@@ -156,10 +170,12 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     plan = CombinationPlan(tuple(axes[m] for m in order), table["samples_per_condition"],
                            table["repeats"], table["run_name"], table["note"])
     snapshot = plan.snapshot()
-    snapshot.update(mode="hardware", hardware_scope="four-module-excitation-v1",
+    snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
+                    lockin_mode=mode,
                     hardware=_json(hardware), config_path=str(path),
                     config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                    cleanup_policy={"lockin": "4mV_restore_ranges_h1", "smu": "zero_disable",
+                    cleanup_policy={"lockin": ("4mV_restore_ranges_h1" if mode == "excitation"
+                        else "4mV_h1_restore_baseline_frequency_ranges_reserve"), "smu": "zero_disable",
                         "temperature": "normal_hold_failure_disable",
                         "magnetic": (magnetic.cleanup.normal_end_field_policy.value if magnetic else "inactive"),
                         "magnetic_failure": "monitored_zero_or_manual_verification"},
@@ -167,7 +183,11 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     # Include point engines and shared safety code, not just the Cartesian loop.
     snapshot["source_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in Path(__file__).parent.glob("*.py")}
-    return HardwareCombinationConfig(path, plan, smu, lockin, snapshot, temperature, magnetic, cryostat)
+    database = project.database_path
+    if not database.is_absolute():
+        database = path.parent / database
+    return HardwareCombinationConfig(path, plan, smu, lockin, snapshot, temperature, magnetic,
+                                     cryostat, database.resolve(), run_id, mode)
 
 
 class _Events:
@@ -227,7 +247,7 @@ class HardwareCombinationStation:
         if self.config.lockin is not None:
             self.lockin = LockinPointSession(
                 self.config.path, self.config.lockin, self.events.event,
-                manager_factory=self.manager_factory)
+                manager_factory=self.manager_factory, mode=self.config.lockin_mode)
             preflight["lockin"] = self.lockin.open()
         # All active preflights must succeed before any configuration writes.
         if self.lockin is not None:
@@ -246,7 +266,10 @@ class HardwareCombinationStation:
                                segment=point.segment)
             # Actual sensed coordinates are produced only by the formal read.
             return {"requested": point.values}
-        return {"actual": self.lockin.set_point(point.values["lockin_excitation_v_rms"])}
+        lockin_axis = next(axis for axis in self.config.plan.axes if axis.module == "lockin")
+        index = lockin_axis.points.index(point)
+        return {"actual": self.lockin.set_point(point.values["lockin_excitation_v_rms"],
+            point.values["lockin_frequency_hz"], point_index=index)}
 
     def qualify(self, modules):
         if self.lockin is not None:
@@ -292,6 +315,7 @@ class HardwareCombinationStation:
         if self.lockin is not None:
             for role, harmonics in self.lockin.harmonics_by_role.items():
                 expected.update(f"lockin_{role}_h{h}_{metric}" for h in harmonics
+                                if h in self.lockin.point_harmonics
                                 for metric in ("x_v", "y_v", "amplitude_v", "phase_deg"))
         return expected
 

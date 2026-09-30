@@ -1,6 +1,6 @@
 # 项目模块开发与操作者协作规范
 
-最后更新：2026-08-25
+最后更新：2026-09-30
 
 本文把长期 Lock-in 开发中形成的项目结构、操作者习惯、安全边界、数据审计、
 Notebook、Git/worktree 和 `LK_setup` 工作流整理为项目级约定。它适用于 Lock-in、
@@ -308,6 +308,14 @@ formal samples；rejected 只能显式 audit opt-in。
   `run_data/<module>_commissioning`；它不是数据库；
 - 只写独立 JSON 的模块命令不应因无关 `database_path` 未配置而停止；只有进入
   Integration 后才由 SQLite 路径承担跨模块索引、恢复和审计。
+
+Combination 的 `run` 默认读取当前目录下 `config/hardware.local.toml`，数据库来自
+`[project].database_path`（相对 TOML 所在目录）；CLI `--database` 覆盖时相对工作目录。
+`[combination_scan].run_id = "auto"` 或省略时生成 UTC 时间戳和净化的 `run_name`；
+`run_name` 可重复，数据库中的 run ID 不可重复。交互启动先显示扫描摘要，输入 `RUN`
+才连接设备；无人值守启动保留完整显式授权开关，部分授权不回退到交互提示。
+选择 `lockin_mode` 后复用 `[lockin_sweep]` 的对应模式网格和谐波，不另填一套频率/激励点。
+具体配置、确认和清理语义见 [COMBINATION_SCAN_GUIDE.md](COMBINATION_SCAN_GUIDE.md)。
 
 ## 8. Notebook 与分析习惯
 

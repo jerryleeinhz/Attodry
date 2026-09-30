@@ -1,8 +1,43 @@
 # Project handoff
 
-Last updated: 2026-09-29
+Last updated: 2026-09-30
 
 ## Current stage
+
+### Combination launch and frequency/excitation grids (offline; 2026-09-30)
+
+User-approved CLI simplification: `python -m attodry_control.combination_cli run`
+reads `config/hardware.local.toml` from the current directory. SQLite comes from
+`project.database_path` relative to that TOML; CLI overrides keep their previous
+working-directory semantics. Optional `combination_scan.run_id` defaults to an
+automatic UTC microsecond timestamp plus sanitized run name. Duplicate IDs reject
+before connection; there is no hardware resume or overwrite.
+
+The CLI displays the requested axes, order, coordinates, groups, selected harmonics,
+ranges/Reserve, overload and cleanup policies, paths and ID. Interactive `RUN`
+confirms that summary and physical XY SINE OUT disconnection when Lock-in is active.
+Cancellation/EOF creates no database and opens no instruments. Existing complete
+explicit authorization flags support unattended operation; partial flags and missing
+noninteractive authorization reject. TOML/safety changes during confirmation reject;
+the database snapshot retains the summary and confirmation method.
+
+Optional `combination_scan.lockin_mode` selects excitation (legacy default), frequency,
+or frequency_excitation, reusing the corresponding daily sweep grid and role/harmonic
+settings. f×e is frequency outer, excitation inner. Source targets, actual frequency/
+voltage, grid indices, segments and explicit unsupported-harmonic gaps are archived.
+Frequency changes and outer-loop returns use verified 4 mV, safe harmonic parking,
+XX FREQ and both readbacks before raising source. Cleanup restores 4 mV/h1/baseline
+frequency/SENS/Reserve. Shared overload policy and universal resultant <=3 T remain.
+Both analysis notebooks expose the archived coordinates and document filtering,
+grouping and f×U maps; historical databases require no migration.
+
+Verification: 371 relevant guarded offline tests passed, including 20 new launch,
+ordering, limits, fault/cleanup and analysis tests; the focused 20-case suite was
+rerun after the final cleanup-summary update. Both notebook JSON schemas validate.
+No real instrument connection, LK_setup deployment or new sweep was performed.
+New frequency transitions still need separately authorized bounded real acceptance.
+Usage/configuration: [COMBINATION_SCAN_GUIDE.md](COMBINATION_SCAN_GUIDE.md).
+
 
 ### Explicit overload continuation (offline; 2026-09-29)
 

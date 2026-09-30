@@ -1,5 +1,8 @@
 # Four-module combination scans — bounded hardware validation complete
 
+2026-09-30 更新：短命令启动和 Lock-in frequency / frequency-excitation 模式已加入，
+完成离线假仪器验证；新增扫频路径尚未实机验收。下面的 2026-09-24 实机范围只涵盖固定频率。
+
 Status: 2026-09-24. The real-driver coordinator includes temperature, magnetic,
 SMU and fixed-frequency Lock-in excitation. Bounded joint hardware validation
 passed: two four-point electrical nesting orders and one 24-point grid with all
@@ -7,7 +10,7 @@ four axes varying, clean verified cleanup, file-only monitoring and analysis.
 See [the acceptance record](MULTI_AXIS_ACCEPTANCE_20260924.md) for exact scope,
 actual temperature ranges, data hashes and unresolved historical faults.
 
-Current verification: **644/644 guarded tests**, latest local rerun 126.899 s;
+Historical 2026-09-24 verification: **644/644 guarded tests**, local rerun 126.899 s;
 unchanged runtime previously passed target lyr 644/644 in 143.182 s. No failures,
 errors or skips. All 64 module subsets/orders are fake-tested; this does not mean
 all 64 physical orders, fault cases or output ranges have been commissioned.
@@ -20,7 +23,7 @@ all 64 physical orders, fault cases or output ranges have been commissioned.
 每个叶节点重新读取所有 active SMU，按各角色配置保存真实 h1/h2/h3 锁相读数。
 不调用完整独立扫描来拼接；连接和配置只做一次，最终集中 cleanup。
 
-仍不支持：Lock-in frequency 扫描、软件脉冲、实机 resume。
+仍不支持：软件脉冲、实机 resume。
 这些请求在连接前拒绝。固定频率下若所选谐波越过 102 kHz，也在连接前拒绝，
 不静默减少谐波。此前四模块模拟器及专用温度×激励命令仍保留。
 
@@ -30,14 +33,16 @@ all 64 physical orders, fault cases or output ranges have been commissioned.
 [combination_scan]
 backend = "hardware"
 order = ["temperature", "smu", "magnetic", "lockin"]  # 外 -> 内；按需求删减/排列
+lockin_mode = "excitation"  # 或 "frequency" / "frequency_excitation"
 samples_per_condition = 1
 repeats = 1
 run_name = "four_module_combination"
+run_id = "auto"
 note = "填写本次接线与样品说明"
 ```
 
 扫描点、source mode、各 SMU 的 V/I 限值、delay 仍来自 `three_smu_run` 和
-对应硬件表；Lock-in 沿用 excitation 网格、角色谐波、量程/Reserve、时间常数、
+对应硬件表；Lock-in 沿用所选模式的网格、角色谐波、量程/Reserve、时间常数、
 电阻与器件 AC 安全限值。两套独立命令的 `samples_per_point` 不再叠加，
 由 `samples_per_condition` 决定每叶完整采样次数。一份采样包含所选谐波，
 各设备/谐波是顺序读取，不能称为同时采样。
@@ -71,25 +76,71 @@ segments 或固定模长 angle_segments，
 中间分量拐角和所有完整读回使用同一有效边界。即使 standalone 允许纯 Z 9 T，
 这里也不允许；只选温度时遇到超出集成边界的初始磁场也会拒绝接管。
 
+Lock-in 模式与参数来源：
+
+| lockin_mode | 频率 | 激励 | 正式谐波选择 |
+|---|---|---|---|
+| `excitation`（缺省） | `lockin_xx.frequency_hz` | excitation 网格 | excitation_xx/xy_harmonics |
+| `frequency` | frequency 网格 | frequency_source_voltage_v_rms | frequency_xx/xy_harmonics |
+| `frequency_excitation` | frequency 网格 | excitation 网格 | combined_xx/xy_harmonics |
+
+网格仍在 `[lockin_sweep]`，frequency_points_hz / frequency_ranges 二选一，
+excitation_points_v_rms / excitation_ranges 二选一，不在 combination 表重复填写。
+f×e 内部固定为频率外层、激励内层。例如 order=[magnetic,smu,lockin]，
+实际为磁场 → SMU/gate 条件 → 频率 → 激励。总条件数为各模块点数相乘再乘 repeats；
+lockin 的点数在 f×e 模式为 Nf×Nu。samples_per_condition 是每条件的完整采样组数。
+
+每个频率检查 h×f<=102000 Hz：h2 基频最高51 kHz，h3最高34 kHz。
+扫频模式沿用 skip_unsupported_harmonics：true 时仅跳过部分超限阶，摘要、原始记录
+和数据缺口明确保留；某频率所有所选阶均不可测时在打开设备前拒绝。
+false 时任何超限阶都拒绝。原 excitation 模式仍严格拒绝不支持的所选阶。
+频率段、激励段都设置同角色量程时沿用独立 f×e 的激励段优先规则；
+省略的激励段量程回退到频率段。与 harmonic_settings 冲突的配置仍拒绝。
+
+频率改变，包括外层循环末频率返回首频率时，先请求并确认4 mV，再按现有
+谐波安全接口停靠超限检测阶，设置XX频率、等待并核对XX/XY读回，最后恢复目标激励。
+同一频率仅换激励不重复写FREQ。结束使用既有清理：4 mV → h1 → TOML基准频率、
+基准SENS/Reserve，并保存最后读回。过载继续策略不取消失锁、通信、频率或环境边界。
+
 可立即执行的**纯离线预览**：
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path .\src).Path
-python -m attodry_control.combination_cli describe-hardware --config config/hardware.local.toml
+python -m attodry_control.combination_cli describe-hardware
 ```
 
-下面是**取得对应范围授权、核对私有 TOML 后**的实机写命令模板；不要直接沿用旧配置或 run-id：
+日常交互式启动从项目目录执行：
 
 ```powershell
-New-Item -ItemType Directory -Force run_data/combination
+python -m attodry_control.combination_cli run
+```
+
+默认配置为当前工作目录下的 config/hardware.local.toml；找不到即报错，不搜索其他实验配置。
+数据库从 `[project].database_path` 读取，相对路径相对该TOML所在目录；例如
+`../run_data/combination/scan.sqlite`。命令行 `--database` 覆盖它，保持原先相对工作目录的语义。
+父目录在确认后自动创建。一份SQLite可以容纳多次不同run ID的扫描。
+`run_name`是可重复的实验名称，`run_id`标识一次运行，在同一数据库内不可重复。
+省略run_id或填写auto会生成UTC微秒时间戳+净化的run_name；也可在TOML写固定ID，
+或用 `--run-id` 临时覆盖。重复ID拒绝，不能覆盖记录或重放磁场历史。
+
+启动前离线展示配置与数据库绝对路径、run name/ID、外到内循环、点数/首末目标/段方向、
+总条件和采样数、正式谐波、量程/Reserve（包括谐波覆盖）、过载策略及cleanup。
+输入RUN才连接仪器，RUN同时确认本次写入/状态消费和XY SINE OUT物理断开（启用lockin时）。
+空输入、其他文字、EOF均取消；Ctrl+C按CLI中断退出。取消不创建数据库或连接设备。
+确认期间TOML或lockin_safety变化会拒绝，需重新启动审阅。
+
+SSH后台/定时启动保留显式授权命令，不等待终端输入：
+
+```powershell
 python -m attodry_control.combination_cli run --config config/hardware.local.toml --database run_data/combination/scan.sqlite --run-id UNIQUE_RUN_ID --authorize-combination --authorize-cryostat --confirm-xy-sine-disconnected
 python -m attodry_control.combination_cli monitor --database run_data/combination/scan.sqlite --run-id UNIQUE_RUN_ID
 ```
 
-`--authorize-combination` 授权所选组合；旧 `--authorize-electrical-combination`
-是兼容别名。只要包含温度或磁场，还必须额外给 `--authorize-cryostat`，
-否则在连接任何设备/创建数据库之前拒绝；纯电学扫描不需要该额外开关。
-包含 Lock-in 时必须确认 XY SINE OUT 物理断开。XX 内参考/XY TTL、
+提供授权开关时必须完整：`--authorize-combination`（旧 electrical-combination别名保留），
+启用温度/磁场时加 `--authorize-cryostat`，启用Lock-in时加 `--confirm-xy-sine-disconnected`。
+部分开关或非交互环境缺少授权时在连接/创建数据库前拒绝，避免后台等待输入。
+完整旧命令也先打印相同摘要；SQLite配置快照保存摘要与确认方式。
+授权不是操作系统提权，也不能代替接线的物理核验。XX 内参考/XY TTL、
 初始 4 mV/h1、输入与滤波读回必须符合配置；需要改面板固定设置时，先单独
 `apply-toml`。off SMU 不访问。未选温度/磁场轴不写入，但共享 DLL 的 full-state
 读回会包含两者，不推断未选模块为 off/zero。不要并行运行
@@ -131,6 +182,12 @@ SQLite 仍为 combination-v1，硬件记录明确 `simulated=false`；配置快�
 `notebooks/combination_analysis.ipynb` 无需按照扫描顺序重写：
 例如 X=`measured.smu_bias_voltage_v`，Y=`measured.lockin_xy_h2_amplitude_v`，
 group=`requested.lockin_excitation_v_rms`；不会把 h1 当作 h2。
+
+新增频率坐标已经进入同一SQLite表和两份Notebook共用的只读绘图界面。
+画磁场/gate曲线时固定或分组frequency；画频率曲线时固定磁场/gate并按激励分组。
+f×U图用 actual.lockin_frequency_hz、actual.lockin_excitation_v_rms 作XY，所选谐波作颜色。
+未固定/分组的变化条件会明确报错，不将不同频率混成一条曲线。跳过的谐波缺失，不能补零。
+条件grid索引、两个段索引和双机实际频率存入审计；旧SQLite保持只读兼容，无迁移要求。
 
 ## What is available
 
@@ -296,8 +353,9 @@ and acquisition models are separate from this plotting change.
    Historical XY overload and 5-mT-command/readback discrepancy remain unresolved.
    For strict temperature-target equilibrium, choose appropriate target-mode
    tolerance/dwell rather than treating stable-readback acceptance as equilibration.
-2. If needed, add Lock-in frequency/frequency-excitation axes separately, retaining
-   harmonic-range and transition policies. Current Lock-in axis is excitation only.
+2. The new frequency and frequency-excitation modes have passed offline fault,
+   ordering, cleanup and analysis tests. Real acceptance of frequency transitions
+   in a combination scan requires a separately authorized bounded experiment.
 
 The shared real path is validated within the recorded small-range experiment;
 this is not certification of all physical trajectories, faults or precision.

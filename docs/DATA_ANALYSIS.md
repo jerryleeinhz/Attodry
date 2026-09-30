@@ -70,6 +70,15 @@ Raw source records are never rewritten. The older Python `select_series`/
 `plot_series`/`export_selection` API remains a raw-observation API; the enhanced
 quality/statistics/export behavior is in `render_plot` and the two notebooks.
 
+For combination frequency/excitation grids, use `actual.lockin_frequency_hz`
+or `actual.lockin_excitation_v_rms` on X. Fix other changing coordinates or group
+by their `requested.*` values. For a field curve, fix both frequency and excitation
+or group the varying one. An XY–Z card can use actual frequency/excitation as X/Y
+and a measured Lock-in channel as Z; fix field/gate/temperature to select a slice.
+Unsupported harmonics stay missing, and neither notebook inserts zeros or pools
+different frequencies into one error bar. Existing excitation-only databases
+remain readable without migration.
+
 This is voltage plotting and qualification, not H1→H2 frequency-response calibration.
 Small repeat scatter does not prove absence of clipping, drift or systematic error.
 Install the analysis extra in the kernel environment; JupyterLab also needs a
