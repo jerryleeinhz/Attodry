@@ -88,6 +88,7 @@ def launch_summary(config, database, run_id):
     if config.magnetic is not None:
         summary["field_transition_policy"] = config.magnetic.run.transition_policy.value
         summary["field_resultant_limit_t"] = 3.0
+        summary["field_readback_policy"] = config.snapshot["field_readback_policy"]
     if config.smu is not None:
         summary["smu"] = {role: {"source_mode": device.source_mode.value,
             "max_abs_voltage_v": device.max_abs_voltage_v,

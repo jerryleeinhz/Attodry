@@ -21,9 +21,14 @@ temperature_max_k = 300.0
 # Controller X is the transverse coil called Y in the factory magnet table.
 hardware_x_max_t = 3.0
 hardware_z_max_t = 9.0
-# Dual-axis resultant ceiling only (operator-approved 2026-09-11).
-# With the other component EXACTLY zero, use the X 3 T / Z 9 T ceilings above.
-# Small nonzero requests/readbacks are NOT rounded to zero for this rule.
+# Nominal vector-plan resultant ceiling; requests and float32 commands stay strict.
+# Complete plan selects single X/Z only when all other-axis targets are exactly zero.
+# A plan using both axes (even at separate points) uses the resultant ceiling throughout.
+# Approved readback policy (2026-09-30): 0.5 mT margin at nominal limits <=3 T;
+# single-axis inactive readback independently <=0.5 mT, raw values retained.
+# Standalone Z9 T is not extended; integrated nominal axes/resultant stay <=3 T.
+# Fixed readback bounds are archived by code; field_tolerance_t is a stability check,
+# not permission to request >3 T or increase this margin. Offline, uncommissioned policy.
 experiment_vector_max_t = 3.0
 field_tolerance_t = 0.001
 stable_range_t = 0.0005
@@ -436,7 +441,7 @@ bidirectional = false
 # Any nonempty subset/order of temperature, magnetic, smu, lockin is supported.
 # Temperature uses temperature_scan (or temperature_run.target_k if absent).
 # Magnetic reuses magnetic_field_run ordered points/segments without deduplication.
-# Temperature + magnetic share one connection; integrated resultant is ALWAYS <=3T,
+# Temperature + magnetic share one connection; integrated nominal resultant <=3 T,
 # including pure Z, with the same limits on float32 commands and intermediate corners.
 # Software-pulse mode and hardware resume are unavailable.
 # Daily command: python -m attodry_control.combination_cli run

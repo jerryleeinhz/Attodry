@@ -17,6 +17,7 @@ from .safety import (
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
     FieldTransitionPolicy,
     MagnetLimits,
+    FieldReadbackPolicy,
     plan_ordered_field_transitions,
 )
 from .scans import temperature_scan_points
@@ -1142,6 +1143,9 @@ def _parse_magnetic_field_run(
         f"{name}.transition_policy",
     )
     try:
+        # Requested targets keep strict nominal limits; the run-wide mode never
+        # changes because of a residual readback or a later segment.
+        FieldReadbackPolicy.from_targets(points, limits)
         # A zero start makes static validation independent of any real station
         # state while still checking every target, exact float32 waypoint, and
         # both component-write mixed corners for the selected transition policy.

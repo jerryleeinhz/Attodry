@@ -170,6 +170,9 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     plan = CombinationPlan(tuple(axes[m] for m in order), table["samples_per_condition"],
                            table["repeats"], table["run_name"], table["note"])
     snapshot = plan.snapshot()
+    if magnetic is not None:
+        snapshot["field_readback_policy"] = plan.magnetic_readback_policy(
+            cryostat.magnet.limits).snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     lockin_mode=mode,
                     hardware=_json(hardware), config_path=str(path),

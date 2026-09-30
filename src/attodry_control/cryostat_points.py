@@ -15,7 +15,8 @@ from .combination_store import utc_now
 from .config import TemperatureStabilityMode
 from .magnetic_field import execute_field_target
 from .models import VectorField
-from .safety import MagnetLimits, SafetyViolation, float32_field, validate_vector_field
+from .safety import (FieldReadbackPolicy, FieldScanMode, MagnetLimits,
+                     SafetyViolation, float32_field, validate_vector_field)
 from .temperature_scan import _validate_point_state
 from .temperature_excitation_scan import _temperature_window_statistics
 
@@ -23,6 +24,9 @@ from .temperature_excitation_scan import _temperature_window_statistics
 class _AuditedDriver(AttoDryDriver):
     def _field_readback_limits(self):
         return self.owner.field_readback_limits
+
+    def _active_field_policy(self):
+        return self.owner.active_field_policy
 
     def read_state(self):
         state = super().read_state()
@@ -54,6 +58,14 @@ class CryostatPointSession:
         self.temperature_ceiling = None
         self.recovery_action = None
         self.recovery_scan_limits_violated = False
+        self.field_policy = (FieldReadbackPolicy.from_targets(
+            magnetic.run.points, config.magnet.limits) if magnetic is not None else None)
+
+    @property
+    def active_field_policy(self):
+        if self.recovery_action is not None and self.field_policy is not None:
+            return FieldReadbackPolicy(FieldScanMode.VECTOR, self.field_readback_limits)
+        return self.field_policy
 
     @property
     def clock(self):
@@ -75,25 +87,36 @@ class CryostatPointSession:
         try:
             self.event("cryostat_recovery_started", {
                 "action": action, "readback_limits": asdict(self.field_readback_limits),
-                "scan_limits": asdict(self.config.magnet.limits)})
+                "scan_limits": asdict(self.config.magnet.limits),
+                **({"field_readback_policy": self.active_field_policy.snapshot()}
+                   if self.active_field_policy is not None else {})})
             yield
         finally:
             self.recovery_action = None
 
     def validate_state(self, state):
-        # Effective axis ceilings are both <=3 T, including pure Z. The same
-        # limits are used inside the driver's float32/corner/ack checks.
+        # Nominal targets remain <=3 T on both axes. Complete-plan policy
+        # applies the approved, separate actual-readback bounds.
         if self.recovery_action is not None:
             try:
-                validate_vector_field(state.field, self.config.magnet.limits)
-                validate_vector_field(state.field_setpoint, self.config.magnet.limits)
+                if self.field_policy is None:
+                    validate_vector_field(state.field, self.config.magnet.limits)
+                    validate_vector_field(state.field_setpoint, self.config.magnet.limits)
+                else:
+                    self.field_policy.validate_readback(state.field)
+                    self.field_policy.validate_target(state.field_setpoint)
             except SafetyViolation as exc:
                 if not self.recovery_scan_limits_violated:
                     self.recovery_scan_limits_violated = True
                     self.event("cryostat_recovery_scan_limit_violation", {
                         "action": self.recovery_action, "error": str(exc), "state": asdict(state)})
-        validate_vector_field(state.field, self.field_readback_limits)
-        validate_vector_field(state.field_setpoint, self.field_readback_limits)
+        policy = self.active_field_policy
+        if policy is None:
+            validate_vector_field(state.field, self.field_readback_limits)
+            validate_vector_field(state.field_setpoint, self.field_readback_limits)
+        else:
+            policy.validate_readback(state.field)
+            policy.validate_target(state.field_setpoint)
         if state.error_code:
             raise AttoDryError(f"attoDRY error code {state.error_code}")
         if not self.cleaning:
@@ -111,6 +134,7 @@ class CryostatPointSession:
         self.driver = _AuditedDriver.from_config(
             self.config, dll=self.dll, connection_authorized=True, writes_authorized=True)
         self.driver.owner = self
+        self.driver.field_readback_policy = self.field_policy
         self.driver.connect(**self.clock)
         self.connection_owned = True
         return asdict(self.driver.read_state())
@@ -124,6 +148,7 @@ class CryostatPointSession:
             result = execute_field_target(
                 self.driver, target, self.magnetic.run.max_step_t,
                 transition_policy=self.magnetic.run.transition_policy,
+                field_readback_policy=self.field_policy,
                 on_event=lambda payload: self.event("magnetic_point_event", payload), **self.clock)
             self.field_target = float32_field(target)
             return {"result": asdict(result), "segment": point.segment,
@@ -185,6 +210,8 @@ class CryostatPointSession:
         record = {"stage": stage, "harmonic": harmonic, "sample_index": sample_index,
                   "captured_at_utc": utc_now(), "captured_monotonic_s": self.monotonic(),
                   "state": asdict(state)}
+        if self.field_policy is not None:
+            record["field_readback_assessment"] = self.field_policy.assessment(state.field)
         self.event("environment_sample", record)
         if self.window is not None:
             self.window.append(record)
@@ -234,6 +261,10 @@ class CryostatPointSession:
                 summary["field_" + axis + "_range_t"] = max(fields) - min(fields)
                 field_range_ok &= max(fields) - min(fields) <= self.config.magnet.stability.criteria.stable_range
             summary["field_mean"] = field_means
+            if self.field_policy is not None:
+                summary["field_readback_policy"] = self.field_policy.snapshot()
+                summary["field_readback_assessment"] = self.field_policy.assessment(
+                    VectorField(field_means["field_x_t"], field_means["field_z_t"]))
             self.event("environment_formal_window", summary)
             if (self.temperature is not None and
                     max(values) - min(values) > self.config.temperature_stability.criteria.stable_range):

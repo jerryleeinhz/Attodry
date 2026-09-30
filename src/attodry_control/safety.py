@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 import math
 import struct
@@ -19,6 +19,11 @@ CONFIRMED_EXPERIMENT_VECTOR_MAX_T = 3.0
 CONFIRMED_HARDWARE_X_MAX_T = 3.0
 CONFIRMED_HARDWARE_Z_MAX_T = 9.0
 FIELD_LIMIT_POLICY = "single-axis-hardware_combined-vector-v1"
+# Operator-approved 2026-09-30 software readback acceptance, not a factory
+# accuracy specification or permission to request fields beyond nominal limits.
+FIELD_READBACK_POLICY = "planned-axis-readback-v2"
+FIELD_READBACK_MARGIN_T = 0.0005
+INACTIVE_AXIS_READBACK_MAX_T = 0.0005
 
 
 class SafetyViolation(ValueError):
@@ -30,6 +35,12 @@ class FieldTransitionPolicy(StrEnum):
 
     DIRECT = "direct"
     VIA_ZERO = "via_zero"
+
+
+class FieldScanMode(StrEnum):
+    SINGLE_X = "single_x"
+    SINGLE_Z = "single_z"
+    VECTOR = "vector"
 
 
 class AxisWriteOrder(StrEnum):
@@ -107,8 +118,8 @@ def validate_vector_field(
         raise SafetyViolation(
             f"|Bz|={abs(target.bz_t):g} T exceeds {limits.hardware_z_max_t:g} T."
         )
-    # Exact zeros only: neither a small requested component nor a residual
-    # readback may bypass the dual-axis ceiling through a tolerance band.
+    # Strict command/legacy envelope: small nonzero components are never zeroed.
+    # Approved scan readbacks use the separately declared FieldReadbackPolicy.
     if (
         target.bx_t != 0.0
         and target.bz_t != 0.0
@@ -119,6 +130,120 @@ def validate_vector_field(
             f"{limits.experiment_vector_max_t:g} T."
         )
     return target
+
+
+@dataclass(frozen=True, slots=True)
+class FieldReadbackPolicy:
+    """Run-wide mode from targets; strict commands and bounded actual readbacks."""
+
+    mode: FieldScanMode
+    limits: MagnetLimits = MagnetLimits()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.mode, FieldScanMode) or not isinstance(self.limits, MagnetLimits):
+            raise ValueError("Field policy requires a validated mode and nominal limits.")
+
+    @classmethod
+    def from_targets(cls, targets: Sequence[VectorField],
+                     limits: MagnetLimits = MagnetLimits()) -> FieldReadbackPolicy:
+        points = tuple(targets)
+        if not points:
+            raise ValueError("Field policy requires the complete nonempty target plan.")
+        has_x = any(p.bx_t != 0 for p in points)
+        has_z = any(p.bz_t != 0 for p in points)
+        mode = (FieldScanMode.SINGLE_X if has_x and not has_z else
+                FieldScanMode.SINGLE_Z if has_z and not has_x else FieldScanMode.VECTOR)
+        policy = cls(mode, limits)
+        for point in points:
+            policy.validate_target(point)
+        return policy
+
+    def validate_target(self, target: VectorField) -> VectorField:
+        validate_vector_field(target, self.limits)
+        if ((self.mode is FieldScanMode.SINGLE_X and target.bz_t != 0) or
+                (self.mode is FieldScanMode.SINGLE_Z and target.bx_t != 0)):
+            raise SafetyViolation("Non-scanning axis setpoint must remain exactly zero.")
+        if self.mode is FieldScanMode.VECTOR and target.magnitude_t > self.limits.experiment_vector_max_t:
+            raise SafetyViolation("Vector scan target exceeds the nominal project limit.")
+        return target
+
+    def _axis_readback_limit(self, nominal: float) -> float:
+        # This approval covers the 3 T boundary and reduced experiment limits.
+        # The standalone Z 9 T ceiling is not increased.
+        return nominal + (FIELD_READBACK_MARGIN_T if nominal <= 3.0 else 0.0)
+
+    def validate_readback(self, actual: VectorField) -> VectorField:
+        checks = {
+            "Bx": (actual.bx_t, self._axis_readback_limit(self.limits.hardware_x_max_t)),
+            "Bz": (actual.bz_t, self._axis_readback_limit(self.limits.hardware_z_max_t)),
+        }
+        if self.mode is FieldScanMode.SINGLE_X:
+            checks["Bz"] = (actual.bz_t, max(INACTIVE_AXIS_READBACK_MAX_T,
+                float32_value(INACTIVE_AXIS_READBACK_MAX_T)))
+        elif self.mode is FieldScanMode.SINGLE_Z:
+            checks["Bx"] = (actual.bx_t, max(INACTIVE_AXIS_READBACK_MAX_T,
+                float32_value(INACTIVE_AXIS_READBACK_MAX_T)))
+        for axis, (value, limit) in checks.items():
+            if not math.isfinite(value) or abs(value) > limit:
+                raise SafetyViolation(
+                    f"{self.mode.value} readback {axis}={value:.12g} T exceeds "
+                    f"{limit:.12g} T "
+                    f"(Bx={actual.bx_t:.12g}, Bz={actual.bz_t:.12g})."
+                )
+        if self.mode is FieldScanMode.VECTOR:
+            limit = self.limits.experiment_vector_max_t + FIELD_READBACK_MARGIN_T
+            if actual.magnitude_t > limit:
+                raise SafetyViolation(
+                    f"Vector readback |B|={actual.magnitude_t:.12g} T exceeds "
+                    f"{limit:.12g} T by {actual.magnitude_t - limit:.12g} T "
+                    f"(Bx={actual.bx_t:.12g}, Bz={actual.bz_t:.12g})."
+                )
+        return actual
+
+    def assessment(self, actual: VectorField) -> dict[str, object]:
+        problem = None
+        try:
+            self.validate_readback(actual)
+        except SafetyViolation as exc:
+            problem = str(exc)
+        return {
+            "policy": FIELD_READBACK_POLICY, "mode": self.mode.value,
+            "actual_magnitude_t": actual.magnitude_t,
+            "within_readback_policy": problem is None, "problem": problem,
+            "inactive_axis_nonzero": (
+                (self.mode is FieldScanMode.SINGLE_X and actual.bz_t != 0) or
+                (self.mode is FieldScanMode.SINGLE_Z and actual.bx_t != 0)),
+            "nominal_limit_exceeded": (
+                abs(actual.bx_t) > self.limits.hardware_x_max_t or
+                abs(actual.bz_t) > self.limits.hardware_z_max_t or
+                (self.mode is FieldScanMode.VECTOR and
+                 actual.magnitude_t > self.limits.experiment_vector_max_t)),
+        }
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "version": FIELD_READBACK_POLICY, "mode": self.mode.value,
+            "limits": asdict(self.limits), "readback_margin_t": FIELD_READBACK_MARGIN_T,
+            "inactive_axis_max_abs_t": INACTIVE_AXIS_READBACK_MAX_T,
+            "axis_readback_limits_t": {
+                "x": (max(INACTIVE_AXIS_READBACK_MAX_T, float32_value(INACTIVE_AXIS_READBACK_MAX_T))
+                      if self.mode is FieldScanMode.SINGLE_Z
+                      else self._axis_readback_limit(self.limits.hardware_x_max_t)),
+                "z": (max(INACTIVE_AXIS_READBACK_MAX_T, float32_value(INACTIVE_AXIS_READBACK_MAX_T))
+                      if self.mode is FieldScanMode.SINGLE_X
+                      else self._axis_readback_limit(self.limits.hardware_z_max_t)),
+            },
+            "vector_readback_limit_t": (
+                self.limits.experiment_vector_max_t + FIELD_READBACK_MARGIN_T
+                if self.mode is FieldScanMode.VECTOR else None),
+        }
+
+    @classmethod
+    def from_snapshot(cls, snapshot: dict) -> FieldReadbackPolicy:
+        policy = cls(FieldScanMode(snapshot["mode"]), MagnetLimits(**snapshot["limits"]))
+        if snapshot != policy.snapshot():
+            raise ValueError("Invalid or unsupported archived field readback policy.")
+        return policy
 
 
 def float32_value(value: float) -> float:

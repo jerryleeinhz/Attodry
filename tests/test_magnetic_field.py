@@ -368,14 +368,15 @@ class MagneticFieldCliTests(_MagneticConfigFixture, unittest.TestCase):
 
         # A record without the new declaration still uses the old 3 T cap.
         events[0].pop("field_limit_policy")
+        events[0].pop("field_readback_policy", None)
         progress.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
         legacy = read_progress_snapshot(progress)
         self.assertEqual(legacy["outcome"], "incomplete")
         self.assertTrue(any("3 T project vector limit" in e for e in legacy["integrity_errors"]))
 
-    def test_high_z_to_x_scan_audits_selected_safe_corner_only(self):
+    def test_z_to_x_vector_scan_audits_selected_safe_corner_only(self):
         path = self.write_config(
-            ((0.0, 9.0), (3.0, 0.0)), max_step_t=10.0, transition_policy="direct",
+            ((0.0, 3.0), (3.0, 0.0)), max_step_t=10.0, transition_policy="direct",
         )
         output = io.StringIO()
         with redirect_stdout(output):

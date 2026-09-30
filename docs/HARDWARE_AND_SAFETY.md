@@ -17,10 +17,11 @@ and [high-impedance XX attenuation notes](LOCKIN_XX_ATTENUATION.md).
 
 ## Magnet coordinates and limits
 
-Integration boundary (2026-09-14): the new four-module offline coordinator keeps
-an additional universal resultant cap of 3 T, including pure Z, per the current
-integration task. The standalone magnetic envelope below is retained for history
-and standalone use; merging it does not authorize higher-field integrated runs.
+The operator explicitly approved a separate software readback-policy change on
+2026-09-30. The following rules supersede the previous exact-zero **readback**
+classification; strict nominal command limits remain. This implementation has
+offline validation only. It is not factory accuracy certification, station
+deployment, authorization to replay failed scans, or real commissioning.
 
 The active software coordinate system is X/Z:
 
@@ -28,8 +29,8 @@ The active software coordinate system is X/Z:
 - X is the 3 T transverse coil called Y in the factory system sheet.
 - No mechanical rotator is controlled.
 
-The operator approved this replacement envelope on 2026-09-11. It supersedes the
-former universal 3 T cap, but does not authorize real hardware execution:
+Nominal requests and exact float32 commands retain the 2026-09-11 standalone
+X 3 T / Z 9 T envelope. Combination nominal axes and resultant stay <=3 T:
 
 ```text
 abs(Bx) <= 3 T
@@ -37,22 +38,53 @@ abs(Bz) <= 9 T
 if Bx != 0 and Bz != 0: sqrt(Bx^2 + Bz^2) <= 3 T
 ```
 
-Pure X permits +/-3 T; pure Z permits +/-9 T. Only exact zero (including signed
-zero) selects the single-axis envelope. Small nonzero requests or residual
-readbacks remain dual-axis even below acknowledgement/stability tolerance.
-Apply the same rule to requested values, exact float32 commands and readbacks.
-`[magnet].experiment_vector_max_t` now limits dual-axis fields only (maximum 3 T).
-Axis limits may be reduced, never raised above factory X 3 T / Z 9 T. To restrict
-pure-axis operation, lower its axis limit, not `experiment_vector_max_t`.
+`planned-axis-readback-v2` fixes mode from the **complete requested point list**:
 
-The envelope is not convex: high pure Z to a dual-axis target can have unsafe
-direct intermediate points despite valid endpoints. Reject the plan, never
-silently switch to `via_zero`. Setpoint acknowledgement does not prove the other
-coil has ramped down: before a changed component write, also validate that
-component against the other axis's latest actual readback. Residual cross-axis
-field blocks high-Z operation rather than widening a zero tolerance. Magnet
-temperature/readiness and factory charging parameters still apply; this change
-does not alter APS100 sweep rates or establish a continuous physical trajectory.
+- `single_x`: at least one nonzero X target; every Z target exactly zero.
+- `single_z`: at least one nonzero Z target; every X target exactly zero.
+- `vector`: all other plans, including a fixed nonzero other axis, an X-to-Z
+  switch across separate points, and an all-zero plan. Every vector-plan target
+  satisfies the nominal resultant limit, even pure-axis endpoints.
+
+Actual readback limits are separate from command limits:
+
+| Mode | Actual readback acceptance | Other axis |
+|---|---|---|
+| Single X | abs(Bx) <= configured X limit + 0.0005 T | abs(Bz) <=0.0005 T |
+| Single Z | abs(Bz) <= configured Z limit + margin | abs(Bx) <=0.0005 T |
+| Vector | each axis within its configured limit + margin; hypot(Bx,Bz) <= configured vector limit + 0.0005 T | Both raw axes retained |
+
+Axis margin is 0.0005 T only for nominal limits <=3 T; larger standalone Z limits,
+including 9 T, get no margin. Thus 3 T becomes 3.0005 T **for actual readbacks**.
+Combination still rejects a 4/9 T Z target. Reduced configured limits are retained
+and receive the same fixed readback margin. The exact DLL binary32 representation
+of 0.0005 T is accepted at the inactive-axis boundary; its effective threshold
+(0.0005000000237487257 T) is archived. No readback is rounded to zero.
+
+Preflight, each monitored read, mixed command/actual corner, formal-window data
+and hold use the same run-wide mode. Current/error/control/stability/timeout and
+non-finite-value protections remain. Raw Bx/Bz, calculated norm, mode, nominal
+limits, effective thresholds and per-sample readback assessment are recorded.
+Nonzero inactive readbacks and nominal-limit excursions inside the accepted
+margin are explicit audit flags. An inactive-axis value beyond the bound still
+aborts; it does not silently switch the run to vector mode.
+
+The fixed 0.5 mT margin is the operator's software acceptance policy, not a
+manufacturer-specified worst-case residual-field error. `field_tolerance_t`
+continues to control target/stability/verified-zero checks and cannot increase
+this margin. Generic diagnostics without a complete magnetic plan retain strict
+legacy checks. Historical records without the new version retain their archived
+rules; unknown or inconsistent declarations cannot certify completion.
+
+A high-Z-to-X plan is vector mode and cannot include a >3 T endpoint. Command
+endpoints and both candidate component-write corners remain strictly validated
+after float32 conversion. Reject unsafe transitions, never silently switch to
+`via_zero`. Setpoint acknowledgement does not prove the other coil has ramped
+down: check the latest complete actual readback and each mixed command/actual
+corner using the declared readback policy before writes. Existing cleanup gates
+remain; failed communication cannot certify zero. Magnet temperature/readiness,
+factory charging parameters and APS100 sweep rates are unchanged. Discrete
+checks do not establish a continuous physical trajectory.
 
 Angle is reported relative to +Z:
 
@@ -136,7 +168,7 @@ status consumption. No repeated RUN prompt or mandatory CLI authorization flags.
 When Lock-in is selected, TOML lockin_xy.sine_output_connected=false is the
 operator's wiring declaration; true rejects before connection. Backend entry
 points retain explicit authorization guards. Configuration/safety hash rechecks,
-preflight, target limits, <=3 T resultant, error handling and cleanup remain.
+preflight, nominal <=3 T targets, declared readback bounds, error handling and cleanup remain.
 describe-hardware is offline; monitor reads only saved files/SQLite and never
 connects instruments. Removing a redundant prompt is not a new commissioning
 authorization or permission to deploy/run experiments through this development task.

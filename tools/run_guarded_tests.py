@@ -9,6 +9,15 @@ import importlib.abc
 import sys
 import unittest
 
+# Colorama's Windows console bootstrap loads kernel32 through ctypes.CDLL.
+# Initialize this non-instrument dependency before blocking DLL loaders so the
+# offline notebook/terminal tests can import IPython normally on Windows.
+if sys.platform == "win32":
+    try:
+        import colorama
+    except ImportError:
+        pass
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT), str(ROOT / "tests")]
 
@@ -26,6 +35,7 @@ def blocked_dll(*args, **kwargs):
 
 sys.meta_path.insert(0, HardwareBlocked())
 ctypes.WinDLL = blocked_dll
+ctypes.CDLL = blocked_dll
 if hasattr(ctypes, "windll"):
     ctypes.windll.LoadLibrary = blocked_dll
 

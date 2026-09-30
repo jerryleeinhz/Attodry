@@ -4,6 +4,36 @@ Last updated: 2026-09-30
 
 ## Current stage
 
+### Planned-axis field readback policy (offline; 2026-09-30)
+
+The operator explicitly approved replacing actual-zero classification with a
+complete-plan single X/single Z/vector mode. Single-axis requires every inactive
+target exactly zero; a fixed nonzero other axis or X-to-Z plan is vector. Strict
+nominal targets and float32 command/corner checks remain; vector-plan targets
+always satisfy the nominal resultant ceiling. Actual readbacks at nominal limits
+<=3 T get a fixed 0.5 mT margin; single-axis inactive readbacks retain an independent
+0.5 mT guard and both raw axes. Standalone Z9 T is not extended; integrated targets
+remain <=3 T. The binary32 inactive-boundary representation is archived explicitly.
+
+The same versioned policy reaches driver, executor, cryostat formal windows,
+coordinator acceptance, hold, launch summaries and file monitors. Raw residuals,
+norm, effective thresholds and readback assessments are retained. Legacy logs use
+their archived strict rules; unknown/mismatched declarations reject certification.
+Existing control/error/communication/stability/cleanup gates remain. The owned
+combination recovery action archives its vector readback bounds separately; a
+failed run remains failed/manual-review even after verified zero.
+
+Verification: 345 relevant guarded offline tests passed; 17 dedicated tests cover
+the -3 T / 0.3 mT regression, boundary/float32 cases, vector-mode persistence,
+formal windows, inactive-axis growth, old/new audit rules and failed communication.
+Hardware imports and DLL loaders were blocked; only fake DLL/VISA used. Tests first
+reproduced the original rejection before source changes. Documentation/config
+comments updated; no experimental/local hardware files changed. Work remains on
+codex/integration-four-module-scan; the user authorized pushing this feature to
+the matching origin branch. It has not been deployed to LK_setup. Real
+commissioning of the new protocol remains a separate authorized stage; no retry
+or replay of the failed magnetic history was performed.
+
 ### Mixed sample-status plotting fix (offline; 2026-09-30)
 
 Sample status is quality metadata, not an acquisition coordinate. Mixed clean/problem

@@ -14,6 +14,8 @@ import math
 from pathlib import Path
 
 from .combination_store import CombinationStore, utc_now
+from .models import VectorField
+from .safety import FieldReadbackPolicy, MagnetLimits
 
 
 MODULE_KEYS = {
@@ -106,9 +108,19 @@ class CombinationPlan:
 
     def snapshot(self) -> dict:
         self.validate()
+        policy = self.magnetic_readback_policy()
         return {**asdict(self), "mode": "simulation", "field_limit_policy": "universal-3T",
+                **({"field_readback_policy": policy.snapshot()} if policy is not None else {}),
                 "record_contract": "combination-v1",
                 "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+
+    def magnetic_readback_policy(self, limits=None):
+        axis = next((a for a in self.axes if a.module == "magnetic"), None)
+        if axis is None:
+            return None
+        return FieldReadbackPolicy.from_targets(
+            tuple(VectorField(p.values["field_x_t"], p.values["field_z_t"]) for p in axis.points),
+            limits or MagnetLimits(3.0, 3.0, 3.0))
 
     def conditions(self) -> list[dict]:
         self.validate()
@@ -234,6 +246,14 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
     """Internal engine; backend entry points own pre-I/O validation."""
     from .lockin_overload import reading_allows_continuation
     conditions = plan.conditions()
+    field_policy = None
+    if "field_readback_policy" in snapshot:
+        field_policy = FieldReadbackPolicy.from_snapshot(snapshot["field_readback_policy"])
+        planned_policy = plan.magnetic_readback_policy(field_policy.limits)
+        if planned_policy is None or field_policy.snapshot() != planned_policy.snapshot():
+            raise ValueError("Field policy differs from the complete target plan")
+        if max(field_policy.limits.hardware_x_max_t, field_policy.limits.hardware_z_max_t) > 3:
+            raise ValueError("Integrated nominal axis limits cannot exceed 3 T")
     if not isinstance(run_id, str) or not run_id.strip():
         raise ValueError("run_id must be nonempty")
     completed = store.begin_run(run_id, snapshot, conditions, resume=resume)
@@ -330,14 +350,23 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 acquisition_accepted = (finite and set(actual) == expected_keys and all(
                     reading_allows_continuation(r) for r in reads)
                     and expected_measured <= set(measurements) and fresh)
-                if "magnetic" in modules and finite:
-                    acquisition_accepted = acquisition_accepted and math.hypot(actual.get("field_x_t", math.inf),
-                                                actual.get("field_z_t", math.inf)) <= 3
+                if "magnetic" in modules and finite and set(actual) == expected_keys:
+                    try:
+                        if field_policy is None:
+                            # Historical snapshots retain their strict 3 T rule.
+                            if math.hypot(actual["field_x_t"], actual["field_z_t"]) > 3:
+                                raise ValueError("Historical formal field exceeds 3 T")
+                        else:
+                            field_policy.validate_readback(VectorField(actual["field_x_t"], actual["field_z_t"]))
+                    except (ValueError, KeyError, TypeError):
+                        acquisition_accepted = False
                 if finite and set(actual) == expected_keys:
                     try:
-                        CombinationPlan(tuple(ScanAxis(module, (AxisPoint({
+                        other_axes = tuple(ScanAxis(module, (AxisPoint({
                             key: value for key, value in actual.items() if key in MODULE_KEYS[module]
-                        }),)) for module in modules)).validate()
+                        }),)) for module in modules if module != "magnetic")
+                        if other_axes:
+                            CombinationPlan(other_axes).validate()
                     except ValueError:
                         acquisition_accepted = False
                 if not finite:
@@ -351,6 +380,9 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                     "actual": actual, "measurements": measurements, "reads": reads,
                     "clean": clean, "simulated": snapshot["mode"] == "simulation",
                 }
+                if field_policy is not None and {"field_x_t", "field_z_t"} <= actual.keys():
+                    sample["field_readback_assessment"] = field_policy.assessment(
+                        VectorField(actual["field_x_t"], actual["field_z_t"]))
                 store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
                 emit("formal_sample", {"sample_index": sample_index, "clean": clean})
                 if not acquisition_accepted:

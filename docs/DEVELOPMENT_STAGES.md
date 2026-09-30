@@ -1,5 +1,27 @@
 # Development stages
 
+## Planned-axis field readback policy (offline; 2026-09-30)
+
+- User-approved protocol: complete requested plan fixes single X/single Z/vector;
+  every inactive-axis target must be zero for single mode. Fixed nonzero other
+  axis or switching axes across points is vector, including pure-axis endpoints.
+- Requests/float32 endpoints and command corners retain nominal limits. Actual
+  readbacks at nominal <=3 T boundaries get 0.5 mT margin; inactive single axis is
+  independently bounded to 0.5 mT with explicit DLL binary32 threshold. Standalone
+  Z9 T is not extended; integrated nominal axes/resultant remain <=3 T.
+- Shared policy applies to driver/executor, environmental sample brackets/formal
+  acceptance and hold. Raw axes, norm, policy/thresholds and residual/margin flags
+  are archived; launch previews and file monitor expose the policy. No new TOML
+  operator knobs. Historical records retain their archived interpretation.
+- Existing fail-closed control/error/communication/stability checks and cleanup
+  gates remain; owned combination recovery archives its vector envelope, and
+  verified recovery does not erase the failed/manual-review run status.
+- 345 relevant guarded tests passed, including 17 dedicated new cases. Original
+  -3 T / 0.3 mT failure reproduced first; fake DLL/VISA only, real loaders/imports
+  blocked. No station deployment, hardware writes, acquisition retry, history
+  replay. The user subsequently authorized push to origin/codex/integration-four-module-scan.
+  New readback policy awaits separately authorized commissioning.
+
 ## Mixed sample-status plotting fix (offline; 2026-09-30)
 
 Sample status is quality metadata, not an acquisition coordinate. Mixed clean/problem

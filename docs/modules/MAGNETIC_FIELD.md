@@ -2,6 +2,19 @@
 
 ## 当前状态
 
+### 2026-09-30 按整次计划判定轴模式及固定读回容差（离线）
+
+本条替代下方历史记录中“按实际读回是否严格零选择单轴/双轴”的规则。
+`planned-axis-readback-v2` 从完整请求点列判定 single X / single Z / vector；另一轴
+目标全部为零才可单轴，固定非零另一轴或同一计划先X后Z均为vector。
+目标和精确float32命令不放宽；vector计划全部目标模长<=配置矢量上限。
+实际读回在<=3 T的标称轴/矢量边界加0.5 mT；单轴另一轴独立检查±0.5 mT并
+保留原始读回。独立纯Z9 T不扩上限，组合路径仍只允许标称<=3 T。
+字段状态、设备错误、通信、稳定性和原cleanup保护保留。JSONL、组合SQLite和
+文件monitor记录版本、模式、阈值及读回评估；没有新声明的旧日志按旧规则验收。
+离线假DLL回归覆盖昨晚的−3 T/0.3 mT案例及超限故障，未部署或重跑LK_setup。
+完整阈值与使用范围见 [安全协议](../HARDWARE_AND_SAFETY.md#magnet-coordinates-and-limits)。
+
 ### 2026-09-28 简化 scan 命令
 
 在项目根目录运行即可读取 `config/hardware.local.toml` 并开始实机扫描：

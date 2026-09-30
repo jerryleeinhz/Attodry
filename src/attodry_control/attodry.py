@@ -21,6 +21,7 @@ from .safety import (
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
     FieldTransitionPlan,
     FieldTransitionPolicy,
+    FieldReadbackPolicy,
     MagnetLimits,
     float32_bits_hex,
     float32_field,
@@ -211,6 +212,9 @@ class AttoDryDriver:
         self.temperature_min_k = temperature_min_k
         self.temperature_max_k = temperature_max_k
         self.limits = limits
+        # Only a complete, validated magnetic scan installs the new policy.
+        # Generic diagnostics and historical entry points retain strict limits.
+        self.field_readback_policy: FieldReadbackPolicy | None = None
         self.field_stability = field_stability
         self.temperature_stability = temperature_stability
         self.connection_authorized = connection_authorized
@@ -509,13 +513,11 @@ class AttoDryDriver:
             # The controller's internal axis order is not established.  Both
             # possible mixed corners must therefore satisfy the vector limit
             # before enabling a latent setpoint can be considered safe.
-            validate_vector_field(
+            self._validate_field_actual(
                 VectorField(state.field.bx_t, state.field_setpoint.bz_t),
-                self.limits,
             )
-            validate_vector_field(
+            self._validate_field_actual(
                 VectorField(state.field_setpoint.bx_t, state.field.bz_t),
-                self.limits,
             )
 
         self._ensure_control(
@@ -560,7 +562,7 @@ class AttoDryDriver:
                 f"{FIELD_SETPOINT_READBACK_TOLERANCE_T:g} T setpoint-readback "
                 "acknowledgement tolerance."
             )
-        checked = validate_vector_field(target, self.limits)
+        checked = self._validate_field_target(target)
         try:
             policy = FieldTransitionPolicy(transition_policy)
         except ValueError as exc:
@@ -715,7 +717,7 @@ class AttoDryDriver:
                     if axis == "x"
                     else VectorField(previous_setpoint.bx_t, command_value)
                 )
-                validate_vector_field(expected_setpoint, self.limits)
+                self._validate_field_target(expected_setpoint)
                 if (
                     math.hypot(
                         expected_setpoint.bx_t - previous_setpoint.bx_t,
@@ -767,11 +769,10 @@ class AttoDryDriver:
                 # A setpoint acknowledgement is not proof that the other coil
                 # has ramped down. Check the new component against its latest
                 # actual readback as well, before allowing a high-field axis switch.
-                validate_vector_field(
+                self._validate_field_actual(
                     VectorField(command_value, current_state.field.bz_t)
                     if axis == "x"
                     else VectorField(current_state.field.bx_t, command_value),
-                    self.limits,
                 )
                 command = self._begin_field_command(
                     command_kind="set_field_component",
@@ -931,7 +932,7 @@ class AttoDryDriver:
         sleeper: Callable[[float], None] = time.sleep,
         on_sample: FieldSampleCallback | None = None,
     ) -> CryostatState:
-        checked = validate_vector_field(target, self.limits)
+        checked = self._validate_field_target(target)
         tolerance = self.field_stability.criteria.tolerance
         if tolerance is None:
             raise ValueError("Field stability requires a configured tolerance.")
@@ -1205,8 +1206,12 @@ class AttoDryDriver:
         self, state: CryostatState, *, require_control: bool = False
     ) -> None:
         limits = self._field_readback_limits()
-        validate_vector_field(state.field, limits)
-        validate_vector_field(state.field_setpoint, limits)
+        self._validate_field_actual(state.field)
+        policy = self._active_field_policy()
+        if policy is None:
+            validate_vector_field(state.field_setpoint, limits)
+        else:
+            policy.validate_target(state.field_setpoint)
         self._require_clear_error(state)
         if require_control and not state.field_control_enabled:
             raise AttoDryError("Field control is not confirmed enabled.")
@@ -1214,6 +1219,21 @@ class AttoDryDriver:
     def _field_readback_limits(self) -> MagnetLimits:
         """Readback policy; requested targets always use the configured limits."""
         return self.limits
+
+    def _active_field_policy(self) -> FieldReadbackPolicy | None:
+        return self.field_readback_policy
+
+    def _validate_field_actual(self, actual: VectorField) -> None:
+        policy = self._active_field_policy()
+        if policy is None:
+            validate_vector_field(actual, self._field_readback_limits())
+        else:
+            policy.validate_readback(actual)
+
+    def _validate_field_target(self, target: VectorField) -> VectorField:
+        policy = self._active_field_policy()
+        return (validate_vector_field(target, self.limits) if policy is None
+                else policy.validate_target(target))
 
     @staticmethod
     def _field_matches(actual: VectorField, expected: VectorField) -> bool:

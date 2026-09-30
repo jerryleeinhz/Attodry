@@ -28,6 +28,7 @@ from .models import CryostatState, VectorField
 from .safety import (
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
     FIELD_LIMIT_POLICY,
+    FieldReadbackPolicy,
     validate_vector_field,
 )
 
@@ -117,6 +118,7 @@ def run(
     config_path = args.config.resolve()
     config = load_magnetic_field_operation_config(config_path)
     points = config.run.points
+    readback_policy = FieldReadbackPolicy.from_targets(points, config.magnet.limits)
     if args.command == "describe":
         print(json.dumps({
             "hardware_connected": False,
@@ -126,6 +128,7 @@ def run(
             "transition_policy": config.run.transition_policy.value,
             "max_step_t": config.run.max_step_t,
             "limits": asdict(config.magnet.limits),
+            "field_readback_policy": readback_policy.snapshot(),
             "static_validation_start": {"bx_t": 0.0, "bz_t": 0.0},
             "live_start_requires_revalidation": True,
             "normal_scan_end_field_policy": config.cleanup.normal_end_field_policy.value,
@@ -178,6 +181,12 @@ def run(
     def emit(event: dict[str, object]) -> None:
         nonlocal audit_failure, completed_points
         nonlocal field_command_attempt_count, field_command_result_count
+        for state_key in ("state", "final_state", "last_confirmed_state"):
+            captured = event.get(state_key)
+            if isinstance(captured, dict) and isinstance(captured.get("field"), dict):
+                event = {**event, "field_readback_assessment":
+                    readback_policy.assessment(VectorField(**captured["field"]))}
+                break
         point_index = event.get("point_index")
         segment_plan = config.run.segment_plan
         if (
@@ -241,6 +250,7 @@ def run(
                 "max_step_t": config.run.max_step_t,
                 "limits": asdict(config.magnet.limits),
                 "field_limit_policy": FIELD_LIMIT_POLICY,
+                "field_readback_policy": readback_policy.snapshot(),
                 "field_stability": {
                     "tolerance_t": stability.criteria.tolerance,
                     "stable_range_t": stability.criteria.stable_range,
@@ -298,6 +308,7 @@ def run(
             writes_authorized=True,
         )
         connection_attempted = True
+        driver.field_readback_policy = readback_policy
         disconnected = False
         driver.connect(monotonic=monotonic, sleeper=sleeper)
         connected = True
@@ -311,6 +322,7 @@ def run(
             on_event=emit,
             monotonic=monotonic,
             sleeper=sleeper,
+            field_readback_policy=readback_policy,
         )
 
         normal_zero_required = (
@@ -583,8 +595,13 @@ def _validate_hold_state(
     state: CryostatState,
     expected: VectorField,
 ) -> None:
-    validate_vector_field(state.field, driver.limits)
-    validate_vector_field(state.field_setpoint, driver.limits)
+    policy = getattr(driver, "field_readback_policy", None)
+    if policy is None:
+        validate_vector_field(state.field, driver.limits)
+        validate_vector_field(state.field_setpoint, driver.limits)
+    else:
+        policy.validate_readback(state.field)
+        policy.validate_target(state.field_setpoint)
     if state.error_code:
         raise AttoDryError(
             f"attoDRY reported error code {state.error_code} during hold verification."

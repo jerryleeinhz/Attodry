@@ -61,11 +61,16 @@ Three-SMU 实机范围还包括此前 bottom-only 小电压扫描；本次唯一
 Bx != 0 且 Bz != 0 时：sqrt(Bx^2 + Bz^2) <= 3 T
 ```
 
-只有另一分量严格等于零才算单轴；不以容差把小非零读回当作零。
-`[magnet].experiment_vector_max_t` 现在只限制双轴合场，单轴使用对应
-`hardware_x_max_t` / `hardware_z_max_t`（可降低，不可超过 3/9 T）。请求、
-float32 命令、实际读回和执行中的混合状态均检查。高 Z 到双轴的 `direct`
-路径若中间超限会拒绝，不自动改成经零场路径。
+上面是目标及精确 float32 命令的标称边界；组合扫描仍将两轴和目标模长收紧至3 T。
+2026-09-30 用户批准的读回规则从**整次目标点列**判定 single X / single Z / vector；
+单轴要求另一轴全部目标严格为零，固定非零另一轴或同一计划先X后Z都算vector。
+vector目标的模长始终受 `[magnet].experiment_vector_max_t` 限制，包含纯轴端点。
+实际读回在不超过3 T的标称边界上加0.5 mT容差（3 T→3.0005 T）；单轴的另一轴
+独立限制为±0.5 mT，仍记录原值。独立Z9 T上限不增加，组合路径不开放Z4/9 T。
+这不是厂商精度保证，也不改变目标上限、场稳定性/误差/控制/通信保护。通用诊断
+和旧记录沿用原规则；新规则仅离线验证，尚未实机验收。详见
+[磁场安全协议](docs/HARDWARE_AND_SAFETY.md#magnet-coordinates-and-limits)。
+高Z与X切换属于vector计划，不能包含超过3 T的目标；转场超限不自动改为经零场。
 
 2026-09-14 状态更新：M3–M5 已在上述小场范围通过，最终回零和正常断开已验证。
 限值校验通过不等于高场实机验收，离散圆周不等于连续恒模长旋转；新实验仍需
@@ -307,8 +312,10 @@ zero 时保持 control enabled at zero，hold 时保持 control enabled at final
 （且不大于 1 mT）tolerance 内相符，并验证两种可能的 mixed corners 均满足上述限值。
 
 新 JSONL 的 `run_started.field_limit_policy` 为
-`single-axis-hardware_combined-vector-v1`，并保存实际限值。文件 monitor 按
-归档规则检查新记录；无此字段的旧记录保留原 3 T 检查，未知规则拒绝认证。
+`single-axis-hardware_combined-vector-v1`，保存严格标称命令限值；2026-09-30起
+另外保存 `field_readback_policy`（`planned-axis-readback-v2`）的整次模式和实际阈值。
+文件monitor按归档规则检查，无读回声明时沿用旧严格规则；无标称声明的旧日志
+保留原3 T检查，未知或与点列不一致的规则拒绝认证。
 
 每次运行只有一个 canonical JSONL；每个事件 append 后都会 flush/`fsync`，partial、
 rejected、interrupted、stability、cleanup 和 terminal evidence 不删除。field monitor

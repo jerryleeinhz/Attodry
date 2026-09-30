@@ -15,6 +15,7 @@ from .safety import (
     FieldTransitionPlan,
     FieldTransitionPolicy,
     FieldWaypoint,
+    FieldReadbackPolicy,
     plan_ordered_field_transitions,
     serialize_float32_field,
     validate_vector_field,
@@ -42,6 +43,7 @@ def execute_field_target(
     on_event: FieldEventSink | None = None,
     monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
+    field_readback_policy: FieldReadbackPolicy | None = None,
 ) -> FieldPointResult:
     """Execute one field target on an already-open driver.
 
@@ -57,6 +59,7 @@ def execute_field_target(
         on_event=on_event,
         monotonic=monotonic,
         sleeper=sleeper,
+        field_readback_policy=field_readback_policy,
     )
     return results[0]
 
@@ -71,10 +74,14 @@ def execute_ordered_field_points(
     on_event: FieldEventSink | None = None,
     monotonic: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
+    field_readback_policy: FieldReadbackPolicy | None = None,
 ) -> tuple[FieldPointResult, ...]:
     """Execute an explicit X/Z point list without sorting or deduplication."""
 
-    targets = tuple(validate_vector_field(point, driver.limits) for point in points)
+    readback_policy = field_readback_policy or FieldReadbackPolicy.from_targets(points, driver.limits)
+    if readback_policy.limits != driver.limits:
+        raise ValueError("Field policy limits differ from the driver's nominal limits.")
+    targets = tuple(readback_policy.validate_target(point) for point in points)
     if not targets:
         raise ValueError("At least one ordered magnetic-field point is required.")
     if (
@@ -88,6 +95,9 @@ def execute_ordered_field_points(
         policy = FieldTransitionPolicy(transition_policy)
     except ValueError as exc:
         raise ValueError("transition_policy must be 'direct' or 'via_zero'.") from exc
+
+    driver.field_readback_policy = readback_policy
+    _emit(on_event, "field_readback_policy", policy=readback_policy.snapshot())
 
     initial_state = driver.read_state()
     _emit(
@@ -278,8 +288,13 @@ def _validate_state(
     require_control: bool = False,
     expected_setpoint: VectorField | None = None,
 ) -> None:
-    validate_vector_field(state.field, driver.limits)
-    validate_vector_field(state.field_setpoint, driver.limits)
+    readback_policy = getattr(driver, "field_readback_policy", None)
+    if readback_policy is None:
+        validate_vector_field(state.field, driver.limits)
+        validate_vector_field(state.field_setpoint, driver.limits)
+    else:
+        readback_policy.validate_readback(state.field)
+        readback_policy.validate_target(state.field_setpoint)
     if state.error_code:
         raise AttoDryError(f"attoDRY field operation reported error code {state.error_code}.")
     if require_control and not state.field_control_enabled:

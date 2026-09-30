@@ -12,7 +12,7 @@ from typing import Sequence
 from .field_audit import SCHEMA_VERSION, read_jsonl_events
 from .field_segments import expand_angle_segments, expand_field_segments
 from .models import VectorField
-from .safety import FIELD_LIMIT_POLICY, MagnetLimits, validate_vector_field
+from .safety import FIELD_LIMIT_POLICY, FieldReadbackPolicy, MagnetLimits, validate_vector_field
 
 
 _FIELD_COMMAND_AUDIT_DECLARATION = {
@@ -101,6 +101,10 @@ def read_progress_snapshot(path: str | Path) -> dict[str, object]:
         "trailing_line_incomplete": trailing_line_incomplete,
         "audit_complete": terminal is not None and not integrity_errors,
         "integrity_errors": integrity_errors,
+        "field_readback_policy": next((e.get("field_readback_policy")
+            for e in events if e.get("event") == "run_started"), None),
+        "last_field_readback_assessment": next((e["field_readback_assessment"]
+            for e in reversed(events) if "field_readback_assessment" in e), None),
     }
 
 
@@ -342,16 +346,36 @@ def _field_command_audit_errors(
             return [f"run_started limits are invalid: {exc}"]
         if "field_command_audit" not in started:
             return ["field_limit_policy requires field_command_audit"]
+        readback_policy = None
+        if "field_readback_policy" in started:
+            try:
+                readback_policy = FieldReadbackPolicy.from_snapshot(started["field_readback_policy"])
+                planned = FieldReadbackPolicy.from_targets(
+                    tuple(VectorField(**p) for p in started["ordered_points"]), limits)
+                if readback_policy.snapshot() != planned.snapshot():
+                    raise ValueError("Archived readback policy differs from the complete target plan.")
+            except (ValueError, KeyError, TypeError) as exc:
+                return [f"run_started field_readback_policy is invalid: {exc}"]
         if terminal.get("outcome") == "completed":
             state = terminal.get("last_confirmed_state")
             for key in ("field", "field_setpoint"):
-                _require_safe_field(
-                    _finite_vector(
-                        state.get(key) if isinstance(state, dict) else None,
-                        f"run_finished {key}", errors,
-                    ),
-                    f"run_finished {key}", errors, limits,
+                field = _finite_vector(
+                    state.get(key) if isinstance(state, dict) else None,
+                    f"run_finished {key}", errors,
                 )
+                if readback_policy is not None and field is not None:
+                    try:
+                        vector = VectorField(**field)
+                        if key == "field":
+                            readback_policy.validate_readback(vector)
+                        else:
+                            readback_policy.validate_target(vector)
+                    except ValueError as exc:
+                        errors.append(f"run_finished {key} violates recorded field policy: {exc}")
+                else:
+                    _require_safe_field(field, f"run_finished {key}", errors, limits)
+    elif "field_readback_policy" in started:
+        return ["field_readback_policy requires recorded nominal field limits"]
     if "field_command_audit" not in started:
         return errors
 

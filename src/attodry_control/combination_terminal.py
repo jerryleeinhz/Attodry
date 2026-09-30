@@ -130,6 +130,14 @@ def launch_text(summary, width=None):
             lines.append("Skipped harmonics: " + json.dumps(lockin["skipped_harmonics_by_frequency"]))
     if "field_resultant_limit_t" in summary:
         lines.append(f"Field: resultant <= {summary['field_resultant_limit_t']} T | Transition: {summary['field_transition_policy']}")
+        policy = summary.get("field_readback_policy")
+        if policy is not None:
+            axes = policy["axis_readback_limits_t"]
+            vector = policy["vector_readback_limit_t"]
+            lines.append(f"Field readback: {policy['mode']} | |Bx| <= {axes['x']:.7g} T"
+                         f" | |Bz| <= {axes['z']:.7g} T"
+                         + (f" | |B| <= {vector:.7g} T" if vector is not None else "")
+                         + " | Nominal targets unchanged")
     finish_names = {"zero_disable": "zero/OFF", "4mV_restore_ranges_h1": "4 mV/h1; restore SENS/Reserve",
                     "4mV_h1_restore_baseline_frequency_ranges_reserve":
                         "4 mV/h1; restore frequency/SENS/Reserve",

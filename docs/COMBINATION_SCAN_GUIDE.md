@@ -72,9 +72,14 @@ segments 或固定模长 angle_segments，
 正式窗口同时检查温漂、磁场误差和范围。它是**同步前后夹取，不是连续监控**，
 无法证明阻塞 VISA 调用期间没有短暂异常；不另开 DLL/VISA 后台读取线程。
 
-集成路径把有效 X/Z 硬件上限都收紧到 <=3 T，合场始终 <=3 T；目标、float32 命令、
-中间分量拐角和所有完整读回使用同一有效边界。即使 standalone 允许纯 Z 9 T，
-这里也不允许；只选温度时遇到超出集成边界的初始磁场也会拒绝接管。
+集成路径的有效X/Z标称上限、目标模长及精确float32命令/中间命令角点仍<=3 T。
+2026-09-30读回协议从**完整磁场计划**确定single X / single Z / vector，不随每个
+点或实时读回切换。单轴要求另一轴全部目标为零；固定非零另一轴、先X后Z都算vector。
+新磁场运行的实际读回边界为配置标称值+0.5 mT（3 T→3.0005 T），单轴另一轴
+独立限制±0.5 mT并保留原值。正式窗口、转场和hold使用同一声明；目标上限、
+场稳定性、设备错误/控制/通信检查不放宽。终端预览及SQLite保存模式/阈值/评估。
+这里不开放纯Z4/9 T；只选温度而没有磁场计划时保持原严格场边界。
+新协议仅离线验证，尚未实机验收；历史日志按各自归档的规则解释。
 
 Lock-in 模式与参数来源：
 
@@ -190,9 +195,11 @@ hold 是保留控制器当前目标/控制状态，不是 persistent-mode 命令
 人工核验，不能因后续清理读回正常而抹去通信不确定性。
 硬退出/断电不能由 Python 保证安全；不允许在旧 run 上自动重开硬件。
 
-联合清理的越界恢复（2026-09-24）：正常扫描、目标写入和 hold 仍严格使用本次 TOML
-限值。只有已接管轴的 monitored-zero / failure-disable 动作，才允许读取超出较小
-实验限值但仍在通用合场 <=3 T 内的状态；不会把扫描限值改为 3 T，也不会继续扫描。
+联合清理的越界恢复（2026-09-24；2026-09-30读回协议更新）：正常扫描/hold按本次
+归档的标称限值及读回协议检查，目标写入保持严格。只有已接管轴的monitored-zero /
+failure-disable动作才允许读取超出较小实验限值或单轴另一轴保护的状态；有新磁场
+协议时恢复读回按vector模长<=3.0005 T，目标/设定值仍<=3 T。无磁场计划时仍严格
+<=3 T；不会提高扫描目标限值，也不会继续扫描。
 非有限/不完整读回、设备 error 和未知控制状态仍拒绝；回零要求磁场控制已开启，
 不因 cleanup 自动开启它。回零超时后仍独立尝试关闭已设置的温控。
 新增 recovery-action、readback envelope 和首次 scan-limit violation 审计。
@@ -370,9 +377,10 @@ and acquisition models are separate from this plotting change.
 - Magnetic resume is deliberately rejected even if cleanup succeeded. Recovery
   needs a separately approved path/history policy; never automatically jump over
   ordered field points or insert a via-zero route.
-- The new integrated contract retains universal resultant <=3 T, including pure
-  Z, per this task. Standalone magnetic code retains its separately documented
-  axis-dependent envelope; merging does not silently raise integrated limits.
+- Integrated nominal targets and exact float32 commands retain resultant <=3 T,
+  including pure Z. The 2026-09-30 archived readback policy allows the fixed
+  0.5 mT margin and independent single-axis inactive guard described above.
+  Standalone Z9 T targets remain unavailable through the integrated path.
 
 ## Remaining acceptance work
 
