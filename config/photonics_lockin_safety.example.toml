@@ -1,0 +1,18 @@
+# Separate explicit sample policy for the photonics lock-in profile.
+# Copy to ignored photonics_lockin_safety.local.toml beside hardware.local.toml.
+# These placeholders deliberately fail numeric validation: no experiment limits
+# are inherited from the legacy 4 mV SR830 minimum or an earlier sample.
+schema_version = 1
+
+# Values are the XX instrument amplitude setting under the source definition in
+# hardware.local.toml. Confirm wiring/load/DC before converting sample limits.
+minimum_source_voltage_v = "CHANGE_ME_APPROVED_MIN_SOURCE_V"
+maximum_source_voltage_v = "CHANGE_ME_APPROVED_MAX_SOURCE_V"
+# Must lie within min/max and may not exceed the smallest requested source point.
+cleanup_source_voltage_v = "CHANGE_ME_APPROVED_PROTECTIVE_SOURCE_V"
+
+[lockin_xx]
+allowed_fixed_full_scales_v = ["CHANGE_ME_APPROVED_XX_FULL_SCALE_V"]
+
+[lockin_xy]
+allowed_fixed_full_scales_v = ["CHANGE_ME_APPROVED_XY_FULL_SCALE_V"]

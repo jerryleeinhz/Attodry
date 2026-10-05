@@ -162,6 +162,8 @@ def _coordinate_for_x(x: str, requested: set[str]) -> str | None:
             return next((key for key in (role + "_v", role + "_a") if key in requested), None)
     if name == "lockin_current_a_rms":
         return "lockin_excitation_v_rms"
+    if name == "optical_power_w" and "optical_target_power_w" in requested:
+        return "optical_target_power_w"
     return None
 
 
@@ -194,6 +196,8 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
         "temperature": {"temperature_k"}, "magnetic": {"field_x_t", "field_z_t"},
         "smu": {r + s for r in ("smu_bias", "gate_top", "gate_bottom") for s in ("_v", "_a")},
         "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
+        "optical": {"optical_source_level_pct", "optical_wavelength_nm", "optical_bandwidth_nm",
+                    "optical_nd_pct", "optical_target_power_w", "optical_pulse_picker_ratio"},
     }.items() if x_coordinate in keys), None)
     protected += sorted({key for row in selected for key in row
                          if key.startswith("axes.") and key.endswith(".index")
@@ -216,6 +220,10 @@ def _column_label(column: str) -> str:
         "temperature_k": "Temperature (K)", "field_x_t": "Bx (T)", "field_z_t": "Bz (T)",
         "lockin_excitation_v_rms": "Excitation (V RMS)", "lockin_frequency_hz": "Frequency (Hz)",
         "lockin_current_a_rms": "Excitation current (A RMS)",
+        "optical_power_w": "Optical power (W)", "optical_target_power_w": "Optical power (W)",
+        "optical_wavelength_nm": "Wavelength (nm)", "optical_bandwidth_nm": "Bandwidth (nm)",
+        "optical_source_level_pct": "Optical source setting (%)", "optical_nd_pct": "ND setting (%)",
+        "optical_pulse_picker_ratio": "Pulse picker ratio", "pem_frequency_hz": "PEM reference (Hz)",
     }
     for role in ("smu_bias", "gate_top", "gate_bottom"):
         label = role.replace("_", " ").capitalize()

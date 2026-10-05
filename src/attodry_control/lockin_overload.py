@@ -60,7 +60,11 @@ def overload_summary(value):
     pairs = []
     def visit(item):
         if isinstance(item, Mapping):
-            if item.get("sampling_policy") == "independent_roles" and "selected_roles" in item:
+            if item.get("schema_version") == "photonics-lockin-v1":
+                # Model-independent formal samples; native/raw and transition
+                # status inside them must not be counted as additional pairs.
+                pairs.extend(item.get("samples", ()))
+            elif item.get("sampling_policy") == "independent_roles" and "selected_roles" in item:
                 pairs.append(item)
             else:
                 for child in item.values():
@@ -69,9 +73,14 @@ def overload_summary(value):
             for child in item:
                 visit(child)
     visit(value)
-    counts = {role: sum(any(pair[role].get("lia_status", {}).get(k) for k in (
-        "input_or_reserve_overload", "filter_overload", "output_overload"))
-        for pair in pairs) for role in ("lockin_xx", "lockin_xy")}
+    def overloaded(pair, role):
+        if "selected_harmonics" in pair:
+            status = pair.get("samples", {}).get(role.removeprefix("lockin_"), {}).get("status", {})
+            return any(status.get(key) is True for key in ("input_overload", "output_scale_overload"))
+        return any(pair[role].get("lia_status", {}).get(key) for key in (
+            "input_or_reserve_overload", "filter_overload", "output_overload"))
+    counts = {role: sum(overloaded(pair, role) for pair in pairs)
+              for role in ("lockin_xx", "lockin_xy")}
     return {"formal_pairs": len(pairs), "overloaded_pairs_by_role": counts,
             "continued_overload_pairs": sum(bool(p.get("continued_overload_problems")) for p in pairs),
             "data_quality": "overload_recorded" if any(counts.values()) else "no_overload_recorded"}

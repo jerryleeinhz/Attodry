@@ -1,6 +1,15 @@
 # 项目模块开发与操作者协作规范
 
-最后更新：2026-09-30
+最后更新：2026-10-05
+
+Photonic integration 的当前已批准接线为 `pem_xy_xx_sine`：PEM 参考接 XY SR865A，
+XY SINE OUT+ 接 XX SR830 的 REF IN，XX SINE OUT 激励样品。XY 的 SINE 输出是
+参考源，保持幅值/DC不写；XX采用正弦零交叉参考。原 `pem_xx_xy` profile 和普通
+电学双 SR830 流程保持各自契约。光学与电学共用 ignored
+hardware.local.toml，新的型号安全策略单独引用；逐点编排和审计由 combination
+负责，监控不另开仪器。新 profile 对目标、实际读回和 cleanup 均严格限制合场
+不超过 3 T。具体参数、授权入口与实机验收边界见
+[光电联合指南](PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
 
 本文把长期 Lock-in 开发中形成的项目结构、操作者习惯、安全边界、数据审计、
 Notebook、Git/worktree 和 `LK_setup` 工作流整理为项目级约定。它适用于 Lock-in、

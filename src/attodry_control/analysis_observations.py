@@ -28,11 +28,13 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
     match = re.fullmatch(r"measured\.(lockin_(xx|xy))_h(\d+)_(x_v|y_v|amplitude_v|phase_deg)", column)
     if not match:
         return "unclassified", ()
-    role, short_role, order, _ = match.groups()
+    role, short_role, order, metric = match.groups()
     harmonic = int(order)
     issues = []
     evidence = []
     status = row.get("status.lockin") or {}
+    if status.get("schema_version") == "photonics-lockin-v1":
+        return _photonics_channel_quality(row, column, role, short_role, harmonic, metric, status)
     for sample in status.get("samples", ()):
         reading = sample.get(role) or {}
         values = reading.get("reading") or {}
@@ -81,6 +83,92 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
                     issues.append("exceeds_full_scale")
     unique = tuple(dict.fromkeys(issues))
     return ("flagged" if unique else "clear" if confirmed_status else "unknown"), unique
+
+
+def _photonics_channel_quality(row, column, role, short_role, harmonic, metric, status):
+    """Read archived normalized evidence; vendor status words are audit only.
+
+    Each formal entry has its own role/harmonic selection. Companion probes,
+    settings transitions and today's hardware configuration cannot qualify it.
+    This function does not change the outer accepted-run/attempt/cleanup filter.
+    """
+    issues = []
+    selected_count = 0
+    companion_seen = False
+    all_known = True
+    for entry in status.get("samples", ()) or ():
+        if not isinstance(entry, Mapping):
+            all_known = False
+            continue
+        selection = entry.get("selected_harmonics") or {}
+        readings = entry.get("samples") or {}
+        if not isinstance(selection, Mapping) or not isinstance(readings, Mapping):
+            all_known = False
+            continue
+        reading = readings.get(short_role) or {}
+        if not isinstance(reading, Mapping):
+            all_known = False
+            continue
+        selected_harmonic = selection.get(short_role)
+        if type(selected_harmonic) is not int or selected_harmonic != harmonic:
+            if selected_harmonic == harmonic:
+                issues.append("invalid_harmonic_selection")
+            companion_seen |= reading.get("harmonic") == harmonic
+            continue
+        selected_count += 1
+        if type(reading.get("harmonic")) is not int or reading.get("harmonic") != harmonic:
+            issues.append("harmonic_readback_mismatch")
+        if reading.get("role") != short_role:
+            issues.append("role_readback_mismatch")
+        normalized = reading.get("status") or {}
+        if not isinstance(normalized, Mapping):
+            normalized = {}
+        if normalized.get("validity") is False:
+            issues.append("recorded_invalid_for_analysis")
+        if normalized.get("locked") is False:
+            issues.append("reference_unlocked")
+        for flag in ("input_overload", "output_scale_overload", "instrument_error"):
+            if normalized.get(flag) is True:
+                issues.append(flag)
+        known = (normalized.get("validity") is True and normalized.get("locked") is True
+                 and all(normalized.get(name) is False for name in
+                         ("input_overload", "output_scale_overload", "instrument_error")))
+        known &= (isinstance(reading.get("model"), str) and bool(reading["model"])
+                  and normalized.get("observation") in
+                  ("latched_interval", "instantaneous", "instantaneous_and_latched"))
+        # Do not manufacture phase=0 when the adapter recorded zero X/Y.
+        if metric == "phase_deg" and reading.get("phase_deg") is None:
+            known = False
+            if finite(row.get(column)):
+                issues.append("undefined_phase")
+        if not finite(reading.get(metric)) or not finite(row.get(column)):
+            known = False
+        scales = []
+        for stage in ("settings_before", "settings_after"):
+            settings = entry.get(stage) or {}
+            settings = settings.get(short_role) if isinstance(settings, Mapping) else None
+            if not isinstance(settings, Mapping):
+                known = False
+                continue
+            if settings.get("model") != reading.get("model") or settings.get("role") != short_role:
+                issues.append("settings_identity_mismatch")
+            full_scale = settings.get("sensitivity_full_scale_v")
+            if not finite(full_scale) or full_scale <= 0:
+                known = False
+                continue
+            scales.append(full_scale)
+            amplitudes = [reading.get(field) for field in ("x_v", "y_v", "amplitude_v")]
+            amplitudes += [row.get(f"measured.{role}_h{harmonic}_{field}")
+                           for field in ("x_v", "y_v", "amplitude_v")]
+            if any(finite(value) and abs(value) > full_scale for value in amplitudes):
+                issues.append("exceeds_full_scale")
+        if len(scales) == 2 and scales[0] != scales[1]:
+            issues.append("settings_changed")
+        all_known &= known
+    if not selected_count and companion_seen:
+        issues.append("not_selected_channel")
+    unique = tuple(dict.fromkeys(issues))
+    return ("flagged" if unique else "clear" if selected_count and all_known else "unknown"), unique
 
 
 def qualify_observations(rows: Sequence[Mapping], columns: Sequence[str], policy="exclude"):

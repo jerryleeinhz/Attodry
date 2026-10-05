@@ -1,0 +1,76 @@
+# FAKE source-current response only: not safe real-instrument starting settings.
+# Replace current range/start/signal threshold with confirmed station values before hardware use.
+[nkt_source]
+control = "current"
+max_level_pct = 40.0
+allowed_pp_ratios = []
+
+[nkt_varia]
+monitor_present = false
+nd_control_verified = false
+
+[nkt_run]
+backend = "simulation"
+mode = "varia_bandpass"
+emit = true
+manual_route = "SIMULATION only"
+timeout_s = 1.0
+poll_interval_s = 0.01
+dwell_s = 0.04
+output_directory = "../run_data/optical_source_current_simulation"
+run_name = "source_current_fake_power_scan"
+note = "Nonlinear fake response; 8% start and signal threshold are not optically commissioned"
+# Omit ND and PP: preserve and verify their preflight readbacks.
+points = [
+  {source_level_pct = 8.0, wavelength_nm = 633.0, bandwidth_nm = 10.0},
+  {source_level_pct = 8.0, wavelength_nm = 633.0, bandwidth_nm = 10.0},
+  {source_level_pct = 8.0, wavelength_nm = 633.0, bandwidth_nm = 10.0},
+]
+
+[pem]
+backend = "simulation"
+io_timeout_s = 0.5
+settle_timeout_s = 1.0
+poll_interval_s = 0.01
+wavelength_min_nm = 400.0
+wavelength_max_nm = 840.0
+amplitude_min_nm = 10.0
+amplitude_max_nm = 550.0
+amplitude_tolerance_nm = 0.01
+frequency_min_hz = 49000.0
+frequency_max_hz = 51000.0
+finish_action = "disable_ack"
+
+[pm100d]
+backend = "simulation"
+io_timeout_s = 0.5
+wavelength_tolerance_nm = 0.01
+average_count = 1
+auto_range = true
+max_power_w = 0.00005
+measurement_plane = "SIMULATED detector plane"
+
+[optical_scan]
+mode = "power_stabilized"
+use_pem = true
+use_power_meter = true
+sample_interval_s = 0.01
+peak_retardance_waves = 0.25
+
+[power_feedback]
+actuator = "source_current"
+target_powers_w = [0.000005, 0.0000225, 0.00004]
+target_tolerance_fraction = 0.10
+max_power_w = 0.00005
+timeout_s = 5.0
+hold_s = 0.04
+source_current_min_pct = 8.0
+source_current_max_pct = 40.0
+source_current_step_pct = 2.0
+minimum_signal_power_w = 0.0000005
+
+[power_feedback.window]
+duration_s = 0.04
+min_samples = 3
+sample_interval_s = 0.01
+max_peak_to_peak_w = 0.0000002

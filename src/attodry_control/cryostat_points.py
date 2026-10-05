@@ -58,12 +58,26 @@ class CryostatPointSession:
         self.temperature_ceiling = None
         self.recovery_action = None
         self.recovery_scan_limits_violated = False
+        self.strict_resultant = getattr(config, "strict_resultant", False)
+        if type(self.strict_resultant) is not bool:
+            raise ValueError("Cryostat strict_resultant must be a boolean")
+        if self.strict_resultant and max(config.magnet.limits.hardware_x_max_t,
+                                         config.magnet.limits.hardware_z_max_t) > config.magnet.limits.experiment_vector_max_t:
+            raise ValueError("Strict-resultant cryostat command axis limits must not exceed the vector ceiling")
         self.field_policy = (FieldReadbackPolicy.from_targets(
-            magnetic.run.points, config.magnet.limits, config.magnet.readback_tolerance_t)
-            if magnetic is not None else None)
+            magnetic.run.points, config.magnet.limits, config.magnet.readback_tolerance_t,
+            strict_resultant=self.strict_resultant)
+            if magnetic is not None else FieldReadbackPolicy(
+                FieldScanMode.VECTOR, config.magnet.limits,
+                config.magnet.readback_tolerance_t, strict_resultant=True)
+            if self.strict_resultant else None)
 
     @property
     def active_field_policy(self):
+        if self.strict_resultant:
+            # The optical profile never expands its actual or setpoint envelope,
+            # including zero/disable cleanup. Unknown/over-limit fields need review.
+            return self.field_policy
         if self.recovery_action is not None and self.field_policy is not None:
             # Only the already-owned zero/disable action can use factory limits.
             # Pure-Z recovery keeps X's independent residual guard at high Z.
@@ -81,7 +95,7 @@ class CryostatPointSession:
     def field_readback_limits(self):
         # A scan trip must not prevent an already-owned controller from zeroing.
         # This is only a readback envelope for zero/disable, never target permission.
-        if self.recovery_action is not None:
+        if self.recovery_action is not None and not self.strict_resultant:
             if self.field_policy is not None and self.field_policy.mode is FieldScanMode.SINGLE_Z:
                 return MagnetLimits()
             return MagnetLimits(3.0, 3.0, 3.0)

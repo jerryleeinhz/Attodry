@@ -1,5 +1,209 @@
 # Development stages
 
+## User-authorized source publication (2026-10-05)
+
+- The user now authorizes committing and pushing the accumulated photonics
+  implementation, examples, regression tests and documentation to origin on
+  `integration-photonics-nonlinear-hall`. This publication follows creation of
+  the remote branch at the original base; it includes the completed offline code.
+- Canonical templates retain placeholder station identities and experimental
+  limits. The filled LK_setup example, all local configurations, data and ignored
+  receipts are excluded. Generic address comments no longer repeat station values.
+- All 211 canonical source files matched the deployed manifest before these
+  publication-only documentation/comment changes; functional code remains the
+  snapshot that passed 658 local and 658 target guarded tests. Staging, template
+  semantics, ignored-file coverage, diff formatting and documentation are checked.
+- LK_setup branch/index synchronization must preserve its exact local configuration
+  contents, including the filled example as an uncommitted tracked modification.
+  Publication adds no hardware I/O and does not complete P5/P6 acceptance.
+
+## Reversed sine-reference photonics template and excitation ranges (2026-10-05)
+
+- Implemented latest user wiring as explicit `pem_xy_xx_sine`: PEM -> XY SR865A
+  REF IN; XY SINE OUT+ -> XX SR830 REF IN; XX SINE OUT excites the high-impedance
+  sample/series load without external 50 ohm termination. XX uses sine zero
+  crossing. XY reference amplitude/DC and unused BlazeX mode are preserved
+  without writes; protection/cleanup reduces only XX. Old profiles remain isolated.
+- New reference-output declaration separates the physically connected XY output
+  from sample excitation. Explicit float/ground settings are supported only for
+  this topology; actual reference frequency is checked separately against PEM
+  for both roles, in addition to pair and model/harmonic limits.
+- Shared legacy range parser now permits linear points/step and logarithmic
+  points for photonics, with explicit-point mutual exclusion, allocation budgets,
+  no shared/overlapping range endpoints, source bounds and cleanup protection.
+- Expanded the requested photonics TOML's choices/examples and operator guide.
+  Model-role switch includes required model tables, source definitions, reference
+  settings and harmonic guards; a subtable rename alone is insufficient.
+- SSH read-only identity/settings queries succeeded for all selected instruments.
+  NKT CONTROL's port lock was resolved by the user closing CONTROL, then an
+  authorized read-only retry. A legal uppercase SR865A firmware `V` was added to
+  strict IDN parsing and covered by regression. Unknown experiment limits remain
+  placeholders; current h1 phase/readback source levels are not h2 calibration or
+  scan approval. One sequential PEM/XX read differed by about 0.545 Hz; the 0.5 Hz
+  guard stays unchanged pending bounded reference acceptance.
+- Local **658/658 guarded regression tests passed** in 135.122 s, no failures,
+  errors or skips; real instrument imports/DLL loads were blocked. Coverage adds
+  reversed-reference guards/cleanup and legacy range compatibility to the prior
+  634-test set, including a station-filled template with synthetic test addresses.
+  LK_setup's updated dedicated worktree also passed **658/658** in 211.405 s,
+  with the same guards and zero failures/errors/skips. Updated source files were
+  checked against the deployed baseline and backed up before replacement; all
+  user local files and the original electrical checkout are preserved. The
+  existing ignored hardware.local.toml duplicate-key error is reported without
+  scope expansion. Eight documents' 82 relative links, five guide TOML fragments,
+  paired fences, compilation and diff formatting passed. Deployment/query/test
+  receipts and backups are ignored under `.test-tmp/photonics-deployment/`.
+- No hardware setting writes, status latch consumption, laser emission, scans,
+  commits or pushes. P5/P6 integrated real acceptance remains pending.
+
+## LK_setup photonics worktree setup (2026-10-05)
+
+- User-requested dedicated worktree created at
+  `C:\Users\LK_Setup\Yuanrong Li\Integration-photonics`, branch
+  `integration-photonics-nonlinear-hall`, base HEAD `ae93eee2fcf1b686c72f18e4ad1ef6ce22294385`.
+  Complete local implementation transferred as uncommitted source changes;
+  210 files verified by SHA256. No new commit or remote push was performed.
+- config/hardware.local.toml was copied exactly from hardware.example.toml and
+  verified ignored; no existing live configuration was copied or overwritten.
+  It remains the legacy electrical template with placeholders; photonics.example
+  and its safety example are available for future configuration.
+- Preserved the empty pre-existing target file in a timestamped sibling backup;
+  original Integration status and modified notebooks were hash-checked unchanged.
+  Transfer/audit files are ignored under .test-tmp/photonics-deployment.
+- Lyr Python 3.12.13 / 64-bit and exact new src import path verified, user site
+  disabled. Compilation and **634/634 guarded tests passed** in 182.286 s,
+  zero skips/failures/errors, real instrument imports/DLL loads blocked. P4
+  target offline is complete for the transferred source snapshot. A Python
+  capture wrapper saved complete logs/receipt after PowerShell misclassified
+  normal unittest stderr progress; the full suite was rerun successfully.
+- No real instrument access or experimental output. P5/P6 remain pending.
+
+## Photonics combination implementation (2026-10-05)
+
+- P2 interface/configuration/point/cleanup and P3 local fake combination are
+  implemented. Current roles are XX SR865A / XY SR830, selected independently
+  by model; a future dual-SR865A pair uses the same upper-level session.
+  Unified daily TOML, explicit source/load/DC and safety-file semantics, fixed
+  IRNG/SCAL, per-role harmonics, actual frequency limits and 10-tau RC waiting
+  are enforced. PEM reference ownership never becomes an internal FREQ write.
+- Additive NKT/PEM/PM100D integration provides a reusable optical point session.
+  Both optical/lock-in loop orders freshly acquire every condition; explicit
+  wavelength x power rows can be crossed with electrical/environment axes.
+  Optical state/power brackets, sequential timestamps, raw communication and
+  requested/actual values share the combination SQLite audit and analysis.
+- Laser OFF precedes axis changes; every PEM preparation protects XX, verifies
+  the actual reference chain and then restores the selected excitation before
+  emission. Cleanup independently attempts laser OFF/electrical protection;
+  PEM disable requires source protection proof, including partial startup.
+  Formal drift, invalid/unknown lock status and failed cleanup stay rejected.
+- New profile strictly limits resultant field to 3 T, including pure Z,
+  float32 transitions/readbacks and cleanup, with no legacy boundary allowance.
+  Historical ordinary SR830/field behavior remains covered by regressions.
+- [Operator guide](PHOTONICS_COMBINATION_SCAN_GUIDE.md) and
+  [configuration template](../config/photonics.example.toml) added. Templates
+  deliberately reject unknown hardware facts and unapproved experimental limits.
+- Final local validation: **634 distinct offline tests passed**. The main
+  guarded regression set passed 572 tests; 62 additional template, normalized
+  photonics analysis, plotting and overload-summary tests passed. Final focused
+  rerun passed 63 tests, including fresh end-to-end records under both nesting
+  orders and per-channel analysis. Hardware imports and real DLL loads were
+  blocked. No test failed or skipped in the successful final runs.
+- Validation used the existing Anaconda interpreter with `python -s` to avoid
+  incompatible user-site NumPy/Matplotlib, and a shorter allowed temporary path
+  plus inherited permissions for newly created fake fixture directories on
+  Windows. These were test-process changes only; no dependencies, existing ACLs
+  or product logic were changed to bypass an instrument guard. The earlier
+  environment failures were resolved and the relevant suite rerun successfully.
+- Compilation, `git diff --check`, both template schemas (after synthetic
+  placeholder replacement), 81 relative links across eight documents and
+  Markdown fences passed. Both local hardware and new safety files are ignored.
+  P4 target offline and P5/P6 real commissioning remain pending. No hardware
+  access, SSH, deployment, commit or push occurred in this implementation.
+
+## Earlier checkpoint: approved lock-in foundation (2026-10-05)
+
+- User approved section 9. The standalone SR865A driver/settings and common
+  physical-unit backend foundation are implemented and offline tested. The
+  factory independently selects each semantic role and model; no constructor
+  opens resources. Source writes/cleanup and scan sessions are not yet wired.
+- 170 relevant offline tests passed: 35 new SR865A tests, 27 common-backend
+  tests and 108 existing SR830/settings regressions. Tests cover exact IDN,
+  guarded writes/readbacks, model-specific tables, per-role harmonic limits,
+  actual frequency drift/boundaries, raw failed I/O, unknown/current/latched
+  status, reset/front-panel events and separate input range/output sensitivity.
+- Documentation validation passed: six documents, 64 relative links, paired
+  Markdown fences and clean git diff --check.
+- The [work package](modules/INTEGRATION_PHOTONICS_NONLINEAR_HALL.md), section 10,
+  specifies one hardware.local.toml plus the retained safety policy file,
+  optical/lockin loop ordering, per-point stability, synchronized reference
+  checks and sequential acquisition timestamps in shared run records.
+- P2 remains in progress; unified TOML/model profile, common point/cleanup
+  migration, optical module integration and P3 fake combination remain pending.
+  No new hardware run entry, source or laser writes, target tests, SSH,
+  commissioning, deployment, commit or push is claimed by this foundation.
+
+## Mixed-model lock-in adaptation plan (2026-10-05)
+
+- Planning clarification complete; implementation remains pending. Current
+  hardware is user-confirmed SR865A XX / SR830 XY. User reports manual PEM-to-XX
+  lock; complete cascade/software commissioning is pending. Dual SR865A is a
+  proposed option. Historical dual-SR830 rejected attempts remain unchanged.
+- [Work package section 9](modules/INTEGRATION_PHOTONICS_NONLINEAR_HALL.md#9-sr830--sr865a-适配实施计划2026-10-05)
+  details a physical-unit backend contract, independent SR865A driver, per-role
+  model factory, strict common/model-specific fields, and migration of the
+  shared point/harmonic/range/status/cleanup code. Adding a driver alone leaves
+  SR830 assumptions in the current session and is insufficient.
+- Limits are checked per role using actual reference and detection frequency;
+  do not replace the global 102 kHz constant with 4 MHz. First software scope
+  remains h1/h2/h3. IRNG input range, SCAL sensitivity, filter modes and source
+  wiring/load/DC receive separate semantics and verified readback.
+- Planned acceptance proceeds through offline contracts/fake sessions, target
+  offline, authorized read-only checks and minimal reference/harmonic/cleanup
+  commissioning before illuminated points. No code, new adapter tests, SSH,
+  hardware settings or deployment were performed for this planning update.
+- Documentation checks passed across six changed documents: 62 valid relative
+  links, paired Markdown fences and clean git diff --check. Adapter implementation
+  and the proposed regression/contract tests remain pending.
+
+## Photonics / nonlinear Hall project (2026-10-04)
+
+- P0 project/plan: complete. New `integration-photonics-nonlinear-hall` branch
+  starts at four-module `ae93eee`; PEM/NKT `a8d991a` is a planned integration
+  input, not yet merged. See the
+  [work package](modules/INTEGRATION_PHOTONICS_NONLINEAR_HALL.md).
+- P1 diagnosis complete; PEM REF OUT -> XX TTL synchronization acceptance failed.
+  Both minimum 4 mVrms attempts rejected XX LIAS=8, including after activating
+  PEM and confirming STABLE=true/50027.0429 Hz. Wiring confirmed: PEM 1f,
+  XX SINE OUT connected to sample, XY SINE OUT physically disconnected.
+  [Full report](PEM_REFERENCE_COMMISSIONING_20261004.md) records raw filenames,
+  transition/formal distinction, writes, unchanged amplitude and final recovery.
+- Final baseline verified: XX internal/5000 Hz/h1/4 mVrms, XY external TTL rising/
+  5000.05 Hz/h1/4 mVrms, both LIAS=0/ERRS=0, no cleanup errors. PEM disable ACK
+  is not physical-off proof. Second attempt queried NKT OFF before/after only;
+  SDK writes=[]; no NKT settings/emission, magnet/temperature/SMU I/O.
+  Rejected raw JSON/JSONL remain ignored on LK_setup; no automatic repeat.
+  Synchronization remains blocked on waveform/connection evidence or a separately
+  reviewed alternate-trigger/level-conditioning test. 3.4 V is not a proven cause.
+- Commissioning helpers passed 9 original local fake tests and then 13 local /
+  13 target activation-variant fake tests. Helpers/tests remain ignored tmp;
+  production control code and existing scan behavior are unchanged.
+- P2 contracts/pure policy, P3 fake integration, P4 target offline, P5 smallest
+  illuminated point and P6 bounded power/wavelength scans: planned. New external
+  XX profile, cascade/harmonic semantics, optical ownership, power-W evidence,
+  accepted-only storage and unified cleanup need implementation/tests.
+- Preserve universal sqrt(Bx^2+Bz^2)<=3 T for this project. Inherited pure-Z 9 T
+  and readback-margin paths need an explicit new-profile guard before use; no
+  new integrated hardware entry exists. Existing generic scan code is unchanged.
+- This creation batch edits documentation only. P0 verification passed: all 53
+  relative links in five changed documents resolve, Markdown fences pair, and
+  git diff --check is clean. Diff scope contains only these five documents;
+  no control tests or real instruments are executed by the documentation task.
+  P1 commissioning evidence is recorded separately. No commit, push or new
+  integrated production entry-point deployment is included.
+- Final P1 report/status validation passed: six changed documents, 60 relative
+  links, paired Markdown fences and clean git diff --check. Tracked changes remain
+  documentation only; ignored helpers/raw records are preserved separately.
+
 ## Unified magnetic tolerance and setpoint ACK (offline; 2026-10-01)
 
 - One explicit magnet.readback_tolerance_t (max 1.5 mT) governs each actual-axis

@@ -1,0 +1,94 @@
+# Explicit FAKE settings only. No experiment parameters or addresses approved here.
+[nkt_source]
+control = "current"
+max_level_pct = 8.0
+allowed_pp_ratios = []
+
+[nkt_varia]
+monitor_present = false
+
+[nkt_run]
+backend = "simulation"
+mode = "varia_bandpass"
+emit = true
+manual_route = "SIMULATION only"
+timeout_s = 1.0
+poll_interval_s = 0.01
+dwell_s = 0.04
+output_directory = "../run_data/optical_simulation"
+run_name = "optical_fake_direct"
+note = "Simulated control evidence; not optical calibration"
+points = [
+  {source_level_pct = 8.0, wavelength_nm = 633.0, bandwidth_nm = 10.0, nd_pct = 20.0},
+  {source_level_pct = 8.0, wavelength_nm = 635.0, bandwidth_nm = 10.0, nd_pct = 20.0},
+]
+
+[pem]
+backend = "simulation"
+io_timeout_s = 0.5
+settle_timeout_s = 1.0
+poll_interval_s = 0.01
+wavelength_min_nm = 400.0
+wavelength_max_nm = 840.0
+amplitude_min_nm = 10.0
+amplitude_max_nm = 550.0
+amplitude_tolerance_nm = 0.01
+frequency_min_hz = 49000.0
+frequency_max_hz = 51000.0
+finish_action = "disable_ack"
+
+[pem_run]
+wavelength_nm = 633.0
+peak_retardance_waves = 0.25
+hold_s = 0.04
+output_directory = "../run_data/pem_simulation"
+run_name = "pem_fake"
+note = "Frequency/tolerances are fake examples; verify actual head before hardware"
+
+[pm100d]
+backend = "simulation"
+io_timeout_s = 0.5
+wavelength_tolerance_nm = 0.01
+average_count = 1
+auto_range = true
+max_power_w = 0.01
+measurement_plane = "SIMULATED detector plane"
+
+[pm100d_run]
+wavelength_nm = 633.0
+timeout_s = 1.0
+output_directory = "../run_data/pm100d_simulation"
+run_name = "pm100d_fake"
+note = "No actual detector/calibration evidence"
+
+[pm100d_run.window]
+duration_s = 0.04
+min_samples = 3
+sample_interval_s = 0.01
+max_peak_to_peak_w = 0.00001
+
+[optical_scan]
+mode = "direct"
+use_pem = true
+use_power_meter = true
+sample_interval_s = 0.01
+peak_retardance_waves = 0.25
+
+# To simulate feedback, change optical_scan.mode to power_stabilized.
+# Direct ignores this table and performs zero ND feedback.
+[power_feedback]
+target_power_w = 0.001
+target_tolerance_w = 0.00003
+max_power_w = 0.005
+timeout_s = 3.0
+hold_s = 0.04
+nd_min_pct = 0.0
+nd_max_pct = 80.0
+nd_step_pct = 5.0
+increasing_nd_increases_power = false
+
+[power_feedback.window]
+duration_s = 0.04
+min_samples = 3
+sample_interval_s = 0.01
+max_peak_to_peak_w = 0.00001

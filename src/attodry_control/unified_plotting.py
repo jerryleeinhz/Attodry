@@ -52,6 +52,14 @@ _COLUMN_LABELS = {
     "lockin_frequency_hz": ("Lock-in frequency", "Hz"),
     "lockin_excitation_v_rms": ("Lock-in excitation", "V RMS"),
     "lockin_current_a_rms": ("Estimated excitation current", "A RMS"),
+    "optical_power_w": ("Optical power", "W"),
+    "optical_target_power_w": ("Optical power", "W"),
+    "optical_wavelength_nm": ("Wavelength", "nm"),
+    "optical_bandwidth_nm": ("Bandwidth", "nm"),
+    "optical_source_level_pct": ("Optical source setting", "%"),
+    "optical_nd_pct": ("ND setting", "%"),
+    "optical_pulse_picker_ratio": ("Pulse picker ratio", ""),
+    "pem_frequency_hz": ("PEM reference", "Hz"),
     "elapsed_s": ("Elapsed time", "s"),
     "sequence_index": ("Sequence index", ""),
     "sample_index": ("Sample index", ""),
@@ -531,6 +539,8 @@ def _dimension_module(key: str) -> str | None:
         return "smu"
     if bare.startswith("lockin_"):
         return "lockin"
+    if bare.startswith("optical_"):
+        return "optical"
     if bare.startswith("csv."):
         return "csv"
     return None

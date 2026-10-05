@@ -38,6 +38,12 @@ def _coordinate(key, values, route=None):
              "lockin_frequency_hz": ("f", "Hz"),
              "field_x_t": ("Bx", "T"), "field_z_t": ("Bz", "T"),
              "temperature_k": ("T", "K")}
+    names.update({"optical_wavelength_nm": ("lambda", "nm"),
+                  "optical_bandwidth_nm": ("bandwidth", "nm"),
+                  "optical_source_level_pct": ("source", "%"),
+                  "optical_nd_pct": ("ND", "%"),
+                  "optical_target_power_w": ("power target", "W"),
+                  "optical_pulse_picker_ratio": ("pulse picker", "")})
     name, unit = names.get(key, (key.rsplit("_", 1)[0], "V" if key.endswith("_v") else "A"))
     count = values["count"] if isinstance(values, dict) else len(values)
     if count > 4:
@@ -90,7 +96,8 @@ def launch_text(summary, width=None):
     lockin = summary.get("lockin", {})
     for role, settings in lockin.get("roles", {}).items():
         harmonics = lockin["harmonics_by_role"].get(role.removeprefix("lockin_"), [])
-        hardware.append((role, ",".join(f"h{h}" for h in harmonics) or "no acquisition",
+        hardware.append((role + (" (" + settings["model"] + ")" if "model" in settings else ""),
+            ",".join(f"h{h}" for h in harmonics) or "no acquisition",
             settings["sensitivity_mode"] + " " + _number(settings["sensitivity_full_scale_v"], "V"),
             settings["reserve_mode"], f"TC {_number(settings['time_constant_s'], 's')}"))
         if settings["sensitivity_mode"] == "bounded_auto":
@@ -128,6 +135,24 @@ def launch_text(summary, width=None):
             lines.append("Segment SENS precedence: excitation > frequency > baseline; harmonic settings apply.")
         if lockin["skipped_harmonics_by_frequency"]:
             lines.append("Skipped harmonics: " + json.dumps(lockin["skipped_harmonics_by_frequency"]))
+        if lockin.get("reference_topology") in {"pem_xx_xy", "pem_xy_xx_sine"}:
+            source = lockin["source"]
+            reference_path = ("PEM -> XY -> XX (XY SINE OUT)" if lockin["reference_topology"] == "pem_xy_xx_sine" else "PEM -> XX -> XY")
+            lines.append("Reference: " + reference_path + " | Allowed: " +
+                " .. ".join(_number(v, "Hz") for v in lockin["reference_bounds_hz"]))
+            lines.append("XX source: " + source["wiring"] + " / " + source["load"] + " | " +
+                source["amplitude_definition"] + " | DC " + source["dc_mode"] +
+                " " + _number(source["dc_offset_v"], "V") + " | Cleanup <= " +
+                _number(lockin["cleanup_source_voltage_v"], "V"))
+            if lockin.get("reference_output") is not None:
+                refout = lockin["reference_output"]
+                lines.append("XY reference only: preserved " + _number(refout["amplitude_v_rms"], "V RMS setting") +
+                    " / " + refout["wiring"] + " / " + refout["load"] + " -> XX REF IN; disconnected from sample")
+            for role, settings in lockin["roles"].items():
+                if settings["model"] == "SR865A":
+                    lines.append(role + ": IRNG " + _number(settings["input_range_v_peak"], "V peak") +
+                        " | REFZ " + _number(settings["reference_input_impedance_ohm"], "ohm") +
+                        " | Sync " + str(settings["sync_output_mode"]))
     if "field_transition_policy" in summary:
         policy = summary.get("field_readback_policy")
         if policy is not None and policy["mode"] != "vector":
@@ -169,7 +194,8 @@ def launch_text(summary, width=None):
         lines.append("Note: " + summary["note"])
     lines += ["Run ID: " + summary["run_id"], "Database: " + summary["database"],
               "Config: " + summary["config"],
-              "Authorization: run command | XY disconnection declared in TOML when selected"]
+              "Authorization: run command | XY disconnection declared in TOML when selected"
+              + (" | optical emission/route explicitly confirmed" if "optical" in summary["outer_to_inner"] else "")]
     return "\n".join(part for line in lines for part in (textwrap.wrap(line, width=width,
         replace_whitespace=False, break_on_hyphens=False) or [""]))
 

@@ -17,6 +17,8 @@ config/gate_calibration.local.toml
 config/temperature_commissioning.local.toml
 config/three_smu_hardware.local.toml
 config/three_smu_scan.local.toml
+config/photonics.local.toml
+config/photonics_lockin_safety.local.toml
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

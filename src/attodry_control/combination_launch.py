@@ -97,7 +97,31 @@ def launch_summary(config, database, run_id):
             "max_abs_voltage_v": device.max_abs_voltage_v,
             "max_abs_current_a": device.max_abs_current_a}
             for role, device in config.smu.hardware.by_role().items()}
-    if config.lockin is not None:
+    from .photonics_lockin_config import PHOTONICS_REFERENCE_TOPOLOGIES
+    if config.lockin is not None and config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
+        device_config = config.lockin
+        hardware = config.snapshot["hardware"]["lockin"]
+        summary["lockin"] = {
+            "mode": config.lockin_mode, "internal_order": ["excitation"],
+            "reference_topology": config.reference_topology,
+            "harmonics_by_role": hardware["harmonics_by_role"],
+            "skipped_harmonics_by_frequency": {}, "overload_policy": "abort",
+            "settle_time_constants": device_config.settle_time_constants,
+            "baseline_frequency_hz": device_config.reference_expected_hz,
+            "reference_bounds_hz": [device_config.reference_min_hz, device_config.reference_max_hz],
+            "source": asdict(device_config.source),
+            "reference_output": (asdict(device_config.reference_output) if device_config.reference_output is not None else None),
+            "source_limits_v": [device_config.minimum_source_voltage_v,
+                                device_config.maximum_source_voltage_v],
+            "cleanup_source_voltage_v": device_config.cleanup_source_voltage_v,
+            "segment_sensitivity_overrides": {},
+            "roles": {role: {**asdict(device),
+                "reserve_mode": device.reserve_mode or "not applicable",
+                "autorange_min_full_scale_v": None, "autorange_max_full_scale_v": None,
+                "harmonic_settings": []}
+                for role, device in (("lockin_xx", device_config.lockin_xx),
+                                     ("lockin_xy", device_config.lockin_xy))}}
+    elif config.lockin is not None:
         hardware = config.snapshot["hardware"]["lockin"]
         summary["lockin"] = {"mode": config.lockin_mode,
             "internal_order": (["frequency", "excitation"]
@@ -126,4 +150,6 @@ def launch_summary(config, database, run_id):
                 "harmonic_settings": [asdict(s) for s in device.harmonic_settings]}
                 for role, device in (("lockin_xx", config.lockin.lockin_xx),
                                      ("lockin_xy", config.lockin.lockin_xy))}}
+    if config.optical is not None:
+        summary["optical"] = config.optical.snapshot()
     return summary

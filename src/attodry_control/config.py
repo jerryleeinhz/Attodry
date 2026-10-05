@@ -40,6 +40,13 @@ from .stability import StabilityCriteria
 MINIMUM_SR830_SINE_OUTPUT_V = 0.004
 MAXIMUM_SR830_SINE_OUTPUT_V = 5.0
 
+# Independent optical/profile loaders validate these sections only when selected.
+# Accepting them here permits a single experiment TOML without opening devices.
+OPTICAL_CONFIG_TABLES = {
+    "nkt_source", "nkt_varia", "nkt_lltf", "nkt_run", "pem", "pem_run",
+    "pm100d", "pm100d_run", "optical_scan", "power_feedback", "photonics_lockin",
+}
+
 
 class ConfigError(ValueError):
     """Raised when a configuration file is incomplete, unknown, or unsafe."""
@@ -420,7 +427,7 @@ def load_config(
                 }
                 if project.mode is RunMode.HARDWARE
                 else set()
-            ),
+            ) | OPTICAL_CONFIG_TABLES,
         )
 
         cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
@@ -950,7 +957,7 @@ def load_temperature_operation_config(
             "temperature_stability",
             "temperature_run",
         },
-        known_tables,
+        known_tables | OPTICAL_CONFIG_TABLES,
     )
     cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
     magnet = _parse_magnet(_table(document, "magnet"))
@@ -1023,7 +1030,7 @@ def load_temperature_excitation_operation_config(
         document,
         "top level",
         required_tables,
-        known_tables - required_tables,
+        (known_tables - required_tables) | OPTICAL_CONFIG_TABLES,
     )
 
     try:
@@ -1217,7 +1224,7 @@ def load_magnetic_field_operation_config(
         document,
         "top level",
         {"project", "cryostat", "magnet", "magnetic_field_run", "cleanup"},
-        known_tables,
+        known_tables | OPTICAL_CONFIG_TABLES,
     )
     try:
         cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
@@ -2152,14 +2159,23 @@ def _parse_sweep_ranges(
     *,
     minimum: float,
     maximum: float,
-    safety: LockinSafetyConfig,
-    lockin_xx: LockinConfig,
-    lockin_xy: LockinConfig,
+    safety: LockinSafetyConfig | None,
+    lockin_xx: LockinConfig | None,
+    lockin_xy: LockinConfig | None,
+    maximum_points: int | None = None,
+    allow_full_scale_overrides: bool = True,
 ) -> tuple[tuple[SweepRangeConfig, ...], tuple[SweepPointConfig, ...]]:
     if not isinstance(value, list) or not value:
         raise ConfigError(f"{name} must be a non-empty array of range tables.")
+    if maximum_points is not None and (type(maximum_points) is not int or maximum_points < 1):
+        raise ConfigError("maximum_points must be a positive integer.")
     ranges: list[SweepRangeConfig] = []
     point_specs: list[SweepPointConfig] = []
+
+    def check_point_budget(count: int) -> None:
+        if maximum_points is not None and len(point_specs) + count > maximum_points:
+            raise ConfigError(f"{name} may expand to at most {maximum_points} points.")
+
     previous_maximum: float | None = None
     for index, raw_segment in enumerate(value):
         segment_name = f"{name}[{index}]"
@@ -2169,7 +2185,8 @@ def _parse_sweep_ranges(
             raw_segment,
             segment_name,
             {"min", "max", "scale"},
-            {"step", "points", "xx_full_scale_v", "xy_full_scale_v"},
+            {"step", "points", "xx_full_scale_v", "xy_full_scale_v"}
+            if allow_full_scale_overrides else {"step", "points"},
         )
         segment_minimum = _positive_number(
             raw_segment["min"], f"{segment_name}.min"
@@ -2204,6 +2221,8 @@ def _parse_sweep_ranges(
             if has_step:
                 step = _positive_number(raw_segment["step"], f"{segment_name}.step")
                 ratio = (segment_maximum - segment_minimum) / step
+                if not math.isfinite(ratio):
+                    raise ConfigError(f"{segment_name}.step implies a non-finite point count.")
                 interval_count = round(ratio)
                 if interval_count < 1 or not math.isclose(
                     ratio, interval_count, rel_tol=0.0, abs_tol=1e-9
@@ -2211,6 +2230,7 @@ def _parse_sweep_ranges(
                     raise ConfigError(
                         f"{segment_name}.step must divide max-min exactly so max is included."
                     )
+                check_point_budget(interval_count + 1)
                 values = tuple(
                     segment_minimum + step * interval_index
                     for interval_index in range(interval_count + 1)
@@ -2220,6 +2240,7 @@ def _parse_sweep_ranges(
                 points = _integer(
                     raw_segment["points"], f"{segment_name}.points", minimum=2
                 )
+                check_point_budget(points)
                 values = tuple(
                     segment_minimum
                     + (segment_maximum - segment_minimum)
@@ -2234,6 +2255,7 @@ def _parse_sweep_ranges(
                     f"{segment_name} with log scale requires points and forbids step."
                 )
             points = _integer(raw_segment["points"], f"{segment_name}.points", minimum=2)
+            check_point_budget(points)
             values = tuple(
                 math.exp(
                     math.log(segment_minimum)
@@ -2244,20 +2266,24 @@ def _parse_sweep_ranges(
                 for point_index in range(points)
             )
             values = (segment_minimum, *values[1:-1], segment_maximum)
-        xx_full_scale_v = _parse_sweep_range_full_scale(
-            raw_segment,
-            "xx_full_scale_v",
-            segment_name,
-            safety.lockin_xx,
-            lockin_xx,
-        )
-        xy_full_scale_v = _parse_sweep_range_full_scale(
-            raw_segment,
-            "xy_full_scale_v",
-            segment_name,
-            safety.lockin_xy,
-            lockin_xy,
-        )
+        xx_full_scale_v = xy_full_scale_v = None
+        if allow_full_scale_overrides:
+            if safety is None or lockin_xx is None or lockin_xy is None:
+                raise ConfigError("Sweep range full-scale overrides require lock-in safety and role configurations.")
+            xx_full_scale_v = _parse_sweep_range_full_scale(
+                raw_segment,
+                "xx_full_scale_v",
+                segment_name,
+                safety.lockin_xx,
+                lockin_xx,
+            )
+            xy_full_scale_v = _parse_sweep_range_full_scale(
+                raw_segment,
+                "xy_full_scale_v",
+                segment_name,
+                safety.lockin_xy,
+                lockin_xy,
+            )
         ranges.append(
             SweepRangeConfig(
                 minimum=segment_minimum,

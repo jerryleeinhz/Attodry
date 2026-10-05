@@ -2,6 +2,16 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
+2026-10-05：photonics combination profile 现按用户确认支持 XX=SR830、XY=SR865A，
+PEM → XY REF IN，XY SINE OUT+ → XX REF IN，XX SINE OUT → 样品。
+新拓扑为 `pem_xy_xx_sine`；原 `pem_xx_xy` 及显式双 SR865A 配置继续保留。
+光学 NKT/PEM/PM100D 与锁相参数统一放入本机 TOML，
+由同一个 combination scan 执行波长/功率点表 × 电激励扫描并逐点读取 Vxx/Vxy。
+两种循环顺序、参考保护、功率漂移拒绝及严格 3 T 合场约束已通过本地 fake 验证；
+目标电脑已完成此前离线验证，本次设置只读核验及软件更新另行记录；完整实机
+级联/有光扫描尚未验收。配置模板与命令见
+[光电联合操作指南](docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
+
 锁相扫描新增可选过载继续采集策略（默认仍中止），保留原始过载与按测量路的
 有效性标记；配置见 [日常操作说明](docs/LOCKIN_DAILY_OPERATION.md)。
 高阻器件的 XX 测量衰减接法与限制见 [衰减设计说明](docs/LOCKIN_XX_ATTENUATION.md)。
@@ -151,6 +161,12 @@ python -m attodry_control.lockin_test monitor-live --help
   `bidirectional`，compliance 由对应边界自动下发并读回验证。三角色使用
   统一单表，Three-SMU timeout 固定为 5000 ms；
 - [`Integration`](docs/modules/INTEGRATION.md)：各设备模块分别验收后的组合流程。
+- [`Photonics / nonlinear Hall`](docs/modules/INTEGRATION_PHOTONICS_NONLINEAR_HALL.md)：
+  光学联合扫描项目；PEM 外参考驱动 XX、XX sync 同步 XY，目标是统一 TOML 后通过
+  combination scan 扫描光功率/波长并读取 Vxx/Vxy。用户已确认 XX 换成 SR865A 且
+  手动锁住 PEM，XY 仍为 SR830；型号适配计划已批准，完整级联及新的联合硬件入口
+  尚待软件验收。[历史实测报告](docs/PEM_REFERENCE_COMMISSIONING_20261004.md)保留
+  更换前双 SR830 的失败与恢复记录。
 
 每个工作包都包含当前真实验收边界、目标、非目标、分阶段验收条件、预计文件
 所有权和可复制的新 Chat 启动提示。多个 Chat 并行修改时应使用独立 branch 和

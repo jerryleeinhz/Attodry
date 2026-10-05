@@ -1,0 +1,325 @@
+# 光电联合配置模板；解释见 docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md。
+# 本源模板不保存本机地址；LK_setup 上的同名未提交副本可填入只读核验值。
+# 当前接线：PEM REF OUT -> XY(SR865A) REF IN；
+# XY SINE OUT+ -> XX(SR830) REF IN；XX SINE OUT -> 样品，无外部50Ω终端。
+# 示例数字不代表样品安全限值，也不代表 h2 相位已标定。
+# Copy to ignored hardware.local.toml; copy the companion safety example to
+# ignored photonics_lockin_safety.local.toml beside it. Replace every CHANGE_ME
+# and verify ALL settings against the station/sample before commissioning.
+# Deliberately invalid placeholders make strict offline loading fail closed.
+# Numeric filter/reference examples below are illustrative, not sample approval.
+
+[project]
+# 此硬件组合入口只接受 hardware；离线仿真使用独立 simulation 配置。
+mode = "hardware"
+# 相对本 TOML 所在目录；运行时 --database 可覆盖。
+database_path = "../run_data/photonics/combination.sqlite"
+
+[combination_scan]
+backend = "hardware"
+# 可选：pem_xy_xx_sine（当前接线）；pem_xx_xy（原 PEM->XX->XY TTL 链）；
+# internal_xx_xy（旧双 SR830 电学路径，不使用这份光电锁相配置）。
+reference_topology = "pem_xy_xx_sine"
+# PEM 拥有基频；光电 profile 当前只能 excitation，不能扫内部频率。
+lockin_mode = "excitation"
+# 顺序为外层 -> 内层。也可 ["lockin", "optical"]；加入环境/SMU须补对应表。
+order = ["optical", "lockin"]
+# 两项均为 1--1000 的整数；总正式样本数不得超过 100000。
+samples_per_condition = 1
+repeats = 1
+# auto 或唯一的手工 ID（非空字符串）；不要重复使用已有运行 ID。
+run_id = "auto"
+run_name = "CHANGE_ME_EXPERIMENT_NAME"
+note = "CHANGE_ME_SAMPLE_OPTICAL_ROUTE_AND_ACCEPTANCE_SCOPE"
+
+[visa]
+# default -> pyvisa.ResourceManager()，使用已安装的默认 VISA 库。
+# 也可 "@py"（须已安装 pyvisa-py）或已安装 VISA DLL 的明确路径。
+# 这里管锁相通信；pm100d.backend="visa" 是另一项驱动选择。
+backend = "default"
+# 正整数，单位 ms。例如 5000；不是采样间隔。
+timeout_ms = 5000
+
+[photonics_lockin]
+# 本软件配置格式版本；当前唯一支持整数 1，不是仪器固件版本。
+schema_version = 1
+# 相对本 TOML 的路径；不能直接用旧 lockin_safety.toml 代替。
+safety_file = "photonics_lockin_safety.local.toml"
+# Illustrative interval around the observed approximately 50.027 kHz PEM 1f.
+# Validate actual PEM/XX/XY readbacks and receiver thresholds at the station.
+reference_min_hz = 49000.0
+reference_max_hz = 51000.0
+reference_expected_hz = 50027.0
+# PEM、XX、XY 的实际基频差上限；不因一次失配自动放宽。
+pair_tolerance_hz = 0.5
+# >=10；实际每次等待 = 此值 * max(XX tau, XY tau)。可设 15.0。
+settle_time_constants = 10.0
+# >=0，单位秒；同一条件第2次及后续电学样本前的额外等待。
+# 对应旧 sample_interval_time_constants 的用途，但这里直接填秒。
+sample_interval_s = 1.0
+
+[photonics_lockin.source]
+# 这是 XX -> 样品的激励源，不是 XY -> XX 的参考源。
+# XX=SR830 只允许 single_ended；XX=SR865A 时可 single_ended / differential。
+wiring = "single_ended"
+# 可选 50_ohm / high_impedance；按实际负载填写，不能从 SINE 设置推断。
+# 用户确认无外部50Ω终端，样品/串联电阻总负载远大于50Ω，故high_impedance。
+# 此值记录接法；SLVL仪器设置仍不能直接换算成样品端电压。
+load = "high_impedance"
+# XX=SR830: sr830_instrument_rms_setting。
+# XX=SR865A: differential_rms_into_50_ohm_loads；更换源型号时必须一并修改。
+amplitude_definition = "sr830_instrument_rms_setting"
+# XX=SR830: not_supported；XX=SR865A: common / difference。
+# common=两输出相同DC，difference=两输出相反DC；交流幅值与DC分别读回。
+dc_mode = "not_supported"
+# 当前软件只允许 0.0；这是源DC，不是 signal input_coupling。
+dc_offset_v = 0.0
+
+[photonics_lockin.reference_output]
+# 当前 XY SINE OUT 只连接 XX REF IN，不连接样品；不扫描或降低其幅值。
+# 可选 single_ended / differential；当前已确认XY的SINE OUT+，所以single_ended。
+# differential须有经验证的差分接收/转换接法，不能直接照单BNC例子替换。
+wiring = "single_ended"
+# 当前软件只接受直接接 SR830 REF IN 的 high_impedance；有终端/转换器须另验收。
+load = "high_impedance"
+amplitude_definition = "differential_rms_into_50_ohm_loads"
+# 填 XY 当前 SLVL 仪器设置（1e-9--2.0 Vrms）；仅核验/保留，不写入。
+amplitude_v_rms = "CHANGE_ME_READBACK_XY_REFERENCE_AMPLITUDE_V_RMS"
+# common / difference；填 XY 的 REFM? 实际读回，不自动切换。
+dc_mode = "CHANGE_ME_READBACK_XY_REFERENCE_DC_MODE"
+# 当前软件只接受已确认的零 DC。
+dc_offset_v = 0.0
+destination = "lockin_xx_ref_in"
+sample_connected = false
+
+[lockin_xx]
+# 当前XX是SR830；换型号需改子表、源定义、谐波及参考拓扑，不能只改名称。
+model = "SR830"
+# VISA资源格式为GPIB<板号>::<主地址>::INSTR；替换为本机枚举值，勿照抄占位符。
+address = "CHANGE_ME_XX_VISA_RESOURCE"
+# 收到的是 XY 的正弦波：external_sine + sine_zero_crossing（RSLP=0）。
+# 收到TTL时才用 external_ttl + rising/falling，不能把正弦波标成TTL。
+reference_source = "external_sine"
+external_reference_edge = "sine_zero_crossing"
+# 表示该路 SINE OUT 有物理连接；XX 到样品，XY 到 XX REF IN。
+sine_output_connected = true
+# 当前profile只允许 a_minus_b；不是参考输入接口选择。
+input_mode = "a_minus_b"
+# 当前pem_xy_xx_sine可选float / ground，按确认的输入屏蔽接地填写；原拓扑只float。
+shield_grounding = "float"
+# 当前profile只支持 ac；硬件dc的含义见MD，不能只改此值启用dc路径。
+input_coupling = "ac"
+# 离散档：1/3 × 10^n s，SR830从10us至30000s；如0.3、1.0、3.0。
+time_constant_s = 1.0
+# 当前只支持24 dB/oct RC；不支持改成advanced/synchronous filter。
+filter_slope_db_oct = 24
+# 当前光电profile只支持 fixed，不接受旧 bounded_auto。
+sensitivity_mode = "fixed"
+# 离散灵敏度档，且必须在本路 safety allowlist；如0.001=1mV、0.01=10mV。
+sensitivity_full_scale_v = "CHANGE_ME_XX_FULL_SCALE_V"
+# 数字-180..180度；设置PHAS，不是测量结果phase_deg，不自动标定。
+phase_shift_deg = "CHANGE_ME_XX_PHASE_DEG"
+# 当前约50kHz，SR830 h3超102kHz，故XX示例只用h1；可[1,2]须逐点频率允许。
+harmonics = [1]
+
+[lockin_xx.sr830]
+# high_reserve / normal / low_noise；不是SR865A的Input Range。
+reserve_mode = "CHANGE_ME_XX_RESERVE_MODE"
+
+[lockin_xy]
+model = "SR865A"
+address = "CHANGE_ME_XY_VISA_RESOURCE"
+# XY 接收PEM REF OUT；此示例采用TTL上升沿，下降沿可用falling。
+reference_source = "external_ttl"
+external_reference_edge = "rising"
+# 当前XY SINE OUT接XX参考，所以true；reference_output.sample_connected须false。
+sine_output_connected = true
+input_mode = "a_minus_b"
+shield_grounding = "float"
+input_coupling = "ac"
+# SR865A额外支持1us/3us；其余为1/3系列至30000s。
+time_constant_s = 1.0
+filter_slope_db_oct = 24
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = "CHANGE_ME_XY_FULL_SCALE_V"
+# 当前读回PHAS若来自h1，填入不代表h2相位已标定。
+phase_shift_deg = "CHANGE_ME_XY_PHASE_DEG"
+# 仅支持1/2/3的软件采样列表；唯一升序，如[2]、[1,2,3]。
+harmonics = [2]
+
+[lockin_xy.sr865a]
+# 前端总输入峰值范围可选：1.0 / 0.3 / 0.1 / 0.03 / 0.01 Vpeak。
+# 和sensitivity_full_scale_v(SCAL输出满量程)分别设置。
+input_range_v_peak = "CHANGE_ME_XY_INPUT_RANGE_V_PEAK"
+# REF IN 阻抗：50.0 / 1000000.0 ohm；不是signal input阻抗或样品负载。
+reference_input_impedance_ohm = "CHANGE_ME_XY_REF_INPUT_IMPEDANCE_OHM"
+# 当前SINE链只允许preserve：保留未使用的BlazeX模式，不重写BLAZEX。
+# 原pem_xx_xy路径才使用unipolar_sync / bipolar_sync，并须实机验证电平。
+sync_output_mode = "preserve"
+# true / false；正式采集要求true，必须先实际确认CUROVLDSTAT?支持。
+current_status_supported = false
+
+[lockin_sweep]
+# Instrument SLVL settings, not inferred sample voltages or currents.
+# A/B/C/D只启用一种；不要把excitation_points_v_rms和excitation_ranges同时保留。
+# A: 明确点，顺序/重复保留。正式值必须在已确认的XX source safety范围内。
+excitation_points_v_rms = ["CHANGE_ME_APPROVED_SOURCE_V_RMS"]
+# 数字语法示例（非样品授权）：excitation_points_v_rms = [0.004, 0.01, 0.02, 0.01]
+# B: 线性区间，含两端，共10点；删除/注释上面的A后再启用。
+# excitation_ranges = [{min=0.004, max=0.04, scale="linear", points=10}]
+# C: 线性步长，必须整除区间；step与points二选一。
+# excitation_ranges = [{min=0.004, max=0.04, scale="linear", step=0.004}]
+# D: 对数区间，仅支持points，且端点均>0。
+# excitation_ranges = [{min=0.004, max=0.04, scale="log", points=10}]
+# 多段可写进同一个数组；需升序、不重叠、不共享端点；总数<=100000。
+# excitation_ranges = [
+#   {min=0.004, max=0.04, scale="linear", points=10},
+#   {min=0.05, max=0.5, scale="log", points=10},
+# ]
+# 光电范围不接受旧量程覆盖字段；量程由各lockin角色统一配置。
+
+[nkt_source]
+# current / power；本模板source_current反馈要求current，不能只改此字段切模式。
+control = "current"
+# 已确认的当前样品源电流上限（0--100%）；此前其他光路的上限不自动沿用。
+max_level_pct = "CHANGE_ME_APPROVED_SOURCE_CURRENT_MAX_PCT"
+# Empty means preserve the existing pulse picker; every point below omits it.
+allowed_pp_ratios = []
+dll_path = "CHANGE_ME_VERIFIED_NKT_SDK_DLL_PATH"
+# 明确单个端口，格式COM<端口号>；不是VISA资源地址。
+port = "CHANGE_ME_NKT_PORT"
+# 整数模块ID（1--255），不是IP/COM号；例如address=15，不带引号。
+# 必须按同一端口已有设备树/只读身份核验填写，不能猜默认值。
+address = "CHANGE_ME_CONFIRMED_SOURCE_MODULE_ADDRESS"
+# EXTREME模块序列号字符串；严格匹配设备读回，保留前导零。
+expected_serial = "CHANGE_ME_SOURCE_SERIAL"
+
+[nkt_varia]
+# true / false；有独立VARIA百分比monitor且已确认才true，它不是W功率计。
+monitor_present = false
+# This profile adjusts source current and preserves the existing ND setting.
+nd_control_verified = false
+# 与source地址不同的VARIA整数模块ID，1--255；序列号属于VARIA而非激光源。
+address = "CHANGE_ME_CONFIRMED_VARIA_MODULE_ADDRESS"
+expected_serial = "CHANGE_ME_VARIA_SERIAL"
+
+[nkt_run]
+# nkt_sdk / simulation；真实组合使用nkt_sdk，不加载未实现的LLTF硬件路径。
+backend = "nkt_sdk"
+# 此PEM/功率反馈模板使用varia_bandpass；独立NKT另有broadband/lltf_swir模式。
+mode = "varia_bandpass"
+# true才计划有光测量；power_stabilized必须true，run仍需显式光学授权标志。
+emit = true
+# 实际光路/衰减/测量位置的非空描述；不能用旧beam-dump记录冒充样品光路。
+manual_route = "CHANGE_ME_CONFIRMED_OPTICAL_ROUTE"
+# 秒。示例timeout_s=20.0，poll_interval_s=0.2；poll<=timeout。
+timeout_s = "CHANGE_ME_NKT_OPERATION_TIMEOUT_S"
+poll_interval_s = "CHANGE_ME_NKT_POLL_INTERVAL_S"
+# 反馈合格后额外观察时间，0--86400秒；如2.0，不是反馈hold_s。
+dwell_s = "CHANGE_ME_QUALIFIED_ILLUMINATION_DWELL_S"
+output_directory = "../run_data/photonics/optical"
+run_name = "CHANGE_ME_OPTICAL_RUN_NAME"
+note = "Explicit 2-wavelength x 2-power point grid; no approved limits in this template"
+# Row order: (lambda_A, P_A), (lambda_A, P_B), (lambda_B, P_A), (lambda_B, P_B).
+# target_powers_w below maps one-to-one to these rows. A one-point first test
+# must reduce BOTH lists to one element. Omitted ND/PP are preserved and checked.
+# 每行source_level_pct是初始电流%，不是W；反馈后实际电流可能不同。
+# VARIA中心波长400--840nm，带宽10--100nm；两滤波边沿也须在400--840内。
+# 格式示例（非实验授权）：{source_level_pct=5.0,wavelength_nm=630.0,bandwidth_nm=10.0}
+# 源电流和边沿使用0.1步进；source_current模式不要添加nd_pct/PP字段。
+points = [
+  {source_level_pct = "CHANGE_ME_START_CURRENT_PCT", wavelength_nm = "CHANGE_ME_LAMBDA_A_NM", bandwidth_nm = "CHANGE_ME_BANDWIDTH_NM"},
+  {source_level_pct = "CHANGE_ME_START_CURRENT_PCT", wavelength_nm = "CHANGE_ME_LAMBDA_A_NM", bandwidth_nm = "CHANGE_ME_BANDWIDTH_NM"},
+  {source_level_pct = "CHANGE_ME_START_CURRENT_PCT", wavelength_nm = "CHANGE_ME_LAMBDA_B_NM", bandwidth_nm = "CHANGE_ME_BANDWIDTH_NM"},
+  {source_level_pct = "CHANGE_ME_START_CURRENT_PCT", wavelength_nm = "CHANGE_ME_LAMBDA_B_NM", bandwidth_nm = "CHANGE_ME_BANDWIDTH_NM"},
+]
+
+[pem]
+# serial / simulation；真实PEM使用serial（驱动固定250000 baud）。
+backend = "serial"
+# 端口格式COM<端口号>；expected_idn必须完整精确字符串，不是仅写"PEM200"。
+port = "CHANGE_ME_PEM_PORT"
+expected_idn = "CHANGE_ME_EXACT_PEM_IDN"
+# 示例3.0/20.0/0.1秒；分别为I/O超时、稳定总超时、稳定状态轮询间隔。
+io_timeout_s = "CHANGE_ME_PEM_IO_TIMEOUT_S"
+settle_timeout_s = "CHANGE_ME_PEM_SETTLE_TIMEOUT_S"
+poll_interval_s = "CHANGE_ME_PEM_POLL_INTERVAL_S"
+wavelength_min_nm = "CHANGE_ME_CONFIRMED_PEM_WAVELENGTH_MIN_NM"
+wavelength_max_nm = "CHANGE_ME_CONFIRMED_PEM_WAVELENGTH_MAX_NM"
+# 延迟幅值单位nm，不是驱动电压或波数；填头部实测范围内已确认的允许值。
+amplitude_min_nm = "CHANGE_ME_ALLOWED_RETARDANCE_MIN_NM"
+amplitude_max_nm = "CHANGE_ME_ALLOWED_RETARDANCE_MAX_NM"
+# 数值0--1nm；例如0.01nm，须适合实机读回精度。
+amplitude_tolerance_nm = "CHANGE_ME_RETARDANCE_READBACK_TOLERANCE_NM"
+frequency_min_hz = 49000.0
+frequency_max_hz = 51000.0
+# Applied only after source protection is verified; ACK does not prove physical OFF.
+finish_action = "disable_ack"
+
+[pm100d]
+# visa / simulation；这里visa是设备驱动类型，不是[visa].backend名称。
+backend = "visa"
+# 格式示例USB0::0x1313::0x8078::PXXXXXXXX::INSTR，填实际枚举资源。
+resource = "CHANGE_ME_PM100D_VISA_RESOURCE"
+# 控制器IDN序列号和SYST:SENS:IDN?传感器序列号分别填写，不能混用。
+expected_serial = "CHANGE_ME_PM100D_CONSOLE_SERIAL"
+expected_sensor_serial = "CHANGE_ME_SENSOR_SERIAL"
+# 秒，示例3.0；只改通信超时，不改变功率边界。
+io_timeout_s = "CHANGE_ME_PM_IO_TIMEOUT_S"
+# nm，例如0.01；核对功率计波长校正设置。
+wavelength_tolerance_nm = "CHANGE_ME_PM_WAVELENGTH_TOLERANCE_NM"
+# 正整数1--1000000，如1；每次仪器内部平均次数。
+average_count = "CHANGE_ME_PM_AVERAGE_COUNT"
+# true / false；false还必须提供明确range_w（W，例如1e-3，仅语法示例）。
+auto_range = true
+# range_w = 1e-3
+# 测量平面的硬上限W，须按传感器/衰减和样品确认；例如50e-6=50uW仅单位示例。
+max_power_w = "CHANGE_ME_APPROVED_MEASURED_POWER_LIMIT_W"
+# 明确PM实际测量位置；探头处功率不自动等于样品处功率。
+measurement_plane = "CHANGE_ME_ACTUAL_POWER_MEASUREMENT_PLANE"
+
+[optical_scan]
+# power_stabilized / direct；direct不执行目标W闭环，切换需移除反馈相关表。
+mode = "power_stabilized"
+# 当前PEM参考组合要求true；有W反馈时功率计也必须true。
+use_pem = true
+use_power_meter = true
+# 功率合格后dwell观察阶段检查间隔（秒），如0.3；非后台连续反馈。
+sample_interval_s = "CHANGE_ME_OPTICAL_SAMPLE_INTERVAL_S"
+# 单位waves；峰值延迟nm=波长nm*此值。已确认目标为0.25 waves；还受PEM范围约束。
+peak_retardance_waves = "CHANGE_ME_REQUESTED_RETARDANCE_WAVES"
+
+[power_feedback]
+# source_current / varia_nd；后者须另行实机验证ND控制并配置其边界。
+# 当前模板为source_current，保持ND和pulse picker现值。
+actuator = "source_current"
+# 二选一：逐行target_powers_w数组，或所有光学行共用target_power_w标量。
+# 数组长度必须等于nkt_run.points行数；下面是2波长x2功率的对应顺序。
+target_powers_w = ["CHANGE_ME_P_A_W", "CHANGE_ME_P_B_W", "CHANGE_ME_P_A_W", "CHANGE_ME_P_B_W"]
+# target_power_w = 10e-6  # W，仅语法示例；启用时删除上面的数组。
+# 二选一：相对误差fraction(0--1，如0.05=5%)，或绝对target_tolerance_w。
+target_tolerance_fraction = "CHANGE_ME_POWER_FRACTIONAL_TOLERANCE"
+# target_tolerance_w = 0.5e-6
+# 目标+容差 <= 此硬上限 <= pm100d.max_power_w；W，不是源电流百分比。
+max_power_w = "CHANGE_ME_APPROVED_FEEDBACK_HARD_LIMIT_W"
+# 秒。timeout如120.0，须>=window.duration_s；hold如3.0，是合格后保持时间。
+timeout_s = "CHANGE_ME_TOTAL_FEEDBACK_TIMEOUT_S"
+hold_s = "CHANGE_ME_STABLE_POWER_HOLD_S"
+# 电流控制区间%、min<=max<=nkt_source.max_level_pct；step正值，均可用0.1%表示。
+source_current_min_pct = "CHANGE_ME_APPROVED_CURRENT_MIN_PCT"
+source_current_max_pct = "CHANGE_ME_APPROVED_CURRENT_MAX_PCT"
+source_current_step_pct = "CHANGE_ME_APPROVED_CURRENT_STEP_PCT"
+# >0 W，且低于目标-容差；低于此值拒绝，不自动增大电流寻找光。
+minimum_signal_power_w = "CHANGE_ME_MINIMUM_VALID_ILLUMINATION_W"
+# 可选软降功率阈值，仅source_current支持；目标+容差<=阈值<硬上限。
+# reduce_above_power_w = 40e-6
+
+[power_feedback.window]
+# 调功率阶段的滚动统计窗口，单位秒，例如3.0。
+duration_s = "CHANGE_ME_POWER_WINDOW_DURATION_S"
+# 整数>=2，例如5；时长、样本数、峰峰波动都满足才合格。
+min_samples = "CHANGE_ME_POWER_WINDOW_MIN_SAMPLES"
+# PM100D在反馈/hold期间的读取间隔，秒，例如0.3；不得超过窗口时长。
+sample_interval_s = "CHANGE_ME_POWER_SAMPLE_INTERVAL_S"
+# W绝对峰峰波动阈值，例如0.5e-6；不是目标容差fraction，也不是标准差。
+max_peak_to_peak_w = "CHANGE_ME_POWER_WINDOW_PEAK_TO_PEAK_W"

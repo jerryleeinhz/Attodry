@@ -24,6 +24,9 @@ MODULE_KEYS = {
     "smu": {"smu_bias_v", "smu_bias_a", "gate_top_v", "gate_top_a",
             "gate_bottom_v", "gate_bottom_a"},
     "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
+    "optical": {"optical_source_level_pct", "optical_wavelength_nm",
+                "optical_bandwidth_nm", "optical_nd_pct", "optical_pulse_picker_ratio",
+                "optical_target_power_w"},
 }
 SMU_ROLES = ("smu_bias", "gate_top", "gate_bottom")
 COMBINATION_FIELD_LIMIT_POLICY = "planned-axis-configured-v2"
@@ -64,15 +67,32 @@ class CombinationPlan:
     note: str = ""
     magnet_limits: MagnetLimits = MagnetLimits()
     readback_tolerance_t: float | None = None
+    lockin_coordinate_limits: tuple[float, float, float, float] | None = None
+    strict_resultant: bool = False
 
     def validate(self) -> None:
         if not isinstance(self.magnet_limits, MagnetLimits):
             raise ValueError("Combination magnet limits must be validated MagnetLimits")
+        if type(self.strict_resultant) is not bool:
+            raise ValueError("strict_resultant must be a boolean")
+        if self.strict_resultant and max(self.magnet_limits.hardware_x_max_t,
+                                         self.magnet_limits.hardware_z_max_t,
+                                         self.magnet_limits.experiment_vector_max_t) > 3:
+            raise ValueError("Photonics field limits must remain within 3 T")
+        source_min, source_max, reference_min, reference_max = (0.004, 5.0, 0.001, 102000.0)
+        if self.lockin_coordinate_limits is not None:
+            values = self.lockin_coordinate_limits
+            if (not isinstance(values, tuple) or len(values) != 4
+                    or not all(type(v) in (float, int) and math.isfinite(v) for v in values)
+                    or not 0 < values[0] <= values[1] <= 5
+                    or not 0.001 <= values[2] <= values[3] <= 4_000_000):
+                raise ValueError("Invalid archived lock-in coordinate limits")
+            source_min, source_max, reference_min, reference_max = values
         if not isinstance(self.run_name, str) or not isinstance(self.note, str):
             raise ValueError("Run name and note must be strings")
         modules = [axis.module for axis in self.axes]
         if not modules or len(set(modules)) != len(modules):
-            raise ValueError("Provide one to four distinct module axes")
+            raise ValueError("Provide distinct module axes")
         for value in (self.samples_per_condition, self.repeats):
             if type(value) is not int or not 1 <= value <= 1000:
                 raise ValueError("Sample/repeat counts must be integers in 1..1000")
@@ -103,10 +123,22 @@ class CombinationPlan:
                 if axis.module == "temperature" and point.values["temperature_k"] <= 0:
                     raise ValueError("Temperature must be positive")
                 if axis.module == "lockin":
-                    if not 0.004 <= point.values["lockin_excitation_v_rms"] <= 5:
-                        raise ValueError("SR830 excitation must be in 0.004..5 V RMS")
-                    if not 0.001 <= point.values["lockin_frequency_hz"] <= 102000:
-                        raise ValueError("SR830 frequency is out of range")
+                    if not source_min <= point.values["lockin_excitation_v_rms"] <= source_max:
+                        raise ValueError("Lock-in excitation is outside the configured limits")
+                    if not reference_min <= point.values["lockin_frequency_hz"] <= reference_max:
+                        raise ValueError("Lock-in reference frequency is outside the configured limits")
+                if axis.module == "optical":
+                    v = point.values
+                    if "optical_source_level_pct" not in v or not 0 <= v["optical_source_level_pct"] <= 100:
+                        raise ValueError("Optical source setting must be within 0..100 percent")
+                    for key in ("optical_wavelength_nm", "optical_bandwidth_nm", "optical_target_power_w"):
+                        if key in v and v[key] <= 0:
+                            raise ValueError(f"{key} must be positive")
+                    if "optical_nd_pct" in v and not 0 <= v["optical_nd_pct"] <= 100:
+                        raise ValueError("Optical ND setting must be within 0..100 percent")
+                    if "optical_pulse_picker_ratio" in v and (type(v["optical_pulse_picker_ratio"]) is not int
+                            or not 1 <= v["optical_pulse_picker_ratio"] <= 65535):
+                        raise ValueError("Optical pulse picker ratio must be an integer in 1..65535")
         # Classify the complete ordered plan, never an individual pure-axis leaf.
         self.magnetic_readback_policy()
 
@@ -124,7 +156,7 @@ class CombinationPlan:
             return None
         return FieldReadbackPolicy.from_targets(
             tuple(VectorField(p.values["field_x_t"], p.values["field_z_t"]) for p in axis.points),
-            self.magnet_limits, self.readback_tolerance_t)
+            self.magnet_limits, self.readback_tolerance_t, strict_resultant=self.strict_resultant)
 
     def conditions(self) -> list[dict]:
         self.validate()
@@ -382,7 +414,8 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                             key: value for key, value in actual.items() if key in MODULE_KEYS[module]
                         }),)) for module in modules if module != "magnetic")
                         if other_axes:
-                            CombinationPlan(other_axes).validate()
+                            CombinationPlan(other_axes,
+                                lockin_coordinate_limits=plan.lockin_coordinate_limits).validate()
                     except ValueError:
                         acquisition_accepted = False
                 if not finite:
@@ -420,7 +453,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 cleanup_errors.append(f"attempt audit: {audit_error}")
     finally:
         # An audit/presentation failure must not prevent later cleanup actions.
-        for module in ("lockin", "smu", "magnetic", "temperature"):
+        for module in ("optical", "lockin", "smu", "magnetic", "temperature"):
             if module not in modules:
                 continue
             try:

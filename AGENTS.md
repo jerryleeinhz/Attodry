@@ -10,6 +10,7 @@ Before changing code, read these files in order:
 
 Project rules:
 
+- User-approved photonics exception (2026-10-05), only for explicit `pem_xy_xx_sine`: PEM REF OUT -> XY SR865A REF IN; XY SINE OUT+ -> XX SR830 REF IN; XX SINE OUT -> sample. XX uses external sine zero crossing. XY amplitude/DC and unused BlazeX mode are preserved without writes; only XX is the sample excitation source. Both SINE outputs are physically connected, but XY does not reach the sample. Original electrical/`pem_xx_xy` contracts below retain their own behavior. The photonics profile enforces strict resultant <=3 T with no legacy field margin. Read-only identity/settings checks were authorized; illuminated acquisition and new output writes require the corresponding explicit stage authorization.
 - Treat all hardware operations as safety critical and fail closed.
 - Do not connect to real instruments or issue write commands unless the user explicitly authorizes that stage.
 - Preserve strict nominal targets and exact float32 commands: standalone and combination single-X/single-Z plans use the configured X/Z limits (at most X 3 T / Z 9 T). A complete plan using both axes, even at separate points, is vector mode and all targets satisfy the configured resultant limit (at most 3 T).

@@ -61,7 +61,7 @@ def run(argv: list[str] | None = None) -> int:
     simulate.add_argument("--run-id", required=True)
     simulate.add_argument("--resume", action="store_true")
     hardware_description = commands.add_parser(
-        "describe-hardware", help="Offline validation of selected four-module hardware axes")
+        "describe-hardware", help="Offline validation of selected electrical, environment and optical axes")
     hardware_description.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
     hardware_run = commands.add_parser(
         "run", help="Authorize and run REAL selected-module writes/status reads using the TOML")
@@ -73,6 +73,10 @@ def run(argv: list[str] | None = None) -> int:
     hardware_run.add_argument("--authorize-cryostat", action="store_true",
                               help="Legacy authorization flag; run already authorizes selected axes")
     hardware_run.add_argument("--confirm-xy-sine-disconnected", action="store_true")
+    hardware_run.add_argument("--authorize-optical", action="store_true",
+                              help="Authorize optical connections, settings and configured emission")
+    hardware_run.add_argument("--confirm-optical-route", action="store_true",
+                              help="Confirm the configured manual optical route and sample limits")
     hardware_run.add_argument("--json", action="store_true", help="Full structured summary/result")
     monitor = commands.add_parser("monitor", help="Read SQLite; never query instruments")
     monitor.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
@@ -88,6 +92,8 @@ def run(argv: list[str] | None = None) -> int:
             print(json.dumps({"plan": config.snapshot, "conditions": config.plan.conditions()},
                              ensure_ascii=False, indent=2))
             return 0
+        if config.optical is not None and not (args.authorize_optical and args.confirm_optical_route):
+            raise ValueError("Optical runs require --authorize-optical and --confirm-optical-route")
         from .combination_launch import resolve_launch, check_run_destination, launch_summary
         database, run_id = resolve_launch(config, args.database, args.run_id)
         check_run_destination(database, run_id)
@@ -99,13 +105,17 @@ def run(argv: list[str] | None = None) -> int:
         # The approved daily run command itself authorizes the selected modules.
         # Legacy flags remain accepted; backend guards and TOML wiring stay strict.
         explicit = (args.authorize_electrical_combination
-                    and (config.lockin is None or args.confirm_xy_sine_disconnected)
+                    and (config.lockin is None or config.reference_topology == "pem_xy_xx_sine"
+                         or args.confirm_xy_sine_disconnected)
                     and (config.cryostat is None or args.authorize_cryostat))
         # Recheck the displayed, validated files immediately before connection.
         if hashlib.sha256(config.path.read_bytes()).hexdigest() != config.snapshot["config_sha256"]:
             raise ValueError("Configuration changed during launch; launch again to review it")
+        from .photonics_lockin_config import PHOTONICS_REFERENCE_TOPOLOGIES
+        safety_path = (Path(config.lockin.safety_path) if config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES
+                       else config.path.with_name("lockin_safety.toml"))
         if config.lockin is not None and hashlib.sha256(
-                config.path.with_name("lockin_safety.toml").read_bytes()).hexdigest() != \
+                safety_path.read_bytes()).hexdigest() != \
                 config.snapshot["hardware"]["lockin"]["safety_sha256"]:
             raise ValueError("Lock-in safety configuration changed during launch")
         config = replace(config, snapshot={**config.snapshot, "launch": {
@@ -117,7 +127,9 @@ def run(argv: list[str] | None = None) -> int:
                 confirm_xy_sine_disconnected=(config.lockin is not None
                     and not config.lockin.lockin_xy.sine_output_connected),
                 authorize_cryostat=config.cryostat is not None,
-                on_registered=lambda store, selected: register_run(config.path, store, selected))
+                on_registered=lambda store, selected: register_run(config.path, store, selected),
+                authorize_optical=args.authorize_optical,
+                confirm_optical_route=args.confirm_optical_route)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:

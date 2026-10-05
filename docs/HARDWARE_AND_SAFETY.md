@@ -1,5 +1,68 @@
 # Hardware and safety guide
 
+## New photonics profile precedence (updated 2026-10-05; offline implemented)
+
+Current user-confirmed wiring supersedes the earlier arrangement below for the
+explicit `pem_xy_xx_sine` profile: PEM REF OUT -> XY SR865A REF IN -> XY SINE OUT+
+-> XX SR830 REF IN; XX SINE OUT excites the sample. Both sine outputs are
+physically connected, but only XX reaches the sample. XX uses sine zero crossing,
+not a TTL edge. XY source amplitude/DC and unused BlazeX mode are verified and
+preserved without writes; source protection/cleanup applies to XX. No external
+50 ohm sample termination is present; the user also confirms the total sample/
+series-resistor load is much larger than 50 ohm (`high_impedance`). Instrument
+SLVL settings still do not establish the actual sample voltage.
+New-profile input shield grounding is explicitly configured as float or ground;
+the historical profile retains its float requirement. This stage authorizes
+read-only identity/settings queries, not output changes or illuminated acquisition.
+Single sequential frequency/settings readbacks are not complete lock acceptance.
+
+The current user request creates a separate
+[photonics / nonlinear Hall work package](modules/INTEGRATION_PHOTONICS_NONLINEAR_HALL.md).
+For this project, preserve `sqrt(Bx^2+Bz^2) <= 3 T`, including pure-axis operation.
+The historical single-Z 9 T policy and readback margins below do not authorize
+their use in the new profile. The new combination profile now applies this
+strict invariant to plans, transitions, actual readbacks and cleanup, with
+offline boundary tests. Real integrated commissioning remains pending.
+
+The user explicitly selects PEM REF OUT -> **external-reference lockin_xx** ->
+XX sync output -> external-reference lockin_xy for this profile. XX remains the
+SINE OUT excitation source/Vxx channel and XY SINE OUT remains disconnected.
+The ordinary internal-reference XX contract below and its existing scan code
+remain unchanged. Do not apply those setup/sweep paths to the new topology.
+The user subsequently confirmed SR865A for XX, with XY still SR830, and reports
+manual PEM-to-XX lock. This explicitly selected SR865A is a narrow exception to
+the historical excluded-model rule for the new photonics profile. Replacing XY
+with SR865A is only being considered. The approved adapter and point session
+are wired into the explicit `pem_xx_xy` combination profile; local fake tests
+do not certify real software acquisition or the complete physical cascade.
+Its BlazeX sync mode, source wiring/load/DC, independent input range and output
+scale must be verified; SR830 source/command/status assumptions cannot carry over.
+PEM-profile setup and cleanup must preserve external frequency ownership.
+The current task implements unified TOML and optical/electrical combination
+without connecting to instruments. Source wiring/load, zero DC/mode and allowed
+amplitude/cleanup values are explicit validated inputs. Fixed 24 dB/oct RC
+filters require at least 10 time constants; model input and output ranges are
+separate. All preflights precede settings, laser OFF precedes axis changes, and
+every PEM adjustment requires XX protection then reference requalification
+before restoring excitation/emission. Cleanup disables PEM only after explicit
+verified XX source protection; unknown output leaves the reference active or
+unknown, closes communication and requires manual verification. Formal power
+drift or invalid/unknown lock status rejects the point. See the
+[photonics guide](PHOTONICS_COMBINATION_SCAN_GUIDE.md).
+Earlier SR830 diagnostic authorization is not treated as authorization for new
+SR865A commissioning, NKT emission or full optical/electrical/environment scans.
+The SR865A manual describes sync as 2.5 V on printed page 62 and +/-2 V or
+0–2 V on printed page 98. Neither establishes the SR830's reliable >3.5 V TTL
+high condition. Do not infer XX-to-XY synchronization from PEM-to-XX success.
+Keep source/load/trigger observations and verify both stages independently.
+
+Historical dual-SR830 P1 diagnosis completed but TTL synchronization acceptance failed: XX
+remained unlocked even after PEM activation/stability. SR830 baseline restoration
+was verified; PEM disable ACK is not physical-off proof. The second diagnostic
+queried NKT OFF before/after with no SDK writes. No automatic retry or unreviewed
+trigger/level-conditioning change; see the
+[commissioning evidence](PEM_REFERENCE_COMMISSIONING_20261004.md).
+
 ## Opt-in SR830 overload acquisition policy (2026-09-29)
 
 At the user's request, `lockin_sweep.overload_policy` may explicitly allow
