@@ -1,5 +1,32 @@
 # Development stages
 
+## Unified plot legends and grid heatmaps (2026-10-06)
+
+- Added complete stacked-curve legends without the former 12-trace cap, including
+  units and explicit single-group values. Legend visibility persists in saved
+  setups. Multicolumn, wrapped labels expand the real canvas for curve and
+  four-channel figures, preserving exported labels without clipping.
+- Added the New heatmap card and clarified New XY-Z scatter. Heatmaps preserve
+  recorded requested grids where available, separate run/repetition/segment/
+  direction identities, and share a unit-bearing colorbar. Missing/excluded cells
+  are explicit gray masks; no interpolation or fabricated zeros. Raw is the
+  default, with mean/SD/SEM only for formal repeats in one condition. Different
+  conditions, attempts or axis-index visits at the same cell are rejected.
+- Exported raw readbacks, cell statistics, sample identities, facets, coordinates,
+  edges, masks and normalization remain auditable; the heatmap source is hashed.
+  Updated both notebook guides, README, DATA_ANALYSIS and the current handoff.
+- Target branch: **73 guarded tests passed** in 12.925 s with real hardware
+  imports/DLL loads blocked. Initial plotting checkout: 85 passed in 11.134 s. Coverage includes 15/60 labels, multiline branches, four-channel canvas
+  bounds, figure/data exports, setup round trips, exact/noisy/nonuniform grids,
+  repeated endpoints, invalid/missing cells, formal-repeat statistics and guards.
+  Notebook JSON/code compilation and diff whitespace checks passed; synthetic
+  stack and four-branch heatmap previews and export layouts were visually checked.
+- User-requested destination: `origin/codex/integration-four-module-scan`, with
+  plotting commit `bd3360a` transferred onto `ae93eee`. The temporary plotting
+  branch will be deleted after target publication is verified.
+  No hardware access or SSH deployment. Tests use available Matplotlib 3.9.2/
+  ipywidgets 7.8.1, with dependency pins unchanged.
+
 ## Unified magnetic tolerance and setpoint ACK (offline; 2026-10-01)
 
 - One explicit magnet.readback_tolerance_t (max 1.5 mT) governs each actual-axis

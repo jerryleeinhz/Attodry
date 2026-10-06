@@ -37,7 +37,8 @@ Restart an existing notebook kernel after updating the code, then run both cells
 1. Set **Data directory**, click **Refresh records**, and check the source files.
 2. Choose **X/Y**, or **Component** (R, X, Y, phase) for the four-channel view.
    It places Vxx h1/h2 above Vxy h1/h2; a varying actual Bx/Bz is selected when available.
-   Add independent curve, four-channel or XY–Z cards as needed.
+   Add independent curve, four-channel, **New XY–Z scatter** or **New heatmap**
+   cards as needed. Scatter colors measured points; heatmap colors grid cells.
 3. Choose **Raw observations**, **Mean ± SD**, or **Mean ± SEM**. Four-channel cards
    default to SD. Means combine only formal repeats in the same source/run/condition/
    attempt and recorded coordinate context. Runs, scan repetitions, directions,
@@ -60,10 +61,14 @@ Restart an existing notebook kernel after updating the code, then run both cells
    values and error intervals crossing zero. XY–Z shows raw measured points only,
    reports overlaps and applies no interpolation. Generic CSV units/independent
    dimensions are not inferred; without recorded condition IDs it supports Raw only.
+   **Show curve legend** is enabled by default; stacked curves retain every entry,
+   with units and recorded group identities, including more than 12 curves.
+   Large legends expand the figure and use multiple columns. Hiding the legend
+   changes only the display, not the exported observations.
 6. **Render this plot** or **Render all plots**, then **Export figures + data**.
    Edits clear the old figure and export state; changed files (including SQLite
    WAL changes) require refresh/re-render. Failed refresh cannot keep stale sources.
-7. **Save/Load setup** records sources, axes, filters, statistics, exclusions and audit
+7. **Save/Load setup** records sources, axes, filters, statistics, exclusions, legend and audit
    choices. Missing source files produce an error. Setup/export files are never
    overwritten.
 
@@ -91,6 +96,34 @@ and a measured Lock-in channel as Z; fix field/gate/temperature to select a slic
 Unsupported harmonics stay missing, and neither notebook inserts zeros or pools
 different frequencies into one error bar. Existing excitation-only databases
 remain readable without migration.
+
+### Grid heatmaps
+
+Click **New heatmap**, select X/Y and **Color Z**, then fix other changing
+acquisition conditions. For a magnetic/excitation scan, choose Bx or Bz, excitation
+and the desired Lock-in channel. Runs, scan repetitions and recorded sweep segments
+and directions are split into separate panels automatically. Repeated endpoints
+from different branches remain distinct; observations from different conditions or
+attempts at one cell are rejected rather than pooled.
+
+The grid uses archived `requested.*` coordinates when the selected `actual.*` axis
+has a recorded requested counterpart. Axis labels and the manifest identify this
+mapping; the raw actual readbacks remain in `selected_samples.csv`. This avoids
+turning readback jitter into extra grid columns. Ordinary CSV uses its selected
+numeric coordinates without assuming units or a planned grid.
+
+Heatmaps default to **Raw observations**, requiring one qualified formal sample per cell.
+Choose **Mean ± SD/SEM** for formal repeats within one condition; the cell displays
+the mean and the statistics export retains n/SD/SEM and contributing sample IDs.
+Gray cells mean missing, excluded or non-finite values, with a separate legend.
+No values are interpolated or filled with zero. At least two distinct X and Y
+coordinates are required in each panel; use a curve or scatter for a 1D selection.
+
+Every panel shares a color scale and a labeled, unit-bearing colorbar. Signed
+Lock-in X/Y signals use a diverging scale centered at zero; magnitudes use a
+sequential scale. Cell edges follow midpoints of the recorded coordinates,
+including nonuniform grids. The manifest records coordinates, edges, masks,
+facets and color normalization; `plotted_statistics.csv` records individual cells.
 
 This is voltage plotting and qualification, not H1→H2 frequency-response calibration.
 Small repeat scatter does not prove absence of clipping, drift or systematic error.

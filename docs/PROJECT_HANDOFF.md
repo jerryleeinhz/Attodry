@@ -1,8 +1,41 @@
 # Project handoff
 
-Last updated: 2026-10-01
+Last updated: 2026-10-06
 
 ## Current stage
+
+### Unified plot legends and grid heatmaps (2026-10-06)
+
+- User-approved plotting changes are transferred from commit `bd3360a` onto
+  `codex/integration-four-module-scan` at base `ae93eee`. The user requested this
+  origin destination and deletion of the temporary plotting branch on 2026-10-06.
+  No LK_setup deployment or instrument operation was performed for this feature.
+- Stacked curves retain every legend entry, including a single explicitly
+  selected group and more than 12 traces. Labels preserve group values/units and
+  varying recorded identities. Multicolumn legends expand both width and height
+  for wrapped text and four-channel panels; the visibility checkbox is saved in
+  setups and exports, and changes invalidate the previous render.
+- The existing XY-Z plot is labeled a color scatter. New grid heatmaps split
+  recorded runs/repetitions/segments/directions into panels with one common,
+  unit-labeled colorbar. Signed signals use a zero-centered diverging scale;
+  magnitudes use a sequential scale. Missing/excluded/non-finite cells are gray,
+  with a separate legend and no interpolation or zero filling.
+- Matching actual axes use archived requested coordinates, explicitly labeled;
+  actual readbacks remain in contributing raw exports. Nonuniform grids use
+  midpoint cell edges. Conflicting condition/attempt/axis-index visits cannot be
+  pooled. Raw requires one qualified formal sample per cell; means aggregate only
+  formal within-condition repeats and export n/SD/SEM and exact sample identities.
+- Exports include cell coordinates, facets, masks and normalization, plus the
+  heatmap implementation hash. Both notebook guides, README and DATA_ANALYSIS
+  describe the controls and restart requirement.
+- Target branch: **73 relevant guarded tests passed** in 12.925 s (unified
+  plotting, heatmap, scientific/report plotting and electrical analysis). The
+  initial plotting checkout passed 85 tests in 11.134 s. Real hardware
+  imports and DLL loading were blocked. Validation used local Anaconda Python
+  with user site disabled, Matplotlib 3.9.2 and ipywidgets 7.8.1; project dependency
+  pins are unchanged. Both notebook JSON/code cells compile without saved outputs,
+  and diff whitespace checks pass. Synthetic 15/60-trace and four-segment previews
+  were inspected, including exported PNG/PDF/SVG and canvas text boundaries.
 
 ### Unified magnetic readback/zero tolerance and register ACK (offline; 2026-10-01)
 

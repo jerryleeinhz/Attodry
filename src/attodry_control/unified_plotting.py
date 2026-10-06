@@ -17,6 +17,7 @@ import math
 import os
 from pathlib import Path
 import re
+import textwrap
 from typing import Any, Iterable, Mapping, Sequence
 
 from .analysis_observations import observation_id
@@ -642,7 +643,7 @@ def _draw_curve(axis, rows, spec, x, y):
     for index, (identity, group) in enumerate(groups.items()):
         points = repeat_statistics(group, x=x, y=y, mode=mode)
         summaries.extend({**p, "group": dict(identity), "channel": y} for p in points)
-        label = _series_label(identity, len(groups) > 1)
+        label = _series_label(identity, bool(identity))
         color = OKABE_ITO_ON_WHITE[index % len(OKABE_ITO_ON_WHITE)]
         xs = [p["x"] if _is_numeric(p["x"]) else float("nan") for p in points]
         ys = [p["y"] if _is_numeric(p["y"]) else float("nan") for p in points]
@@ -679,14 +680,29 @@ def _draw_curve(axis, rows, spec, x, y):
         if measured_x and min(measured_x) != max(measured_x):
             axis.set_xlim(min(measured_x), max(measured_x))
     style_axis(axis)
-    if len(groups) > 1 and len(groups) <= 12:
-        outside_legend(axis)
-    if len(groups) > 12:
-        axis.text(.01, .01, f"{len(groups)} separate traces; see exported group table", transform=axis.transAxes, fontsize=8)
+    legend_labels = []
+    if spec.get("show_legend", True) and (len(groups) > 1 or spec.get("group_by")):
+        handles, labels = axis.get_legend_handles_labels()
+        legend_labels = labels
+        columns = max(1, math.ceil(len(labels) / 16))
+        wrapped = [textwrap.fill(label, width=44, break_on_hyphens=False) for label in labels]
+        # Reserve real figure space: large legends must not shrink the data panel.
+        entries_per_column = math.ceil(len(wrapped) / columns)
+        column_heights = [sum(len(label.splitlines()) * 7 * 1.2 + 7 * .4
+                              for label in wrapped[start:start + entries_per_column]) / 72
+                          for start in range(0, len(wrapped), entries_per_column)]
+        grid = axis.get_subplotspec().get_gridspec()
+        width, height = axis.figure.get_size_inches()
+        axis.figure.set_size_inches(max(width, (7 + 3.2 * columns) * grid.ncols),
+                                    max(height, (max(column_heights, default=0) + 1.5) * grid.nrows, 5.5))
+        outside_legend(axis, handles, wrapped, ncols=columns, fontsize=7,
+                       columnspacing=1.1)
     report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **quality, "selected_row_count": len(rows), "plotted_row_count": len(valid),
               "omitted_missing_or_nonfinite_count": len(kept)-len(valid),
               "displayed_point_count": sum(_is_numeric(p["y"]) for p in summaries),
-              "statistics": mode, "replication_unit": "formal repeats within the same source/run/condition/attempt",
+              "statistics": mode, "legend_labels": legend_labels,
+              "show_legend": bool(spec.get("show_legend", True)),
+              "replication_unit": "formal repeats within the same source/run/condition/attempt",
               "uncertainty": "sample SD (ddof=1); SEM=SD/sqrt(n), independence assumed; undefined for n<2",
               "undefined_error_point_count": sum(p['n'] == 1 for p in summaries) if mode != 'raw' else 0,
               "source_paths": sorted({str(r.get("source_path")) for r in rows if r.get("source_path")})}
@@ -697,8 +713,8 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     """Render qualified observations; preserve raw provenance and explicit gaps."""
     from .analysis_observations import qualify_observations
     mode = spec.get("mode", "curve")
-    if mode not in ("curve", "xy_z", "field"):
-        raise ValueError("Plot mode must be curve, xy_z or field")
+    if mode not in ("curve", "xy_z", "field", "heatmap"):
+        raise ValueError("Plot mode must be curve, xy_z, field or heatmap")
     x, y = spec.get("x"), spec.get("y")
     if not x or (mode != "field" and not y):
         raise ValueError("Choose the required axes first.")
@@ -709,6 +725,9 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     eligible = tuple(r for r in selected if not r.get("_manual_excluded"))
     if not eligible:
         raise ValueError("No data rows remain after the selected filters.")
+    if mode == "heatmap":
+        from .plotting_heatmap import render_heatmap
+        return render_heatmap(selected, spec)
     z = spec.get("z") if mode == "xy_z" else None
     plot_keys = [k for k in (x, y, z) if k]
     if mode == "field":
@@ -903,6 +922,7 @@ def export_plot_bundle(
         }),
         "statistics_source_sha256": hashlib.sha256(Path(__file__).with_name("analysis_observations.py").read_bytes()).hexdigest(),
         "plotting_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "heatmap_source_sha256": hashlib.sha256(Path(__file__).with_name("plotting_heatmap.py").read_bytes()).hexdigest(),
     }
     (destination / "plot_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False),
@@ -1018,12 +1038,13 @@ class UnifiedPlotDashboard:
         self.refresh_button = widgets.Button(description="Refresh records", icon="refresh")
         self.add_curve_button = widgets.Button(description="New curve plot", icon="plus")
         self.add_field_button = widgets.Button(description="Four lock-in channels", icon="plus")
-        self.add_map_button = widgets.Button(description="New XY–Z plot", icon="plus")
+        self.add_map_button = widgets.Button(description="New XY–Z scatter", icon="plus")
+        self.add_heatmap_button = widgets.Button(description="New heatmap", icon="plus")
         self.render_button = widgets.Button(description="Render all plots", button_style="primary")
         self.export_button = widgets.Button(description="Export figures + data", icon="download")
         self.save_button = widgets.Button(description="Save setup", icon="save")
         self.load_button = widgets.Button(description="Load setup", icon="upload")
-        for button in (self.refresh_button, self.add_curve_button, self.add_map_button,
+        for button in (self.refresh_button, self.add_curve_button, self.add_map_button, self.add_heatmap_button,
                        self.add_field_button, self.render_button, self.export_button,
                        self.save_button, self.load_button):
             button.layout.width = "auto"
@@ -1033,6 +1054,7 @@ class UnifiedPlotDashboard:
         self.add_curve_button.on_click(lambda _button: self.add_plot("curve"))
         self.add_field_button.on_click(lambda _button: self.add_plot("field"))
         self.add_map_button.on_click(lambda _button: self.add_plot("xy_z"))
+        self.add_heatmap_button.on_click(lambda _button: self.add_plot("heatmap"))
         self.render_button.on_click(self._render_all)
         self.export_button.on_click(self._export)
         self.save_button.on_click(self._save_setup)
@@ -1043,7 +1065,7 @@ class UnifiedPlotDashboard:
             widgets.HBox([self.refresh_button, self.include_audit]),
             self.status,
             self.card_box,
-            widgets.HBox([self.add_curve_button, self.add_map_button, self.add_field_button, self.render_button], layout=widgets.Layout(flex_flow="row wrap")),
+            widgets.HBox([self.add_curve_button, self.add_map_button, self.add_heatmap_button, self.add_field_button, self.render_button], layout=widgets.Layout(flex_flow="row wrap")),
             self.output_directory,
             widgets.HBox([self.export_button]),
             self.configuration_path,
@@ -1052,8 +1074,8 @@ class UnifiedPlotDashboard:
         self._refresh()
 
     def add_plot(self, mode: str, saved: Mapping[str, Any] | None = None) -> None:
-        if mode not in {"curve", "xy_z", "field"}:
-            raise ValueError("Plot mode must be curve, xy_z or field")
+        if mode not in {"curve", "xy_z", "field", "heatmap"}:
+            raise ValueError("Plot mode must be curve, xy_z, field or heatmap")
         widgets = self.widgets
         card_id = self._next_card_id
         self._next_card_id += 1
@@ -1067,8 +1089,11 @@ class UnifiedPlotDashboard:
         x_axis, y_axis = axis("X:"), axis("Y:")
         z_axis = axis("Color Z:")
         group_axis = widgets.Dropdown(
-            options=[("None", "")], description="Stack/group:", layout=widgets.Layout(width="100%")
+            options=[("None", "")], description="Stack/group:", disabled=mode in {"xy_z", "heatmap"},
+            layout=widgets.Layout(width="100%")
         )
+        show_legend = widgets.Checkbox(value=bool(default_spec.get("show_legend", True)),
+                                      description="Show curve legend", disabled=mode in {"xy_z", "heatmap"})
         curve_style = widgets.Dropdown(
             options=[("Line + points", "line+points"), ("Points only", "points"), ("Lines only", "line")],
             value=str(default_spec.get("curve_style", "line+points")), description="Style:",
@@ -1101,18 +1126,21 @@ class UnifiedPlotDashboard:
             "id": card_id, "mode": mode, "title": title, "sources": checklist,
             "x": x_axis, "y": y_axis, "z": z_axis, "group": group_axis,
             "curve_style": curve_style, "x_scale": x_scale, "y_scale": y_scale,
+            "show_legend": show_legend,
             "filter_box": filter_box, "filters": [], "output": output,
             "figure": None, "rendered": None, "updating": False,
             "statistics": statistics, "quality": quality, "component": component, "excluded": excluded,
             "image": figure_image,
         }
         card["widget"] = widgets.VBox([
-            widgets.HTML(f"<h3>Plot {card_id}: {'Four lock-in channels' if mode == 'field' else 'Curve / stacked' if mode == 'curve' else 'XY–Z color map'}</h3>"),
+            widgets.HTML(f"<h3>Plot {card_id}: {'Four lock-in channels' if mode == 'field' else 'Curve / stacked' if mode == 'curve' else 'Grid heatmap' if mode == 'heatmap' else 'XY–Z color scatter'}</h3>"),
             title,
             widgets.HTML("<b>Choose one or more data sources</b>"),
             checklist.widget,
             widgets.HBox([x_axis, component if mode == "field" else y_axis], layout=widgets.Layout(width="100%")),
-            group_axis if mode != "xy_z" else z_axis,
+            group_axis if mode in {"curve", "field"} else z_axis,
+            show_legend,
+            widgets.HTML("Heatmap: recorded requested grid when available; runs and sweep segments are separate panels. Gray means missing/excluded. Raw requires one sample per cell; choose Mean for formal repeats. No interpolation." if mode == "heatmap" else "XY–Z scatter retains measured coordinates. Use a segment filter to view one hysteresis branch." if mode == "xy_z" else "Curve legends remain visible for more than 12 traces."),
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
             widgets.HTML("SD: scatter of formal repeats; SEM: SD/√n assumes independent repeats. Missing status stays unknown. n and exclusions are exported."),
             excluded,
@@ -1127,7 +1155,7 @@ class UnifiedPlotDashboard:
         remove_button.on_click(lambda _button, target=card: self._remove_card(target))
         render_card_button.on_click(lambda _button, target=card: self._render_card(target))
         add_filter_button.on_click(lambda _button, target=card: self._add_filter(target))
-        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded):
+        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded, show_legend):
             control.observe(lambda _change, target=card: self._card_changed(target), names="value")
         self.cards.append(card)
         self.card_box.children = tuple(item["widget"] for item in self.cards)
@@ -1311,6 +1339,7 @@ class UnifiedPlotDashboard:
             "x": card["x"].value, "y": card["y"].value, "z": card["z"].value,
             "group_by": group or None,
             "curve_style": card["curve_style"].value,
+            "show_legend": bool(card["show_legend"].value),
             "x_scale": card["x_scale"].value, "y_scale": card["y_scale"].value,
             "filters": filters,
             "statistics": card["statistics"].value, "quality_policy": card["quality"].value,
@@ -1408,7 +1437,7 @@ class UnifiedPlotDashboard:
             missing = {p for spec in payload.get("plots", []) for p in spec.get("source_paths", [])} - available
             if missing:
                 raise ValueError("Setup sources are missing: " + ", ".join(sorted(missing)))
-            if any(spec.get("mode") not in ("curve", "xy_z", "field") for spec in payload.get("plots", [])):
+            if any(spec.get("mode") not in ("curve", "xy_z", "field", "heatmap") for spec in payload.get("plots", [])):
                 raise ValueError("Unsupported plot mode in setup.")
             self.directory.value = str(payload["data_directory"])
             self.include_audit.value = bool(payload.get("include_audit", False))
