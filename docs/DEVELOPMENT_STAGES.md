@@ -1,5 +1,20 @@
 # Development stages
 
+## Photonics sensitivity and reserve documentation (2026-10-06)
+
+- Adds all 28 SR865A voltage sensitivity/SCAL entries (1 V down to 1 nV),
+  checked against SRS manual revision 2.11, printed page 113, and source tables.
+  The photonics guide distinguishes hardware capability from each role's
+  existing safety allowlist; no allowed full-scale value is added by this update.
+- Portable and station TOML annotations list complete SR830/SR865A voltage
+  choices and explain SR830 high_reserve/normal/low_noise (RMOD 0/1/2).
+  The station already selects low_noise; annotation changes preserve all parsed
+  configuration values, including operator-selected harmonics/input ranges.
+- Existing adapters/parsers support all these choices; no production source
+  change or instrument I/O is required. All 146 related guarded fake tests pass,
+  plus table/capability equality and three reserve-mode configure/readback checks.
+  Deployment uses file hashes, a no-active-run/owner guard and file backups.
+
 ## User-authorized source publication (2026-10-05)
 
 - The user now authorizes committing and pushing the accumulated photonics

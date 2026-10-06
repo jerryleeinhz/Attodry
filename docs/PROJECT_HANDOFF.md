@@ -1,8 +1,24 @@
 # Project handoff
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 ## Current stage
+
+### Photonics sensitivity and reserve documentation (2026-10-06)
+
+- The guide now lists the complete 28-entry SR865A SCAL voltage table, 1 V to
+  1 nV, verified against SRS manual revision 2.11, printed page 113, and the
+  physical-unit capability table. Hardware entries remain subject to each
+  semantic role's existing allowed_fixed_full_scales_v; the allowlist is unchanged.
+- TOML annotations enumerate both models' voltage sensitivities and SR830
+  high_reserve/normal/low_noise, mapped to RMOD 0/1/2. The station's existing
+  low_noise selection and all other parsed operating values are preserved.
+  SR865A IRNG remains a separate setting, without an SR830 reserve-mode field.
+- No adapter/parser changes or hardware commands. Verification passes 146
+  guarded fake regressions, complete doc/comment-to-capability checks and
+  configure/readback for all three reserve modes. File-only station deployment
+  requires an idle acquisition lease, no active SQLite run, unchanged before
+  hashes, backups and exact after hashes; raw scan/config data are not modified.
 
 ### Source publication to origin (2026-10-05)
 

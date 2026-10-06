@@ -116,6 +116,11 @@ filter_slope_db_oct = 24
 # 当前光电profile只支持 fixed，不接受旧 bounded_auto。
 sensitivity_mode = "fixed"
 # 离散灵敏度档，且必须在本路 safety allowlist；如0.001=1mV、0.01=10mV。
+# SR830 电压灵敏度完整选项（单位 V，SENS 0..26，2 nV..1 V）：
+# 2e-9, 5e-9, 10e-9, 20e-9, 50e-9, 100e-9, 200e-9, 500e-9,
+# 1e-6, 2e-6, 5e-6, 10e-6, 20e-6, 50e-6, 100e-6, 200e-6, 500e-6,
+# 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0。
+# 实验可填值还必须属于 safety_file 中 [lockin_xx].allowed_fixed_full_scales_v。
 sensitivity_full_scale_v = "CHANGE_ME_XX_FULL_SCALE_V"
 # 数字-180..180度；设置PHAS，不是测量结果phase_deg，不自动标定。
 phase_shift_deg = "CHANGE_ME_XX_PHASE_DEG"
@@ -123,7 +128,12 @@ phase_shift_deg = "CHANGE_ME_XX_PHASE_DEG"
 harmonics = [1]
 
 [lockin_xx.sr830]
-# high_reserve / normal / low_noise；不是SR865A的Input Range。
+# reserve_mode 可选："high_reserve" / "normal" / "low_noise"（区分大小写）。
+# high_reserve = 最大可用动态储备（RMOD 0），normal = 中间储备（RMOD 1），
+# low_noise = 最小可用储备（RMOD 2）；实际 dB 随灵敏度档变化。
+# 这不是 sensitivity 满量程，也不是 SR865A 的 input_range_v_peak。
+# 例如将下面这一行替换为 reserve_mode = "low_noise" 或 reserve_mode = "normal"；
+# 只保留一个有效 reserve_mode，且必须放在这个 sr830 子表内。
 reserve_mode = "CHANGE_ME_XX_RESERVE_MODE"
 
 [lockin_xy]
@@ -141,6 +151,12 @@ input_coupling = "ac"
 time_constant_s = 1.0
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"
+# SR865A 电压灵敏度完整选项（单位 V，SCAL 0..27，1 V..1 nV）：
+# 1.0, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001,
+# 500e-6, 200e-6, 100e-6, 50e-6, 20e-6, 10e-6, 5e-6, 2e-6, 1e-6,
+# 500e-9, 200e-9, 100e-9, 50e-9, 20e-9, 10e-9, 5e-9, 2e-9, 1e-9。
+# 实验可填值还必须属于 safety_file 中 [lockin_xy].allowed_fixed_full_scales_v。
+# 此处控制 SCAL 输出满量程；前端总输入峰值范围由下面的 IRNG 独立设置。
 sensitivity_full_scale_v = "CHANGE_ME_XY_FULL_SCALE_V"
 # 当前读回PHAS若来自h1，填入不代表h2相位已标定。
 phase_shift_deg = "CHANGE_ME_XY_PHASE_DEG"
