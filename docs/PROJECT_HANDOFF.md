@@ -4,6 +4,40 @@ Last updated: 2026-10-07
 
 ## Current stage
 
+### Authorized 1 V input range: real excitation sweep completed (2026-10-07)
+
+- The user explicitly selected XY front-end IRNG 1 V peak with Sensitivity
+  retaining the existing TOML 20 mV. The private configuration changed only
+  `lockin_xy.sr865a.input_range_v_peak: 0.3 -> 1.0`; original bytes and all
+  rejected runs below remain preserved. The previous stop did not authorize
+  bypassing status checks; this new range choice was separately authorized.
+- After confirming acquisition exit and the same known file-only analysis
+  owners, aligned native IRNG to 1 V and SCAL to the original 20 mV target at
+  XX 4 mVrms. Settled diagnostics and a separate final six-read baseline were
+  clean/locked, with XY phase and unused source/offset/DC/sync settings unchanged.
+- A uniquely claimed hidden standalone `sweep-excitation --authorize-writes`
+  launched supervisor PID 6956 / scan PID 14008. SSH exit survival/identities
+  were checked; subsequent monitoring read only progress/result files.
+  The scan exited **0 at 2026-10-07T17:38:06Z**, with all **15** original linear
+  0.7–5 Vrms points at **5 kHz**, selected XX h1 / XY h2, three samples per
+  selection, TC 1 s, settle 15 TC and unchanged policy/other parameters.
+- Independent result audit verified **90 raw formal pairs**, including **45
+  selected formal readings per role**. Selected XX/XY overload, invalid,
+  nonfinite, instrument-error and unlocked counts were all zero. These quality
+  counts describe this run; they do not retroactively validate earlier failures.
+- Cleanup was attempted and `verified=true, errors=[]`. Last native confirmation
+  **2026-10-07T17:38:05Z**: XX 4 mVrms/h1/1 V/Low Noise, status/error zero;
+  XY h1/20 mV/IRNG 1 V peak, current/latch/error/ESR zero and locked. XY unused
+  approximately 0.4 Vrms source and PHAS remained preserved, not disabled.
+  No magnetic, SMU, temperature or optical module was opened. This verifies the
+  stated standalone mixed sweep, not every acquisition mode/frequency.
+- Result: ignored station `run_data/commissioning/20261007T173805736310Z_BL_CrSBr-b-axis_e-sweep-back-from-optics_excitation_completed.json`.
+  Baselines, original configuration, launch identities and independent certificate:
+  `run_data/operator_lockin_irng1_20261007T171844718348Z`.
+  Config SHA256 `751e2cc828f73c561f0dbdb440e0b0f7b017954c1e1b1d611d3d63ae3b352ecd`.
+  The Reserve-before-SENS ordering issue recorded below remains in source;
+  actual XX gain was already aligned before this successful attempt.
+
 ### Real mixed excitation attempt stopped for input review (2026-10-07)
 
 - The authorized current-TOML standalone excitation sweep did not acquire any

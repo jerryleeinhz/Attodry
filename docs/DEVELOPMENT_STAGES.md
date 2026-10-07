@@ -1,5 +1,29 @@
 # Development stages
 
+## Real standalone mixed sweep completed after authorized IRNG change (2026-10-07)
+
+- User selected XY IRNG 1 V peak, keeping the original configured Sensitivity
+  20 mV. Only that private TOML field changed; original configuration and all
+  earlier failed records were preserved. No experimental grid/timing/source/
+  grounding/phase/policy change and no status gate bypass.
+- Independently verified minimum-source baseline after native IRNG/SCAL alignment
+  and before unique hidden launch. Supervisor 6956 / scan 14008 identities and
+  survival after SSH exit were confirmed; monitored solely through saved files.
+- Exit 0 at 2026-10-07T17:38:06Z. Independently audited all original 15 linear
+  0.7–5 Vrms points at 5 kHz, selected XX h1 / XY h2, three samples per selection,
+  TC 1 s / settle 15 TC. 90 raw formal pairs; selected formal readings 45 per
+  role, with zero overload/invalid/nonfinite/error/unlocked counts for each.
+- Cleanup attempted/verified with no errors. Last confirmation 17:38:05Z:
+  XX 4 mVrms/h1/1 V/Low Noise and zero status/error; XY h1/20 mV/IRNG 1 V peak,
+  locked and zero current/latch/error/ESR. Unused XY source/offset/DC/sync/phase
+  preserved. Actual XX gain was aligned before launch; the prior setup ordering
+  issue is still unresolved in source. No other hardware module was opened.
+- Evidence is in ignored station run data: completed JSON stamped
+  `20261007T173805736310Z` and operator audit
+  `operator_lockin_irng1_20261007T171844718348Z`. Real verification is limited to
+  this stated standalone mixed sweep. Documentation-only follow-up uses diff
+  checks; existing source regression coverage remains the 211 guarded tests.
+
 ## Real mixed excitation attempt: failed/manual review (2026-10-07)
 
 - Ran the user's current standalone excitation TOML with explicit write
