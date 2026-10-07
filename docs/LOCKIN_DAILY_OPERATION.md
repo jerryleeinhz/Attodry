@@ -25,6 +25,49 @@ SCAL 对应 `sensitivity_full_scale_v`，固定与 bounded_auto 仍受
 `lockin_safety.toml` 物理量白名单约束。参考阻抗明确选择 50 或 1000000 Ω。
 TC/滤波使用型号自己的离散表；输入仍限制为 A-B、Float、AC、TTL rising。
 
+### SR865A 电压输入量程与 Sensitivity 允许值
+
+电压输入量程的命令名是 **IRNG**（不是 IRIN），对应
+`[lockin_xy.sr865a].input_range_v_peak`；Sensitivity 命令是 **SCAL**，对应
+`[lockin_xy].sensitivity_full_scale_v`。TOML 填写以 V 为单位的物理值，
+不要填下表中的硬件整数代码。两项独立：IRNG 决定输入模拟增益/过载边界，
+SCAL 决定显示和模拟输出满量程，改变 SCAL 不会消除输入过载。
+
+| IRNG 代码 | 输入峰值量程 | TOML `input_range_v_peak` |
+| --- | --- | --- |
+| 0 | 1 V peak | `1.0` |
+| 1 | 300 mV peak | `0.3` |
+| 2 | 100 mV peak | `0.1` |
+| 3 | 30 mV peak | `0.03` |
+| 4 | 10 mV peak | `0.01` |
+
+SR865A 电压模式的 SCAL 硬件完整档位如下，顺序即原生代码 0 至 27：
+
+| 单位 | 离散 Sensitivity 档位（由大到小） | SCAL 代码 |
+| --- | --- | --- |
+| V | 1 | 0 |
+| mV | 500、200、100、50、20、10、5、2、1 | 1–9 |
+| µV | 500、200、100、50、20、10、5、2、1 | 10–18 |
+| nV | 500、200、100、50、20、10、5、2、1 | 19–27 |
+
+**硬件支持不等于本项目允许使用。** 当前仓库
+`config/lockin_safety.toml` 的 XY 固定量程白名单为 **1、2、10、20、50、100 mV**，
+对应 TOML 值 `0.001, 0.002, 0.010, 0.020, 0.050, 0.100`。固定基准和分谐波固定
+设置都必须通过这个白名单及型号硬件档位检查；其它硬件档位不会自动获准。
+当前 XY bounded-auto 只接受文件中明确列出的阶梯：
+`[0.001, 0.010]`、`[0.002, 0.010]`、`[0.010, 0.020, 0.050]` V。
+IRNG 不跟随 SCAL autorange 自动改变，整个 run 使用配置的固定输入峰值量程。
+
+例如 `sensitivity_full_scale_v = 0.02` 表示 20 mV、原生 `SCAL 5`；
+`input_range_v_peak = 0.1` 表示 100 mV peak、原生 `IRNG 2`。
+IRNG 应容纳输入端的总瞬时信号，包括基波、其它频率和噪声，不能仅凭所选 h2 的
+幅值推断合适档位。当前接收机只支持电压 A-B 模式，不启用电流量程控制。
+
+硬件依据：[SRS SR865A 手册](https://www.thinksrs.com/downloads/pdfs/manuals/SR865Am.pdf)
+印刷页 112–113（PDF 第 130–131 页）；软件映射见
+`src/attodry_control/sr865a_settings.py`，实际项目许可见本机同目录的
+`lockin_safety.toml`。上述项目白名单描述仓库当前版本，本机文件仍必须严格校验。
+
 SR865A 不接受 Reserve 或 SR830 line-notch 设置。PHAS 与未使用的
 SLVL/SOFF/REFM/BLAZEX 保留；测量滤波 ADVFILT/SYNC 另行禁用并校验。
 原生状态与原始命令保留型号信息，XY 输出量程过载和未知状态始终阻断。
@@ -283,16 +326,20 @@ python -m attodry_control.lockin_test validate-config
 它只解析两个 TOML 并输出安全策略摘要，绝不会打开 VISA 或写 SR830。日常操作者通常
 只修改被 Git 忽略的 `hardware.local.toml`；需要扩大项目允许量程或改变占用率/稳定样本
 策略时，维护者才编辑并提交 `config/lockin_safety.toml`，同时更新测试和文档。该文件
-当前允许 fixed 的 1、10、20、50 mV 以及 XX 的 1 V；XX 的 bounded-auto 阶梯为 10→20→50 mV，XY
-为 1→10 mV，阈值 0.85、缩窄前 2 个连续稳定样本。SR830 的完整硬件映射（包括 1 V，
+当前 XX fixed 允许 1、10、20、50 mV 和 1 V；XY fixed 允许 1、2、10、20、50、100 mV。
+XX bounded-auto 阶梯包括 10→20、20→50 和 10→20→50 mV；XY 包括 1→10、2→10
+和 10→20→50 mV。阈值为 0.85、缩窄前需 2 个连续稳定样本。SR830 的完整硬件映射（包括 1 V，
 代码 26）存在于驱动层，但不等于日常安全白名单。
 
-每个角色还必须在 TOML 中填写 `reserve_mode`：`"high_reserve"`（RMOD 0）、
+每个 **SR830** 角色还必须在 TOML 中填写 `reserve_mode`：`"high_reserve"`（RMOD 0）、
 `"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。它只由该角色的
 `hardware.local.toml` 选择，不再在 `lockin_safety.toml` 重复维护白名单；日常默认仍是
 `"normal"`。Sweep 会记录原始 RMOD、目标模式、读回和转换状态，并在 cleanup 时保持
 TOML 指定的 RMOD，而不是恢复扫描前的任意面板值。Reserve 写入始终在降低 SINE OUT 后进行，读回与状态确认失败会 fail
 closed。
+
+SR865A XY 没有 Reserve 配置，禁止填写 `reserve_mode`，包括分谐波子表；
+其 IRNG/SCAL 和项目允许值见本页开头的 SR865A 表格。
 
 ### Reserve dB、内部增益分配和选择方法
 

@@ -1,7 +1,28 @@
 # Development stages
 
+## Standing delivery instruction and documentation synchronization (2026-10-07)
+
+- Recorded the user's standing instruction in `AGENTS.md` and the current
+  handoff: publish completed authorized changes to
+  `origin/codex/integration-four-module-scan` and fast-forward tracked files on
+  `LK_setup` in `C:/Users/LK_Setup/Yuanrong Li/Integration`.
+- Delivery requires branch/local-change/process checks and preserves local
+  hardware configuration, data, secrets and user changes. Active acquisition
+  source must not change; blocked target updates are reported and deferred.
+  Software delivery does not authorize instrument operations or commissioning.
+- The target already contained feature commit `4271672` with a clean tracked
+  working tree at 2026-10-07T16:30:07Z. This follow-up clarifies SR865A range
+  documentation and delivery instructions; no production code or policy changes.
+- Follow-up verification: 47 guarded offline SR865A driver/configuration tests
+  passed; documented native tables/project allowlists and diff whitespace were
+  checked. No instrument I/O or configuration/data changes.
+
 ## Electrical SR865A receiver and run-scoped notebook cache (offline; 2026-10-07)
 
+- Documentation clarification: LOCKIN_DAILY_OPERATION now lists all five native
+  IRNG ranges, all 28 SCAL voltage full scales, their TOML units/native codes,
+  and the separate current XY fixed/auto project allowlists. Reserve prose is
+  explicitly limited to SR830. Hardware tables/project limits are unchanged.
 - User approved adapting the committed lock-in/notebook implementation from
   `integration-photonics-nonlinear-hall` (`6e90df9a5270e3909be88d1a7ba84c6b7288cc2b`).
   Native SR865A driver, settings and model capability modules match that commit;
