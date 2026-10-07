@@ -1,5 +1,29 @@
 # Development stages
 
+## Real mixed excitation attempt: failed/manual review (2026-10-07)
+
+- Ran the user's current standalone excitation TOML with explicit write
+  authorization and unchanged experimental parameters. Three uniquely audited
+  attempts exited 2 before formal points/samples: frequency preflight, native XY
+  preflight status, and XX overload during Reserve setup. Original failed
+  results/cleanup records remain unchanged; real commissioning is incomplete.
+- Frequency fix `204e682` is pushed to the existing origin branch and synchronized
+  to LK_setup; 211 guarded offline tests passed on both computers.
+- XX was at 20 mV sensitivity when setup lowered Reserve to Low Noise, before
+  applying the configured 1 V range. Record the executor's Reserve-before-SENS
+  ordering as an unresolved setup issue. An independently audited alignment to
+  the original 1 V target at minimum excitation subsequently verified XX at
+  4 mVrms/h1, Low Noise and zero status/error. This does not certify the failed
+  run's cleanup, which remains `verified=false`.
+- New XY input-overload latch 16 recurred at the minimum XX baseline despite
+  clean instantaneous status and earlier clean diagnostics. Final native status
+  was clean/locked at 2026-10-07T17:09:54Z, but further scans were stopped pending
+  physical input review. IRNG/SCAL/source/grounding/phase/sweep settings were not
+  widened or changed to bypass the fault; the private TOML bytes are unchanged.
+- Scan/supervisor exit was confirmed. Independent stop records remain in ignored
+  station run data; no other hardware modules were opened. Documentation-only
+  follow-up requires whitespace checks; source coverage remains the 211 tests.
+
 ## SR865A external-frequency readback correction (2026-10-07)
 
 - The user authorized a real standalone excitation sweep with the current TOML

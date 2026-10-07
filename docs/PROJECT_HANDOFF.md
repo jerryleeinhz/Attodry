@@ -4,6 +4,41 @@ Last updated: 2026-10-07
 
 ## Current stage
 
+### Real mixed excitation attempt stopped for input review (2026-10-07)
+
+- The authorized current-TOML standalone excitation sweep did not acquire any
+  formal points or samples. Three unique attempts exited with code 2: frequency
+  consistency preflight rejection; native XY preflight status rejection; then
+  XX input/reserve overload during the Reserve transition. Preserve all rejected
+  records and the third run's `cleanup.verified=false`; later diagnostics or
+  gain alignment do not convert that failed run into a successful/clean run.
+- The frequency correction below was delivered to the existing origin branch
+  and LK_setup at `204e682bc62e149e3312a362226605b203270a53`; the 211 guarded
+  offline tests passed locally and on the station. No TOML bytes changed.
+- The third attempt applied Low Noise while XX still had its original 20 mV
+  sensitivity. The executor configures Reserve before configured Sensitivity;
+  lowering Reserve before widening to the requested 1 V caused the transition
+  rejection. This ordering issue remains in source. After scan/supervisor exit,
+  at confirmed minimum excitation, a separately audited XX `SENS 26` aligned
+  actual gain to the existing 1 V TOML target. After settling, the last confirmed
+  XX readback was 4 mVrms / h1 / 1 V / Low Noise, error/status zero.
+- XY native input-overload latch 16 recurred at that 4 mVrms XX baseline after
+  earlier clean reads. Instantaneous current status was zero; the final read
+  also had clean latches and a locked reference, but those observations do not
+  establish sustained input health. Stop further excitation until physical XY
+  input/reference/grounding review. Do not bypass the gate or change IRNG, SCAL,
+  grounding, the excitation grid or overload policy to force a run.
+- Last independent confirmation: 2026-10-07T17:09:54Z. XY actual IRNG was
+  0.3 V peak and SCAL 2 mV; the requested 20 mV sweep setting was never reached.
+  Its unused source stayed at the original approximately 0.4 Vrms, with source
+  offset/reference/DC/phase preserved; do not describe it as output OFF.
+  This is a historical readback, not a claim of current state or commissioning
+  completion. All acquisition/supervisor processes were verified exited; the
+  identified file-only analysis Jupyter sessions were left running.
+- Independent operator audit and stop summary are under ignored station
+  `run_data/operator_lockin_20261007T1702388675987Z`; rejected results remain in
+  `run_data/commissioning`. No magnetic, SMU, temperature or optical I/O occurred.
+
 ### SR865A external-frequency readback correction (2026-10-07)
 
 - User explicitly authorized connecting to LK_setup and running the current
