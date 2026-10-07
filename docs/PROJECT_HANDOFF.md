@@ -4,6 +4,22 @@ Last updated: 2026-10-07
 
 ## Current stage
 
+### Daily excitation command authorization (2026-10-07)
+
+- User approved removing repeated `--authorize-writes` from the commissioned
+  standalone `sweep-excitation` entry and requested one subsequent real sweep.
+  Only that command propagates run authorization to the mixed receiver; the
+  legacy flag stays compatible. Results record `write_authorization=run_command`.
+- Mixed frequency and frequency/excitation sweeps and commissioning/apply-toml
+  retain their explicit authorization gates. No TOML/grid/timing/range/status/
+  readback/cleanup policy changes. Fake-resource regression covers both flag
+  forms, preserved receiver source, cleanup, unknown-status rejection and
+  pre-I/O rejection of the other mixed sweep entries.
+- Local verification: all 213 relevant lock-in tests passed with real VISA,
+  serial/QCoDeS imports and DLL loads blocked; `git diff --check` passed.
+- Real rerun remains pending deployment and a fresh exclusive baseline; prior
+  completed and rejected runs below remain independent records.
+
 ### Authorized 1 V input range: real excitation sweep completed (2026-10-07)
 
 - The user explicitly selected XY front-end IRNG 1 V peak with Sensitivity

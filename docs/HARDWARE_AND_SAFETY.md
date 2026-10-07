@@ -21,9 +21,13 @@ returns XX excitation to 4 mV, then verifies h1, native measurement settings,
 input range and unchanged XY source state. Exact-zero SR865A X/Y has undefined
 phase, archived as null. Magnetic, SMU and temperature policies are unchanged.
 
-Mixed standalone sweeps require `--authorize-writes` before any instrument I/O.
-Combination and temperature–excitation propagate existing run authorization;
-the receiver/station cannot grant itself authorization. Legacy dual-SR830
+The commissioned daily `sweep-excitation` command carries operator write
+authorization; `--authorize-writes` remains accepted for compatibility.
+Mixed frequency and frequency/excitation sweeps still require that explicit
+flag before any instrument I/O. Combination and temperature–excitation
+propagate existing run authorization; the receiver/station cannot grant itself
+authorization. Configuration, status, wiring, readback and cleanup gates remain
+unchanged. Legacy dual-SR830
 commissioning commands reject mixed pairs before connection. See
 [configuration and scope](LOCKIN_DAILY_OPERATION.md#sr865a-作为-xy-接收机).
 

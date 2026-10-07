@@ -452,7 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     excitation_sweep = subparsers.add_parser(
         "sweep-excitation",
-        help="Sweep lockin_xx SINE OUT and record nominal path current.",
+        help="Run the configured excitation sweep; this command authorizes writes.",
     )
     _add_pair_arguments(excitation_sweep, hide_overrides=True)
     _add_sweep_arguments(excitation_sweep, hide_overrides=True)
@@ -577,7 +577,7 @@ def _add_sweep_arguments(
     parser: argparse.ArgumentParser, *, hide_overrides: bool = False
 ) -> None:
     parser.add_argument("--authorize-writes", action="store_true",
-                        help="Explicitly authorize a mixed SR830/SR865A electrical sweep.")
+                        help="Required for mixed frequency sweeps; optional for sweep-excitation.")
     override_help = argparse.SUPPRESS if hide_overrides else None
     parser.add_argument(
         "--samples-per-point", type=_positive_integer, help=override_help
@@ -2150,6 +2150,8 @@ def _run_excitation_sweep(
     args: argparse.Namespace, factory: Callable[[], object]
 ) -> int:
     settings = _resolve_pair_settings(args)
+    # This commissioned daily write command carries the operator's run authorization.
+    settings["authorize_writes"] = True
     _require_mixed_write_authorization(settings)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _resolve_sweep_settings(args, settings, scan="excitation")
@@ -2183,6 +2185,7 @@ def _run_excitation_sweep(
                 point=point,
             ),
         )
+        result["write_authorization"] = "run_command"
         _emit_sweep_result(record_directory, result, progress_writer=progress_writer)
         if failure is not None:
             raise failure

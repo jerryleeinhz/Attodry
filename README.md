@@ -2,9 +2,11 @@
 
 用于 attoDRY2100XL、按 XX/XY 角色配置的锁相放大器和栅极 SMU 的低温输运测量项目。
 
-2026-10-07：新增 SR865A 作为 `lockin_xy` 接收机的离线适配，XX 仍由 SR830 提供
+2026-10-07：新增 SR865A 作为 `lockin_xy` 接收机的适配，XX 仍由 SR830 提供
 激励和 TTL 参考。旧双 SR830 配置继续兼容；设置见
-[Lock-in 日常说明](docs/LOCKIN_DAILY_OPERATION.md#sr865a-作为-xy-接收机)。实机替换仍待独立验收。
+[Lock-in 日常说明](docs/LOCKIN_DAILY_OPERATION.md#sr865a-作为-xy-接收机)。5 kHz 独立扫幅已通过实机验收；
+日常 `sweep-excitation` 命令本身授权写入，旧 `--authorize-writes` 参数仍兼容。
+混合扫频及频率×幅值扫描继续要求显式授权参数。
 通用绘图现在先选 SQLite **Run IDs** 再读取该次数据；切换图形参数复用缓存，
 手动 **Refresh records** 更新，详见 [加载与刷新](docs/DATA_ANALYSIS.md#run-selection-and-refresh-cache)。
 

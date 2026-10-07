@@ -1,5 +1,20 @@
 # Development stages
 
+## Daily standalone excitation command authorization (2026-10-07)
+
+- User approved the commissioned `sweep-excitation` command as write authorization
+  and requested one real rerun after synchronization. The legacy flag remains
+  compatible; the result records command authorization. Other mixed sweep and
+  commissioning entry gates are unchanged.
+- Injected-resource regression checks no-flag/old-flag completed sweeps with
+  preserved XY source and certified cleanup, strict unknown-status rejection,
+  and no instrument I/O for unauthorized frequency/frequency-excitation entries.
+  Experimental configuration and all runtime safety gates are unchanged.
+- All 213 relevant lock-in regression tests passed locally with real hardware
+  imports and DLL loads blocked; `git diff --check` passed.
+- Real rerun awaits deployment and fresh baseline; its outcome will be recorded
+  separately from the previous successful and failed runs.
+
 ## Real standalone mixed sweep completed after authorized IRNG change (2026-10-07)
 
 - User selected XY IRNG 1 V peak, keeping the original configured Sensitivity

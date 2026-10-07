@@ -75,7 +75,10 @@ SLVL/SOFF/REFM/BLAZEX 保留；测量滤波 ADVFILT/SYNC 另行禁用并校验�
 结束时 XX 回到 4 mVrms、双方 h1，恢复测量量程并核验 XY 源原值。
 精确零幅样本的相位保持 null，幅值/X/Y 可保留，相位图不补 0°。
 
-三种独立混合 sweep 必须加 `--authorize-writes`。四模块 `combination_cli run`
+已验收的日常 `sweep-excitation` 命令本身表示写入授权，不再需要额外加
+`--authorize-writes`，旧参数仍兼容。混合 `sweep-frequency` 和
+`sweep-frequency-excitation` 仍须加该参数。接线、配置、过载、失锁、读回及
+清理检查保持不变。四模块 `combination_cli run`
 与温度–激励入口使用各自已有运行授权。独立只读诊断不得与扫描并行连接。
 
 SR865A 的 `FREQEXT?` 和 `FREQDET?` 是先后查询，不是同一时刻的快照。
@@ -104,7 +107,7 @@ SR830 commissioning，遇到 SR865A 在连接前拒绝；混合采集使用 swee
 
 ```powershell
 # 仅示例；真实运行须先完成接线/型号验收。
-python -m attodry_control.lockin_test sweep-excitation --authorize-writes
+python -m attodry_control.lockin_test sweep-excitation
 ```
 
 本页是 Lock-in 日常数据采集入口。它覆盖扫频、扫幅和频率×幅值二维矩阵三类设备扫描命令；不包含

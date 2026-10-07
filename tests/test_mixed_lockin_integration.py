@@ -4,7 +4,6 @@ from dataclasses import replace
 import io
 import json
 import re
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -13,7 +12,7 @@ from attodry_control.combination_hardware import (
     load_hardware_combination, run_hardware_combination,
 )
 from attodry_control.combination_store import CombinationStore, open_readonly
-from attodry_control.config import RunMode
+from attodry_control.config import load_config
 from attodry_control.electrical_lockin_backend import ElectricalLockinError
 from attodry_control.lockin_test import run as standalone_cli
 from attodry_control.sr830 import AuthorizationRequired, Sr830Error
@@ -29,6 +28,7 @@ class TrackingReceiverResource(ReceiverResource):
         super().__init__("SR865A", "xy")
         self.frequency = frequency
         self.closed = False
+        self.clear_calls = 0
         self.responses.update({"SLVL?": "1.2", "SOFF?": "0.7", "REFM?": "1",
             "BLAZEX?": "0", "PHAS?": "37.5", "SNAP? X,Y": "1e-6,2e-7"})
 
@@ -41,6 +41,10 @@ class TrackingReceiverResource(ReceiverResource):
 
     def close(self):
         self.closed = True
+
+    def clear(self):
+        # Standalone sweeps clear VISA queues; native fault responses remain intact.
+        self.clear_calls += 1
 
 
 class MixedLockinIntegrationTests(unittest.TestCase):
@@ -221,26 +225,61 @@ autorange_stable_samples = 2
                             if wire.startswith(command.removesuffix("?") + " ")]
                 self.assertEqual(commands, ["IRNG 1"] if command == "IRNG?" else [])
 
-    def test_mixed_standalone_requires_explicit_write_flag_before_factory(self):
+    def standalone_config(self, fixture):
+        config = load_config(fixture.path)
+        return replace(config, lockin_sweep=replace(
+            config.lockin_sweep, output_directory=fixture.path.parent / "sweeps"))
+
+    def test_mixed_standalone_excitation_command_authorizes_and_keeps_old_flag_compatible(self):
+        for flags in ([], ["--authorize-writes"]):
+            with self.subTest(flags=flags):
+                fixture = self.fixture()
+                output = io.StringIO()
+                with patch("attodry_control.lockin_test.load_config", return_value=self.standalone_config(fixture)), \
+                        redirect_stdout(output):
+                    self.assertEqual(standalone_cli(
+                        ["sweep-excitation", "--config", str(fixture.path), *flags],
+                        resource_manager_factory=lambda: fixture.manager), 0)
+                record = json.loads(output.getvalue())
+                self.assertTrue(record["completed"], record.get("error"))
+                self.assertEqual(record["write_authorization"], "run_command")
+                self.assertEqual(record["requested_points_v_rms"], [.004, .008])
+                self.assertTrue(record["cleanup"]["verified"])
+                self.assertEqual(float(fixture.xx.responses["SLVL?"]), .004)
+                self.assertEqual(int(fixture.xy.responses["HARM?"]), 1)
+                self.assert_receiver_owns_no_source_writes(fixture)
+                self.assertTrue(fixture.xx.closed and fixture.xy.closed and fixture.manager.closed)
+
+    def test_mixed_standalone_excitation_without_flag_still_blocks_unknown_status(self):
         fixture = self.fixture()
-        configured = load_hardware_combination(fixture.path)
-        standalone = SimpleNamespace(**vars(configured.lockin),
-            project=SimpleNamespace(mode=RunMode.HARDWARE))
-        standalone.lockin_sweep = replace(standalone.lockin_sweep, output_directory=fixture.path.parent / "sweeps")
-        calls = []
-        def factory():
-            calls.append("opened")
-            return fixture.manager
+        fixture.xy.responses["CUROVLDSTAT?"] = "4"
         output = io.StringIO()
-        errors = io.StringIO()
-        with patch("attodry_control.lockin_test.load_config", return_value=standalone), \
-                redirect_stdout(output), redirect_stderr(errors), \
-                self.assertRaisesRegex(AuthorizationRequired, "--authorize-writes"):
+        with patch("attodry_control.lockin_test.load_config", return_value=self.standalone_config(fixture)), \
+                redirect_stdout(output), self.assertRaisesRegex(Sr830Error, "unknown"):
             standalone_cli(["sweep-excitation", "--config", str(fixture.path)],
-                           resource_manager_factory=factory)
-        self.assertEqual(calls, [])
-        self.assertEqual(fixture.manager.opened, [])
-        self.assertEqual(fixture.xx.queries + fixture.xy.queries + fixture.xx.writes + fixture.xy.writes, [])
+                           resource_manager_factory=lambda: fixture.manager)
+        record = json.loads(output.getvalue())
+        self.assertFalse(record["completed"])
+        self.assertEqual(record["points"], [])
+        self.assertEqual(fixture.xx.writes + fixture.xy.writes, [])
+        self.assertTrue(fixture.xx.closed and fixture.xy.closed and fixture.manager.closed)
+
+    def test_other_mixed_standalone_sweeps_require_explicit_flag_before_factory(self):
+        for command in ("sweep-frequency", "sweep-frequency-excitation"):
+            with self.subTest(command=command):
+                fixture = self.fixture()
+                calls = []
+                def factory():
+                    calls.append("opened")
+                    return fixture.manager
+                with patch("attodry_control.lockin_test.load_config", return_value=self.standalone_config(fixture)), \
+                        redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), \
+                        self.assertRaisesRegex(AuthorizationRequired, "--authorize-writes"):
+                    standalone_cli([command, "--config", str(fixture.path)],
+                                   resource_manager_factory=factory)
+                self.assertEqual(calls, [])
+                self.assertEqual(fixture.manager.opened, [])
+                self.assertEqual(fixture.xx.queries + fixture.xy.queries + fixture.xx.writes + fixture.xy.writes, [])
 
     def apply_fixture(self):
         fixture = self.fixture()
