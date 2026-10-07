@@ -10,10 +10,27 @@
   preserved XY source and certified cleanup, strict unknown-status rejection,
   and no instrument I/O for unauthorized frequency/frequency-excitation entries.
   Experimental configuration and all runtime safety gates are unchanged.
-- All 213 relevant lock-in regression tests passed locally with real hardware
-  imports and DLL loads blocked; `git diff --check` passed.
-- Real rerun awaits deployment and fresh baseline; its outcome will be recorded
-  separately from the previous successful and failed runs.
+- All 213 relevant lock-in regression tests passed locally and on LK_setup
+  with real hardware imports and DLL loads blocked; `git diff --check` passed.
+  Change `cefc675` was pushed to the existing origin branch and synchronized.
+- The user's current TOML (new test2 name, XY 10 mV / IRNG 1 V peak) and edited
+  analysis notebooks were preserved. An initial read-only baseline had XY
+  input-overload latch 16 and remained a rejected record; a later independent
+  six-read baseline was clean/locked before the unique no-flag sweep launch.
+- Supervisor 1876 / scan 9136 exited successfully with code 0 at
+  2026-10-07T19:04:32Z. All 15 original 0.7-5 Vrms / 5 kHz points completed;
+  selected XX h1 / XY h2, three samples each, TC 1 s / settle 15 TC.
+  Independent file-only audit verified 90 raw formal pairs and 45 selected
+  readings per role, with no overload/invalid/nonfinite/error/unlocked readings.
+- Cleanup attempted/verified with errors empty. Last confirmation 19:04:31Z:
+  XX 4 mVrms/h1/1 V/Low Noise; XY h1/10 mV/IRNG 1 V peak, clean and locked.
+  XY unused source/offset/DC/sync/phase preserved; no other hardware module opened.
+  Exit/quality evidence is in ignored station audit
+  `operator_lockin_daily_20261007T183548Z`; result timestamp
+  `20261007T190431753795Z`. Prior failures remain independent records.
+- The broader subsequent request to default every hardware CLI authorization
+  was rejected by automatic approval review; no broader gate changes applied.
+  Real verification here covers only this standalone mixed excitation sweep.
 
 ## Real standalone mixed sweep completed after authorized IRNG change (2026-10-07)
 

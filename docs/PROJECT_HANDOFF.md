@@ -15,10 +15,37 @@ Last updated: 2026-10-07
   readback/cleanup policy changes. Fake-resource regression covers both flag
   forms, preserved receiver source, cleanup, unknown-status rejection and
   pre-I/O rejection of the other mixed sweep entries.
-- Local verification: all 213 relevant lock-in tests passed with real VISA,
+- All 213 relevant lock-in tests passed locally and on LK_setup with real VISA,
   serial/QCoDeS imports and DLL loads blocked; `git diff --check` passed.
-- Real rerun remains pending deployment and a fresh exclusive baseline; prior
-  completed and rejected runs below remain independent records.
+  Command change `cefc675` was pushed to the existing origin branch and synced.
+- The current private TOML already had a new `test2` name and XY Sensitivity
+  10 mV, compared with the prior run's 20 mV. IRNG remained 1 V peak.
+  These user settings and two modified analysis notebooks were preserved.
+- The first read-only baseline was rejected for XY latched input overload 16
+  despite clean instantaneous status. Its failed evidence remains unchanged.
+  A separate later six-read baseline was clean/locked before the unique launch.
+- Ran exactly one no-flag `python -m attodry_control.lockin_test sweep-excitation`:
+  supervisor PID 1876 / scan PID 9136. Identities and survival after SSH exit
+  were confirmed; subsequent monitoring only read saved files. Exit **0** at
+  **2026-10-07T19:04:32Z**, with all **15** linear 0.7-5 Vrms points at **5 kHz**,
+  selected XX h1 / XY h2, three samples each, TC 1 s / settle 15 TC.
+- Independent audit verified 90 raw formal pairs and 45 selected readings per
+  role. Both raw and selected overload counts were zero; selected invalid,
+  nonfinite, error and unlocked counts were zero for each role.
+  Cleanup was attempted/verified with no errors. Last confirmation
+  **2026-10-07T19:04:31Z**: XX 4 mVrms/h1/1 V/Low Noise, zero status/error;
+  XY h1/10 mV/IRNG 1 V peak, locked, zero current/latch/error/ESR.
+  XY unused source/offset/DC/sync/phase stayed preserved. No other module opened.
+- Result: ignored station
+  `run_data/commissioning/20261007T190431753795Z_BL_CrSBr-b-axis_e-sweep-back-from-optics-test2_excitation_completed.json`.
+  Independent baselines, launch identities, exit and quality certificates:
+  `run_data/operator_lockin_daily_20261007T183548Z`.
+  Config SHA256 `b3a86a0eb5068fb2c90b0f35f7d8a4478f05e9567dac661622806afce0c1e993`.
+  Scan and supervisor exit were independently checked before subsequent sync.
+- A later user request to default all hardware CLI authorization was rejected
+  twice by automatic approval review as a persistent removal of hardware
+  authorization gates. No broader change was applied. The scope clarification
+  remains pending; the commissioned excitation-only change above is retained.
 
 ### Authorized 1 V input range: real excitation sweep completed (2026-10-07)
 
