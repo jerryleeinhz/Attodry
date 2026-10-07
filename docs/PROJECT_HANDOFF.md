@@ -4,6 +4,26 @@ Last updated: 2026-10-07
 
 ## Current stage
 
+### SR865A low-frequency external readback allowance (2026-10-07)
+
+- User reported reference 17.0011 Hz / h2 / detection 33.9989 Hz and explicitly
+  requested a larger software consistency allowance. The 3.3 mHz difference
+  reproduced the existing 25 ppm / 1 mHz rejection in a hardware-free test.
+- External-reference detection consistency now allows 100 ppm or 5 mHz,
+  whichever is larger. Internal-reference consistency remains 1 ppm / 1 mHz.
+  Raw frequencies/timestamps, strict actual/harmonic frequency limits, source
+  settings, native unlock/unknown/error/overload checks and cleanup remain.
+  This is operator-approved software acceptance, not a factory accuracy claim
+  or proof that this reported external reference was locked.
+- Regression covers the exact reported h2 values, both signs immediately inside/
+  outside the low/high-frequency allowance, native faults at the reported
+  frequencies, and strict low/high internal-reference checks. All 216 relevant
+  lock-in tests passed locally with real hardware imports and DLL loads blocked.
+- Delivery follows the standing existing origin branch / LK_setup instruction,
+  after verifying acquisition exit and preserving current private TOML and edited
+  analysis notebooks. This request does not start/replay an experiment; real
+  17 Hz acquisition with this new allowance remains unverified.
+
 ### Daily excitation command authorization (2026-10-07)
 
 - User approved removing repeated `--authorize-writes` from the commissioned

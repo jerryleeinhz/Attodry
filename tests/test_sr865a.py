@@ -256,21 +256,66 @@ class Sr865aAdapterTests(unittest.TestCase):
                 self.assertEqual(sample.detection_frequency_hz, harmonic * 5000.05)
                 self.assertEqual(self.resource.writes, [])
 
+    def test_external_low_frequency_h2_preserves_reported_readbacks(self):
+        self.resource.responses.update({
+            "HARM?": "2", "FREQEXT?": "17.0011", "FREQDET?": "33.9989",
+        })
+        sample = self.sample()
+        self.assertTrue(sample.status.valid)
+        self.assertEqual(sample.reference_frequency_hz, 17.0011)
+        self.assertEqual(sample.detection_frequency_hz, 33.9989)
+        self.assertEqual(sample.harmonic, 2)
+        self.assertEqual(self.resource.writes, [])
+
+    def test_external_frequency_allowance_is_bounded_at_low_and_high_frequency(self):
+        for reference, difference, accepted in (
+            (17.0, 0.0049, True), (17.0, 0.0051, False),
+            (5000.0, 0.49, True), (5000.0, 0.51, False),
+        ):
+            for sign in (-1, 1):
+                with self.subTest(reference=reference, difference=sign * difference):
+                    self.resource.responses.update({
+                        "HARM?": "1", "FREQEXT?": str(reference),
+                        "FREQDET?": str(reference + sign * difference),
+                    })
+                    if accepted:
+                        self.assertTrue(self.sample().status.valid)
+                    else:
+                        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+                            self.sample()
+        self.assertEqual(self.resource.writes, [])
+
+    def test_low_frequency_allowance_keeps_status_faults_invalid(self):
+        for command, value in (
+            ("CUROVLDSTAT?", "8"), ("LIAS?", "8"), ("ERRS?", "4"),
+            ("CUROVLDSTAT?", "4"), ("CUROVLDSTAT?", "16"),
+        ):
+            with self.subTest(command=command, value=value):
+                self.resource.responses.update({
+                    "HARM?": "2", "FREQEXT?": "17.0011", "FREQDET?": "33.9989",
+                    "CUROVLDSTAT?": "0", "LIAS?": "0", "ERRS?": "0",
+                })
+                self.resource.responses[command] = value
+                self.assertFalse(self.sample().status.valid)
+        self.assertEqual(self.resource.writes, [])
+
     def test_external_frequency_jitter_limit_does_not_accept_frequency_fault(self):
         self.resource.responses.update({
-            "HARM?": "1", "FREQEXT?": "5000", "FREQDET?": "5000.2",
+            "HARM?": "1", "FREQEXT?": "5000", "FREQDET?": "5000.6",
         })
         with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
             self.sample()
         self.assertEqual(self.resource.writes, [])
 
     def test_internal_reference_retains_strict_detection_frequency_check(self):
-        self.resource.responses.update({
-            "RSRC?": "0", "HARM?": "2", "FREQINT?": "5000",
-            "FREQDET?": "10000.06",
-        })
-        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
-            self.sample()
+        for reference, detection in (("5000", "10000.06"), ("17.0011", "33.9989")):
+            with self.subTest(reference=reference, detection=detection):
+                self.resource.responses.update({
+                    "RSRC?": "0", "HARM?": "2", "FREQINT?": reference,
+                    "FREQDET?": detection,
+                })
+                with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+                    self.sample()
 
     def test_external_jitter_allowance_does_not_make_unlocked_sample_valid(self):
         self.resource.responses.update({

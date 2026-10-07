@@ -1,5 +1,20 @@
 # Development stages
 
+## SR865A external low-frequency consistency allowance (2026-10-07)
+
+- At the user's explicit request, external-reference detection consistency
+  changed from 25 ppm / 1 mHz to 100 ppm / 5 mHz (larger allowance wins).
+  The exact 17.0011 Hz / h2 / 33.9989 Hz report first reproduced the old rejection.
+- Internal reference remains 1 ppm / 1 mHz. Strict actual/harmonic frequency
+  boundaries and native lock/status/error/overload gates remain independent;
+  no source/TOML/experimental-grid/timing/cleanup or authorization changes.
+- Added exact-readback, low/high boundary and low-frequency native fault coverage,
+  including unchanged internal low-frequency rejection. All 216 relevant
+  lock-in tests passed locally under real-import/DLL blockers; diff check passed.
+  Target delivery is gated on acquisition exit and preserves local configuration,
+  data and analysis notebooks. No real instruments opened or scan replayed;
+  the new allowance is software policy, not real 17 Hz commissioning.
+
 ## Daily standalone excitation command authorization (2026-10-07)
 
 - User approved the commissioned `sweep-excitation` command as write authorization

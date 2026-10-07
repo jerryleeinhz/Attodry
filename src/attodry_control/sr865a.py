@@ -20,11 +20,12 @@ from . import sr865a_settings as settings
 
 
 # FREQEXT? and FREQDET? are separate observations of the tracked external
-# reference, not one atomic frequency snapshot. A locked 5 kHz receiver showed
-# about 6 ppm between successive queries. Bound this comparison at 25 ppm;
+# reference, not one atomic frequency snapshot. The operator's 17 Hz/h2
+# readbacks differed by 3.3 mHz. Use the approved 100 ppm / 5 mHz allowance;
 # retain the stricter internal-reference check and independent frequency/status
 # limits. This is a software consistency allowance, not an accuracy specification.
-EXTERNAL_DETECTION_FREQUENCY_REL_TOLERANCE = 25e-6
+EXTERNAL_DETECTION_FREQUENCY_REL_TOLERANCE = 100e-6
+EXTERNAL_DETECTION_FREQUENCY_ABS_TOLERANCE_HZ = 0.005
 
 
 class Sr865aError(RuntimeError):
@@ -360,12 +361,16 @@ class Sr865a:
             EXTERNAL_DETECTION_FREQUENCY_REL_TOLERANCE
             if reference_source == "external" else 1e-6
         )
+        frequency_abs_tolerance = (
+            EXTERNAL_DETECTION_FREQUENCY_ABS_TOLERANCE_HZ
+            if reference_source == "external" else 0.001
+        )
         if not (
             settings.MINIMUM_REFERENCE_FREQUENCY_HZ <= detection_hz
             < settings.MAXIMUM_REFERENCE_FREQUENCY_HZ
         ) or not math.isclose(
             detection_hz, expected_detection,
-            rel_tol=frequency_rel_tolerance, abs_tol=0.001,
+            rel_tol=frequency_rel_tolerance, abs_tol=frequency_abs_tolerance,
         ):
             self._identity = None
             raise Sr865aError(
