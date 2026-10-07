@@ -14,6 +14,8 @@ from .commissioning_analysis import (
     PLOT_HARMONICS,
     PLOT_ROLES,
     SAMPLE_STATUSES,
+    _formal_lockin_model,
+    _formal_phase_deg,
     load_commissioning_file,
 )
 from .scientific_plotting import (
@@ -53,12 +55,14 @@ class TemperatureExcitationSample:
     x_v: float
     y_v: float
     amplitude_v: float
-    phase_deg: float
+    phase_deg: float | None
     frequency_hz: float
     lia_status_raw: int
     error_status: int
     statuses: tuple[str, ...]
     problems: tuple[str, ...]
+    model: str | None = None
+    recorded_lia_status: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +189,9 @@ def aggregate_temperature_iv(
         grouped.items(),
         key=lambda item: (item[0][3], item[0][0], item[0][1], item[0][4]),
     ):
-        values = [float(getattr(row, metric)) for row in grouped_rows]
+        values = [float(getattr(row, metric)) for row in grouped_rows if getattr(row, metric) is not None]
+        if not values:
+            continue
         mean, spread = _mean_and_standard_deviation(values, metric=metric)
         source_path, temperature_index, requested_k, measured_k, current = key
         statistics.append(
@@ -474,12 +480,14 @@ def _summary_sample_row(
         problems = ("Recorded invalid for analysis",)
     raw = _integer(lia_status.get("raw", 0), "lia_status.raw")
     error_status = _integer(instrument.get("error_status", 0), "error_status")
+    model = _formal_lockin_model(instrument)
     statuses = _sample_statuses(
         reading=reading,
         lia_status=lia_status,
         raw=raw,
         error_status=error_status,
         problems=problems,
+        model=model,
     )
     return TemperatureExcitationSample(
         source_path=str(path),
@@ -498,12 +506,14 @@ def _summary_sample_row(
         x_v=_finite_float(reading.get("x_v"), "x_v"),
         y_v=_finite_float(reading.get("y_v"), "y_v"),
         amplitude_v=_finite_float(reading.get("amplitude_v"), "amplitude_v"),
-        phase_deg=_finite_float(reading.get("phase_deg"), "phase_deg"),
+        phase_deg=_formal_phase_deg(instrument, role=role),
         frequency_hz=_finite_float(reading.get("frequency_hz"), "frequency_hz"),
         lia_status_raw=raw,
         error_status=error_status,
         statuses=statuses,
         problems=problems,
+        model=model,
+        recorded_lia_status=dict(lia_status),
     )
 
 
@@ -613,22 +623,30 @@ def _sample_statuses(
     raw: int,
     error_status: int,
     problems: tuple[str, ...],
+    model: str | None = None,
 ) -> tuple[str, ...]:
     statuses: list[str] = []
-    if problems or raw & ~0b1111:
+    native_sr865 = model == "SR865A"
+    unknown_native = native_sr865 and (
+        lia_status.get("status_known") is not True or lia_status.get("unknown_status_bits")
+        or any(lia_status.get(name) for name in ("configuration_changed_latched", "power_on_latched"))
+    )
+    if problems or unknown_native or (not native_sr865 and raw & ~0b1111):
         statuses.append("problem")
     unlocked = bool(lia_status.get("reference_unlocked")) or (
         "locked" in reading and not bool(reading["locked"])
-    ) or bool(raw & 0b1000)
+    ) or (not native_sr865 and bool(raw & 0b1000))
     overload = any(
         bool(lia_status.get(name))
         for name in ("input_or_reserve_overload", "filter_overload")
-    ) or bool(raw & 0b0011)
+    ) or (native_sr865 and bool(lia_status.get("output_overload"))) or (
+        not native_sr865 and bool(raw & 0b0011)
+    )
     if unlocked:
         statuses.append("unlocked")
     if overload:
         statuses.append("overload")
-    if error_status:
+    if error_status or (native_sr865 and lia_status.get("instrument_error")):
         statuses.append("instrument_error")
     if not statuses:
         statuses.append("clean")

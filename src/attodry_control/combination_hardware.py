@@ -1,7 +1,7 @@
 """Gated four-module point execution; no I/O until explicit run authorization."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, replace, is_dataclass
 from datetime import datetime
 from enum import Enum
 import hashlib
@@ -22,6 +22,8 @@ from .safety import MagnetLimits, plan_ordered_field_transitions
 
 
 def _json(value):
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json(asdict(value))
     if isinstance(value, dict):
         return {k: _json(v) for k, v in value.items()}
     if isinstance(value, (tuple, list)):
@@ -213,8 +215,9 @@ class _Events:
 
 class HardwareCombinationStation:
     def __init__(self, config, *, smu_adapter_factory=None, manager_factory=None, sleep=None,
-                 dll=None, monotonic=None):
+                 dll=None, monotonic=None, authorize_hardware=False):
         self.config = config
+        self.authorize_hardware = authorize_hardware is True
         self.smu_adapter_factory = smu_adapter_factory
         self.manager_factory = manager_factory
         self.sleep = sleep
@@ -230,6 +233,10 @@ class HardwareCombinationStation:
     def open(self, modules):
         if modules != tuple(a.module for a in self.config.plan.axes):
             raise ValueError("Station modules differ from validated plan")
+        if (self.config.lockin is not None
+                and self.config.lockin.lockin_xy.model == "SR865A"
+                and not self.authorize_hardware):
+            raise ValueError("Mixed lock-in hardware requires explicit run authorization before any instrument I/O")
         preflight = {}
         if self.config.cryostat is not None:
             self.cryo = CryostatPointSession(self.config.cryostat, self.config.temperature,
@@ -252,7 +259,8 @@ class HardwareCombinationStation:
         if self.config.lockin is not None:
             self.lockin = LockinPointSession(
                 self.config.path, self.config.lockin, self.events.event,
-                manager_factory=self.manager_factory, mode=self.config.lockin_mode)
+                manager_factory=self.manager_factory, mode=self.config.lockin_mode,
+                authorize_writes=self.authorize_hardware)
             preflight["lockin"] = self.lockin.open()
         # All active preflights must succeed before any configuration writes.
         if self.lockin is not None:
@@ -295,8 +303,8 @@ class HardwareCombinationStation:
         if module in {"temperature", "magnetic"}:
             return self.cryo.read(module)
         if module == "lockin":
-            return self.lockin.sample_point(
-                measurement_context=self.cryo.capture if self.cryo is not None else None)
+            return _json(self.lockin.sample_point(
+                measurement_context=self.cryo.capture if self.cryo is not None else None))
         sample = self.smu.sample_point({k[:-2]: v for k, v in self.point.values.items()},
                                        segment=self.point.segment)
         self.events.event("smu_formal_sample", asdict(sample))
@@ -318,10 +326,15 @@ class HardwareCombinationStation:
             for role in self.config.smu.hardware.by_role():
                 expected.update({role + "_voltage_v", role + "_current_a"})
         if self.lockin is not None:
+            skipped = {(item.get("role"), item["harmonic"])
+                       for item in self.lockin.point_record.get("skipped_harmonics", ())}
             for role, harmonics in self.lockin.harmonics_by_role.items():
                 expected.update(f"lockin_{role}_h{h}_{metric}" for h in harmonics
                                 if h in self.lockin.point_harmonics
+                                and (role, h) not in skipped
+                                and ("lockin_" + role, h) not in skipped
                                 for metric in ("x_v", "y_v", "amplitude_v", "phase_deg"))
+            expected.difference_update(getattr(self.lockin, "unavailable_phase_keys", ()))
         return expected
 
     def cleanup(self, module, failed):
@@ -377,7 +390,8 @@ def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
         raise ValueError("Separate cryostat temperature/field write authorization required")
     station = HardwareCombinationStation(config, smu_adapter_factory=smu_adapter_factory,
                                            manager_factory=manager_factory, sleep=sleep,
-                                           dll=dll, monotonic=monotonic)
+                                           dll=dll, monotonic=monotonic,
+                                           authorize_hardware=authorize_hardware)
     snapshot = {**config.snapshot, "authorization": {
         "combined_connection_writes_status_consumption": True,
         "xy_sine_disconnected": confirm_xy_sine_disconnected,

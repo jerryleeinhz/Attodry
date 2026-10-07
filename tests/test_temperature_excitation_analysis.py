@@ -47,6 +47,74 @@ class TemperatureExcitationAnalysisTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
+    def test_temperature_formal_json_native_output_and_semantic_error_are_strict(self):
+        for model in (None, "SR830", "SR865A"):
+            for flag, status in (("output_overload", "overload"),
+                                 ("instrument_error", "instrument_error")):
+                with self.subTest(model=model, flag=flag):
+                    payload = self._summary()
+                    instrument = payload["temperature_conditions"][0]["excitation"]["points"][0]["samples"][0]["lockin_xy"]
+                    if model is not None:
+                        instrument["model"] = model
+                        instrument["reading"]["model"] = model
+                        instrument["lia_status"]["model"] = model
+                    instrument["lia_status"].update(
+                        status_known=True, **{flag: True},
+                        raw=(1 if model == "SR865A" else 4) if flag == "output_overload" else 0)
+                    instrument["error_status"] = 0
+                    path = self._write_summary(payload, name=f"{model}_{flag}")
+                    clean = load_temperature_excitation_samples(path)
+                    raw = load_temperature_excitation_samples(path, sample_statuses=None)
+                    self.assertEqual(len(raw), 32)
+                    xy = next(row for row in raw if row.role == "xy" and row.harmonic == 1
+                              and row.temperature_index == row.point_index == row.sample_index == 0)
+                    self.assertEqual(xy.statuses, (status,) if model == "SR865A" else ("clean",))
+                    self.assertEqual(xy.error_status, 0)
+                    self.assertTrue(xy.recorded_lia_status[flag])
+                    self.assertEqual(len(clean), 31 if model == "SR865A" else 32)
+
+    def test_sr865_zero_phase_is_missing_only_from_phase_statistics(self):
+        payload = self._summary()
+        instrument = payload["temperature_conditions"][0]["excitation"]["points"][0]["samples"][0]["lockin_xy"]
+        instrument["model"] = "SR865A"
+        instrument["reading"].update(model="SR865A", role="xy", x_v=0.0, y_v=0.0,
+                                     amplitude_v=0.0, phase_deg=None)
+        instrument["lia_status"].update(model="SR865A", status_known=True)
+        path = self._write_summary(payload, name="sr865_zero")
+        rows = load_temperature_excitation_samples(path)
+        self.assertEqual(len(rows), 32)
+        zero = next(row for row in rows if row.role == "xy" and row.phase_deg is None)
+        self.assertEqual((zero.x_v, zero.y_v, zero.amplitude_v), (0.0, 0.0, 0.0))
+        phase = aggregate_temperature_iv(rows, role="xy", harmonic=1, metric="phase_deg")
+        amplitude = aggregate_temperature_iv(rows, role="xy", harmonic=1, metric="amplitude_v")
+        self.assertEqual(phase[0].count, 1)
+        self.assertEqual(amplitude[0].count, 2)
+        self.assertEqual(aggregate_temperature_iv((zero,), role="xy", harmonic=1, metric="phase_deg"), ())
+        from attodry_control.combination_analysis import load_legacy_temperature_lockin
+        adapted = load_legacy_temperature_lockin(path)
+        adapted_zero = next(row for row in adapted if row.get("measured.lockin_xy_h1_phase_deg", 1) is None)
+        self.assertEqual(adapted_zero["status.lockin_xy"]["model"], "SR865A")
+
+    def test_temperature_undefined_phase_rejects_unproven_zero_or_model(self):
+        mutations = (
+            lambda item: item.pop("model"),
+            lambda item: item["reading"].update(model="SR830"),
+            lambda item: item["reading"].update(role="xx"),
+            lambda item: item["reading"].update(x_v=1e-300),
+            lambda item: item["reading"].pop("phase_deg"),
+            lambda item: item["reading"].update(phase_deg=float("nan")),
+        )
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index):
+                payload = self._summary()
+                instrument = payload["temperature_conditions"][0]["excitation"]["points"][0]["samples"][0]["lockin_xy"]
+                instrument["model"] = "SR865A"
+                instrument["reading"].update(x_v=0.0, y_v=0.0, amplitude_v=0.0, phase_deg=None)
+                mutation(instrument)
+                path = self._write_summary(payload, name=f"bad_phase_{index}")
+                with self.assertRaises(ValueError):
+                    load_temperature_excitation_samples(path)
+
     def test_loader_uses_actual_temperature_and_recorded_current(self) -> None:
         path = self._write_summary(self._summary())
 

@@ -1,5 +1,54 @@
 # Development stages
 
+## Electrical SR865A receiver and run-scoped notebook cache (offline; 2026-10-07)
+
+- User approved adapting the committed lock-in/notebook implementation from
+  `integration-photonics-nonlinear-hall` (`6e90df9a5270e3909be88d1a7ba84c6b7288cc2b`).
+  Native SR865A driver, settings and model capability modules match that commit;
+  optical controls and the reference checkout's uncommitted changes were not imported.
+- Electrical roles remain `lockin_xx` / `lockin_xy`. XX must remain SR830, with
+  internal reference and sole SINE OUT excitation. XY may be SR830 or SR865A,
+  using XX's external TTL reference and physically disconnected XY SINE OUT.
+  Existing SR830 TOMLs and records retain their semantics. This is the approved
+  XY receiver exception to the prior SR865A active-path prohibition.
+- Native XY uses separate IRNG (input peak range) and SCAL (measurement full
+  scale), native TC/filter tables and role-specific harmonic limits. Reserve is
+  unavailable and rejected in its TOML. Measurement ADVFILT/SYNC are disabled;
+  PHAS and unused SLVL/SOFF/REFM/BLAZEX are preserved and verified. Sample brackets
+  and cleanup check native physical settings; drift, unknown status and native
+  output-scale overload fail closed. Status/audit records retain the model and
+  original commands, including failed writes. No SR830 LIAS masks decode SR865A.
+- Mixed standalone sweeps require explicit `--authorize-writes`; integrated
+  scans propagate their existing explicit run authorization before instrument
+  opening. Legacy commissioning commands that configure both SR830 sources
+  reject mixed models before I/O. Exact finite native X=Y=R=0 retains undefined
+  phase as null, usable X/Y/R and a missing phase; no invented zero-degree value.
+- Both unified notebooks read SQLite run metadata first. New cards select no
+  run by default; Run IDs load only selected formal rows through indexed SQL.
+  Cleanup is decoded once per run. Shared per-run snapshots are reused across
+  cards/plot controls until explicit Refresh records. File/WAL identity changes,
+  loading races and mixed snapshot revisions block stale rendering/export.
+  Stable recorded sample IDs retain exclusions; old setups/API scopes remain.
+- Synthetic local Python 3.12 benchmark: SQLite 7.44 MB, 20 runs x 1,000 samples,
+  4,139-byte cleanup/run; warmup then median of three. Same-scope single-run
+  loading fell from 0.223435 s to 0.043442 s; all-run loading from 4.217394 s to
+  0.916085 s. Cached 1,000-row snapshot copy took 0.019296 s. Cleanup decodes
+  fell from 20,000 to 20 for all runs, and 1,000 to 1 for one run. This is a
+  synthetic comparison to `ea3fb2d`, not an experimental-data timing guarantee.
+- Final joint regression: **633 guarded offline tests passed** in 106.595 s,
+  covering model configuration/previews, copied driver/backend, mixed apply-TOML
+  and full scans, legacy SR830, autorange/harmonics, combination/cryostat/temperature
+  paths, analysis, cache/UI, Stack legends and heatmap/export. Both notebook JSON
+  code cells compile with no saved outputs. Reference-module bytes match the
+  committed source; final diff whitespace checks pass.
+  All implementation/verification is offline, using injected resources with
+  real VISA/serial/qcodes imports and DLL loaders blocked. No SSH, real instrument
+  I/O, station deployment, local hardware config, experimental data, magnetic
+  policy, or dependency-pin changes. Real receiver replacement remains unverified
+  until a separately authorized commissioning stage. Target remains
+  `origin/codex/integration-four-module-scan`; the user authorized commit/push
+  to this existing branch on 2026-10-07.
+
 ## Unified plot legends and grid heatmaps (2026-10-06)
 
 - Added complete stacked-curve legends without the former 12-trace cap, including

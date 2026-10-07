@@ -459,6 +459,7 @@ class CombinationTests(unittest.TestCase):
             card = dashboard.cards[0]
             card["sources"].set_sources(dashboard.catalog, [str(self.path)])
             dashboard._card_changed(card)
+            card["runs"].value = ((str(self.path), "test"),)
             self.assertEqual(len(dashboard._selected_rows(card)), 6)
             self.assertEqual(len(card["excluded"].options), 6)
             card["excluded"].value = (card["excluded"].options[0][1],)

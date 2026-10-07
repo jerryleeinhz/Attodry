@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .sr830 import Sr830Diagnostic
-from .sr830_settings import sensitivity_full_scale_v
+from .lockin_model_settings import model_name, sensitivity_full_scale_for
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,8 +47,10 @@ def format_live_lockin_snapshot(snapshot: LiveLockinPairSnapshot) -> str:
     timestamp = snapshot.captured_at_utc.astimezone(timezone.utc).isoformat(
         timespec="seconds"
     )
+    models = model_name(snapshot.lockin_xx) + "/" + model_name(snapshot.lockin_xy)
+    title = "SR830" if models == "SR830/SR830" else models
     header = (
-        f"SR830 live status | sample {snapshot.sample_index} | {timestamp} | "
+        f"{title} live status | sample {snapshot.sample_index} | {timestamp} | "
         f"status latches: {'queried' if snapshot.status_latches_consumed else 'not queried'}"
     )
     columns = (
@@ -82,12 +84,13 @@ def format_live_lockin_snapshot(snapshot: LiveLockinPairSnapshot) -> str:
 
 def _format_diagnostic_row(diagnostic: Sr830Diagnostic) -> str:
     sensitivity = _sensitivity_text(diagnostic)
+    phase = "undefined" if diagnostic.phase_deg is None else f"{diagnostic.phase_deg:.3f}"
     return (
         f"{diagnostic.role.value.upper():<4}  "
         f"{diagnostic.x_v:>11.4e}  "
         f"{diagnostic.y_v:>11.4e}  "
         f"{diagnostic.amplitude_v:>11.4e}  "
-        f"{diagnostic.phase_deg:>11.3f}  "
+        f"{phase:>11}  "
         f"{diagnostic.frequency_hz:>11.6g}  "
         f"{diagnostic.snapshot_frequency_hz:>11.6g}  "
         f"{diagnostic.harmonic:>4d}  "
@@ -101,7 +104,7 @@ def _format_diagnostic_row(diagnostic: Sr830Diagnostic) -> str:
 
 def _confirmed_sensitivity_text(diagnostic: Sr830Diagnostic) -> str | None:
     try:
-        return f"{sensitivity_full_scale_v(diagnostic.sensitivity):.4g} V"
+        return f"{sensitivity_full_scale_for(diagnostic, diagnostic.sensitivity):.4g} V"
     except ValueError:
         return None
 

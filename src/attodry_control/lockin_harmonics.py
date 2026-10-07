@@ -15,7 +15,11 @@ from .lockin_autorange import AutorangePolicy, AutorangeState
 from .sr830_settings import SensitivityMode
 
 from .sr830 import RESERVE_MODE_CODES, Sr830Error
-from .sr830_settings import sensitivity_code, sensitivity_full_scale_v, time_constant_seconds
+from .lockin_model_settings import (
+    sensitivity_code_for, sensitivity_full_scale_for, time_constant_seconds_for,
+    reserve_code_for, harmonic_supported, model_name,
+    receiver_invariant_targets,
+)
 
 
 class HarmonicSensitivitySession:
@@ -43,11 +47,11 @@ class HarmonicSensitivitySession:
                     policy = AutorangePolicy(
                         setting.autorange_min_full_scale_v, setting.autorange_max_full_scale_v,
                         setting.autorange_target_occupancy, setting.autorange_stable_samples,
-                        setting.autorange_full_scales_v)
+                        setting.autorange_full_scales_v, model=model_name(self.configs[role]))
                     self.policies[role, harmonic] = policy
                     # Begin at the largest approved auto range, not a blind narrow.
                     initial = (policy.maximum_full_scale_v if self.configs[role].harmonic_settings
-                               else sensitivity_full_scale_v(self.ranges[role]["current_sensitivity_code"]))
+                               else sensitivity_full_scale_for(self.configs[role], self.ranges[role]["current_sensitivity_code"]))
                     self.states[role, harmonic] = AutorangeState(initial)
         self.current_harmonics = {role: 1 for role in self.configs}
         self.expected_reserves = {role: value["configured_code"] for role, value in self.reserves.items()}
@@ -64,12 +68,23 @@ class HarmonicSensitivitySession:
             values = result["roles"][role] = {}
             values["harmonic"] = instrument.read_harmonic()
             values["sensitivity_code"] = instrument.read_sensitivity()
-            values["sensitivity_full_scale_v"] = sensitivity_full_scale_v(values["sensitivity_code"])
+            values["model"] = model_name(self.configs[role])
+            values["sensitivity_full_scale_v"] = sensitivity_full_scale_for(self.configs[role], values["sensitivity_code"])
             values["reserve_code"] = instrument.read_reserve_mode()
             values["reserve_mode"] = next((k for k, v in RESERVE_MODE_CODES.items()
-                                             if v == values["reserve_code"]), "unknown")
+                                             if v == values["reserve_code"]), None)
             values["time_constant_code"] = instrument.read_time_constant()
-            values["time_constant_s"] = time_constant_seconds(values["time_constant_code"])
+            values["time_constant_s"] = time_constant_seconds_for(self.configs[role], values["time_constant_code"])
+            if model_name(self.configs[role]) == "SR865A":
+                try:
+                    values["receiver_invariants"] = instrument.read_receiver_invariants()
+                except BaseException as exc:
+                    values["receiver_invariants_error"] = str(exc)
+                    if getattr(exc, "evidence", None) is not None:
+                        values["receiver_invariants_evidence"] = exc.evidence
+                    if getattr(exc, "raw", None) is not None:
+                        values["receiver_invariants_raw"] = exc.raw
+                    raise
         return result
 
     def _check(self, reading, harmonic, targets=None):
@@ -81,6 +96,17 @@ class HarmonicSensitivitySession:
             for field, value in expected.items():
                 if actual[field] != value:
                     raise Sr830Error(f"{role} harmonic setting readback {field}={actual[field]} != {value}")
+            if model_name(self.configs[role]) == "SR865A":
+                config = self.configs[role]
+                native = actual["receiver_invariants"]
+                expected_native = {
+                    **receiver_invariant_targets(config),
+                    "harmonic": expected["harmonic"],
+                    "sensitivity_full_scale_v": sensitivity_full_scale_for(config, sensitivity),
+                }
+                for field, value in expected_native.items():
+                    if native.get(field) != value:
+                        raise Sr830Error(f"{role} native setting readback {field}={native.get(field)} != {value}")
 
     def verify(self, xx, xy, harmonic, record):
         audit = record.setdefault("harmonic_setting_checks", [])
@@ -117,11 +143,12 @@ class HarmonicSensitivitySession:
             sensitivity, reserve = targets[role]
             # Widen first; reserve before narrowing. Append attempts before I/O.
             operations = []
-            if sensitivity > actual["sensitivity_code"]:
+            target_scale = sensitivity_full_scale_for(self.configs[role], sensitivity)
+            if target_scale > actual["sensitivity_full_scale_v"]:
                 operations.append(("sensitivity", sensitivity))
-            if reserve != actual["reserve_code"]:
+            if reserve is not None and reserve != actual["reserve_code"]:
                 operations.append(("reserve_mode", reserve))
-            if sensitivity < actual["sensitivity_code"]:
+            if target_scale < actual["sensitivity_full_scale_v"]:
                 operations.append(("sensitivity", sensitivity))
             for field, value in operations:
                 command = {"role": role, "setting": field, "requested_code": value,
@@ -156,9 +183,9 @@ class HarmonicSensitivitySession:
             if role in self.owned and role in roles:
                 setting = self.setting(role, harmonic)
                 state = self.states.get((role, harmonic))
-                targets[role] = (sensitivity_code(state.current_full_scale_v if state else
+                targets[role] = (sensitivity_code_for(self.configs[role], state.current_full_scale_v if state else
                                                  setting.sensitivity_full_scale_v),
-                                 RESERVE_MODE_CODES[setting.reserve_mode.value])
+                                 reserve_code_for(setting) if model_name(self.configs[role]) == "SR830" else None)
             else:
                 targets[role] = self.ranges[role]["current_sensitivity_code"], self.expected_reserves[role]
         return targets
@@ -186,8 +213,11 @@ class HarmonicSensitivitySession:
                 if role in self.owned and (roles is None or role in roles):
                     config = self.configs[role]
                     choices = (config, *config.harmonic_settings)
-                    sensitivity = max(sensitivity, *(sensitivity_code(s.autorange_max_full_scale_v or s.sensitivity_full_scale_v) for s in choices))
-                    reserve = min(reserve, *(RESERVE_MODE_CODES[s.reserve_mode.value] for s in choices))
+                    widest = max(actual["sensitivity_full_scale_v"],
+                                 *(s.autorange_max_full_scale_v or s.sensitivity_full_scale_v for s in choices))
+                    sensitivity = sensitivity_code_for(config, widest)
+                    if reserve is not None:
+                        reserve = min(reserve, *(reserve_code_for(s) for s in choices))
                 targets[role] = sensitivity, reserve
             self._apply(xx, xy, targets, harmonic, settle_s, event, cleanup=cleanup)
             event["completed"] = True
@@ -196,15 +226,13 @@ class HarmonicSensitivitySession:
             raise
 
     def initial_harmonics(self, frequency_hz):
-        from .lockin_test import MAXIMUM_REFERENCE_FREQUENCY_HZ
         return {role: next((h for h in sorted(values)
-                            if h * frequency_hz <= MAXIMUM_REFERENCE_FREQUENCY_HZ), 1)
+                            if harmonic_supported(self.configs[role], frequency_hz, h)), 1)
                 for role, values in self.selected.items()}
 
     def prepare_frequency(self, xx, xy, frequency_hz, settle_s, record):
         """Park only incompatible detectors before FREQ can reset/reject HARM."""
-        from .lockin_test import MAXIMUM_REFERENCE_FREQUENCY_HZ
-        targets = {role: 1 if h * frequency_hz > MAXIMUM_REFERENCE_FREQUENCY_HZ else h
+        targets = {role: h if harmonic_supported(self.configs[role], frequency_hz, h) else 1
                    for role, h in self.current_harmonics.items()}
         if targets != self.current_harmonics:
             record["harmonic_parking_reason"] = "detection frequency limit before FREQ"
@@ -303,9 +331,10 @@ class HarmonicSensitivitySession:
                 sensitivity = instrument.read_sensitivity()
                 reserve = instrument.read_reserve_mode()
                 audit["sensitivity_code"] = sensitivity
-                audit["sensitivity_full_scale_v"] = sensitivity_full_scale_v(sensitivity)
+                audit["model"] = model_name(self.configs[role])
+                audit["sensitivity_full_scale_v"] = sensitivity_full_scale_for(self.configs[role], sensitivity)
                 audit["reserve_code"] = reserve
-                audit["reserve_mode"] = next(k for k, v in RESERVE_MODE_CODES.items() if v == reserve)
+                audit["reserve_mode"] = next((k for k, v in RESERVE_MODE_CODES.items() if v == reserve), None)
                 if audit["harmonic_before"] != 1:
                     audit["harmonic_write_attempted"] = True
                     instrument.set_harmonic(1)
@@ -340,7 +369,7 @@ class HarmonicSensitivitySession:
                 # remains invalid diagnostic data at the current approved range.
                 continue
             amplitude = sample.reading.amplitude_v
-            scale = sensitivity_full_scale_v(self.ranges[role]["current_sensitivity_code"])
+            scale = sensitivity_full_scale_for(self.configs[role], self.ranges[role]["current_sensitivity_code"])
             if not math.isfinite(amplitude) or amplitude < 0 or amplitude >= policy.target_occupancy * scale:
                 problems.append(f"{role} h{harmonic} formal sample exceeds bounded-auto occupancy; retain rejected raw sample")
         return problems

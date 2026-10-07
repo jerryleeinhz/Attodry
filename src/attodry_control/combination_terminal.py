@@ -90,9 +90,16 @@ def launch_text(summary, width=None):
     lockin = summary.get("lockin", {})
     for role, settings in lockin.get("roles", {}).items():
         harmonics = lockin["harmonics_by_role"].get(role.removeprefix("lockin_"), [])
-        hardware.append((role, ",".join(f"h{h}" for h in harmonics) or "no acquisition",
+        hardware.append((role + " " + settings.get("model", "SR830"), ",".join(f"h{h}" for h in harmonics) or "no acquisition",
             settings["sensitivity_mode"] + " " + _number(settings["sensitivity_full_scale_v"], "V"),
-            settings["reserve_mode"], f"TC {_number(settings['time_constant_s'], 's')}"))
+            settings["reserve_mode"] or "n/a", f"TC {_number(settings['time_constant_s'], 's')}"))
+        if settings.get("sr865a") is not None:
+            capabilities = settings["sr865a"]
+            hardware.append((role, "SR865A input", "IRNG " + _number(capabilities["input_range_v_peak"], "V peak"),
+                "n/a", "Ref " + _number(capabilities["reference_input_impedance_ohm"], "ohm")))
+            hardware.append((role, "SR865A diagnostics", "current status " +
+                ("supported" if capabilities["current_status_supported"] else "unsupported"),
+                "n/a", "SYNC " + capabilities["sync_output_mode"]))
         if settings["sensitivity_mode"] == "bounded_auto":
             hardware.append((role, "AUTO limits",
                 _number(settings["autorange_min_full_scale_v"], "V") + " .. " +
@@ -100,7 +107,7 @@ def launch_text(summary, width=None):
         for override in settings["harmonic_settings"]:
             hardware.append((role, f"h{override['harmonic']} override",
                 _number(override["sensitivity_full_scale_v"], "V"),
-                getattr(override["reserve_mode"], "value", override["reserve_mode"]),
+                getattr(override["reserve_mode"], "value", override["reserve_mode"]) or "n/a",
                 getattr(override["sensitivity_mode"], "value", override["sensitivity_mode"])))
             if override["sensitivity_mode"] == "bounded_auto":
                 minimum = override.get("autorange_min_full_scale_v") or settings["autorange_min_full_scale_v"]
@@ -158,6 +165,9 @@ def launch_text(summary, width=None):
     for module in summary["outer_to_inner"]:
         policy = summary["cleanup"][module]
         text = finish_names.get(policy, policy)
+        if module == "lockin" and any(settings.get("model") == "SR865A"
+                for settings in lockin.get("roles", {}).values()):
+            text = text.replace("SENS/Reserve", "XX SENS/Reserve; XY SCAL")
         if module == "magnetic" and policy == "hold":
             last = next(a["last_target"] for a in summary["axes"] if a["module"] == module)
             text += " at " + ", ".join(_coordinate(k, [v]) for k, v in last.items())

@@ -40,6 +40,98 @@ class CommissioningAnalysisTests(unittest.TestCase):
         self.paths: list[Path] = []
         self.addCleanup(self._cleanup_files)
 
+    def test_formal_json_native_output_and_semantic_error_exclude_clean_samples(self):
+        from attodry_control.unified_plotting import load_plot_sources
+        for model in (None, "SR830", "SR865A"):
+            for flag, status in (("output_overload", "overload"),
+                                 ("instrument_error", "instrument_error")):
+                with self.subTest(model=model, flag=flag):
+                    payload = self._sweep(completed=True)
+                    instrument = payload["points"][0]["samples"][0]["lockin_xy"]
+                    if model is not None:
+                        instrument["model"] = model
+                        instrument["reading"]["model"] = model
+                        instrument["lia_status"]["model"] = model
+                    instrument["lia_status"].update(
+                        status_known=True, **{flag: True},
+                        raw=(1 if model == "SR865A" else 4) if flag == "output_overload" else 0)
+                    instrument["error_status"] = 0
+                    path = self._write_json(f"{model}_{flag}.json", payload)
+                    rows = load_sweep_samples(path)
+                    xy = next(row for row in rows if row.role == "xy")
+                    expected = (status,) if model == "SR865A" else ("clean",)
+                    self.assertEqual(xy.statuses, expected)
+                    self.assertEqual(xy.overload, model == "SR865A" and flag == "output_overload")
+                    self.assertEqual(xy.error_status, 0)
+                    self.assertTrue(xy.recorded_lia_status[flag])
+                    clean = load_sweep_samples(path, sample_statuses=("clean",))
+                    self.assertEqual(len(clean), 1 if model == "SR865A" else 2)
+                    adapted = load_plot_sources([path])
+                    self.assertEqual(len(adapted), 1 if model == "SR865A" else 2)
+
+    def test_sr865_exact_zero_phase_remains_undefined_without_losing_xy(self):
+        payload = self._sweep(completed=True)
+        instrument = payload["points"][0]["samples"][0]["lockin_xy"]
+        instrument["model"] = "SR865A"
+        instrument["reading"].update(model="SR865A", x_v=0.0, y_v=0.0,
+                                     amplitude_v=0.0, phase_deg=None)
+        instrument["lia_status"].update(model="SR865A", status_known=True)
+        path = self._write_json("sr865_zero.json", payload)
+        rows = load_sweep_samples(path)
+        xy = next(row for row in rows if row.role == "xy")
+        self.assertIsNone(xy.phase_deg)
+        self.assertEqual((xy.x_v, xy.y_v, xy.amplitude_v), (0.0, 0.0, 0.0))
+        self.assertEqual(next(item for item in aggregate_sweep_samples(rows) if item.role == "xy").count, 1)
+        self.assertEqual([item.role for item in aggregate_sweep_samples(rows, metric="phase_deg")], ["xx"])
+        self.assertEqual(aggregate_sweep_repeatability(
+            rows, role="xy", harmonic=1, metric="phase_deg"), ())
+        combined = tuple(replace(row, scan_type="frequency_excitation") for row in rows)
+        self.assertEqual(aggregate_frequency_excitation_iv(
+            combined, role="xy", harmonic=1, metric="phase_deg",
+            excitation_x_axis="sine_output_v_rms"), ())
+        from attodry_control.unified_plotting import load_plot_sources
+        adapted = load_plot_sources([path])
+        self.assertEqual(len(adapted), 2)
+        adapted_xy = next(row for row in adapted if row["role"] == "lockin_xy")
+        self.assertIsNone(adapted_xy["measured.lockin_xy_h1_phase_deg"])
+        self.assertEqual(adapted_xy["status.lockin_xy"]["model"], "SR865A")
+        scaling_rows = tuple(replace(xy, scan_type="excitation", sine_output_v_rms=voltage)
+                             for voltage in (0.001, 0.003, 0.01))
+        fit = fit_harmonic_scaling(
+            scaling_rows, role="xy", harmonic=1,
+            excitation_path=ExcitationPathResistance(100_000.0, 50.0, 500.0),
+            rules=HarmonicScalingRules(minimum_points=3))
+        self.assertEqual(len(fit.points), 3)
+        self.assertTrue(all(point.phase_deg is None for point in fit.points))
+        self.assertTrue(all(point.phase_standard_deviation_deg is None for point in fit.points))
+        self.assertTrue(all(point.complex_included for point in fit.points))
+        self.assertTrue(all(not point.included for point in fit.points))
+
+    def test_undefined_phase_requires_explicit_sr865_zero_and_consistent_role(self):
+        mutations = (
+            lambda item: item.pop("model"),
+            lambda item: item["reading"].update(model="SR830"),
+            lambda item: item["reading"].update(role="xx"),
+            lambda item: item["reading"].update(x_v=1e-300),
+            lambda item: item["reading"].update(amplitude_v=1e-300),
+            lambda item: item["reading"].update(y_v=float("nan")),
+            lambda item: item["reading"].pop("phase_deg"),
+            lambda item: item["reading"].update(phase_deg=float("nan")),
+            lambda item: item["reading"].update(phase_deg=float("inf")),
+        )
+        for index, mutation in enumerate(mutations):
+            with self.subTest(index=index):
+                payload = self._sweep(completed=True)
+                instrument = payload["points"][0]["samples"][0]["lockin_xy"]
+                instrument["model"] = "SR865A"
+                instrument["reading"].update(x_v=0.0, y_v=0.0, amplitude_v=0.0, phase_deg=None)
+                mutation(instrument)
+                path = self._write_json(f"bad_phase_{index}.json", payload)
+                with self.assertRaises(ValueError):
+                    load_sweep_samples(path)
+        legacy = self._write_json("legacy_finite_phase.json", self._sweep(completed=True))
+        self.assertTrue(all(row.phase_deg == 0.0 for row in load_sweep_samples(legacy)))
+
     def test_catalog_filters_completed_rejected_and_diagnostic_records(self) -> None:
         completed = self._write_json("completed.json", self._sweep(completed=True))
         self._write_json("rejected.json", self._sweep(completed=False))

@@ -1,5 +1,32 @@
 # Hardware and safety guide
 
+## SR865A electrical XY receiver exception (offline; 2026-10-07)
+
+The user explicitly approved software support for replacing only `lockin_xy`
+with SR865A. XX remains SR830, internal reference and the sole connected
+excitation source. Its TTL OUT feeds XY REF IN; XY SINE OUT must be physically
+disconnected. Dual SR830 remains the default. This software work does not
+authorize real connection, commissioning or deployment.
+
+SR865A uses native SCAL for sensitivity and independent IRNG in V peak, without
+SR830 Reserve or line-notch settings. Range comparisons use physical volts,
+not native code ordering. Reference impedance and current-status query support
+are explicit local facts. Unknown safety status, unlock/error/configuration/
+power-on flags and output-scale overload remain blocking. Optional overload
+continuation covers only declared input/filter faults and retains invalid data.
+
+Setup and formal checks preserve XY PHAS, SLVL, SOFF, REFM and BLAZEX. The
+measurement filters ADVFILT/SYNC are separately disabled and verified. Cleanup
+returns XX excitation to 4 mV, then verifies h1, native measurement settings,
+input range and unchanged XY source state. Exact-zero SR865A X/Y has undefined
+phase, archived as null. Magnetic, SMU and temperature policies are unchanged.
+
+Mixed standalone sweeps require `--authorize-writes` before any instrument I/O.
+Combination and temperature–excitation propagate existing run authorization;
+the receiver/station cannot grant itself authorization. Legacy dual-SR830
+commissioning commands reject mixed pairs before connection. See
+[configuration and scope](LOCKIN_DAILY_OPERATION.md#sr865a-作为-xy-接收机).
+
 ## Opt-in SR830 overload acquisition policy (2026-09-29)
 
 At the user's request, `lockin_sweep.overload_policy` may explicitly allow

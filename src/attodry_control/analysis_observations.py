@@ -13,10 +13,13 @@ def finite(value):
 
 
 def observation_id(row):
+    # A recorded formal identity must not change when another run is unloaded.
+    recorded = (row.get("source_path") is not None and row.get("run_id") is not None
+                and row.get("condition_id") is not None and row.get("sample_index") is not None)
     return {k: row[k] for k in (
         "source_path", "run_id", "condition_id", "attempt_index", "sample_index",
         "repeat_index", "row_index", "role", "harmonic",
-    ) if k in row}
+    ) if k in row and not (recorded and k == "row_index")}
 
 
 def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
@@ -50,7 +53,8 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
     if not evidence and row.get("role") in (role, short_role) and row.get("harmonic") == harmonic:
         legacy = row.get("status." + role, row)
         if "lia_status_raw" in legacy or "error_status" in legacy:
-            evidence.append(({"lia_status": {"raw": legacy.get("lia_status_raw")},
+            evidence.append(({"model": legacy.get("model"),
+                              "lia_status": legacy.get("lia_status") or {"raw": legacy.get("lia_status_raw")},
                               "error_status": legacy.get("error_status")}, {}))
     confirmed_status = False
     for reading, sample in evidence:
@@ -60,11 +64,29 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
             issues.append("formal_problem")
         lia = reading.get("lia_status") or {}
         raw = lia.get("raw")
-        confirmed_status |= type(raw) is int
+        models = {source.get("model") for source in (reading, reading.get("reading") or {}, lia)
+                  if source.get("model") is not None}
+        model = next(iter(models)) if len(models) == 1 else None
+        if len(models) > 1:
+            issues.append("model_conflict")
+        elif model not in (None, "SR830", "SR865A"):
+            issues.append("unknown_lockin_model")
+        native_sr865 = model == "SR865A"
+        confirmed_status |= lia.get("status_known") is True if native_sr865 else (
+            type(raw) is int and not models.difference({"SR830"}))
+        # Native SR865 LIAS is retained for audit. Only its decoded semantic
+        # flags may qualify a channel; SR830 masks have different meanings.
         for name, mask in (("input_or_reserve_overload", 1), ("filter_overload", 2),
                            ("output_overload", 4), ("reference_unlocked", 8)):
-            if lia.get(name) is True or (type(raw) is int and raw & mask):
+            legacy_bit = not models.difference({"SR830"}) and type(raw) is int and raw & mask
+            if lia.get(name) is True or legacy_bit:
                 issues.append(name)
+        if native_sr865:
+            if lia.get("unknown_status_bits"):
+                issues.append("unknown_status_bits")
+            for name in ("configuration_changed_latched", "power_on_latched", "instrument_error"):
+                if lia.get(name) is True:
+                    issues.append(name)
         if reading.get("error_status") not in (None, 0):
             issues.append("instrument_error")
         values = reading.get("reading") or {}

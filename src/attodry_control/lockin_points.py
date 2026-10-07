@@ -9,7 +9,6 @@ from dataclasses import asdict, dataclass, replace
 
 from . import lockin_test as daily
 from .combination_store import utc_now
-from .sr830 import DualSr830Controller
 
 
 @dataclass(frozen=True)
@@ -35,7 +34,7 @@ class _AuditedInstrument:
 
     def __getattr__(self, name):
         method = getattr(self.instrument, name)
-        if name not in {"read_diagnostic", "read_harmonic_sample", "read_fixed_setting", "read_status_latches"} and not name.startswith("set_"):
+        if name not in {"read_diagnostic", "read_harmonic_sample", "read_fixed_setting", "read_status_latches", "read_receiver_invariants"} and not name.startswith("set_"):
             return method
 
         def call(*args, **kwargs):
@@ -47,7 +46,7 @@ class _AuditedInstrument:
             result = method(*args, **kwargs)
             self.event("lockin_command_return" if write else "lockin_raw_role", {
                 "role": role, "method": name, "captured_at_utc": utc_now(),
-                "reading": (None if write else result if name == "read_fixed_setting"
+                "reading": (None if write else result if name in {"read_fixed_setting", "read_receiver_invariants"}
                             else {"lia_status": asdict(result[0]), "error_status": result[1]}
                             if name == "read_status_latches" else asdict(result)),
             })
@@ -57,13 +56,14 @@ class _AuditedInstrument:
 
 class LockinPointSession:
     def __init__(self, config_path, config, event, *, manager_factory=None,
-                 mode="excitation"):
+                 mode="excitation", authorize_writes=False):
         self.config = config
         self.mode = mode
         self.args, self.settings, self.points, self.safety = (
             daily.prepare_configured_lockin_sweep(config_path, config, scan=mode)
         )
         self.event = event
+        self.settings["authorize_writes"] = authorize_writes is True
         self.manager_factory = manager_factory
         self.context = None
         self.pair = None
@@ -95,17 +95,19 @@ class LockinPointSession:
         self.skipped_by_frequency = {}
         for frequency in frequency_specs:
             # Includes the all-selected-orders-unsupported case before any I/O.
-            _, skipped = daily._harmonics_for_frequency(frequency.value, self.harmonics,
-                                                       skip_unsupported=self.skip_unsupported)
+            _, skipped = daily._harmonics_for_frequency(
+                frequency.value, self.harmonics, skip_unsupported=self.skip_unsupported,
+                config=config, harmonics_by_role=self.harmonics_by_role)
             self.skipped_by_frequency[str(frequency.value)] = skipped
         self.point_harmonics = self.harmonics
 
     def open(self):
+        daily._require_mixed_write_authorization(self.settings)
         factory = self.manager_factory or daily._load_resource_manager_factory()
         self.context = daily._open_pair(self.settings, factory)
         self.pair = tuple(_AuditedInstrument(i, self.event) for i in self.context.__enter__())
         xx, xy = self.pair
-        self.preflight = DualSr830Controller(xx, xy).verify_existing_configuration(
+        self.preflight = daily._pair_controller(xx, xy).verify_existing_configuration(
             frequency_hz=self.config.lockin_xx.frequency_hz,
             check_frequency=False,
             ignore_output_overload=True,
@@ -114,6 +116,9 @@ class LockinPointSession:
                 zip(("lockin_xx", "lockin_xy"), self.preflight)}
 
     def configure(self):
+        if (daily.model_name(self.config.lockin_xy) == "SR865A"
+                and self.settings.get("authorize_writes") is not True):
+            raise daily.AuthorizationRequired("Mixed lock-in setting writes were not authorized")
         xx, xy = self.pair
         before_xx, before_xy = self.preflight
         self.writes_started = True
@@ -176,6 +181,9 @@ class LockinPointSession:
             "samples": [], "harmonic_transition_status": [],
         }
         try:
+            if daily.model_name(xy) == "SR865A":
+                self.harmonic_control.verify(xx, xy, self.harmonic_control.current_harmonics,
+                                             self.point_record)
             daily._verify_frequency_readbacks(self.target_frequency_hz,
                 xx.read_reference_frequency(), xy.read_reference_frequency(),
                 rel_tolerance=1e-5,
@@ -232,7 +240,8 @@ class LockinPointSession:
                                  source_readback_safety=safety)
         self.point_harmonics, skipped = daily._harmonics_for_frequency(
             max(self.target_frequency_hz, frequency, companion), self.harmonics,
-            skip_unsupported=self.skip_unsupported)
+            skip_unsupported=self.skip_unsupported, config=self.config,
+            harmonics_by_role=self.harmonics_by_role)
         self.point_record["skipped_harmonics"] = skipped
         return {"lockin_excitation_v_rms": source, "lockin_frequency_hz": frequency}
 
@@ -265,11 +274,20 @@ class LockinPointSession:
             self.event("lockin_point_samples", record)
         self.sample_count += 1
         measured = {}
+        self.unavailable_phase_keys = set()
         for sample in record["samples"]:
             for role in sample["selected_roles"]:
                 reading = sample["lockin_" + role]["reading"]
                 for metric in ("x_v", "y_v", "amplitude_v", "phase_deg"):
-                    measured[f"lockin_{role}_h{sample['harmonic']}_{metric}"] = reading[metric]
+                    key = f"lockin_{role}_h{sample['harmonic']}_{metric}"
+                    if (metric == "phase_deg" and reading[metric] is None
+                            and reading.get("model") == "SR865A"
+                            and reading["x_v"] == reading["y_v"] == reading["amplitude_v"] == 0):
+                        # atan2(0, 0) has no measured phase. Keep None in raw
+                        # audit data; omit only this unavailable plotted metric.
+                        self.unavailable_phase_keys.add(key)
+                        continue
+                    measured[key] = reading[metric]
         from .lockin_overload import overload_summary
         summary = overload_summary(record)
         clean = all(s["valid_for_analysis_by_role"]["lockin_" + role]
@@ -289,12 +307,12 @@ class LockinPointSession:
             return {"attempted": False, "verified": True, "errors": []}
         cleanup = daily._restore_scan_state(
             *self.pair, baseline_hz=self.config.lockin_xx.frequency_hz,
-            original_xx_sensitivity=daily.sensitivity_code(self.config.lockin_xx.sensitivity_full_scale_v),
-            original_xy_sensitivity=daily.sensitivity_code(self.config.lockin_xy.sensitivity_full_scale_v),
+            original_xx_sensitivity=daily.sensitivity_code_for(self.config.lockin_xx, self.config.lockin_xx.sensitivity_full_scale_v),
+            original_xy_sensitivity=daily.sensitivity_code_for(self.config.lockin_xy, self.config.lockin_xy.sensitivity_full_scale_v),
             restore_sensitivity=daily._range_write_attempted(self.sensitivity_setup, "lockin_xx"),
             restore_xy_sensitivity=daily._range_write_attempted(self.sensitivity_setup, "lockin_xy"),
-            original_xx_reserve_mode=daily.RESERVE_MODE_CODES[self.config.lockin_xx.reserve_mode.value],
-            original_xy_reserve_mode=daily.RESERVE_MODE_CODES[self.config.lockin_xy.reserve_mode.value],
+            original_xx_reserve_mode=daily.reserve_code_for(self.config.lockin_xx),
+            original_xy_reserve_mode=daily.reserve_code_for(self.config.lockin_xy),
             restore_xx_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xx"),
             restore_xy_reserve=daily._reserve_write_attempted(self.reserve_setup, "lockin_xy"),
             harmonic_control=self.harmonic_control,
@@ -304,7 +322,8 @@ class LockinPointSession:
         if (self.fixed_setup and self.fixed_setup.get("verified")
                 and self.frequency_setup and self.frequency_setup.get("verified")
                 and self.sensitivity_setup and self.reserve_setup):
-            daily._verify_sweep_configured_cleanup(cleanup, self.config)
+            daily._verify_sweep_configured_cleanup(cleanup, self.config,
+                receiver_setup=self.fixed_setup.get("receiver_setup"))
         return cleanup
 
     def close(self):

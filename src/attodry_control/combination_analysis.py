@@ -24,6 +24,16 @@ def _flatten(prefix: str, value: Mapping) -> dict:
     return result
 
 
+def list_combination_runs(path: str | Path) -> tuple[dict, ...]:
+    """Read run identities/status only; never decode formal sample payloads."""
+    with closing(open_readonly(path)) as connection:
+        rows = connection.execute(
+            "SELECT run_id, schema_version, created_at_utc, status FROM combination_runs "
+            "ORDER BY created_at_utc, run_id"
+        ).fetchall()
+    return tuple(dict(row) for row in rows)
+
+
 def load_combination_rows(path: str | Path, *, run_id: str | None = None,
                           audit: bool = False) -> tuple[dict, ...]:
     """One wide row per formal sample. Audit opt-in exposes failed run samples.
@@ -32,29 +42,34 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
     """
     with closing(open_readonly(path)) as connection:
         connection.execute("BEGIN")
-        rows = connection.execute("""
+        where = "WHERE s.run_id=?" if run_id is not None else ""
+        rows = connection.execute(f"""
             SELECT r.schema_version, r.status AS run_status, r.cleanup_json,
                    c.context_json, a.status AS attempt_status, s.*
             FROM combination_samples s
             JOIN combination_runs r USING(run_id)
             JOIN combination_conditions c USING(run_id, condition_id)
             JOIN combination_attempts a USING(run_id, condition_id, attempt_index)
-            WHERE (? IS NULL OR r.run_id=?)
+            {where}
             ORDER BY r.created_at_utc, c.sequence_index, s.attempt_index, s.sample_index
-        """, (run_id, run_id)).fetchall()
+        """, () if run_id is None else (run_id,)).fetchall()
     output = []
+    cleanup_by_run = {}
+    source_path = str(Path(path).resolve())
     for row in rows:
         if row["schema_version"] != SCHEMA_VERSION:
             raise ValueError("Unsupported combination schema")
         sample = json.loads(row["payload_json"])
-        cleanup = json.loads(row["cleanup_json"] or "{}")
+        if row["run_id"] not in cleanup_by_run:
+            cleanup_by_run[row["run_id"]] = json.loads(row["cleanup_json"] or "{}")
+        cleanup = cleanup_by_run[row["run_id"]]
         accepted = (row["attempt_status"] == "accepted" and row["run_status"] == "completed"
                     and cleanup.get("clean") is True and sample.get("clean") is True)
         if not audit and not accepted:
             continue
         context = json.loads(row["context_json"])
         record = {
-            "schema_version": SCHEMA_VERSION, "source_path": str(Path(path).resolve()),
+            "schema_version": SCHEMA_VERSION, "source_path": source_path,
             "run_id": row["run_id"], "condition_id": row["condition_id"],
             "attempt_index": row["attempt_index"], "sample_index": row["sample_index"],
             "accepted": accepted, "run_status": row["run_status"],
@@ -141,7 +156,8 @@ def load_legacy_temperature_lockin(path: str | Path) -> tuple[dict, ...]:
             f"measured.{role}_h{row.harmonic}_y_v": row.y_v,
             f"measured.{role}_h{row.harmonic}_amplitude_v": row.amplitude_v,
             f"measured.{role}_h{row.harmonic}_phase_deg": row.phase_deg,
-            "status." + role: {"lia_status_raw": row.lia_status_raw,
+            "status." + role: {"model": row.model, "lia_status": row.recorded_lia_status,
+                              "lia_status_raw": row.lia_status_raw,
                               "error_status": row.error_status, "problems": row.problems},
         })
     return tuple(output)

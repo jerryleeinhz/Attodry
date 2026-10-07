@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 import math
 
-from .sr830_settings import sensitivity_code
+from .lockin_model_settings import sensitivity_code_for
 
 
 class AutorangeAction(StrEnum):
@@ -21,6 +21,7 @@ class AutorangePolicy:
     target_occupancy: float
     stable_samples_before_narrowing: int
     configured_full_scales_v: tuple[float, ...] | None = None
+    model: str = "SR830"
 
     def __post_init__(self) -> None:
         full_scales = self.full_scales_v
@@ -33,10 +34,10 @@ class AutorangePolicy:
             raise ValueError("autorange ladder must be strictly increasing")
         try:
             for full_scale in full_scales:
-                sensitivity_code(full_scale)
+                sensitivity_code_for(self.model, full_scale)
         except ValueError as exc:
             raise ValueError(
-                "autorange bounds must use SR830 voltage-input full scales"
+                f"autorange bounds must use {self.model} voltage-input full scales"
             ) from exc
         if not math.isclose(
             self.minimum_full_scale_v, full_scales[0], rel_tol=0.0, abs_tol=1e-15

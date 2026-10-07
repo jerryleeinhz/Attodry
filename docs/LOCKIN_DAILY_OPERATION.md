@@ -1,4 +1,45 @@
-# Dual-SR830 日常扫频与扫幅
+# 电学 Lock-in 日常扫频与扫幅
+
+## SR865A 作为 XY 接收机
+
+2026-10-07 已完成离线软件适配，真实替换验收尚未执行。XX 必须是 SR830，
+仍提供 SINE OUT 激励与 TTL OUT 参考；XY 可为 SR830 或 SR865A，SINE OUT 必须
+物理断开。角色名、激励/频率网格、正式谐波选择和分析列名保持一致。
+
+在本地已有 `[lockin_xy]` 表内修改 `model = "SR865A"` 和实际 VISA 地址，
+删除 XY 的 `reserve_mode`（包括其 `harmonic_settings` 内的 Reserve），保留
+原来的物理输入、滤波、TC 和 full-scale 设置，再加入以下型号表：
+
+```toml
+[lockin_xy.sr865a]
+input_range_v_peak = 1.0
+reference_input_impedance_ohm = 1000000.0
+current_status_supported = false
+sync_output_mode = "preserve"
+```
+
+这些值必须按接线与固件能力确认。`current_status_supported = false` 可供离线
+配置/预览，但不会通过需要当前安全状态的采集门槛；只有实测确认支持当前状态
+查询后才设 true。IRNG 为独立输入峰值量程，可选 1/0.3/0.1/0.03/0.01 V；
+SCAL 对应 `sensitivity_full_scale_v`，固定与 bounded_auto 仍受
+`lockin_safety.toml` 物理量白名单约束。参考阻抗明确选择 50 或 1000000 Ω。
+TC/滤波使用型号自己的离散表；输入仍限制为 A-B、Float、AC、TTL rising。
+
+SR865A 不接受 Reserve 或 SR830 line-notch 设置。PHAS 与未使用的
+SLVL/SOFF/REFM/BLAZEX 保留；测量滤波 ADVFILT/SYNC 另行禁用并校验。
+原生状态与原始命令保留型号信息，XY 输出量程过载和未知状态始终阻断。
+结束时 XX 回到 4 mVrms、双方 h1，恢复测量量程并核验 XY 源原值。
+精确零幅样本的相位保持 null，幅值/X/Y 可保留，相位图不补 0°。
+
+三种独立混合 sweep 必须加 `--authorize-writes`。四模块 `combination_cli run`
+与温度–激励入口使用各自已有运行授权。独立只读诊断不得与扫描并行连接。
+旧 `configure-minimum`、`harmonics`、`commission-xx-autorange-narrow` 保留为双
+SR830 commissioning，遇到 SR865A 在连接前拒绝；混合采集使用 sweep/combination。
+
+```powershell
+# 仅示例；真实运行须先完成接线/型号验收。
+python -m attodry_control.lockin_test sweep-excitation --authorize-writes
+```
 
 本页是 Lock-in 日常数据采集入口。它覆盖扫频、扫幅和频率×幅值二维矩阵三类设备扫描命令；不包含
 attoDRY、PPMS、SMU 或旋转台控制。

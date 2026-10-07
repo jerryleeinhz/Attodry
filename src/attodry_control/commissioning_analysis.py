@@ -76,7 +76,7 @@ class CommissioningSample:
     x_v: float
     y_v: float
     amplitude_v: float
-    phase_deg: float
+    phase_deg: float | None
     reference_frequency_hz: float
     locked: bool
     overload: bool
@@ -86,6 +86,8 @@ class CommissioningSample:
     problems: tuple[str, ...]
     phase_shift_deg: float | None = None
     source_readback_confirmed: bool = False
+    model: str | None = None
+    recorded_lia_status: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,8 +237,8 @@ class HarmonicScalingPoint:
     amplitude_v: float
     amplitude_standard_deviation_v: float
     amplitude_standard_error_v: float
-    phase_deg: float
-    phase_standard_deviation_deg: float
+    phase_deg: float | None
+    phase_standard_deviation_deg: float | None
     count: int
     snr: float | None
     included: bool
@@ -732,10 +734,11 @@ def aggregate_sweep_samples(
     )
     grouped: dict[tuple[float, str], list[float]] = {}
     for row in rows:
+        value = getattr(row, metric)
+        if value is None:
+            continue
         raw_x = _sweep_x_value(row, x_axis, resolved_excitation_path)
-        grouped.setdefault((float(raw_x), row.role), []).append(
-            float(getattr(row, metric))
-        )
+        grouped.setdefault((float(raw_x), row.role), []).append(float(value))
     statistics: list[SweepStatistic] = []
     for (x_value, role), values in sorted(grouped.items()):
         mean, spread = _mean_and_standard_deviation(values, metric=metric)
@@ -809,6 +812,9 @@ def aggregate_sweep_repeatability(
         tuple[str, tuple[float, ...]], tuple[list[float], list[float], tuple[float, ...]]
     ] = {}
     for row in selected:
+        value = getattr(row, metric)
+        if value is None:
+            continue
         coordinates = tuple(float(getattr(row, axis)) for axis in coordinate_axes)
         if any(not math.isfinite(value) for value in coordinates):
             raise ValueError("Requested scan coordinates must be finite.")
@@ -816,7 +822,7 @@ def aggregate_sweep_repeatability(
         if key not in grouped:
             grouped[key] = ([], [], coordinates)
         values, x_values, _ = grouped[key]
-        values.append(float(getattr(row, metric)))
+        values.append(float(value))
         x_values.append(_sweep_x_value(row, x_axis, resolved_path))
 
     statistics: list[RepeatabilityStatistic] = []
@@ -1095,10 +1101,11 @@ def aggregate_frequency_excitation_iv(
     grouped: dict[tuple[float, float], list[float]] = {}
     for frequency_hz, bin_rows in frequency_bins:
         for row in bin_rows:
+            value = getattr(row, metric)
+            if value is None:
+                continue
             x_value = _sweep_x_value(row, excitation_x_axis, resolved_path)
-            grouped.setdefault((frequency_hz, x_value), []).append(
-                float(getattr(row, metric))
-            )
+            grouped.setdefault((frequency_hz, x_value), []).append(float(value))
     statistics: list[MultiFrequencyIVStatistic] = []
     for (frequency_hz, x_value), values in sorted(grouped.items()):
         mean, spread = _mean_and_standard_deviation(values, metric=metric)
@@ -1950,7 +1957,7 @@ def _harmonic_scaling_points(
         x_values = [float(row.x_v) for row in grouped_rows]
         y_values = [float(row.y_v) for row in grouped_rows]
         amplitudes = [float(row.amplitude_v) for row in grouped_rows]
-        phases = [float(row.phase_deg) for row in grouped_rows]
+        phases = [float(row.phase_deg) for row in grouped_rows if row.phase_deg is not None]
         x_mean = fmean(x_values)
         y_mean = fmean(y_values)
         x_sem = (
@@ -1967,7 +1974,9 @@ def _harmonic_scaling_points(
         amplitude_sd = stdev(amplitudes) if len(amplitudes) > 1 else 0.0
         amplitude_sem = amplitude_sd / math.sqrt(len(amplitudes)) if len(amplitudes) > 1 else 0.0
         snr = amplitude / amplitude_sem if amplitude_sem > 0.0 else None
-        phase, phase_sd = _mean_and_standard_deviation(phases, metric="phase_deg")
+        phase, phase_sd = (
+            _mean_and_standard_deviation(phases, metric="phase_deg") if phases else (None, None)
+        )
         included = True
         exclusion_reason = None
         if not math.isfinite(current) or current <= 0.0:
@@ -3168,9 +3177,12 @@ def _complex_power_law_verdict(
 def _phase_scaling_metrics(
     points: Sequence[HarmonicScalingPoint],
 ) -> tuple[float | None, float | None]:
-    if len(points) < 2:
+    ordered = sorted(
+        (point for point in points if point.phase_deg is not None),
+        key=lambda point: point.current_a_rms,
+    )
+    if len(ordered) < 2:
         return None, None
-    ordered = sorted(points, key=lambda point: point.current_a_rms)
     unwrapped: list[float] = []
     previous_wrapped = None
     previous_unwrapped = None
@@ -3895,6 +3907,43 @@ def _measurement_config_for_record(
     return profile
 
 
+def _formal_lockin_model(instrument: Mapping[str, object]) -> str | None:
+    """Resolve recorded model evidence without consulting live hardware config."""
+    sources = (instrument, instrument.get("reading"), instrument.get("lia_status"),
+               instrument.get("native_sample"))
+    models = {source["model"] for source in sources
+              if isinstance(source, Mapping) and source.get("model") is not None}
+    if len(models) > 1:
+        raise ValueError("Formal lock-in model evidence conflicts.")
+    return next(iter(models)) if models else None
+
+
+def _formal_phase_deg(instrument: Mapping[str, object], *, role: str) -> float | None:
+    """SR865 simultaneous X=Y=R=0 has undefined phase, preserved as None."""
+    reading = instrument.get("reading")
+    if not isinstance(reading, Mapping) or "phase_deg" not in reading:
+        raise ValueError("Formal phase_deg is missing.")
+    phase = reading["phase_deg"]
+    if phase is not None:
+        try:
+            converted = float(phase)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("phase_deg must be numeric.") from exc
+        if not math.isfinite(converted):
+            raise ValueError("phase_deg must be finite.")
+        return converted
+    if _formal_lockin_model(instrument) != "SR865A":
+        raise ValueError("Undefined phase requires a recorded SR865A model.")
+    for source in (instrument, reading, instrument.get("native_sample")):
+        if isinstance(source, Mapping) and source.get("role") not in (None, role, "lockin_" + role):
+            raise ValueError("Undefined phase has conflicting lock-in role evidence.")
+    for field in ("x_v", "y_v", "amplitude_v"):
+        value = reading.get(field)
+        if type(value) not in (int, float) or not math.isfinite(value) or value != 0:
+            raise ValueError("Undefined SR865A phase requires exact finite X=Y=R=0.")
+    return None
+
+
 def _commissioning_sample(
     *,
     path: Path,
@@ -3934,6 +3983,15 @@ def _commissioning_sample(
     validity = sample.get("valid_for_analysis_by_role", {})
     if validity.get(f"lockin_{role}") is False and not problems:
         problems = ("Recorded invalid for analysis",)
+    model = _formal_lockin_model(instrument)
+    # The archived SR830 output-path exception does not apply to native SR865A.
+    if model == "SR865A":
+        overload = overload or bool(lia_status.get("output_overload"))
+    if model == "SR865A" and (
+        lia_status.get("status_known") is not True or lia_status.get("unknown_status_bits")
+        or any(lia_status.get(name) for name in ("configuration_changed_latched", "power_on_latched"))
+    ):
+        problems += ("Unknown or latched SR865A formal status",)
     statuses: list[str] = []
     if problems:
         statuses.append("problem")
@@ -3941,7 +3999,7 @@ def _commissioning_sample(
         statuses.append("unlocked")
     if overload:
         statuses.append("overload")
-    if error_status:
+    if error_status or (model == "SR865A" and lia_status.get("instrument_error")):
         statuses.append("instrument_error")
     if not statuses:
         statuses.append("clean")
@@ -3985,7 +4043,7 @@ def _commissioning_sample(
         x_v=float(reading["x_v"]),
         y_v=float(reading["y_v"]),
         amplitude_v=float(reading["amplitude_v"]),
-        phase_deg=float(reading["phase_deg"]),
+        phase_deg=_formal_phase_deg(instrument, role=role),
         reference_frequency_hz=float(reading["frequency_hz"]),
         locked=bool(reading["locked"]),
         overload=overload,
@@ -3998,6 +4056,8 @@ def _commissioning_sample(
             else float(reading["phase_shift_deg"])
         ),
         source_readback_confirmed=point.get("source_readback_v_rms") is not None,
+        model=model,
+        recorded_lia_status=dict(lia_status),
     )
 
 

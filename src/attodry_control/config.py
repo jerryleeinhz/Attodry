@@ -206,12 +206,22 @@ class HarmonicSensitivityConfig:
     harmonic: int
     sensitivity_mode: SensitivityMode
     sensitivity_full_scale_v: float
-    reserve_mode: ReserveMode
+    reserve_mode: ReserveMode | None
     autorange_min_full_scale_v: float | None = None
     autorange_max_full_scale_v: float | None = None
     autorange_target_occupancy: float | None = None
     autorange_stable_samples: int | None = None
     autorange_full_scales_v: tuple[float, ...] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Sr865aConfig:
+    """Independent input range and explicitly declared firmware capabilities."""
+
+    input_range_v_peak: float
+    reference_input_impedance_ohm: float
+    current_status_supported: bool
+    sync_output_mode: str = "preserve"
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,8 +246,9 @@ class LockinConfig:
     autorange_target_occupancy: float | None
     autorange_stable_samples: int | None
     autorange_full_scales_v: tuple[float, ...] | None
-    reserve_mode: ReserveMode
+    reserve_mode: ReserveMode | None
     harmonic_settings: tuple[HarmonicSensitivityConfig, ...] = ()
+    sr865a: Sr865aConfig | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1406,6 +1417,11 @@ def _parse_lockin(
     safety_role: LockinSafetyRoleConfig,
     safety: LockinSafetyConfig,
 ) -> LockinConfig:
+    model = _string(table.get("model"), f"{name}.model")
+    supported_models = {"SR830"} if role is LockinRole.XX else {"SR830", "SR865A"}
+    if model not in supported_models:
+        allowed = "'SR830'" if role is LockinRole.XX else "'SR830' or 'SR865A'"
+        raise ConfigError(f"{name}.model must be {allowed}.")
     expected = {
         "model",
         "address",
@@ -1420,8 +1436,8 @@ def _parse_lockin(
         "filter_slope_db_oct",
         "sensitivity_mode",
         "sensitivity_full_scale_v",
-        "reserve_mode",
     }
+    expected.add("reserve_mode" if model == "SR830" else "sr865a")
     if role is LockinRole.XY:
         expected.add("external_reference_edge")
     if table.get("sensitivity_mode") == SensitivityMode.BOUNDED_AUTO.value:
@@ -1436,9 +1452,10 @@ def _parse_lockin(
     _strict_keys_with_optional(
         table, name, expected, {"harmonic_settings"},
     )
-    model = _string(table["model"], f"{name}.model")
-    if model != "SR830":
-        raise ConfigError(f"{name}.model must be 'SR830'.")
+    sr865a = None
+    if model == "SR865A":
+        from . import sr865a_settings
+        sr865a = _parse_sr865a(table["sr865a"], f"{name}.sr865a")
     reference_source = _enum_value(
         ReferenceSource, table["reference_source"], f"{name}.reference_source"
     )
@@ -1469,6 +1486,8 @@ def _parse_lockin(
     )
     if not 0.004 <= source_voltage_v <= 5.0:
         raise ConfigError(f"{name}.source_voltage_v must be within 4 mVrms to 5 Vrms.")
+    if model == "SR865A" and source_voltage_v > sr865a_settings.MAXIMUM_SINE_OUTPUT_V:
+        raise ConfigError(f"{name}.source_voltage_v exceeds the SR865A 2 Vrms capability.")
     frequency_hz = _positive_number(table["frequency_hz"], f"{name}.frequency_hz")
     if frequency_hz > 102_000:
         raise ConfigError(f"{name}.frequency_hz cannot exceed 102000 Hz.")
@@ -1488,9 +1507,9 @@ def _parse_lockin(
     sensitivity_mode = _enum_value(
         SensitivityMode, table["sensitivity_mode"], f"{name}.sensitivity_mode"
     )
-    reserve_mode = _enum_value(
+    reserve_mode = (_enum_value(
         ReserveMode, table["reserve_mode"], f"{name}.reserve_mode"
-    )
+    ) if model == "SR830" else None)
     sensitivity_full_scale_v = _positive_number(
         table["sensitivity_full_scale_v"], f"{name}.sensitivity_full_scale_v"
     )
@@ -1540,6 +1559,9 @@ def _parse_lockin(
                     "or lockin_safety.toml ladder."
                 )
             autorange_full_scales_v = matching_ladders[0]
+            if model == "SR865A":
+                for full_scale in autorange_full_scales_v:
+                    sr865a_settings.sensitivity_code(full_scale)
             AutorangePolicy(
                 autorange_min_full_scale_v,
                 autorange_max_full_scale_v,
@@ -1569,16 +1591,21 @@ def _parse_lockin(
                 f"{name}.sensitivity_full_scale_v must equal the autorange minimum."
             )
     try:
-        map_sr830_settings(
-            reference_source=reference_source,
-            external_reference_edge=external_reference_edge,
-            input_mode=input_mode,
-            shield_grounding=shield_grounding,
-            input_coupling=input_coupling,
-            time_constant_s=time_constant_s,
-            filter_slope_db_oct=filter_slope_db_oct,
-            sensitivity_full_scale_v=sensitivity_full_scale_v,
-        )
+        if model == "SR830":
+            map_sr830_settings(
+                reference_source=reference_source,
+                external_reference_edge=external_reference_edge,
+                input_mode=input_mode,
+                shield_grounding=shield_grounding,
+                input_coupling=input_coupling,
+                time_constant_s=time_constant_s,
+                filter_slope_db_oct=filter_slope_db_oct,
+                sensitivity_full_scale_v=sensitivity_full_scale_v,
+            )
+        else:
+            sr865a_settings.time_constant_code(time_constant_s)
+            sr865a_settings.filter_slope_code(filter_slope_db_oct)
+            sr865a_settings.sensitivity_code(sensitivity_full_scale_v)
     except ValueError as exc:
         raise ConfigError(f"{name}: {exc}") from exc
     return LockinConfig(
@@ -1604,7 +1631,35 @@ def _parse_lockin(
         autorange_full_scales_v=autorange_full_scales_v,
         reserve_mode=reserve_mode,
         harmonic_settings=_parse_harmonic_settings(table, role, name, safety_role, safety),
+        sr865a=sr865a,
     )
+
+
+def _parse_sr865a(table: Any, name: str) -> Sr865aConfig:
+    if not isinstance(table, dict):
+        raise ConfigError(f"{name} must be a table.")
+    _strict_keys(table, name, {
+        "input_range_v_peak", "reference_input_impedance_ohm",
+        "current_status_supported", "sync_output_mode",
+    })
+    input_range = _positive_number(table["input_range_v_peak"], f"{name}.input_range_v_peak")
+    from .sr865a_settings import input_range_code
+    try:
+        input_range_code(input_range)
+    except ValueError as exc:
+        raise ConfigError(f"{name}: {exc}") from exc
+    impedance = _positive_number(
+        table["reference_input_impedance_ohm"], f"{name}.reference_input_impedance_ohm"
+    )
+    if impedance not in {50.0, 1_000_000.0}:
+        raise ConfigError(f"{name}.reference_input_impedance_ohm must be 50 or 1000000 ohm.")
+    current_status_supported = _boolean(
+        table["current_status_supported"], f"{name}.current_status_supported"
+    )
+    sync_output_mode = _string(table["sync_output_mode"], f"{name}.sync_output_mode")
+    if sync_output_mode != "preserve":
+        raise ConfigError(f"{name}.sync_output_mode must be 'preserve'.")
+    return Sr865aConfig(input_range, impedance, current_status_supported, sync_output_mode)
 
 
 def _parse_harmonic_settings(
@@ -1619,9 +1674,11 @@ def _parse_harmonic_settings(
         raise ConfigError(f"{label} must be a non-empty table.")
     if table["sensitivity_mode"] != "fixed":
         raise ConfigError(f"{label} requires a fixed role baseline; set bounded_auto per harmonic.")
-    allowed = {"sensitivity_mode", "sensitivity_full_scale_v", "reserve_mode",
+    allowed = {"sensitivity_mode", "sensitivity_full_scale_v",
                "autorange_min_full_scale_v", "autorange_max_full_scale_v",
                "autorange_target_occupancy", "autorange_stable_samples"}
+    if table["model"] == "SR830":
+        allowed.add("reserve_mode")
     result = []
     for key, override in sorted(settings.items()):
         if key not in {"h1", "h2", "h3"}:
@@ -1629,7 +1686,7 @@ def _parse_harmonic_settings(
         if not isinstance(override, dict) or not override:
             raise ConfigError(f"{label}.{key} must be a non-empty table.")
         _strict_keys_with_optional(override, f"{label}.{key}", set(), allowed)
-        # Reuse the same hardware mapping, safety ladder and Reserve validation.
+        # Reuse the model's hardware mapping and the same approved safety ladder.
         merged = {k: v for k, v in table.items() if k != "harmonic_settings"}
         merged.update(override)
         parsed = _parse_lockin(merged, role, f"{label}.{key}", safety_role, safety)
@@ -2298,13 +2355,14 @@ def _parse_sweep_range_full_scale(
     value = _positive_number(segment[field], f"{segment_name}.{field}")
     if value not in safety_role.allowed_fixed_full_scales_v:
         raise ConfigError(
-            f"{segment_name}.{field} must use a project-confirmed SR830 full scale."
+            f"{segment_name}.{field} must use a project-confirmed {lockin.model} full scale."
         )
     try:
-        sensitivity_code(value)
+        from .lockin_model_settings import sensitivity_code_for
+        sensitivity_code_for(lockin, value)
     except ValueError as exc:
         raise ConfigError(
-            f"{segment_name}.{field} is not an SR830 full scale."
+            f"{segment_name}.{field} is not a {lockin.model} full scale."
         ) from exc
     if lockin.sensitivity_mode is SensitivityMode.BOUNDED_AUTO:
         raise ConfigError(

@@ -1,5 +1,14 @@
 # Lock-in module work package
 
+## SR865A XY 接收适配（离线；2026-10-07）
+
+XX 保持 SR830 激励源；XY 可选 SR830/SR865A，统一使用原有语义角色、
+物理量设置及 selected-role 谐波网格。SCAL、IRNG、TC、参考与状态按原生型号
+验证，Reserve 不适用；未使用的 XY 源与相位不写入。固定/有界自动量程、
+三种 sweep、combination 和温度–激励复用点执行器与清理审计，旧配置/数据兼容。
+真实 SR865A 接线/固件验收待独立授权。配置和 commissioning 范围见
+[日常说明](../LOCKIN_DAILY_OPERATION.md#sr865a-作为-xy-接收机)。
+
 ## 分谐波量程与 Reserve（离线完成；2026-09-28）
 
 `lockin_xx/xy.harmonic_settings.h1/h2/h3` 现在支持独立 fixed 或 bounded_auto，

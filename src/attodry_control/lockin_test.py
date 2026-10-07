@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from contextlib import ExitStack
 from copy import deepcopy
-from dataclasses import asdict, replace
+from dataclasses import asdict, replace, is_dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -23,6 +23,11 @@ from .config import (
     load_config,
 )
 from .lockin_harmonics import HarmonicSensitivitySession
+from .lockin_model_settings import (
+    model_name, sensitivity_code_for, sensitivity_full_scale_for,
+    time_constant_code_for, reserve_code_for, harmonic_supported, ElectricalSettingCodes,
+    receiver_invariant_targets,
+)
 from .lockin_autorange import (
     AutorangeAction,
     AutorangePolicy,
@@ -46,7 +51,7 @@ from .sr830 import (
     RESERVE_MODE_CODES,
     configure_minimum_excitation_pair,
     verify_fixed_settings_readback,
-    verify_pair_readback,
+    verify_pair_readback as _verify_sr830_pair_readback,
 )
 from .sr830_settings import (
     SensitivityMode,
@@ -72,6 +77,15 @@ SR830_FREQUENCY_READBACK_MINIMUM_QUANTUM_HZ = 0.0001
 SWEEP_PROGRESS_SCHEMA_VERSION = 1
 
 
+def _json_record_default(value):
+    """Encode native audit timestamps without discarding their recorded UTC."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
+    raise TypeError(f"Unsupported audit value: {type(value).__name__}")
+
+
 class _JsonlProgressWriter:
     """Append durable, incremental sweep events without owning any instrument."""
 
@@ -81,7 +95,7 @@ class _JsonlProgressWriter:
 
     def append(self, event: Mapping[str, object]) -> None:
         with self.path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+            stream.write(json.dumps(event, ensure_ascii=False, default=_json_record_default) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
 
@@ -562,6 +576,8 @@ def _add_pair_arguments(
 def _add_sweep_arguments(
     parser: argparse.ArgumentParser, *, hide_overrides: bool = False
 ) -> None:
+    parser.add_argument("--authorize-writes", action="store_true",
+                        help="Explicitly authorize a mixed SR830/SR865A electrical sweep.")
     override_help = argparse.SUPPRESS if hide_overrides else None
     parser.add_argument(
         "--samples-per-point", type=_positive_integer, help=override_help
@@ -656,6 +672,7 @@ def _run_diagnose(args: argparse.Namespace, factory: Callable[[], object]) -> in
                         "problems": problems,
                     },
                     ensure_ascii=False,
+                    default=_json_record_default,
                 ),
                 flush=True,
             )
@@ -748,7 +765,7 @@ def _run_set_xx_sensitivity(
 
     xx_settings = _setting_codes(config.lockin_xx)
     xy_settings = _setting_codes(config.lockin_xy)
-    target_code = sensitivity_code(config.lockin_xx.sensitivity_full_scale_v)
+    target_code = sensitivity_code_for(config.lockin_xx, config.lockin_xx.sensitivity_full_scale_v)
     record: dict[str, object] = {
         "operation": "set_xx_sensitivity",
         "target_sensitivity_code": target_code,
@@ -790,7 +807,7 @@ def _run_set_xx_sensitivity(
             if previous_code == target_code:
                 record["write_performed"] = False
                 record["completed"] = True
-                print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+                print(json.dumps(record, indent=2, ensure_ascii=False, default=_json_record_default), flush=True)
                 return 0
 
             write_started = True
@@ -847,12 +864,12 @@ def _run_set_xx_sensitivity(
                     settle_s=args.settle_s,
                     writes_started=True,
                 )
-            print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+            print(json.dumps(record, indent=2, ensure_ascii=False, default=_json_record_default), flush=True)
             raise
 
     record["completed"] = True
     record["write_performed"] = True
-    print(json.dumps(record, indent=2, ensure_ascii=False), flush=True)
+    print(json.dumps(record, indent=2, ensure_ascii=False, default=_json_record_default), flush=True)
     return 0
 
 
@@ -878,8 +895,8 @@ def _run_apply_toml(
     role = LockinRole.XX if args.role == "lockin_xx" else LockinRole.XY
     target_config = config.lockin_xx if role is LockinRole.XX else config.lockin_xy
     target_settings = _setting_codes(target_config)
-    target_sensitivity = sensitivity_code(target_config.sensitivity_full_scale_v)
-    target_reserve = RESERVE_MODE_CODES[target_config.reserve_mode.value]
+    target_sensitivity = sensitivity_code_for(target_config, target_config.sensitivity_full_scale_v)
+    target_reserve = reserve_code_for(target_config)
     settle_s = max(
         1.5,
         config.lockin_sweep.settle_time_constants * target_config.time_constant_s,
@@ -912,7 +929,7 @@ def _run_apply_toml(
             "filter_slope_db_oct": target_config.filter_slope_db_oct,
             "sensitivity_full_scale_v": target_config.sensitivity_full_scale_v,
             "sensitivity_code": target_sensitivity,
-            "reserve_mode": target_config.reserve_mode.value,
+            "reserve_mode": (None if target_config.reserve_mode is None else target_config.reserve_mode.value),
             "reserve_mode_code": target_reserve,
         },
         "write_scope": ["ISRC", "IGND", "ICPL", "OFLT", "OFSL", "SENS", "RMOD"],
@@ -929,6 +946,11 @@ def _run_apply_toml(
             ),
         },
     }
+    if model_name(target_config) == "SR865A":
+        record["model"] = "SR865A"
+        record["write_scope"] = ["REFZ", "RTRG", "RSRC", "IRNG", "ADVFILT", "SYNC",
+                                 "ISRC", "IGND", "ICPL", "OFLT", "OFSL", "SCAL"]
+        record["never_written"] = ["SLVL", "SOFF", "REFM", "BLAZEX", "FREQINT", "PHAS", "HARM"]
 
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         instrument = lockin_xx if role is LockinRole.XX else lockin_xy
@@ -950,8 +972,9 @@ def _run_apply_toml(
                 and target_status.input_or_reserve_overload
                 and not target_status.filter_overload
                 and not target_status.reference_unlocked
-                # Higher SR830 SENS codes represent wider full-scale ranges.
-                and target_sensitivity > target_before.sensitivity
+                and (model_name(target_config) == "SR830" or not target_status.output_overload)
+                and sensitivity_full_scale_for(target_config, target_sensitivity)
+                > sensitivity_full_scale_for(target_config, target_before.sensitivity)
             )
             if widening_overload:
                 overload_problem = f"lockin_{role.value} reports overload"
@@ -959,7 +982,7 @@ def _run_apply_toml(
                     problems.remove(overload_problem)
             for diagnostic in (before_xx, before_xy):
                 status = diagnostic.lia_status
-                if status is not None and (
+                if status is not None and model_name(diagnostic) == "SR830" and (
                     status.frequency_range_changed
                     or status.time_constant_changed
                     or status.triggered
@@ -991,9 +1014,24 @@ def _run_apply_toml(
                 or target_before.reserve_mode != target_reserve
             )
             record["write_performed"] = write_performed
+            if model_name(target_config) == "SR865A":
+                native_targets = receiver_invariant_targets(target_config)
+                receiver_write_expected = any(
+                    getattr(target_before.native_settings, field) != native_targets[field]
+                    for field in (
+                        "reference_input_impedance_ohm", "external_reference_edge",
+                        "reference_source", "input_range_v_peak", "advanced_filter",
+                        "synchronous_filter",
+                    )
+                )
+                # Record pending native writes before I/O, including a partial
+                # failure; raw query timestamps do not indicate a setting change.
+                record["write_performed"] = write_performed or receiver_write_expected
+                record["receiver_setup"] = instrument.configure_receiver()
             if write_performed:
                 instrument.write_fixed_settings(target_settings)
-                instrument.set_reserve_mode(target_reserve)
+                if target_reserve is not None:
+                    instrument.set_reserve_mode(target_reserve)
                 time.sleep(settle_s)
 
             after_xx = lockin_xx.read_diagnostic(consume_status_latches=True)
@@ -1007,7 +1045,7 @@ def _run_apply_toml(
             )
             for diagnostic in (after_xx, after_xy):
                 status = diagnostic.lia_status
-                if status is not None and (
+                if status is not None and model_name(diagnostic) == "SR830" and (
                     status.frequency_range_changed
                     or status.time_constant_changed
                     or status.triggered
@@ -1029,6 +1067,11 @@ def _run_apply_toml(
                     f"lockin_{role.value} Reserve readback {target_after.reserve_mode} "
                     f"!= configured code {target_reserve}."
                 )
+            if model_name(target_config) == "SR865A":
+                native = record["receiver_invariants"] = instrument.read_receiver_invariants()
+                for field, expected in receiver_invariant_targets(target_config).items():
+                    if native.get(field) != expected:
+                        raise Sr830Error(f"lockin_xy native {field} readback does not match TOML")
             record["last_confirmed_state"] = record["after"]
             record["completed"] = True
             record["outcome"] = "completed"
@@ -1036,6 +1079,10 @@ def _run_apply_toml(
             record["error"] = str(exc)
             record["outcome"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected"
             record["manual_verification_required"] = True
+            if model_name(config.lockin_xy) == "SR865A":
+                record["native_error_evidence"] = getattr(exc, "evidence", None)
+                record["native_error_raw"] = getattr(exc, "raw", ())
+                record["native_audit"] = lockin_xy.audit
             if "last_confirmed_state" not in record:
                 if "after" in record:
                     record["last_confirmed_state"] = record["after"]
@@ -1077,6 +1124,7 @@ def _run_commission_xx_autorange_narrow(
     """Verify the real two-safe-sample XX narrowing branch without changing excitation."""
 
     settings = _resolve_pair_settings(args)
+    _require_sr830_commissioning_pair(settings)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     config = settings["config"]
     if config is None:
@@ -1258,6 +1306,7 @@ def _run_commission_xx_autorange_narrow(
 
 def _run_configure(args: argparse.Namespace, factory: Callable[[], object]) -> int:
     settings = _resolve_pair_settings(args)
+    _require_sr830_commissioning_pair(settings)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     if not args.authorize_writes:
         raise AuthorizationRequired("SR830 setting writes were not explicitly authorized.")
@@ -1295,6 +1344,7 @@ def _run_configure(args: argparse.Namespace, factory: Callable[[], object]) -> i
 
 def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> int:
     settings = _resolve_pair_settings(args)
+    _require_sr830_commissioning_pair(settings)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     if not args.authorize_writes:
         raise AuthorizationRequired("SR830 harmonic-setting writes were not authorized.")
@@ -1303,7 +1353,7 @@ def _run_harmonics(args: argparse.Namespace, factory: Callable[[], object]) -> i
             "Physical disconnection of lockin_xy SINE OUT was not confirmed."
         )
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
-        controller = DualSr830Controller(lockin_xx, lockin_xy)
+        controller = _pair_controller(lockin_xx, lockin_xy)
         preflight_xx, preflight_xy = controller.authorize_existing_configuration(
             frequency_hz=settings["frequency_hz"],
             authorize_writes=args.authorize_writes,
@@ -1373,10 +1423,24 @@ def _audited_harmonic_sample_record(
     return record
 
 
+def _model_status_problems(sample) -> list[str]:
+    """Native SR865A faults cannot use the SR830 output-latch exception."""
+    status = sample.lia_status
+    if getattr(status, "model", "SR830") != "SR865A":
+        return []
+    role = "lockin_" + sample.reading.role.value
+    from .electrical_lockin_backend import native_status_problems
+    problems = [f"{role} {problem}" for problem in native_status_problems(status)]
+    if status.output_overload:
+        problems.append(f"{role} output scale overload")
+    return problems
+
+
 def _run_frequency_sweep(
     args: argparse.Namespace, factory: Callable[[], object]
 ) -> int:
     settings = _resolve_pair_settings(args)
+    _require_mixed_write_authorization(settings)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _resolve_sweep_settings(args, settings, scan="frequency")
     config = settings["config"]
@@ -1392,7 +1456,7 @@ def _run_frequency_sweep(
     harmonics_by_role = _requested_sweep_harmonics_by_role(args)
     harmonics = _requested_sweep_harmonics(args)
     if not args.skip_unsupported_harmonics:
-        _validate_harmonic_detection_frequencies(points, harmonics)
+        _validate_harmonic_detection_frequencies(points, harmonics, config=config, harmonics_by_role=harmonics_by_role)
     baseline_hz = float(settings["frequency_hz"])
     _sweep_baseline_source_voltage(settings)
     frequency_source_v = config.lockin_sweep.frequency_source_voltage_v_rms
@@ -1407,7 +1471,7 @@ def _run_frequency_sweep(
         record_directory, settings, scan="frequency", points_total=len(points)
     )
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
-        controller = DualSr830Controller(lockin_xx, lockin_xy)
+        controller = _pair_controller(lockin_xx, lockin_xy)
         preflight_xx = None
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
@@ -1563,6 +1627,7 @@ def _run_frequency_sweep(
                     max(target_hz, actual_frequency_hz, xy_readback),
                     harmonics,
                     skip_unsupported=args.skip_unsupported_harmonics,
+                    config=config, harmonics_by_role=harmonics_by_role,
                 )
                 point_record["skipped_harmonics"] = skipped_harmonics
                 _append_sweep_progress_point(
@@ -1619,16 +1684,16 @@ def _run_frequency_sweep(
                 lockin_xx,
                 lockin_xy,
                 baseline_hz=baseline_hz,
-                original_xx_sensitivity=sensitivity_code(config.lockin_xx.sensitivity_full_scale_v),
-                original_xy_sensitivity=sensitivity_code(config.lockin_xy.sensitivity_full_scale_v),
+                original_xx_sensitivity=sensitivity_code_for(config.lockin_xx, config.lockin_xx.sensitivity_full_scale_v),
+                original_xy_sensitivity=sensitivity_code_for(config.lockin_xy, config.lockin_xy.sensitivity_full_scale_v),
                 restore_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xx"
                 ),
                 restore_xy_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xy"
                 ),
-                original_xx_reserve_mode=RESERVE_MODE_CODES[config.lockin_xx.reserve_mode.value],
-                original_xy_reserve_mode=RESERVE_MODE_CODES[config.lockin_xy.reserve_mode.value],
+                original_xx_reserve_mode=reserve_code_for(config.lockin_xx),
+                original_xy_reserve_mode=reserve_code_for(config.lockin_xy),
                 restore_xx_reserve=_reserve_write_attempted(
                     reserve_setup, "lockin_xx"
                 ),
@@ -1646,7 +1711,7 @@ def _run_frequency_sweep(
             else {"attempted": False, "verified": True, "errors": []}
         )
         if fixed_setup and fixed_setup.get("verified") and frequency_setup and frequency_setup.get("verified") and sensitivity_setup and reserve_setup:
-            _verify_sweep_configured_cleanup(cleanup, config)
+            _verify_sweep_configured_cleanup(cleanup, config, receiver_setup=(fixed_setup or {}).get("receiver_setup"))
         result = {
             "scan": "frequency",
             "completed": failure is None and cleanup["verified"],
@@ -1723,6 +1788,7 @@ def _run_frequency_excitation_sweep(
     """Run the configured frequency-by-excitation matrix sweep."""
 
     settings = _resolve_pair_settings(args)
+    _require_mixed_write_authorization(settings)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _resolve_sweep_settings(args, settings, scan="frequency_excitation")
     config = settings["config"]
@@ -1740,7 +1806,7 @@ def _run_frequency_excitation_sweep(
     harmonics_by_role = _requested_sweep_harmonics_by_role(args)
     harmonics = _requested_sweep_harmonics(args)
     if not args.skip_unsupported_harmonics:
-        _validate_harmonic_detection_frequencies(frequencies, harmonics)
+        _validate_harmonic_detection_frequencies(frequencies, harmonics, config=config, harmonics_by_role=harmonics_by_role)
     baseline_hz = float(settings["frequency_hz"])
     baseline_source_v = _sweep_baseline_source_voltage(settings)
     source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
@@ -1758,7 +1824,7 @@ def _run_frequency_excitation_sweep(
         points_total=len(frequencies) * len(amplitudes),
     )
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
-        controller = DualSr830Controller(lockin_xx, lockin_xy)
+        controller = _pair_controller(lockin_xx, lockin_xy)
         preflight_xx = None
         preflight_xy = None
         sensitivity_setup: dict[str, object] | None = None
@@ -1871,6 +1937,7 @@ def _run_frequency_excitation_sweep(
                     max(target_hz, xx_readback, xy_readback),
                     harmonics,
                     skip_unsupported=args.skip_unsupported_harmonics,
+                    config=config, harmonics_by_role=harmonics_by_role,
                 )
                 frequency_record["skipped_harmonics"] = skipped_harmonics
                 for excitation_index, source_v in enumerate(amplitudes):
@@ -1983,16 +2050,16 @@ def _run_frequency_excitation_sweep(
                 lockin_xx,
                 lockin_xy,
                 baseline_hz=baseline_hz,
-                original_xx_sensitivity=sensitivity_code(config.lockin_xx.sensitivity_full_scale_v),
-                original_xy_sensitivity=sensitivity_code(config.lockin_xy.sensitivity_full_scale_v),
+                original_xx_sensitivity=sensitivity_code_for(config.lockin_xx, config.lockin_xx.sensitivity_full_scale_v),
+                original_xy_sensitivity=sensitivity_code_for(config.lockin_xy, config.lockin_xy.sensitivity_full_scale_v),
                 restore_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xx"
                 ),
                 restore_xy_sensitivity=_range_write_attempted(
                     sensitivity_setup, "lockin_xy"
                 ),
-                original_xx_reserve_mode=RESERVE_MODE_CODES[config.lockin_xx.reserve_mode.value],
-                original_xy_reserve_mode=RESERVE_MODE_CODES[config.lockin_xy.reserve_mode.value],
+                original_xx_reserve_mode=reserve_code_for(config.lockin_xx),
+                original_xy_reserve_mode=reserve_code_for(config.lockin_xy),
                 restore_xx_reserve=_reserve_write_attempted(
                     reserve_setup, "lockin_xx"
                 ),
@@ -2010,7 +2077,7 @@ def _run_frequency_excitation_sweep(
             else {"attempted": False, "verified": True, "errors": []}
         )
         if fixed_setup and fixed_setup.get("verified") and frequency_setup and frequency_setup.get("verified") and sensitivity_setup and reserve_setup:
-            _verify_sweep_configured_cleanup(cleanup, config)
+            _verify_sweep_configured_cleanup(cleanup, config, receiver_setup=(fixed_setup or {}).get("receiver_setup"))
         result = {
             "scan": "frequency_excitation",
             "completed": failure is None and cleanup["verified"],
@@ -2083,6 +2150,7 @@ def _run_excitation_sweep(
     args: argparse.Namespace, factory: Callable[[], object]
 ) -> int:
     settings = _resolve_pair_settings(args)
+    _require_mixed_write_authorization(settings)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     _resolve_sweep_settings(args, settings, scan="excitation")
     record_directory = _prepare_sweep_record_directory(args, settings)
@@ -2213,7 +2281,7 @@ def _execute_excitation_sweep_on_open_pair(
     baseline_source_v = _sweep_baseline_source_voltage(settings)
     source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
     records: list[dict[str, object]] = []
-    controller = DualSr830Controller(lockin_xx, lockin_xy)
+    controller = _pair_controller(lockin_xx, lockin_xy)
     preflight_xx = None
     preflight_xy = None
     sensitivity_setup: dict[str, object] | None = None
@@ -2338,6 +2406,7 @@ def _execute_excitation_sweep_on_open_pair(
                 max(baseline_hz, xx_frequency_readback, xy_frequency_readback),
                 harmonics,
                 skip_unsupported=args.skip_unsupported_harmonics,
+                    config=config, harmonics_by_role=harmonics_by_role,
             )
             point_record["skipped_harmonics"] = skipped_harmonics
             _apply_sweep_segment_ranges(
@@ -2383,14 +2452,14 @@ def _execute_excitation_sweep_on_open_pair(
             lockin_xx,
             lockin_xy,
             baseline_hz=baseline_hz,
-            original_xx_sensitivity=sensitivity_code(config.lockin_xx.sensitivity_full_scale_v),
-            original_xy_sensitivity=sensitivity_code(config.lockin_xy.sensitivity_full_scale_v),
+            original_xx_sensitivity=sensitivity_code_for(config.lockin_xx, config.lockin_xx.sensitivity_full_scale_v),
+            original_xy_sensitivity=sensitivity_code_for(config.lockin_xy, config.lockin_xy.sensitivity_full_scale_v),
             restore_sensitivity=_range_write_attempted(sensitivity_setup, "lockin_xx"),
             restore_xy_sensitivity=_range_write_attempted(
                 sensitivity_setup, "lockin_xy"
             ),
-            original_xx_reserve_mode=RESERVE_MODE_CODES[config.lockin_xx.reserve_mode.value],
-            original_xy_reserve_mode=RESERVE_MODE_CODES[config.lockin_xy.reserve_mode.value],
+            original_xx_reserve_mode=reserve_code_for(config.lockin_xx),
+            original_xy_reserve_mode=reserve_code_for(config.lockin_xy),
             restore_xx_reserve=_reserve_write_attempted(reserve_setup, "lockin_xx"),
             restore_xy_reserve=_reserve_write_attempted(reserve_setup, "lockin_xy"),
             harmonic_control=harmonic_control,
@@ -2404,7 +2473,7 @@ def _execute_excitation_sweep_on_open_pair(
         else {"attempted": False, "verified": True, "errors": []}
     )
     if fixed_setup and fixed_setup.get("verified") and frequency_setup and frequency_setup.get("verified") and sensitivity_setup and reserve_setup:
-        _verify_sweep_configured_cleanup(cleanup, config)
+        _verify_sweep_configured_cleanup(cleanup, config, receiver_setup=(fixed_setup or {}).get("receiver_setup"))
     result = {
         "scan": "excitation",
         "completed": failure is None and cleanup["verified"],
@@ -2507,8 +2576,8 @@ def _measurement_config_snapshot(
             "lockin_xy": config.lockin_xy.sensitivity_mode.value,
         },
         "reserve_modes": {
-            "lockin_xx": config.lockin_xx.reserve_mode.value,
-            "lockin_xy": config.lockin_xy.reserve_mode.value,
+            "lockin_xx": (None if config.lockin_xx.reserve_mode is None else config.lockin_xx.reserve_mode.value),
+            "lockin_xy": (None if config.lockin_xy.reserve_mode is None else config.lockin_xy.reserve_mode.value),
         },
         "run_name": config.lockin_sweep.run_name,
         "note": config.lockin_sweep.note,
@@ -2696,7 +2765,7 @@ def _emit_sweep_result(
                 "error": result.get("error"),
             }
         )
-    print(json.dumps(stored_result or result, indent=2, ensure_ascii=False), flush=True)
+    print(json.dumps(stored_result or result, indent=2, ensure_ascii=False, default=_json_record_default), flush=True)
     if "recording_error" in result:
         raise Sr830Error("Sweep audit record could not be saved.")
 
@@ -2813,7 +2882,7 @@ def _write_json_atomically(
     destination: Path, payload: Mapping[str, object], *, prefix: str
 ) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    serialized = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    serialized = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False, default=_json_record_default) + "\n"
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -2871,6 +2940,8 @@ def _prepare_sweep_record_directory(
 def _sweep_baseline_source_voltage(settings: dict[str, object]) -> float:
     config = _require_lockin_sweep_config(settings["config"])
     for role, lockin in (("xx", config.lockin_xx), ("xy", config.lockin_xy)):
+        if model_name(lockin) == "SR865A":
+            continue  # Disconnected receiver source is preserved, never configured.
         if not math.isclose(
             lockin.source_voltage_v,
             MINIMUM_SINE_OUTPUT_V,
@@ -2914,6 +2985,9 @@ def _configure_sweep_fixed_settings(
         ("lockin_xx", lockin_xx, preflight_xx),
         ("lockin_xy", lockin_xy, preflight_xy),
     ):
+        if model_name(getattr(config, role)) == "SR865A":
+            # Both identities/statuses and XX minimum output were verified first.
+            record["receiver_setup"] = instrument.configure_receiver()
         expected = _setting_codes(getattr(config, role))
         role_record: dict[str, object] = {
             "before": asdict(before),
@@ -2952,7 +3026,8 @@ def _configure_sweep_fixed_settings(
             current_codes[field] = readback
             time.sleep(settle_s)
         role_record["after_codes"] = current_codes
-    if any(roles[role]["writes"] for role in ("lockin_xx", "lockin_xy")):
+    if (any(roles[role]["writes"] for role in ("lockin_xx", "lockin_xy"))
+            or model_name(config.lockin_xy) == "SR865A"):
         transition, problems = _consume_sweep_fixed_transition(
             lockin_xx, lockin_xy, roles
         )
@@ -2973,6 +3048,11 @@ def _consume_sweep_fixed_transition(
     }
     problems: list[str] = []
     for role, (status, error_status) in statuses.items():
+        if model_name(status) == "SR865A":
+            from .electrical_lockin_backend import native_status_problems
+            problems.extend(f"{role} {problem}" for problem in native_status_problems(status))
+            if status.output_overload:
+                problems.append(f"{role} output scale overload after fixed-setting setup")
         role_record = roles[role]
         assert isinstance(role_record, dict)
         writes = role_record["writes"]
@@ -3051,7 +3131,7 @@ def _configure_sweep_baseline_frequency(
 
 
 def _verify_sweep_configured_cleanup(
-    cleanup: dict[str, object], config: object
+    cleanup: dict[str, object], config: object, *, receiver_setup=None
 ) -> None:
     """Require the final panel readback to retain the configured base settings."""
 
@@ -3070,11 +3150,21 @@ def _verify_sweep_configured_cleanup(
         for field in (*_SWEEP_FIXED_SETTING_FIELDS, "sensitivity", "reserve_mode"):
             actual = diagnostic.get(field)
             target = (
-                RESERVE_MODE_CODES[role_config.reserve_mode.value]
+                reserve_code_for(role_config)
                 if field == "reserve_mode" else getattr(expected, field)
             )
             if actual != target:
                 errors.append(f"{role} final {field} code {actual} differs from TOML {target}")
+        if model_name(role_config) == "SR865A":
+            native = diagnostic.get("native_settings", {})
+            for field, target in receiver_invariant_targets(role_config).items():
+                if native.get(field) != target:
+                    errors.append(f"{role} final native {field} differs from TOML {target}")
+            if receiver_setup is not None:
+                before = receiver_setup.get("before", {})
+                for field in ("sine_output_v", "source_offset_v", "source_dc_mode", "sync_output_mode", "phase_shift_deg"):
+                    if field not in before or native.get(field) != before[field]:
+                        errors.append(f"{role} disconnected source/output {field} was not preserved")
     cleanup["verified"] = not errors
 
 
@@ -3114,6 +3204,14 @@ def _new_sweep_reserve_setup(
     """Build an auditable, policy-checked RMOD transition plan."""
 
     def role_record(lockin: LockinConfig, original: int) -> dict[str, object]:
+        if model_name(lockin) == "SR865A":
+            if original is not None:
+                raise Sr830Error("SR865A receiver cannot have an SR830 Reserve code")
+            return {"model": "SR865A", "applicable": False,
+                    "configured_mode": None, "configured_code": None,
+                    "original_code": None, "write_attempted": False,
+                    "readback_code": None, "verification_code": None,
+                    "transition_status": None}
         try:
             target = RESERVE_MODE_CODES[lockin.reserve_mode.value]
         except KeyError as exc:
@@ -3183,6 +3281,8 @@ def _configure_sweep_reserve_modes(
         role_record = roles.get(role)
         if not isinstance(role_record, dict):
             raise ValueError(f"Sweep reserve setup is missing {role}.")
+        if role_record.get("applicable") is False:
+            continue
         original = _reserve_record_int(role_record, "original_code", role)
         target = _reserve_record_int(role_record, "configured_code", role)
         if original != target:
@@ -3195,6 +3295,8 @@ def _configure_sweep_reserve_modes(
         role_record = roles.get(role)
         if not isinstance(role_record, dict):
             raise ValueError(f"Sweep reserve setup is missing {role}.")
+        if role_record.get("applicable") is False:
+            continue
         target = _reserve_record_int(role_record, "configured_code", role)
         readback = instrument.read_reserve_mode()
         role_record["readback_code"] = readback
@@ -3214,6 +3316,8 @@ def _configure_sweep_reserve_modes(
         for role, instrument in instruments:
             role_record = roles.get(role)
             assert isinstance(role_record, dict)
+            if role_record.get("applicable") is False:
+                continue
             verification = instrument.read_reserve_mode()
             role_record["verification_code"] = verification
             target = _reserve_record_int(role_record, "configured_code", role)
@@ -3231,6 +3335,7 @@ def _consume_reserve_transition(
     xy = lockin_xy.read_harmonic_sample(1)
     problems: list[str] = []
     for sample in (xx, xy):
+        problems.extend(_model_status_problems(sample))
         role = sample.reading.role.value
         if sample.lia_status.reference_unlocked:
             problems.append(f"lockin_{role} reference unlocked during reserve transition")
@@ -3264,6 +3369,7 @@ def _consume_reserve_transition(
         verification_xy = lockin_xy.read_harmonic_sample(1)
         verification_problems: list[str] = []
         for sample in (verification_xx, verification_xy):
+            verification_problems.extend(_model_status_problems(sample))
             role = sample.reading.role.value
             if sample.lia_status.reference_unlocked:
                 verification_problems.append(f"lockin_{role} reference unlocked during reserve transition")
@@ -3294,18 +3400,18 @@ def _new_sweep_range_record(
     initial_full_scale_v: float | None = None,
 ) -> dict[str, object]:
     policy = _autorange_policy_for_lockin(lockin)
-    configured_code = sensitivity_code(lockin.sensitivity_full_scale_v)
+    configured_code = sensitivity_code_for(lockin, lockin.sensitivity_full_scale_v)
     if initial_full_scale_v is not None:
         if policy is not None:
             raise ValueError(
                 f"lockin_{lockin.role.value} range overrides require fixed sensitivity mode."
             )
-        initial_target = sensitivity_code(initial_full_scale_v)
+        initial_target = sensitivity_code_for(lockin, initial_full_scale_v)
     elif policy is None:
         initial_target = configured_code
     else:
         try:
-            original_full_scale_v = sensitivity_full_scale_v(original_sensitivity)
+            original_full_scale_v = sensitivity_full_scale_for(lockin, original_sensitivity)
         except ValueError as exc:
             raise Sr830Error(
                 f"lockin_{lockin.role.value} preflight sensitivity "
@@ -3322,7 +3428,7 @@ def _new_sweep_range_record(
         initial_target = (
             original_sensitivity
             if original_full_scale_v >= policy.minimum_full_scale_v
-            else sensitivity_code(policy.minimum_full_scale_v)
+            else sensitivity_code_for(lockin, policy.minimum_full_scale_v)
         )
     policy_record = None
     if policy is not None:
@@ -3330,12 +3436,13 @@ def _new_sweep_range_record(
         policy_record["full_scales_v"] = policy.full_scales_v
     return {
         "mode": lockin.sensitivity_mode.value,
+        "model": model_name(lockin),
         "configured_fixed_sensitivity_code": configured_code,
         "configured_fixed_full_scale_v": lockin.sensitivity_full_scale_v,
         "autorange_policy": policy_record,
         "original_sensitivity_code": original_sensitivity,
         "initial_target_sensitivity_code": initial_target,
-        "initial_target_full_scale_v": sensitivity_full_scale_v(initial_target),
+        "initial_target_full_scale_v": sensitivity_full_scale_for(lockin, initial_target),
         "initial_range_override_full_scale_v": initial_full_scale_v,
         "current_sensitivity_code": initial_target,
         "write_attempted": False,
@@ -3368,6 +3475,7 @@ def _autorange_policy_for_lockin(lockin: LockinConfig) -> AutorangePolicy | None
         float(occupancy),
         int(stable_samples),
         tuple(float(value) for value in full_scales),
+        model=model_name(lockin),
     )
 
 
@@ -3487,7 +3595,7 @@ def _apply_sweep_segment_ranges(
         target_full_scale = requested[role]
         if target_full_scale is None:
             target_full_scale = lockin_config.sensitivity_full_scale_v
-        target_code = sensitivity_code(target_full_scale)
+        target_code = sensitivity_code_for(lockin_config, target_full_scale)
         range_record = ranges.get(role)
         if not isinstance(range_record, dict):
             raise ValueError(f"Sweep sensitivity setup is missing {role}.")
@@ -3515,7 +3623,7 @@ def _apply_sweep_segment_ranges(
         range_record["write_attempted"] = True
         changed_record[role] = {
             "target_sensitivity_code": target_code,
-            "target_full_scale_v": sensitivity_full_scale_v(target_code),
+            "target_full_scale_v": sensitivity_full_scale_for(role_configs[role], target_code),
         }
         instruments[role].set_sensitivity(target_code)
     time.sleep(settle_s)
@@ -3538,7 +3646,7 @@ def _apply_sweep_segment_ranges(
             raise TypeError("Range transition verification must be a mapping.")
         verification[role] = {
             "readback_sensitivity_code": readback,
-            "readback_full_scale_v": sensitivity_full_scale_v(readback),
+            "readback_full_scale_v": sensitivity_full_scale_for(role_configs[role], readback),
         }
     transition, problems = _consume_sensitivity_transition(
         lockin_xx,
@@ -3749,7 +3857,7 @@ def _apply_sweep_autorange(
             range_record = ranges.get(role)
             if not isinstance(range_record, dict):
                 raise ValueError(f"Sweep sensitivity setup is missing {role}.")
-            target_code = sensitivity_code(decision.state.current_full_scale_v)
+            target_code = sensitivity_code_for(instruments[role], decision.state.current_full_scale_v)
             range_record["write_attempted"] = True
             range_record["autorange_write_attempted"] = True
             transitions = range_record.get("autorange_transitions")
@@ -3778,7 +3886,7 @@ def _apply_sweep_autorange(
                 range_record, "current_sensitivity_code", role
             )
             if role in changes:
-                expected_code = sensitivity_code(changes[role].state.current_full_scale_v)
+                expected_code = sensitivity_code_for(instrument, changes[role].state.current_full_scale_v)
             readback = instrument.read_sensitivity()
             if readback != expected_code:
                 raise Sr830Error(
@@ -3877,6 +3985,7 @@ def _autorange_probe_problems(
 ) -> list[str]:
     problems: list[str] = []
     for sample in (xx, xy):
+        problems.extend(_model_status_problems(sample))
         role = f"lockin_{sample.reading.role.value}"
         if sample.lia_status.reference_unlocked:
             problems.append(f"{role} reference is unlocked")
@@ -3925,6 +4034,8 @@ def _sweep_overload_recheck_eligible(
         "time constant changed",
         "instrument error",
         "frequency readback",
+        "current status is unknown", "unknown native", "native ", "output scale overload",
+        "safety status is incomplete", "configuration changed", "instrument power-on",
     )
     return not any(any(fragment in problem for fragment in fatal_fragments) for problem in problems)
 
@@ -4153,10 +4264,20 @@ def _roles_by_harmonic(
 
 
 def _validate_harmonic_detection_frequencies(
-    points_hz: Sequence[float], harmonics: Sequence[int]
+    points_hz: Sequence[float], harmonics: Sequence[int], *,
+    config=None, harmonics_by_role=None,
 ) -> None:
     """Reject harmonic/reference products the SR830 cannot represent before VISA I/O."""
 
+    if config is not None and model_name(config.lockin_xy) == "SR865A":
+        from .lockin_backend import capabilities_for
+        selections = harmonics_by_role or {"xx": harmonics, "xy": harmonics}
+        for frequency in points_hz:
+            for role, selected in selections.items():
+                caps = capabilities_for(model_name(getattr(config, "lockin_" + role)))
+                for harmonic in selected:
+                    caps.validate_detection(frequency, harmonic)
+        return
     unsupported = [
         (frequency_hz, harmonic, frequency_hz * harmonic)
         for frequency_hz in points_hz
@@ -4180,7 +4301,33 @@ def _harmonics_for_frequency(
     requested_harmonics: Sequence[int],
     *,
     skip_unsupported: bool,
+    config=None,
+    harmonics_by_role=None,
 ) -> tuple[tuple[int, ...], list[dict[str, float | int | str]]]:
+    if config is not None and model_name(config.lockin_xy) == "SR865A":
+        from .lockin_backend import capabilities_for
+        supported = set()
+        skipped = []
+        selections = harmonics_by_role or {"xx": requested_harmonics, "xy": requested_harmonics}
+        for role, selected in selections.items():
+            role_config = getattr(config, "lockin_" + role)
+            caps = capabilities_for(model_name(role_config))
+            for harmonic in selected:
+                if harmonic not in requested_harmonics:
+                    continue
+                if harmonic_supported(role_config, frequency_hz, harmonic):
+                    supported.add(harmonic)
+                else:
+                    if not skip_unsupported:
+                        caps.validate_detection(frequency_hz, harmonic)
+                    skipped.append({"role": "lockin_" + role, "model": model_name(role_config),
+                                    "harmonic": harmonic,
+                                    "required_detection_frequency_hz": frequency_hz * harmonic,
+                                    "limit_hz": caps.maximum_detection_hz,
+                                    "reason": "exceeds_model_detection_limit"})
+        if not supported:
+            raise ValueError(f"No requested role/harmonic is supported at {frequency_hz:g} Hz.")
+        return tuple(sorted(supported)), skipped
     supported: list[int] = []
     skipped: list[dict[str, float | int | str]] = []
     for harmonic in requested_harmonics:
@@ -4424,6 +4571,11 @@ def _capture_sweep_point(
     on_formal_sample_recorded: Callable[[Mapping[str, object]], None] | None = None,
     harmonic_control: HarmonicSensitivitySession | None = None,
 ) -> None:
+    skipped = {(item.get("role"), item.get("harmonic"))
+               for item in record.get("skipped_harmonics", ())}
+    selected_roles_by_harmonic = {
+        h: tuple(role for role in roles if ("lockin_" + role, h) not in skipped)
+        for h, roles in selected_roles_by_harmonic.items()}
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
         raise TypeError("Sweep point samples must be a list.")
@@ -4582,6 +4734,7 @@ def _consume_harmonic_transition(
     xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
     problems: list[str] = []
     for sample in (xx, xy):
+        problems.extend(_model_status_problems(sample))
         role = sample.reading.role.value
         if sample.lia_status.reference_unlocked:
             problems.append(f"lockin_{role} reference unlocked during harmonic transition")
@@ -4682,6 +4835,7 @@ def _consume_frequency_transition(
     if xx.lia_status.reference_unlocked:
         problems.append("lockin_xx internal reference unlocked during transition")
     for sample in (xx, xy):
+        problems.extend(_model_status_problems(sample))
         role = sample.reading.role.value
         if sample.lia_status.time_constant_changed:
             problems.append(f"lockin_{role} time constant changed unexpectedly")
@@ -4727,6 +4881,7 @@ def _consume_sensitivity_transition(
     xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
     problems: list[str] = []
     for sample in (xx, xy):
+        problems.extend(_model_status_problems(sample))
         role = sample.reading.role.value
         if sample.lia_status.input_or_reserve_overload:
             problems.append(f"lockin_{role} input/reserve overload during sensitivity transition")
@@ -4766,6 +4921,7 @@ def _consume_sensitivity_transition(
         verification_xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
         verification_problems: list[str] = []
         for sample in (verification_xx, verification_xy):
+            verification_problems.extend(_model_status_problems(sample))
             role = sample.reading.role.value
             if sample.lia_status.input_or_reserve_overload:
                 verification_problems.append(f"lockin_{role} input/reserve overload during sensitivity transition")
@@ -4863,7 +5019,8 @@ def _restore_scan_state(
             ("lockin_xy", lockin_xy, original_xy_reserve_mode),
         ):
             label = f"restore {role} reserve mode"
-            if role in harmonic_control.owned and label not in existing_labels:
+            if (role in harmonic_control.owned and label not in existing_labels
+                    and model_name(instrument) == "SR830"):
                 if baseline is None:
                     errors.append(f"{role} baseline reserve mode unavailable")
                 else:
@@ -4965,6 +5122,15 @@ def _restore_scan_state(
         xx = lockin_xx.read_diagnostic(consume_status_latches=True)
         xy = lockin_xy.read_diagnostic(consume_status_latches=True)
         diagnostics.update({"lockin_xx": asdict(xx), "lockin_xy": asdict(xy)})
+        if model_name(lockin_xy) == "SR865A":
+            try:
+                diagnostics["lockin_xy_receiver_invariants"] = lockin_xy.read_receiver_invariants()
+            except BaseException as exc:
+                errors.append(f"lockin_xy final receiver preservation: {exc}")
+                diagnostics["lockin_xy_receiver_preservation_failure"] = {
+                    "evidence": getattr(exc, "evidence", None),
+                    "raw": getattr(exc, "raw", None),
+                }
         errors.extend(
             _diagnostic_problems(
                 xx,
@@ -4973,7 +5139,8 @@ def _restore_scan_state(
                 ignore_output_overload=ignore_output_overload,
             )
         )
-        if not math.isclose(xx.sine_output_v, 0.004, rel_tol=0.0, abs_tol=0.001):
+        minimum_tolerance = 1e-9 if model_name(lockin_xy) == "SR865A" else 0.001
+        if not math.isclose(xx.sine_output_v, 0.004, rel_tol=0.0, abs_tol=minimum_tolerance):
             errors.append("lockin_xx did not read back 4 mVrms")
         try:
             _verify_frequency_readbacks(
@@ -5042,11 +5209,66 @@ def _open_pair(settings: dict[str, object], factory: Callable[[], object]):
     except BaseException:
         stack.close()
         raise
-    pair = (
-        Sr830(xx_resource, LockinRole.XX),
-        Sr830(xy_resource, LockinRole.XY),
-    )
+    try:
+        config = settings.get("config")
+        if config is not None and model_name(config.lockin_xy) == "SR865A":
+            from .electrical_lockin_backend import create_electrical_lockin
+            pair = (Sr830(xx_resource, LockinRole.XX),
+                    create_electrical_lockin(xy_resource, config.lockin_xy,
+                                            authorize_writes=settings.get("authorize_writes") is True))
+        else:
+            pair = (Sr830(xx_resource, LockinRole.XX), Sr830(xy_resource, LockinRole.XY))
+    except BaseException:
+        stack.close()
+        raise
     return _PairContext(stack, pair)
+
+
+def _pair_controller(xx, xy):
+    if model_name(xy) == "SR865A":
+        from .electrical_lockin_backend import pair_controller
+        return pair_controller(xx, xy)
+    return DualSr830Controller(xx, xy)
+
+
+def _require_sr830_commissioning_pair(settings):
+    config = settings.get("config")
+    if config is not None and model_name(config.lockin_xy) != "SR830":
+        raise ValueError("This commissioning command supports a dual-SR830 pair only; use the model-aware sweep/combination path for SR865A XY.")
+
+
+def _require_mixed_write_authorization(settings):
+    config = settings.get("config")
+    if (config is not None and model_name(config.lockin_xy) == "SR865A"
+            and settings.get("authorize_writes") is not True):
+        raise AuthorizationRequired("Mixed-model sweeps require explicit --authorize-writes before instrument I/O.")
+
+
+def verify_pair_readback(xx, xy, expected_frequency_hz, *, check_frequency=True):
+    """Verify native reference codes without touching a disconnected XY source."""
+    if model_name(xy) == "SR830":
+        return _verify_sr830_pair_readback(xx, xy, expected_frequency_hz,
+                                          check_frequency=check_frequency)
+    problems = []
+    if xx.reference_mode != 1 or model_name(xx) != "SR830":
+        problems.append("lockin_xx must be an internal-reference SR830")
+    if getattr(xy, "reference_source", None) != "external" or xy.reference_mode != 1:
+        problems.append("lockin_xy is not using native external reference")
+    if xy.reference_slope != 1:
+        problems.append("lockin_xy is not using TTL rising edge")
+    if xx.harmonic != 1 or xy.harmonic != 1:
+        problems.append("both lock-ins must use first harmonic")
+    if not math.isclose(xx.sine_output_v, MINIMUM_SINE_OUTPUT_V, rel_tol=0, abs_tol=1e-9):
+        problems.append("lockin_xx sine output is not at the 4 mVrms minimum")
+    for diagnostic in (xx, xy):
+        for frequency in (diagnostic.frequency_hz, diagnostic.snapshot_frequency_hz):
+            if not math.isfinite(frequency) or not 0.001 <= frequency <= MAXIMUM_REFERENCE_FREQUENCY_HZ:
+                problems.append(f"lockin_{diagnostic.role.value} reference frequency is invalid")
+            elif check_frequency and not math.isclose(frequency, expected_frequency_hz,
+                    rel_tol=1e-5, abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ):
+                problems.append(f"lockin_{diagnostic.role.value} frequency readback does not match")
+    if problems:
+        raise Sr830Error("Mixed lock-in configuration verification failed: " + "; ".join(problems))
 
 
 def _clear_pair_interfaces(
@@ -5118,10 +5340,20 @@ def _resolve_pair_settings(args: argparse.Namespace) -> dict[str, object]:
         "xy_address": xy_address,
         "timeout_ms": timeout_ms,
         "frequency_hz": frequency_hz,
+        "authorize_writes": getattr(args, "authorize_writes", False) is True,
     }
 
 
 def _setting_codes(config: LockinConfig) -> Sr830SettingCodes:
+    if model_name(config) == "SR865A":
+        from .sr865a_settings import filter_slope_code
+        return ElectricalSettingCodes(
+            "SR865A", 1, {"rising": 1}[config.external_reference_edge.value],
+            {"a_minus_b": 1}[config.input_mode.value],
+            {"float": 0}[config.shield_grounding.value], {"ac": 0}[config.input_coupling.value],
+            time_constant_code_for(config, config.time_constant_s),
+            filter_slope_code(config.filter_slope_db_oct),
+            sensitivity_code_for(config, config.sensitivity_full_scale_v))
     return map_sr830_settings(
         reference_source=config.reference_source,
         external_reference_edge=config.external_reference_edge,
@@ -5163,16 +5395,18 @@ def _diagnostic_problems(
 ) -> list[str]:
     problems: list[str] = []
     if xx.identity == xy.identity:
-        problems.append("both VISA addresses returned the same SR830 identity")
+        problems.append("both VISA addresses returned the same lock-in identity")
     if xx.reference_mode != 1:
         problems.append("lockin_xx reference is not internal")
-    if xy.reference_mode != 0:
+    xy_is_sr865a = model_name(xy) == "SR865A"
+    if (getattr(xy, "reference_source", None) != "external" if xy_is_sr865a
+            else xy.reference_mode != 0):
         problems.append("lockin_xy reference is not external")
     if xy.reference_slope != 1:
         problems.append("lockin_xy external reference is not TTL rising")
     if xx.harmonic != 1 or xy.harmonic != 1:
         problems.append("both lock-ins must use first harmonic for this test")
-    if xy.sine_output_v > 0.005:
+    if not xy_is_sr865a and xy.sine_output_v > 0.005:
         problems.append("lockin_xy SINE OUT is above its minimum setting")
     if check_frequency_match and not math.isclose(
         xx.snapshot_frequency_hz,
@@ -5183,12 +5417,17 @@ def _diagnostic_problems(
         problems.append("lock-in reference frequencies differ")
     for diagnostic in (xx, xy):
         if diagnostic.lia_status is not None:
+            if model_name(diagnostic) == "SR865A":
+                from .electrical_lockin_backend import native_status_problems
+                problems.extend(f"lockin_{diagnostic.role.value} {problem}"
+                                for problem in native_status_problems(diagnostic.lia_status))
             if diagnostic.lia_status.reference_unlocked:
                 problems.append(f"lockin_{diagnostic.role.value} reference is unlocked")
             if (
                 diagnostic.lia_status.any_overload
                 and not (
                     ignore_output_overload
+                    and model_name(diagnostic) == "SR830"
                     and diagnostic.lia_status.output_overload
                     and not (
                         diagnostic.lia_status.input_or_reserve_overload

@@ -117,10 +117,12 @@ def launch_summary(config, database, run_id):
                 for name in ("frequency_point_specs", "excitation_point_specs")
                 if config.lockin_mode == "frequency_excitation"
                     or name.startswith(config.lockin_mode)},
-            "roles": {role: {"sensitivity_mode": device.sensitivity_mode.value,
+            "roles": {role: {"model": device.model,
+                "sensitivity_mode": device.sensitivity_mode.value,
                 "sensitivity_full_scale_v": device.sensitivity_full_scale_v,
-                "reserve_mode": device.reserve_mode.value,
+                "reserve_mode": device.reserve_mode.value if device.reserve_mode is not None else None,
                 "time_constant_s": device.time_constant_s,
+                "sr865a": asdict(device.sr865a) if device.sr865a is not None else None,
                 "autorange_min_full_scale_v": device.autorange_min_full_scale_v,
                 "autorange_max_full_scale_v": device.autorange_max_full_scale_v,
                 "harmonic_settings": [asdict(s) for s in device.harmonic_settings]}

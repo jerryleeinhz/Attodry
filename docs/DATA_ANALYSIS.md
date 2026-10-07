@@ -35,6 +35,8 @@ Both use the same read-only `attodry_control.unified_plotting` implementation.
 Restart an existing notebook kernel after updating the code, then run both cells.
 
 1. Set **Data directory**, click **Refresh records**, and check the source files.
+   For combination SQLite, select this card's **Run IDs** before samples load.
+   New cards select no run automatically; Ctrl selects several runs.
 2. Choose **X/Y**, or **Component** (R, X, Y, phase) for the four-channel view.
    It places Vxx h1/h2 above Vxy h1/h2; a varying actual Bx/Bz is selected when available.
    Add independent curve, four-channel, **New XY–Z scatter** or **New heatmap**
@@ -67,16 +69,41 @@ Restart an existing notebook kernel after updating the code, then run both cells
    changes only the display, not the exported observations.
 6. **Render this plot** or **Render all plots**, then **Export figures + data**.
    Edits clear the old figure and export state; changed files (including SQLite
-   WAL changes) require refresh/re-render. Failed refresh cannot keep stale sources.
+   WAL changes) require manual **Refresh records** and re-render. Failed refresh cannot keep stale sources.
 7. **Save/Load setup** records sources, axes, filters, statistics, exclusions, legend and audit
    choices. Missing source files produce an error. Setup/export files are never
    overwritten.
 
-Sources: combination SQLite, archived Three-SMU metadata+CSV, SR830 sweep JSON,
+Sources: combination SQLite, archived Three-SMU metadata+CSV, electrical Lock-in sweep JSON,
 temperature–excitation summaries/formal CSV, and ordinary CSV. Project loaders
 retain their completed/accepted/clean defaults; summary/formal CSV pairs are
 deduplicated. Source checkboxes show wrapped file names. The specialized SR830,
 temperature and Three-SMU notebooks keep their existing science models.
+
+## Run selection and refresh cache
+
+Both unified notebooks first read lightweight run metadata from each selected
+combination database. Selecting **Run IDs** loads only those runs through direct
+run-filtered SQL; unselected formal rows and cleanup records are not decoded.
+Each run's cleanup JSON is parsed once per load rather than once per sample.
+
+The widget caches immutable rows by resolved file, run ID and audit selection.
+Changing axes, Stack/group, filters, statistics, legend or plot mode reuses the
+same loaded rows; different cards reuse matching cached runs. **Refresh records**
+explicitly clears the cache, refreshes the run catalog and reloads selected runs.
+There is no background polling or automatic full-database reload.
+
+The snapshot signature includes SQLite WAL state and is stored with the rows.
+Changed files, changes during loading and runs loaded at different database
+revisions cannot render/export as one current snapshot. Refresh and render again.
+Saved setups retain selected runs; old setups preserve their original run scope,
+and recorded sample identities keep exclusions stable under scoped loading.
+
+SR865A rows retain model/native status rather than applying SR830 LIAS masks.
+Unknown native safety state remains unknown. Exact finite X=Y=R=0 with explicitly
+recorded SR865A identity may have phase null: X/Y/R remain usable, while the phase
+is missing and is never replaced with zero degrees. Other malformed/nonfinite
+readings still reject or remain audit-only under the existing source policy.
 
 Exports contain 600-dpi PNG, vector PDF/SVG, `selected_samples.csv` (contributing
 raw observations), `plotted_statistics.csv` (displayed means/gaps, n, SD, SEM,

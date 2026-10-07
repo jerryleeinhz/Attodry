@@ -138,6 +138,8 @@ def run(
             "--authorize-temperature-excitation-scan."
         )
 
+    lockin_settings["authorize_writes"] = args.authorize_temperature_excitation_scan
+
     cryostat = config.cryostat
     if (
         cryostat.com_port is None
