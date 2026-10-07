@@ -76,6 +76,13 @@ SLVL/SOFF/REFM/BLAZEX 保留；测量滤波 ADVFILT/SYNC 另行禁用并校验�
 
 三种独立混合 sweep 必须加 `--authorize-writes`。四模块 `combination_cli run`
 与温度–激励入口使用各自已有运行授权。独立只读诊断不得与扫描并行连接。
+
+SR865A 的 `FREQEXT?` 和 `FREQDET?` 是先后查询，不是同一时刻的快照。
+外参考检测频率与 `HARM × FREQEXT` 的软件一致性检查允许 25 ppm 相对差或
+1 mHz 绝对差（取较大者）；内参考仍为 1 ppm / 1 mHz。该上限用于避免锁定时
+小幅读回抖动的误拒绝，不是频率精度承诺，也不会改变 XX 的设定频率。
+两个实际频率及原始查询时间均保留；检测频率必须严格小于 4 MHz，
+谐波边界、失锁、未知状态、仪器错误和过载检查仍独立执行。
 旧 `configure-minimum`、`harmonics`、`commission-xx-autorange-narrow` 保留为双
 SR830 commissioning，遇到 SR865A 在连接前拒绝；混合采集使用 sweep/combination。
 

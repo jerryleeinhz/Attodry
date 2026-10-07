@@ -19,6 +19,14 @@ from .models import LockinRole
 from . import sr865a_settings as settings
 
 
+# FREQEXT? and FREQDET? are separate observations of the tracked external
+# reference, not one atomic frequency snapshot. A locked 5 kHz receiver showed
+# about 6 ppm between successive queries. Bound this comparison at 25 ppm;
+# retain the stricter internal-reference check and independent frequency/status
+# limits. This is a software consistency allowance, not an accuracy specification.
+EXTERNAL_DETECTION_FREQUENCY_REL_TOLERANCE = 25e-6
+
+
 class Sr865aError(RuntimeError):
     """Invalid instrument response or unverified setting; audit remains available."""
 
@@ -222,11 +230,14 @@ class Sr865a:
         return self._frequency("FREQDET?")
 
     def read_reference_frequency(self) -> float:
+        return self._read_reference_source_and_frequency()[1]
+
+    def _read_reference_source_and_frequency(self) -> tuple[str, float]:
         source = self._enum("RSRC?", _REFERENCE_SOURCES)
         if source not in ("internal", "external"):
             self._identity = None
             raise Sr865aError("Dual/chop references are outside the initial adapter scope.")
-        return self._frequency("FREQEXT?" if source == "external" else "FREQINT?")
+        return source, self._frequency("FREQEXT?" if source == "external" else "FREQINT?")
 
     def read_sine_output(self) -> float:
         value = self._query_float("SLVL?")
@@ -338,19 +349,30 @@ class Sr865a:
         identity = self.query_identity()
         self._verify_voltage_input()
         harmonic = self.read_harmonic()
-        reference_hz = self.read_reference_frequency()
+        reference_source, reference_hz = self._read_reference_source_and_frequency()
         try:
             expected_detection = settings.validate_harmonic_frequency(harmonic, reference_hz)
         except ValueError as exc:
             self._identity = None
             raise Sr865aError(str(exc)) from exc
         detection_hz = self.read_detection_frequency()
+        frequency_rel_tolerance = (
+            EXTERNAL_DETECTION_FREQUENCY_REL_TOLERANCE
+            if reference_source == "external" else 1e-6
+        )
         if not (
             settings.MINIMUM_REFERENCE_FREQUENCY_HZ <= detection_hz
             < settings.MAXIMUM_REFERENCE_FREQUENCY_HZ
-        ) or not math.isclose(detection_hz, expected_detection, rel_tol=1e-6, abs_tol=0.001):
+        ) or not math.isclose(
+            detection_hz, expected_detection,
+            rel_tol=frequency_rel_tolerance, abs_tol=0.001,
+        ):
             self._identity = None
-            raise Sr865aError("Detection frequency does not match harmonic and reference readbacks.")
+            raise Sr865aError(
+                "Detection frequency does not match harmonic and reference readbacks: "
+                f"reference={reference_hz:g} Hz, harmonic={harmonic}, "
+                f"detection={detection_hz:g} Hz, source={reference_source}."
+            )
         xy = self._query_text("SNAP? X,Y").split(",")
         if len(xy) != 2:
             self._identity = None

@@ -4,6 +4,30 @@ Last updated: 2026-10-07
 
 ## Current stage
 
+### SR865A external-frequency readback correction (2026-10-07)
+
+- User explicitly authorized connecting to LK_setup and running the current
+  standalone excitation TOML, correcting configuration problems without changing
+  experiment parameters. The first attempt was rejected during preflight, before
+  excitation/settings writes or formal data. Its rejected record is preserved;
+  cleanup `attempted=false, verified=true` does not certify instrument reset.
+- After confirming acquisition exit and identifying both idle Jupyter kernels
+  as file-only analysis, a separately saved read-only diagnostic observed XX at
+  5 kHz / 4 mVrms and a locked SR865A. Sequential native external/detection
+  frequency queries differed by about 6 ppm; the copied driver's 1 ppm comparison
+  falsely rejected this otherwise consistent readback.
+- External-reference consistency now has a bounded 25 ppm / 1 mHz allowance.
+  Internal reference retains 1 ppm / 1 mHz. Raw frequencies/query timestamps,
+  strict harmonic/detection limits and native status gates remain. This is a
+  software consistency allowance, not an instrument accuracy specification.
+  No TOML values, source/phase preservation or magnetic/SMU policies change.
+- Regression covers h1/h2 jitter, rejection beyond the bound, strict internal
+  reference and invalid unlocked status. **211 guarded offline tests passed**
+  (SR865A, electrical backend, mixed integration, SR830 and lock-in backend).
+  Real VISA/serial imports and DLL loads were blocked. A new uniquely recorded
+  real attempt follows normal station synchronization.
+
+
 ### Standing delivery instruction and documentation synchronization (2026-10-07)
 
 - User instruction: after each completed authorized change, commit/push to the

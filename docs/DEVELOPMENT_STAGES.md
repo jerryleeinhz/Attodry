@@ -1,5 +1,23 @@
 # Development stages
 
+## SR865A external-frequency readback correction (2026-10-07)
+
+- The user authorized a real standalone excitation sweep with the current TOML
+  and unchanged experimental parameters. The first run rejected preflight before
+  acquisition/settings writes. Its history remains; no same-run replay.
+- Read-only diagnosis after process exit found locked external-reference queries
+  differing by about 6 ppm. The native driver now permits bounded 25 ppm / 1 mHz
+  consistency for sequential external/detection queries, while internal reference
+  remains at 1 ppm / 1 mHz. Original values/timestamps are retained.
+- Independent frequency/harmonic boundaries and native unlock, unknown status,
+  error and overload gates remain. This allowance is not a frequency-accuracy
+  specification. Configuration and experimental parameters are unchanged.
+- Added offline regression for h1/h2 jitter, out-of-bound mismatch, internal
+  reference strictness and unlocked status. **211 guarded offline tests passed**
+  for native SR865A, electrical backend, mixed integration, SR830 and lock-in
+  backend; real VISA/serial imports and DLL loads were blocked. Real verification
+  follows normal delivery and unique launch recording.
+
 ## Standing delivery instruction and documentation synchronization (2026-10-07)
 
 - Recorded the user's standing instruction in `AGENTS.md` and the current

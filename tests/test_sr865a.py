@@ -243,6 +243,44 @@ class Sr865aAdapterTests(unittest.TestCase):
         self.resource.responses["SNAP? X,Y"] = "0,0"
         self.assertIsNone(self.sample().phase_deg)
 
+    def test_locked_external_frequency_queries_allow_small_sequential_jitter(self):
+        for harmonic in (1, 2):
+            with self.subTest(harmonic=harmonic):
+                self.resource.responses.update({
+                    "HARM?": str(harmonic), "FREQEXT?": "5000.02",
+                    "FREQDET?": str(harmonic * 5000.05),
+                })
+                sample = self.sample()
+                self.assertTrue(sample.status.valid)
+                self.assertEqual(sample.reference_frequency_hz, 5000.02)
+                self.assertEqual(sample.detection_frequency_hz, harmonic * 5000.05)
+                self.assertEqual(self.resource.writes, [])
+
+    def test_external_frequency_jitter_limit_does_not_accept_frequency_fault(self):
+        self.resource.responses.update({
+            "HARM?": "1", "FREQEXT?": "5000", "FREQDET?": "5000.2",
+        })
+        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+            self.sample()
+        self.assertEqual(self.resource.writes, [])
+
+    def test_internal_reference_retains_strict_detection_frequency_check(self):
+        self.resource.responses.update({
+            "RSRC?": "0", "HARM?": "2", "FREQINT?": "5000",
+            "FREQDET?": "10000.06",
+        })
+        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+            self.sample()
+
+    def test_external_jitter_allowance_does_not_make_unlocked_sample_valid(self):
+        self.resource.responses.update({
+            "HARM?": "1", "FREQEXT?": "5000.02", "FREQDET?": "5000.05",
+            "CUROVLDSTAT?": "8",
+        })
+        sample = self.sample()
+        self.assertFalse(sample.status.locked)
+        self.assertFalse(sample.status.valid)
+
     def test_snapshot_rejects_truncation_nonfinite_and_overflow(self):
         for bad in ("1", "1,2,3", "nan,0", "1,inf", "oops,1", "1.7e308,1.7e308"):
             self.resource.responses["SNAP? X,Y"] = bad
