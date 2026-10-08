@@ -32,6 +32,102 @@ class NotebookTests(unittest.TestCase):
                 self.assertIsNone(cell["execution_count"])
                 self.assertEqual(cell["outputs"], [])
 
+    def test_optional_export_without_running_temperature_section(self) -> None:
+        import tempfile
+        from types import SimpleNamespace
+
+        document = json.loads(
+            (PROJECT_ROOT / "notebooks/sr830_commissioning_sweeps.ipynb")
+            .read_text(encoding="utf-8")
+        )
+        source = next("".join(cell["source"]) for cell in document["cells"]
+                      if cell["cell_type"] == "code"
+                      and "selection_manifest = {" in "".join(cell["source"]))
+        tree = ast.parse(source)
+        # Enable exports in the test without changing the notebook's safe default.
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "SAVE_OUTPUTS"
+                for target in node.targets
+            ):
+                node.value = ast.Constant(True)
+        code = compile(ast.fix_missing_locations(tree), "optional-export", "exec")
+        for enabled in (("frequency",), ("excitation",), ("combined",),
+                        ("frequency", "excitation", "combined")):
+            for with_temperature in (False, True):
+                with self.subTest(enabled=enabled, with_temperature=with_temperature):
+                    with tempfile.TemporaryDirectory() as directory:
+                        scope = {
+                            "PROJECT_ROOT": Path(directory), "Path": Path,
+                            "json": json, "asdict": Mock(return_value={}),
+                            "DATA_DIRECTORY": Path(directory),
+                            "TEMPERATURE_DATA_DIRECTORY": Path(directory),
+                            "RECORD_STATUSES": {"completed"}, "SAMPLE_STATUSES": {"clean"},
+                            "INCLUDE_REJECTED": False, "PHASE_MINIMUM_AMPLITUDE_V": 0.0,
+                            "PHASE_MAXIMUM_STANDARD_DEVIATION_DEG": 10.0,
+                            "SCALING_RULES": object(), "SCALING_PLOT_METHODS": ("scalar",),
+                            "harmonic_scaling_results": {}, "harmonic_scaling_results_by_run": {},
+                            "harmonic_scaling_figures": {}, "repeatability_summary": {},
+                            "FREQUENCY_EXCLUDED_TARGET_HZ": set(),
+                            "EXCITATION_EXCLUDED_SOURCE_V_RMS": set(),
+                            "COMBINED_EXCLUDED_FREQUENCIES_HZ": set(),
+                            "COMBINED_EXCLUDED_EXCITATIONS_V_RMS": set(),
+                            "export_commissioning_csv": Mock(),
+                            "export_temperature_excitation_csv": Mock(),
+                            "export_publication_figure_set": Mock(), "display": Mock(),
+                        }
+                        for name, value in (
+                            ("excitation_x_axis_widget", "current"),
+                            ("repeatability_metrics_widget", ("amplitude_v",)),
+                            ("repeatability_x_scale_widget", "linear"),
+                            ("frequency_baseline_widget", None),
+                            ("excitation_baseline_widget", None),
+                            ("combined_baseline_widget", None),
+                        ):
+                            scope[name] = SimpleNamespace(value=value)
+                        for name in ("frequency", "excitation", "combined"):
+                            scope[name + "_rows"] = (object(),) if name in enabled else ()
+                            scope[name + "_paths"] = (Path(directory) / (name + ".json"),)
+                        scope.update(frequency_figures={}, current_voltage_figures={},
+                                     combined_iv_figures={}, combined_phase_figures={})
+                        if with_temperature:
+                            scope.update(
+                                temperature_excitation_rows=(object(),),
+                                temperature_excitation_paths=(Path(directory) / "temperature.json",),
+                                temperature_iv_figures={("xy", 2, "amplitude_v"): "temperature-figure"},
+                                temperature_sample_status_widget=SimpleNamespace(value=("clean",)),
+                                temperature_condition_widget=SimpleNamespace(value=("temperature::0",)),
+                                temperature_current_minimum_a_rms=None,
+                                temperature_current_maximum_a_rms=None,
+                                temperature_iv_x_scale="linear",
+                                temperature_iv_resolved_x_scales={"xy_h2_amplitude_v": "linear"},
+                            )
+                        exec(code, scope)
+                        output = scope["OUTPUT_DIRECTORY"]
+                        manifest = json.loads((output / "selection_manifest.json").read_text())
+                        self.assertEqual(scope["export_commissioning_csv"].call_count, len(enabled))
+                        stems = {"frequency": "frequency", "excitation": "excitation",
+                                 "combined": "frequency_excitation"}
+                        for name in enabled:
+                            scope["export_commissioning_csv"].assert_any_call(
+                                scope[name + "_rows"], output / (stems[name] + "_samples.csv")
+                            )
+                        if with_temperature:
+                            scope["export_temperature_excitation_csv"].assert_called_once_with(
+                                scope["temperature_excitation_rows"],
+                                output / "temperature_excitation_samples.csv",
+                            )
+                            scope["export_publication_figure_set"].assert_called_once_with(
+                                "temperature-figure", output / "temperature_iv_xy_h2_amplitude_v"
+                            )
+                            self.assertEqual(manifest["temperature_excitation"]["selected_rows"], 1)
+                            self.assertEqual(manifest["temperature_excitation"]["x_scale"], "linear")
+                        else:
+                            scope["export_temperature_excitation_csv"].assert_not_called()
+                            scope["export_publication_figure_set"].assert_not_called()
+                            self.assertIsNone(manifest["temperature_excitation"])
+                            self.assertNotIn("temperature_excitation_rows", scope)
+
     def test_temperature_scale_controls_plot_existing_rows_and_export_actual_scale(self) -> None:
         try:
             import ipywidgets as widgets
@@ -64,6 +160,8 @@ class NotebookTests(unittest.TestCase):
                                        manifest_assignment.value.values)
             if isinstance(key, ast.Constant) and key.value == "temperature_excitation"
         )
+        self.assertIsInstance(temperature_manifest, ast.IfExp)
+        temperature_manifest = temperature_manifest.body
         manifest_expression = compile(ast.Expression(temperature_manifest), "temperature-manifest", "eval")
         discovery = Mock(return_value=())
         loader = Mock(side_effect=AssertionError("Changing plot scale must not load data."))

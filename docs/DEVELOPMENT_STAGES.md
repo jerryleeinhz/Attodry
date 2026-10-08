@@ -1,5 +1,20 @@
 # Development stages
 
+## Optional export without temperature cells (offline complete; 2026-10-08)
+
+- Fixed a `NameError` when exporting ordinary frequency/excitation results after
+  skipping the independent temperature section. Temperature CSV/figures are
+  exported only when their state exists; absent temperature analysis is recorded
+  as `temperature_excitation: null` rather than fabricated empty measurements.
+- Loaded temperature data retain the existing selected rows, filters and the
+  scale captured when figures were generated. The notebook still defaults to
+  `SAVE_OUTPUTS = False`; no acquisition/configuration modules were changed.
+- Regression reproduces the original error, covers frequency-only, excitation-
+  only, combined-only and all ordinary scans with/without temperature data, and
+  checks export calls and saved manifests. **80 guarded tests passed, zero skips**
+  (3 notebook, 11 report, 54 commissioning-analysis, 12 progress-widget).
+  No instrument connection or experiment restart is part of this fix.
+
 ## Condensed experimental/fit overlays (target synchronized; 2026-10-08)
 
 - Each measured channel and selected frequency/excitation run gets an aligned
