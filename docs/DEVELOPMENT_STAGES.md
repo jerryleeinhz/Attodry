@@ -1,6 +1,6 @@
 # Development stages
 
-## Condensed experimental/fit overlays (local verified; 2026-10-08)
+## Condensed experimental/fit overlays (target synchronized; 2026-10-08)
 
 - Each measured channel and selected frequency/excitation run gets an aligned
   amplitude/phase report from already loaded/filtered rows. Legends distinguish
@@ -17,8 +17,16 @@
   channels with 32 experimental points each, including Vxy h2 without a scalar
   model. Five previews (four real, one synthetic) passed legend/canvas and width
   checks; raw-data hashes remained unchanged. No hardware modules were edited.
-- Delivery targets the existing integration branch and LK_setup, preserving
-  private TOML and user notebook fields after dependency/owner inventory checks.
+- Feature **21b47cb** was pushed to the existing integration branch and synced
+  to LK_setup at **2026-10-08T16:08:57Z**, after the target `lyr` interpreter
+  passed the same **79 guarded tests, zero skips**. All 28 audited acquisition
+  dependencies and private TOML retained their bytes. Unified notebook bytes
+  and every commissioning notebook user field, including cell 8 source and
+  outputs/metadata/IDs/execution counts, were retained by a three-way field merge.
+  The merged notebook compiles and both user notebooks remain `M`.
+  Audit/backups: `Integration/run_data/operator_report_sync_20261008T160848366517Z`.
+  No instrument I/O or acquisition restart. Reopen the analysis notebook and
+  restart its kernel, then run the upper data/fit cell and the report cell.
 
 ## Multi-run commissioning plot layout (target synchronized; 2026-10-08)
 

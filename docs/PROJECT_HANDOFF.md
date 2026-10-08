@@ -4,7 +4,7 @@ Last updated: 2026-10-08
 
 ## Current stage
 
-### Condensed experimental/fit overlays (local verified; 2026-10-08)
+### Condensed experimental/fit overlays (target synchronized; 2026-10-08)
 
 - `sr830_commissioning_sweeps.ipynb` Condensed report now gives each measured
   channel and selected frequency/excitation run its own amplitude/phase figure.
@@ -27,9 +27,17 @@ Last updated: 2026-10-08
   bounds and plotting-width checks. The previously omitted Vxy h2 now retains
   all **32 experimental points** even when scalar models are unavailable;
   the other three channels also retain 32 points. Raw source SHA stayed unchanged.
-- Push/sync destination remains `origin/codex/integration-four-module-scan`.
-  LK_setup delivery will preserve user notebook fields and private TOML, with a
-  dependency audit before updating independent analysis code. No instrument I/O.
+- Feature **21b47cb** was pushed to `origin/codex/integration-four-module-scan`
+  and LK_setup fast-forwarded `17e44e2 -> 21b47cb` at
+  **2026-10-08T16:08:57Z**. Its `lyr` interpreter passed the same **79 guarded
+  tests, zero skips** in a pristine ignored snapshot before deployment.
+- All 28 audited acquisition dependencies and the current private TOML kept
+  identical bytes. Unified notebook bytes and commissioning notebook user fields
+  (including cell 8 source, metadata, IDs, outputs and execution counts) were
+  preserved; the merged notebook compiles and both user notebooks remain `M`.
+  Audit/backups: `Integration/run_data/operator_report_sync_20261008T160848366517Z`.
+  No instrument I/O or acquisition restart occurred. Reopen the notebook and
+  restart only its analysis kernel; run the upper data/fit cell, then the report.
 
 ### Multi-run commissioning plot layout (target synchronized; 2026-10-08)
 
