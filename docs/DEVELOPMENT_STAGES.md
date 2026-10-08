@@ -1,6 +1,6 @@
 # Development stages
 
-## Condensed reports in Optional export (offline complete; 2026-10-08)
+## Condensed reports in Optional export (target synchronized; 2026-10-08)
 
 - `sr830_commissioning_sweeps.ipynb` Optional export now saves all cached
   Condensed report Figures as PNG/PDF/SVG plus per-run/channel provenance JSON.
@@ -16,6 +16,16 @@
   Figures, per-figure manifests, same-basename run separation, disabled
   export and missing-provenance rejection. No acquisition source, private
   configuration, hardware communication or experiment parameters were changed.
+- Feature **7b9398d** was pushed to `origin/codex/integration-four-module-scan`
+  and LK_setup fast-forwarded `a9e9836 -> 7b9398d` at **2026-10-08T18:10:17Z**.
+  Target `lyr` passed the same **81 guarded tests, zero skips**, before
+  deployment. All 28 audited acquisition dependencies, private TOML and
+  unified notebook retained their bytes. The commissioning notebook merge
+  retained user source/metadata/IDs/outputs/execution counts and compiles;
+  both user notebooks remain modified. Audit/backups:
+  `Integration/run_data/operator_condensed_export_sync_20261008T181008436643Z`.
+  Reopen the updated notebook, run Condensed report figure, then set
+  `SAVE_OUTPUTS=True` in Optional export. No instrument I/O or restart.
 
 ## Optional export without temperature cells (target synchronized; 2026-10-08)
 
