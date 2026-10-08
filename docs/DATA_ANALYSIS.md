@@ -404,15 +404,31 @@ multi-frequency I--V curves use a distinct cool `viridis` sequence. Both retain
 marker and line-style redundancy where practical; for dense frequency sweeps,
 the continuous frequency colorbar provides the numerical mapping.
 
-The final Notebook section provides a separate condensed report figure without
-changing the channel-by-channel analysis. `REPORT_AMPLITUDE_CHANNELS` accepts any
-available `("xx" | "xy", 1 | 2 | 3)` combinations. `REPORT_PHASE_MODE="right"`
-adds the selected `REPORT_PHASE_CHANNELS` to a separately labelled right y axis;
-use `"none"` with an empty phase tuple for an amplitude-only figure. Each amplitude
-channel displays only fit-qualified points and one `scalar_selected_free_model`
-curve over the measured current range. Its right-side legend gives the fitted
-`R(I) = b + A(I/Iref)^p` equation, exponent confidence interval, R-squared, and
-relative RMSE. Optional PNG/PDF/SVG export also writes a JSON report manifest.
+The **Condensed report figure** section reuses the loaded, filtered frequency
+and excitation rows, separately per run and measured channel. Each figure keeps
+amplitude and phase on aligned panels, with the same experimental coordinates,
+means, sample SD and phase qualifications as the upper single-run figures.
+Amplitude markers are labelled **experiment** and every available selected
+fixed/free curve is labelled **fitting**, with method/model and exponent.
+`REPORT_FIT_METHODS` defaults to `SCALING_PLOT_METHODS`; for one method use
+`("scalar",)` with the comma. Fits are reused rather than recomputed. Each curve
+is confined to its method's qualified current interval; a voltage X-axis uses
+the cached excitation path from that run's fit. All retained experimental
+amplitude points, including zero/low-SNR points excluded from fitting, remain
+visible. A channel with no fit shows the experiment and an explicit message.
+Frequency sweeps have no scaling fit; phase remains experimental because the
+existing scalar/log amplitude fits do not define phase curves. Combined f × e
+and calibration figures remain in their respective sections.
+
+`REPORT_AMPLITUDE_CHANNELS=None` includes every measured channel, or supply
+`(("xx", 1), ("xy", 2))` to select channels. `REPORT_OUTPUT_STEM=None` displays
+only; setting a stem exports PNG/PDF/SVG and one provenance manifest per
+run/channel, including shown models, fit coefficients/goodness, current domains,
+experimental sample count, excitation path and phase thresholds. If loaded
+excitation selection changes, rerun the upper figure/fit cell before the report;
+stale fits are rejected. No records are reread by the report cell and runs are
+never pooled. The earlier `plot_condensed_iv_report` scalar-only Python API is
+preserved for existing callers.
 
 For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
 `amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency

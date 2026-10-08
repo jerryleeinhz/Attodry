@@ -1,15 +1,23 @@
-"""Condensed, read-only report figures from completed harmonic-scaling fits."""
+"""Read-only experimental reports and overlays of existing harmonic-scaling fits."""
 
 from __future__ import annotations
 
 import math
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
 from .commissioning_analysis import (
+    CommissioningSample,
+    ExcitationPathResistance,
+    HARMONIC_SCALING_PLOT_METHODS,
     HarmonicScalingFit,
     HarmonicScalingPoint,
     ScalarHarmonicScalingModel,
+    _complex_model_prediction,
+    _scalar_model_prediction,
+    _validate_harmonic_scaling_plot_methods,
+    plot_role_harmonic_sweep,
 )
 from .scientific_plotting import (
     SERIES_MARKERS,
@@ -30,6 +38,189 @@ REPORT_COLORS = (
     "#332288",
     "#997700",
 )
+
+
+@dataclass(frozen=True)
+class _AmplitudeFitCurve:
+    method: str
+    model_name: str
+    free_exponent: bool
+    exponent: float
+    current_a_rms: tuple[float, ...]
+    amplitude_v: tuple[float, ...]
+
+
+@publication_plot
+def plot_experiment_fit_report(
+    rows: Sequence[CommissioningSample],
+    *,
+    role: str,
+    harmonic: int,
+    fit: HarmonicScalingFit | None = None,
+    methods: Iterable[str] = HARMONIC_SCALING_PLOT_METHODS,
+    excitation_path: ExcitationPathResistance | None = None,
+    excitation_x_axis: str = "sine_output_current_a_rms",
+    phase_minimum_amplitude_v: float = 0.0,
+    phase_maximum_standard_deviation_deg: float | None = None,
+    title: str | None = None,
+    destination: str | Path | None = None,
+):
+    """Reuse one run's experimental amplitude/phase view and overlay existing fits.
+
+    All supplied experimental samples retain the upper section's aggregation
+    and phase rules. Fits are never recomputed, and each curve stays within its
+    own qualified current interval. Frequency sweeps have no scaling overlay.
+    """
+    selected_methods = _validate_harmonic_scaling_plot_methods(methods)
+    _validate_experiment_report(rows, role, harmonic, fit)
+    curves = _available_amplitude_fit_curves(fit, selected_methods)
+    if curves and excitation_x_axis == "sine_output_v_rms" and excitation_path is None:
+        raise ValueError("Voltage-axis fit overlays require the fit's excitation path.")
+
+    figure = plot_role_harmonic_sweep(
+        rows, role=role, harmonic=harmonic, excitation_path=excitation_path,
+        excitation_x_axis=excitation_x_axis,
+        phase_minimum_amplitude_v=phase_minimum_amplitude_v,
+        phase_maximum_standard_deviation_deg=phase_maximum_standard_deviation_deg,
+    )
+    figure.set_size_inches(10.8, 6.4)
+    amplitude_axis, phase_axis = figure.axes
+    for axis in (amplitude_axis, phase_axis):
+        handles, labels = axis.get_legend_handles_labels()
+        for handle, label in zip(handles, labels):
+            handle.set_label(f"experiment · {label}")
+    # The experimental connecting line is a visual guide, not a fitted model.
+    for container in amplitude_axis.containers:
+        if container.get_label().startswith("experiment"):
+            container.lines[0].set_linestyle("none")
+    colors = {
+        "log": REPORT_COLORS[1], "scalar": REPORT_COLORS[2],
+        "complex": REPORT_COLORS[3],
+    }
+    for curve in curves:
+        x_values = curve.current_a_rms
+        if excitation_x_axis == "sine_output_v_rms":
+            x_values = tuple(
+                current * excitation_path.total_resistance_ohm for current in x_values
+            )
+        order = "free" if curve.free_exponent else "fixed"
+        amplitude_axis.plot(
+            x_values, curve.amplitude_v, color=colors[curve.method],
+            linestyle="-" if curve.free_exponent else "--", linewidth=1.5,
+            label=(f"fitting · {curve.method} · {order} p={curve.exponent:.4g}\n"
+                   f"{curve.model_name.replace('_', ' ')}"),
+        )
+    legend_title = "Experiment: mean ± sample SD"
+    if curves:
+        legend_title += "\nFitting: existing selected models"
+    handles, labels = amplitude_axis.get_legend_handles_labels()
+    ordered = sorted(zip(handles, labels), key=lambda item: not item[1].startswith("experiment"))
+    outside_legend(amplitude_axis, handles=[handle for handle, _ in ordered],
+                   labels=[label for _, label in ordered], title=legend_title)
+    outside_legend(phase_axis, title="Experiment: circular mean ± sample SD")
+    if not curves:
+        amplitude_axis.text(
+            0.02, 0.96, "No available fit for the selected methods",
+            transform=amplitude_axis.transAxes, va="top", fontsize=8,
+        )
+    if title is not None:
+        amplitude_axis.set_title(title)
+    if destination is not None:
+        save_publication_figure(figure, destination)
+    return figure
+
+
+def experiment_fit_report_manifest(
+    rows: Sequence[CommissioningSample],
+    *,
+    role: str,
+    harmonic: int,
+    fit: HarmonicScalingFit | None = None,
+    methods: Iterable[str] = HARMONIC_SCALING_PLOT_METHODS,
+    excitation_x_axis: str = "sine_output_current_a_rms",
+    excitation_path: ExcitationPathResistance | None = None,
+    phase_minimum_amplitude_v: float = 0.0,
+    phase_maximum_standard_deviation_deg: float | None = None,
+) -> dict[str, object]:
+    """Record the experiments and the already computed models shown in a report."""
+    _validate_experiment_report(rows, role, harmonic, fit)
+    selected_methods = _validate_harmonic_scaling_plot_methods(methods)
+    curves = _available_amplitude_fit_curves(fit, selected_methods)
+    return {
+        "source_files": sorted({row.source_path for row in rows}),
+        "channel": [role, harmonic],
+        "experimental_sample_count": sum(row.role == role and row.harmonic == harmonic for row in rows),
+        "experiment_filtering": "uses already loaded and filtered rows; no fit qualification filter",
+        "x_axis": "actual_frequency_hz" if rows[0].scan_type == "frequency" else excitation_x_axis,
+        "excitation_path": asdict(excitation_path) if excitation_path is not None else None,
+        "phase_minimum_amplitude_v": phase_minimum_amplitude_v,
+        "phase_maximum_standard_deviation_deg": phase_maximum_standard_deviation_deg,
+        "fit_methods": list(selected_methods),
+        "curves": [
+            {"method": curve.method, "model_name": curve.model_name,
+             "free_exponent": curve.free_exponent, "exponent": curve.exponent,
+             "current_min_a_rms": min(curve.current_a_rms),
+             "current_max_a_rms": max(curve.current_a_rms)}
+            for curve in curves
+        ],
+        "fit": fit.as_dict() if fit is not None else None,
+    }
+
+
+def _validate_experiment_report(
+    rows: Sequence[CommissioningSample], role: str, harmonic: int,
+    fit: HarmonicScalingFit | None,
+) -> None:
+    _validate_channels(((role, harmonic),), "experiment")
+    if len({row.source_path for row in rows}) != 1:
+        raise ValueError("Plot one run at a time; never pool report fits.")
+    scan_types = {row.scan_type for row in rows}
+    if len(scan_types) != 1 or not scan_types <= {"frequency", "excitation"}:
+        raise ValueError("Select one frequency or excitation sweep for the report.")
+    if fit is not None and (
+        scan_types != {"excitation"} or (fit.role, fit.harmonic) != (role, harmonic)
+    ):
+        raise ValueError("The scaling fit must match the excitation report channel.")
+
+
+def _available_amplitude_fit_curves(
+    fit: HarmonicScalingFit | None,
+    methods: Sequence[str],
+) -> tuple[_AmplitudeFitCurve, ...]:
+    if fit is None:
+        return ()
+    curves = []
+    for method in methods:
+        points = tuple(sorted(
+            (point for point in fit.points
+             if (point.complex_included if method == "complex" else point.included)
+             and point.current_a_rms > 0.0),
+            key=lambda point: point.current_a_rms,
+        ))
+        if not points:
+            continue
+        currents = _logarithmic_curve_grid(points)
+        for free in (False, True):
+            if method == "log":
+                intercept = fit.free_intercept_log if free else fit.fixed_intercept_log
+                exponent = fit.exponent if free else fit.expected_order
+                if intercept is None or exponent is None:
+                    continue
+                name = "log_free_order" if free else "log_fixed_order"
+                predictions = tuple(math.exp(intercept) * current ** exponent for current in currents)
+            else:
+                prefix = method + "_selected_" + ("free_model" if free else "model")
+                model = next((candidate for candidate in getattr(fit, method + "_models")
+                              if candidate.name == getattr(fit, prefix)), None)
+                if model is None:
+                    continue
+                name, exponent = model.name, model.exponent
+                if method == "scalar":
+                    predictions = tuple(_scalar_model_prediction(model, current) for current in currents)
+                else:
+                    predictions = tuple(math.hypot(*_complex_model_prediction(model, current)) for current in currents)
+            curves.append(_AmplitudeFitCurve(method, name, free, float(exponent), currents, predictions))
+    return tuple(curves)
 
 
 @publication_plot

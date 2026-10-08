@@ -4,6 +4,33 @@ Last updated: 2026-10-08
 
 ## Current stage
 
+### Condensed experimental/fit overlays (local verified; 2026-10-08)
+
+- `sr830_commissioning_sweeps.ipynb` Condensed report now gives each measured
+  channel and selected frequency/excitation run its own amplitude/phase figure.
+  It reuses the loaded, filtered experiment rows and the upper cell's cached
+  fits/path; legends explicitly label `experiment` and `fitting`. Available
+  selected log/scalar/complex fixed/free curves follow `REPORT_FIT_METHODS`
+  (default `SCALING_PLOT_METHODS`) without refitting or extrapolation. Missing
+  models keep experiments visible, including zero and low-SNR amplitude points.
+- Experimental aggregation, phase qualifications, fit rules and acquisition
+  code are unchanged. Frequency reports have no scaling model; phase remains
+  experimental. Combined/calibration views remain in their existing sections.
+  A changed excitation selection requires rerunning the upper figure/fit cell
+  before report overlays. Optional per-run/channel exports record fit provenance.
+  The previous consolidated scalar-only Python API remains compatible.
+- **79 guarded tests passed locally, zero skips** (11 report, 54 commissioning,
+  2 notebook, 12 progress-widget). Tests cover experiment/phase parity, all six
+  available fits, frozen-path voltage conversion, zeros with missing models,
+  frequency-only data, per-run separation and stale-selection rejection.
+- Four real-data renders plus a synthetic six-fit render passed canvas/legend
+  bounds and plotting-width checks. The previously omitted Vxy h2 now retains
+  all **32 experimental points** even when scalar models are unavailable;
+  the other three channels also retain 32 points. Raw source SHA stayed unchanged.
+- Push/sync destination remains `origin/codex/integration-four-module-scan`.
+  LK_setup delivery will preserve user notebook fields and private TOML, with a
+  dependency audit before updating independent analysis code. No instrument I/O.
+
 ### Multi-run commissioning plot layout (target synchronized; 2026-10-08)
 
 - Fixed the selected-run overlay/difference plots in

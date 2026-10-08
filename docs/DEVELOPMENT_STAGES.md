@@ -1,5 +1,25 @@
 # Development stages
 
+## Condensed experimental/fit overlays (local verified; 2026-10-08)
+
+- Each measured channel and selected frequency/excitation run gets an aligned
+  amplitude/phase report from already loaded/filtered rows. Legends distinguish
+  `experiment` from available selected log/scalar/complex fixed/free `fitting`
+  curves, controlled by `REPORT_FIT_METHODS` (default `SCALING_PLOT_METHODS`).
+  Fit/path caches are reused; no refit, extrapolation or multi-run pooling occurs.
+- Missing models do not suppress experimental channels or zero/low-SNR points.
+  Frequency reports and phase panels remain experimental. Experimental statistics,
+  phase qualification and fitting rules retain their existing semantics. Stale
+  excitation selections require refreshing the upper figure/fit cell. Optional
+  PNG/PDF/SVG/manifest exports preserve shown-model provenance. The earlier
+  scalar-only consolidated Python API remains available.
+- **79 guarded tests passed, zero skips**. Real-data rendering verified all four
+  channels with 32 experimental points each, including Vxy h2 without a scalar
+  model. Five previews (four real, one synthetic) passed legend/canvas and width
+  checks; raw-data hashes remained unchanged. No hardware modules were edited.
+- Delivery targets the existing integration branch and LK_setup, preserving
+  private TOML and user notebook fields after dependency/owner inventory checks.
+
 ## Multi-run commissioning plot layout (target synchronized; 2026-10-08)
 
 - Fixed long-file-name layout collapse in multi-selected frequency, excitation
