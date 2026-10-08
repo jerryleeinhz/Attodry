@@ -1,6 +1,6 @@
 # Development stages
 
-## Multi-run commissioning plot layout (2026-10-08)
+## Multi-run commissioning plot layout (target synchronized; 2026-10-08)
 
 - Fixed long-file-name layout collapse in multi-selected frequency, excitation
   and frequency/excitation repeatability plots. Full filenames wrap in the upper
@@ -12,9 +12,15 @@
 - **68 guarded tests passed locally**, including a rendered long-name regression
   for two/six runs and three runs at three frequencies. It checks visible legends,
   physical plot width and unchanged coordinates/differences. Four synthetic
-  amplitude/phase figures passed visual inspection. Delivery targets the existing
-  integration branch and preserves LK_setup user notebooks/private configuration
-  plus all active acquisition source bytes.
+  amplitude/phase figures passed visual inspection.
+- Feature **7ef5efa** was pushed to the existing integration branch and
+  synchronized to LK_setup at **2026-10-08T12:54:25Z**. The target `lyr` interpreter
+  passed **68 guarded tests, zero skips** in a pristine ignored snapshot. Both
+  user notebooks, private TOML and all 28 audited acquisition dependencies kept
+  identical bytes while sweep-excitation PID 22180 remained present. Audit and
+  notebook backups are in ignored
+  `Integration/run_data/operator_plot_layout_sync_20261008T125418403020Z`.
+  Restart only the analysis notebook kernel to load the updated function.
 
 ## Temperature I–V Linear/Log/Auto display (target synchronized; 2026-10-08)
 

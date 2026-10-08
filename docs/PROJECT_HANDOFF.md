@@ -4,7 +4,7 @@ Last updated: 2026-10-08
 
 ## Current stage
 
-### Multi-run commissioning plot layout (2026-10-08)
+### Multi-run commissioning plot layout (target synchronized; 2026-10-08)
 
 - Fixed the selected-run overlay/difference plots in
   `sr830_commissioning_sweeps.ipynb`: long filenames in outside legends could
@@ -20,9 +20,16 @@ Last updated: 2026-10-08
   legends remain within the canvas, plot width is at least 4.5 inches, and actual
   X coordinates/paired differences retain their values. Four synthetic renders,
   including phase, were visually inspected; plotting width exceeds 6 inches.
-- Deliver through `origin/codex/integration-four-module-scan`; LK_setup sync
-  must preserve both user notebooks/private TOML and verify that incoming files
-  do not overlap any active acquisition dependencies. Restart only the analysis
+- Feature **7ef5efa** was pushed to `origin/codex/integration-four-module-scan`
+  and LK_setup fast-forwarded `45d3d39 -> 7ef5efa` at
+  **2026-10-08T12:54:25Z**. All 28 conservatively audited acquisition dependencies
+  and private TOML retained their bytes; both user notebooks also retained their
+  exact bytes and remain modified. Incoming changes were disjoint from the
+  acquisition dependencies of the existing sweep-excitation PID 22180.
+- LK_setup `lyr` passed the same **68 guarded tests, zero skips**, in an ignored
+  pristine validation snapshot. Audit/backups:
+  `Integration/run_data/operator_plot_layout_sync_20261008T125418403020Z`.
+  No instrument I/O or process restart was performed. Restart only the analysis
   kernel and rerun notebook cells to load the updated plotting function.
 
 ### Temperature I–V Linear/Log/Auto display (target synchronized; 2026-10-08)
