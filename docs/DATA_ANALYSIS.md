@@ -597,6 +597,38 @@ Yuhuan He, Darshil Patel, and Aubrey M. Brueckner (2026),
 [Scientific Agent Skills: A Library of Procedural Knowledge for Research
 Agents](https://doi.org/10.48550/arXiv.2609.00065).
 
+## Temperature–excitation I–V X-axis scale
+
+In `notebooks/sr830_commissioning_sweeps.ipynb`, load the temperature records
+with **Refresh T records** / **Load T records**, then apply the selected
+temperature/current filters. Choose **Auto**, **Linear**, or **Log** in
+**T current scale** and rerun the existing temperature figure cell. This reuses
+the loaded data; changing the scale does not require loading the files again.
+
+| Choice | Current X-axis |
+| --- | --- |
+| Auto (default) | Logarithmic when every retained current coordinate is finite and positive; otherwise linear. |
+| Linear | Linear current display. |
+| Log | Requires finite, positive current coordinates; invalid coordinates raise an error rather than being dropped. |
+
+The Python functions `plot_temperature_iv_curves` and
+`plot_temperature_iv_suite` accept `x_scale="auto"`, `"linear"`, or `"log"`.
+Only the displayed current X-axis changes. Amplitude and phase Y-axes remain
+linear; archived current coordinates, quality filters, circular phase statistics
+and actual-temperature legends retain their existing meaning.
+
+Optional `selection_manifest.json` export records `temperature_excitation.x_scale`
+from the most recent successful temperature figure generation, plus each
+figure's actual scale in `resolved_x_scales`. Changing the control without
+plotting, or a failed replot, does not relabel previously generated figures as
+using the new setting.
+
+On LK_setup, the independently verified preview is
+`Integration/run_data/operator_temperature_preview_20261008_b8b194b9e904/temperature_linear_preview.ipynb`.
+Open it in a new `lyr` kernel. Its five offline tests passed on 2026-10-08;
+the active acquisition keeps formal source synchronization deferred. The
+original source, private TOML and user notebooks are preserved.
+
 ## XY-only frequency and amplitude sweeps
 
 Use `notebooks/sr830_xy_sweeps.ipynb` to plot only XY from the completed

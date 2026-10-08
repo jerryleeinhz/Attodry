@@ -1,10 +1,12 @@
 import ast
 import csv
+from dataclasses import replace
 import json
 import math
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from attodry_control.temperature_excitation_analysis import (
     aggregate_temperature_iv,
@@ -337,6 +339,99 @@ class TemperatureExcitationAnalysisTests(unittest.TestCase):
         )
         self.assertNotIn("attodry_control.attodry", code)
         self.assertNotIn("attodry_control.sr830", code)
+
+    def test_explicit_x_scales_preserve_current_statistics_phase_and_linear_y(self) -> None:
+        plt = self._pyplot()
+        rows = load_temperature_excitation_samples(self._write_summary(self._summary()))
+        for metric in ("amplitude_v", "phase_deg"):
+            plotted = {}
+            for x_scale in ("auto", "linear", "log"):
+                with self.subTest(metric=metric, x_scale=x_scale):
+                    figure = plot_temperature_iv_curves(
+                        rows, role="xx", harmonic=1, metric=metric, x_scale=x_scale,
+                    )
+                    axis = figure.axes[0]
+                    self.assertEqual(axis.get_xscale(), "linear" if x_scale == "linear" else "log")
+                    self.assertEqual(axis.get_yscale(), "linear")
+                    plotted[x_scale] = tuple(
+                        (tuple(container.lines[0].get_xdata()),
+                         tuple(container.lines[0].get_ydata()),
+                         tuple(tuple(tuple(value) for value in segment)
+                               for collection in container.lines[2]
+                               for segment in collection.get_segments()))
+                        for container in axis.containers
+                    )
+                    self.assertEqual(axis.get_legend_handles_labels()[1], ["1.775 K", "2.025 K"])
+                    figure.canvas.draw()
+                    plt.close(figure)
+            self.assertEqual(plotted["auto"], plotted["linear"])
+            self.assertEqual(plotted["auto"], plotted["log"])
+            self.assertTrue(all(trace[0] == (4e-8, 8e-8) for trace in plotted["linear"]))
+
+    def test_linear_and_auto_preserve_nonpositive_dataclass_current_coordinates(self) -> None:
+        plt = self._pyplot()
+        loaded = load_temperature_excitation_samples(self._write_summary(self._summary()))
+        rows = tuple(replace(row, current_a_rms=-4e-8 if row.point_index == 0 else 0.0)
+                     for row in loaded)
+        for x_scale in ("auto", "linear"):
+            for metric in ("amplitude_v", "phase_deg"):
+                with self.subTest(x_scale=x_scale, metric=metric):
+                    figure = plot_temperature_iv_curves(
+                        rows, role="xx", harmonic=1, metric=metric, x_scale=x_scale,
+                    )
+                    self.assertEqual(figure.axes[0].get_xscale(), "linear")
+                    self.assertTrue(all(tuple(container.lines[0].get_xdata()) == (-4e-8, 0.0)
+                                        for container in figure.axes[0].containers))
+                    figure.canvas.draw()
+                    plt.close(figure)
+
+    def test_invalid_x_scale_and_log_current_reject_before_figure_creation(self) -> None:
+        plt = self._pyplot()
+        rows = load_temperature_excitation_samples(self._write_summary(self._summary()))
+        with patch.object(plt, "subplots", side_effect=AssertionError("Figure was created")):
+            for x_scale in ("unknown", "LOG", None):
+                with self.subTest(x_scale=x_scale):
+                    with self.assertRaisesRegex(ValueError, "x_scale"):
+                        plot_temperature_iv_curves(
+                            rows, role="xx", harmonic=1, metric="amplitude_v", x_scale=x_scale,
+                        )
+                    with self.assertRaisesRegex(ValueError, "x_scale"):
+                        plot_temperature_iv_suite(rows, x_scale=x_scale)
+                    with self.assertRaisesRegex(ValueError, "x_scale"):
+                        plot_temperature_iv_suite((), x_scale=x_scale)
+            for current in (0.0, -1e-8, math.nan, math.inf, -math.inf):
+                changed = tuple(replace(row, current_a_rms=current) for row in rows)
+                for metric in ("amplitude_v", "phase_deg"):
+                    with self.subTest(current=current, metric=metric):
+                        with self.assertRaisesRegex(ValueError, "finite and positive"):
+                            plot_temperature_iv_curves(
+                                changed, role="xx", harmonic=1, metric=metric, x_scale="log",
+                            )
+
+    def test_suite_propagates_x_scale_to_every_available_role_harmonic_metric(self) -> None:
+        plt = self._pyplot()
+        rows = load_temperature_excitation_samples(self._write_summary(self._summary()))
+        for x_scale in ("linear", "log", "auto"):
+            suite = plot_temperature_iv_suite(rows, x_scale=x_scale)
+            self.assertEqual(set(suite), {(role, harmonic, metric)
+                                         for role in ("xx", "xy") for harmonic in (1, 2)
+                                         for metric in ("amplitude_v", "phase_deg")})
+            for key, figure in suite.items():
+                with self.subTest(x_scale=x_scale, channel=key):
+                    self.assertEqual(figure.axes[0].get_xscale(),
+                                     "linear" if x_scale == "linear" else "log")
+                    self.assertEqual(figure.axes[0].get_yscale(), "linear")
+                    plt.close(figure)
+
+    def _pyplot(self):
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+        except (ImportError, RuntimeError) as exc:
+            self.skipTest(f"matplotlib unavailable: {exc}")
+        self.addCleanup(plt.close, "all")
+        return plt
 
     def _write_summary(
         self, payload: dict[str, object], *, name: str = "test"

@@ -16,6 +16,7 @@ from .commissioning_analysis import (
     SAMPLE_STATUSES,
     _formal_lockin_model,
     _formal_phase_deg,
+    _resolve_comparison_x_scale,
     load_commissioning_file,
 )
 from .scientific_plotting import (
@@ -219,12 +220,27 @@ def plot_temperature_iv_curves(
     role: str,
     harmonic: int,
     metric: str,
+    x_scale: str = "auto",
     destination: str | Path | None = None,
 ):
-    """Plot one Vxx/Vxy harmonic and metric with one curve per actual temperature."""
+    """Plot one Vxx/Vxy harmonic and metric with one curve per actual temperature.
+
+    ``x_scale="auto"`` uses logarithmic current for positive coordinates and
+    linear current otherwise. Explicit scales change only the displayed X axis.
+    """
 
     statistics = aggregate_temperature_iv(
         rows, role=role, harmonic=harmonic, metric=metric
+    )
+    automatic_x_scale = (
+        "log" if statistics and all(
+            math.isfinite(item.current_a_rms) and item.current_a_rms > 0.0
+            for item in statistics
+        ) else "linear"
+    )
+    resolved_x_scale = _resolve_comparison_x_scale(
+        x_scale, (item.current_a_rms for item in statistics),
+        automatic_x_scale=automatic_x_scale,
     )
     try:
         import matplotlib.pyplot as plt
@@ -287,8 +303,7 @@ def plot_temperature_iv_curves(
             elinewidth=0.8,
             label=label,
         )
-    if statistics and all(item.current_a_rms > 0.0 for item in statistics):
-        axis.set_xscale("log")
+    axis.set_xscale(resolved_x_scale)
     signal_name = f"V{role}"
     axis.set_xlabel("SINE OUT current (A RMS)")
     axis.set_ylabel(
@@ -315,12 +330,15 @@ def plot_temperature_iv_curves(
 
 def plot_temperature_iv_suite(
     rows: Sequence[TemperatureExcitationSample],
+    *,
+    x_scale: str = "auto",
 ) -> dict[tuple[str, int, str], object]:
     """Return separate amplitude and phase figures for every available channel."""
 
+    _resolve_comparison_x_scale(x_scale, (), automatic_x_scale="linear")
     return {
         (role, harmonic, metric): plot_temperature_iv_curves(
-            rows, role=role, harmonic=harmonic, metric=metric
+            rows, role=role, harmonic=harmonic, metric=metric, x_scale=x_scale
         )
         for role in PLOT_ROLES
         for harmonic in PLOT_HARMONICS

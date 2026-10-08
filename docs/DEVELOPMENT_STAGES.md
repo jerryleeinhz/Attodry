@@ -1,5 +1,33 @@
 # Development stages
 
+## Temperature I–V Linear/Log/Auto display (target offline; 2026-10-08)
+
+- Temperature I–V curve/suite plotting accepts `x_scale="auto"`, `"linear"`
+  and `"log"`. The independent **T current scale** control applies when the
+  existing temperature figure cell reruns, reusing loaded rows. Auto chooses log
+  for finite positive currents and linear otherwise; explicit Log rejects
+  invalid coordinates without dropping points. Amplitude/phase Y-axes remain
+  linear, with existing archived-current, quality, circular-statistics and
+  actual-temperature legend semantics.
+- Export captures the latest successful `temperature_excitation.x_scale` and
+  each figure's `resolved_x_scales`; a control change without plotting or a
+  failed plot cannot falsely report a new scale.
+- **83 guarded tests passed** (16 temperature-analysis, 2 notebook,
+  53 commissioning-analysis, 12 progress-widget). Synthetic Linear amplitude
+  and phase renders passed visual checks of current-axis spacing, legends and
+  titles. The independent preview passed
+  **5 offline tests locally and on LK_setup with zero skips**. Target verification
+  at **2026-10-08T12:07:38Z** blocked hardware imports and DLL loading.
+- Separate target notebook, using a new `lyr` kernel:
+  `Integration/run_data/operator_temperature_preview_20261008_b8b194b9e904/temperature_linear_preview.ipynb`.
+  Before/after HEAD, entire source-tree, private-TOML and two user-notebook hashes
+  were identical. Target remains `9e14d3179a700e56fe04f273b62f2d42e9463b66`;
+  acquisition owners 22180 and 20464 remain active, so formal source sync is
+  deferred under the standing AGENTS rule. This is read-only analysis delivery
+  with no instrument I/O. Publication destination is the existing
+  `origin/codex/integration-four-module-scan`; the exact feature commit is recorded
+  in Git and the delivery report.
+
 ## Standalone Lock-in file progress preview (target offline; 2026-10-08)
 
 - Approved implementation adds a separate manual-refresh file preview to

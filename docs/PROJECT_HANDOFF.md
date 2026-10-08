@@ -4,6 +4,35 @@ Last updated: 2026-10-08
 
 ## Current stage
 
+### Temperature I–V Linear/Log/Auto display (target offline; 2026-10-08)
+
+- Added `x_scale="auto"` to temperature I–V curve/suite plotting and an
+  independent **T current scale** Auto/Linear/Log control. Rerun the existing
+  temperature figure cell to reuse loaded data. Auto uses log only for finite,
+  positive retained current coordinates; explicit Log rejects invalid values
+  without dropping points. Amplitude/phase Y-axes stay linear; archived current,
+  quality filters, circular statistics and actual-temperature legends retain
+  their existing semantics.
+- Exported `temperature_excitation.x_scale` and per-figure `resolved_x_scales`
+  describe the latest successful temperature figures. Unplotted control changes
+  and failed replots cannot relabel the saved figure scale metadata.
+- **83 guarded tests passed**: 16 temperature-analysis, 2 notebook,
+  53 commissioning-analysis and 12 progress-widget tests. Synthetic Linear
+  amplitude/phase figures were visually checked: equally spaced current axis,
+  complete legends and titles. The independent
+  preview also passed **5 offline tests locally and on LK_setup, zero skips**;
+  target verification completed at **2026-10-08T12:07:38Z**, blocking hardware
+  imports and DLL loading.
+- Target entry:
+  `Integration/run_data/operator_temperature_preview_20261008_b8b194b9e904/temperature_linear_preview.ipynb`,
+  opened in a new `lyr` kernel. Before/after hashes matched for target HEAD,
+  the entire source tree, private TOML and both user notebooks.
+  Target HEAD is `9e14d3179a700e56fe04f273b62f2d42e9463b66`; acquisition PIDs
+  22180 and 20464 were still active, so formal source synchronization is deferred
+  under the standing AGENTS rule. Publication destination is the existing
+  `origin/codex/integration-four-module-scan`; the exact feature commit is recorded
+  in Git and the delivery report. This analysis feature performs no instrument I/O.
+
 ### Standalone Lock-in file progress preview (target offline; 2026-10-08)
 
 - Approved scope: a separate manual-refresh progress panel in
