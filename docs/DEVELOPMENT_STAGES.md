@@ -1,6 +1,6 @@
 # Development stages
 
-## Retained merged and per-channel Condensed reports (offline complete; 2026-10-08)
+## Retained merged and per-channel Condensed reports (target synchronized; 2026-10-08)
 
 - Restored the original per-run multi-channel scalar I–V merged summary in
   the Condensed report cell, alongside all newer per-channel experiment/fit
@@ -20,6 +20,25 @@
   visually checked; 600 dpi PNG metadata and legend bounds passed.
   No hardware/acquisition source, private
   configuration, experimental parameters or raw records were changed.
+- Feature `3b33c977bf83c81a4a517c3491023de4394016a3` was pushed to
+  `origin/codex/integration-four-module-scan` and fast-forwarded on LK_setup
+  from `3e4f7d69f3e7390b6eee2effb5e5517a43cdd28d` at
+  **2026-10-08T20:21:02.291836Z**. The pristine incoming checkout passed the
+  same **82 guarded tests, zero skips** on the station before deployment.
+- All 28 audited acquisition dependency modules, private hardware TOML and
+  the user's unified notebook remained byte-identical. A field-level merge
+  preserved commissioning notebook metadata, cell IDs, outputs, execution
+  counts and the user's data-selection cell source; all delivered code cells
+  compile. Both user-modified notebooks remain modified in Git.
+- Exact pre-update notebook backups and the target test/sync audit are in
+  `run_data/operator_retained_report_sync_20261008T202052036380Z/` on LK_setup.
+  No instrument connection, write, scan launch or process termination was
+  performed for this delivery.
+- Reopen the delivered notebook, run its upper fitting cells and then
+  Condensed report. Both layouts appear; set Optional export `SAVE_OUTPUTS`
+  to `True` when PNG/PDF/SVG exports are desired. Missing final scalar fits
+  are listed explicitly and their experiment remains in per-channel plots.
+
 
 ## Condensed reports in Optional export (target synchronized; 2026-10-08)
 
