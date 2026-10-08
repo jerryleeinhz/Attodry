@@ -4,6 +4,27 @@ Last updated: 2026-10-08
 
 ## Current stage
 
+### Multi-run commissioning plot layout (2026-10-08)
+
+- Fixed the selected-run overlay/difference plots in
+  `sr830_commissioning_sweeps.ipynb`: long filenames in outside legends could
+  collapse the plotting area or extend beyond the figure. The plotting function
+  now uses scoped publication styling, a wider canvas, wrapped full filenames
+  and adaptive height for dense legends. Run numbers connect the upper filename
+  legend to compact difference labels and explicitly identify the baseline.
+- No notebook source, loading/filtering, recorded values, requested-coordinate
+  pairing, per-run statistics or circular phase-difference rules were changed.
+- **68 guarded tests passed locally** (54 commissioning-analysis, 2 notebook,
+  12 progress-widget). The new render regression first failed on the old code,
+  then passed for two/six long-named runs and three runs at three frequencies:
+  legends remain within the canvas, plot width is at least 4.5 inches, and actual
+  X coordinates/paired differences retain their values. Four synthetic renders,
+  including phase, were visually inspected; plotting width exceeds 6 inches.
+- Deliver through `origin/codex/integration-four-module-scan`; LK_setup sync
+  must preserve both user notebooks/private TOML and verify that incoming files
+  do not overlap any active acquisition dependencies. Restart only the analysis
+  kernel and rerun notebook cells to load the updated plotting function.
+
 ### Temperature I–V Linear/Log/Auto display (target synchronized; 2026-10-08)
 
 - Added `x_scale="auto"` to temperature I–V curve/suite plotting and an

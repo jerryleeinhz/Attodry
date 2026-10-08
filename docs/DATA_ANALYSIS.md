@@ -429,6 +429,15 @@ frequencies to one arbitrary 360° branch. Optional export names these figures
 `combined_phase_*`. For multiple selected f × e runs, choose `Phase` in the
 repeatability metrics selector to compare runs.
 
+Multi-selected repeatability figures show each full filename wrapped in the
+upper legend with a Run number and the baseline marker. The lower difference
+panel refers to those same Run numbers and retains matched-point counts and
+frequency labels. Figure height grows with legend content; long filenames no
+longer squeeze the plotting area. This changes display only: actual X readbacks,
+requested-coordinate pairing, per-run statistics and phase differences keep
+their existing definitions. Restart the analysis kernel after updating the
+plotting module, then rerun the notebook cells.
+
 ### Harmonic current-power-law fitting
 
 When an excitation-amplitude record is loaded, the commissioning notebook also

@@ -1,5 +1,21 @@
 # Development stages
 
+## Multi-run commissioning plot layout (2026-10-08)
+
+- Fixed long-file-name layout collapse in multi-selected frequency, excitation
+  and frequency/excitation repeatability plots. Full filenames wrap in the upper
+  outside legend; run numbers identify the baseline and corresponding difference
+  curves. Scoped publication styling, a wider canvas and legend-dependent height
+  keep the plotting area readable without truncating identities or matched counts.
+- Data selection, per-run aggregation, actual X readbacks, requested-coordinate
+  matching, circular phase differences and notebook source remain unchanged.
+- **68 guarded tests passed locally**, including a rendered long-name regression
+  for two/six runs and three runs at three frequencies. It checks visible legends,
+  physical plot width and unchanged coordinates/differences. Four synthetic
+  amplitude/phase figures passed visual inspection. Delivery targets the existing
+  integration branch and preserves LK_setup user notebooks/private configuration
+  plus all active acquisition source bytes.
+
 ## Temperature I–V Linear/Log/Auto display (target synchronized; 2026-10-08)
 
 - Temperature I–V curve/suite plotting accepts `x_scale="auto"`, `"linear"`

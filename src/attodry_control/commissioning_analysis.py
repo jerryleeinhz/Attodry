@@ -7,6 +7,7 @@ import json
 import math
 from pathlib import Path
 from statistics import NormalDist, fmean, stdev
+from textwrap import wrap
 from typing import Callable, Iterable, Mapping, Sequence
 
 from .scientific_plotting import (
@@ -852,6 +853,7 @@ def aggregate_sweep_repeatability(
     )
 
 
+@publication_plot
 def plot_sweep_repeatability(
     rows: Sequence[CommissioningSample],
     *,
@@ -867,6 +869,8 @@ def plot_sweep_repeatability(
 
     ``x_scale="auto"`` preserves the scan defaults: frequency scans use a
     logarithmic X axis; excitation and frequency–excitation scans use linear.
+    Full run names wrap in the upper legend; the difference panel refers to
+    those run numbers so long filenames cannot squeeze the plotting area.
     """
 
     statistics = aggregate_sweep_repeatability(
@@ -897,7 +901,7 @@ def plot_sweep_repeatability(
         ) from exc
 
     figure, (value_axis, difference_axis) = plt.subplots(
-        2, 1, figsize=(8.5, 7.0), sharex=True,
+        2, 1, figsize=(10.0, 7.0), sharex=True,
         gridspec_kw={"height_ratios": (2.2, 1)}, constrained_layout=True,
     )
     metric_labels = {
@@ -913,6 +917,7 @@ def plot_sweep_repeatability(
     }
     combined = scan_type == "frequency_excitation"
     run_paths = tuple(by_run)
+    run_numbers = {path: index + 1 for index, path in enumerate(run_paths)}
     colors = [OKABE_ITO_ON_WHITE[index % len(OKABE_ITO_ON_WHITE)] for index in range(len(run_paths))]
     line_styles = ("-", "--", ":", "-.")
     frequency_values = sorted(
@@ -938,9 +943,14 @@ def plot_sweep_repeatability(
             selected = sorted(selected, key=lambda item: item.x_value)
             if not selected:
                 continue
-            label = Path(source_path).name
+            label = f"Run {run_numbers[source_path]}"
+            if source_path == baseline_path:
+                label += " (baseline)"
+            label += "\n" + "\n".join(
+                wrap(Path(source_path).name, width=45, break_on_hyphens=False)
+            )
             if frequency is not None:
-                label += f" · {frequency:.7g} Hz"
+                label += f"\n{frequency:.7g} Hz"
             style = frequency_style[frequency] if frequency is not None else "-"
             value_axis.errorbar(
                 [item.x_value for item in selected],
@@ -979,9 +989,9 @@ def plot_sweep_repeatability(
                 linestyle=(frequency_style[frequency] if frequency is not None else "-"),
                 marker="o", linewidth=1.15, markersize=3.8,
                 label=(
-                    f"{Path(source_path).name} − baseline"
+                    f"Run {run_numbers[source_path]} − baseline"
                     + (f" · {frequency:.7g} Hz" if frequency is not None else "")
-                    + f" ({len(pairs)} matched points)"
+                    + f"\n{len(pairs)} matched points"
                 ),
             )
     difference_axis.axhline(0.0, color="black", linewidth=0.8, alpha=0.55)
@@ -1009,12 +1019,15 @@ def plot_sweep_repeatability(
         f"SR830 {scan_type} · V{role} h{harmonic} · {metric} by run"
     )
     difference_axis.set_title(
-        f"Paired difference from {Path(baseline_path).name}"
+        f"Paired difference from Run {run_numbers[baseline_path]} (baseline)"
+        if baseline_path in run_numbers else "Paired difference (baseline unavailable)"
     )
+    minimum_panel_heights = []
     for axis in (value_axis, difference_axis):
         style_axis(axis)
         axis.grid(True, alpha=0.25)
-        if axis.get_legend_handles_labels()[0]:
+        handles, labels = axis.get_legend_handles_labels()
+        if handles:
             outside_legend(
                 axis,
                 title=(
@@ -1023,6 +1036,15 @@ def plot_sweep_repeatability(
                     else "Paired difference"
                 ),
             )
+        # Estimate wrapped legend height in inches at the scoped publication
+        # font size, including spacing/title, to keep dense comparisons visible.
+        minimum_panel_heights.append(
+            0.3 + 0.15 * sum(label.count("\n") + 1 for label in labels)
+            + 0.045 * len(labels)
+        )
+    figure.set_figheight(max(
+        7.0, 1.2 + 3.2 * max(minimum_panel_heights[0] / 2.2, minimum_panel_heights[1])
+    ))
     return figure
 
 

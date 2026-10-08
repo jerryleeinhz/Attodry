@@ -1469,6 +1469,74 @@ class CommissioningAnalysisTests(unittest.TestCase):
                 x_scale="symlog",
             )
 
+    def test_repeatability_long_run_names_keep_plot_and_legends_readable(self):
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib is not installed")
+        path = self._write_json("layout-base.json", self._sweep(completed=True))
+        base = next(row for row in load_sweep_samples(path) if row.role == "xx")
+        for scan_type, run_count, frequencies in (
+            ("excitation", 2, (5000.0,)),
+            ("excitation", 6, (5000.0,)),
+            ("frequency_excitation", 3, (17.0, 5000.0, 50000.0)),
+        ):
+            with self.subTest(scan_type=scan_type, runs=run_count):
+                names = [
+                    f"20260101T123456123456Z_sample_long_description_run{index}_"
+                    "excitation_completed.json"
+                    for index in range(run_count)
+                ]
+                rows = tuple(
+                    replace(
+                        base, source_path=names[run], scan_type=scan_type,
+                        target_frequency_hz=frequency, actual_frequency_hz=frequency,
+                        source_v_rms=voltage, sine_output_v_rms=voltage + run * 0.001,
+                        amplitude_v=voltage * 0.01 + run * 0.0001,
+                    )
+                    for run in range(run_count)
+                    for frequency in frequencies
+                    for voltage in (0.7, 1.0, 2.0)
+                )
+                figure = plot_sweep_repeatability(
+                    rows, role="xx", harmonic=1, metric="amplitude_v",
+                    baseline_source_path=names[0],
+                    excitation_x_axis="sine_output_v_rms", x_scale="linear",
+                )
+                self.addCleanup(plt.close, figure)
+                figure.canvas.draw()
+                renderer = figure.canvas.get_renderer()
+                for axis in figure.axes:
+                    self.assertGreaterEqual(
+                        axis.get_position().width * figure.get_figwidth(), 4.5
+                    )
+                    bounds = axis.get_legend().get_window_extent(renderer)
+                    self.assertGreaterEqual(bounds.x0, -1.0)
+                    self.assertLessEqual(bounds.x1, figure.bbox.width + 1.0)
+                    self.assertGreaterEqual(bounds.y0, -1.0)
+                    self.assertLessEqual(bounds.y1, figure.bbox.height + 1.0)
+                legend_text = "".join(
+                    label.get_text().replace("\n", "")
+                    for label in figure.axes[0].get_legend().get_texts()
+                )
+                for name in names:
+                    self.assertIn(name, legend_text)
+                curves = figure.axes[0].containers
+                self.assertEqual(len(curves), run_count * len(frequencies))
+                for run in range(run_count):
+                    curve = curves[run * len(frequencies)].lines[0]
+                    self.assertEqual(
+                        list(curve.get_xdata()),
+                        [voltage + run * 0.001 for voltage in (0.7, 1.0, 2.0)],
+                    )
+                differences = figure.axes[1].get_lines()[:-1]
+                self.assertEqual(len(differences), (run_count - 1) * len(frequencies))
+                for index, curve in enumerate(differences):
+                    self.assertEqual(list(curve.get_xdata()), [0.7, 1.0, 2.0])
+                    expected = (index // len(frequencies) + 1) * 0.0001
+                    for value in curve.get_ydata():
+                        self.assertAlmostEqual(value, expected)
+
     def test_repeatability_phase_uses_circular_statistics(self):
         path = self._write_json("phase.json", self._sweep(completed=True))
         row = next(r for r in load_sweep_samples(path) if r.role == "xx")
