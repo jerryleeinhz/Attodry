@@ -623,11 +623,20 @@ figure's actual scale in `resolved_x_scales`. Changing the control without
 plotting, or a failed replot, does not relabel previously generated figures as
 using the new setting.
 
-On LK_setup, the independently verified preview is
-`Integration/run_data/operator_temperature_preview_20261008_b8b194b9e904/temperature_linear_preview.ipynb`.
-Open it in a new `lyr` kernel. Its five offline tests passed on 2026-10-08;
-the active acquisition keeps formal source synchronization deferred. The
-original source, private TOML and user notebooks are preserved.
+On LK_setup, use the formal
+`Integration/notebooks/sr830_commissioning_sweeps.ipynb`. Feature `72c8319` was
+synchronized at **2026-10-08T12:38:25Z**; restart this analysis notebook's kernel
+and run its cells to load the new modules. The two user notebooks retain their
+local modifications, and the private TOML is preserved.
+
+The earlier isolated
+`Integration/run_data/operator_temperature_preview_20261008_b8b194b9e904/temperature_linear_preview.ipynb`
+and its five-test verification at 12:07:38Z remain historical evidence. Formal
+sync was deferred then. A later AST audit, including fixed lazy exports, proved
+that all 28 acquisition dependencies were unchanged and disjoint from the 15
+incoming files, allowing sync while PID 22180 was still present. A pristine
+ignored snapshot of `72c8319` passed 83 guarded tests in the target `lyr`
+environment; the merged formal Notebook passed JSON/code and user-field checks.
 
 ## XY-only frequency and amplitude sweeps
 

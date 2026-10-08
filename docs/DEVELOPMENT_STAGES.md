@@ -1,6 +1,6 @@
 # Development stages
 
-## Temperature I–V Linear/Log/Auto display (target offline; 2026-10-08)
+## Temperature I–V Linear/Log/Auto display (target synchronized; 2026-10-08)
 
 - Temperature I–V curve/suite plotting accepts `x_scale="auto"`, `"linear"`
   and `"log"`. The independent **T current scale** control applies when the
@@ -18,15 +18,30 @@
   titles. The independent preview passed
   **5 offline tests locally and on LK_setup with zero skips**. Target verification
   at **2026-10-08T12:07:38Z** blocked hardware imports and DLL loading.
-- Separate target notebook, using a new `lyr` kernel:
+- Historical isolated target notebook at 12:07:38Z:
   `Integration/run_data/operator_temperature_preview_20261008_b8b194b9e904/temperature_linear_preview.ipynb`.
-  Before/after HEAD, entire source-tree, private-TOML and two user-notebook hashes
-  were identical. Target remains `9e14d3179a700e56fe04f273b62f2d42e9463b66`;
-  acquisition owners 22180 and 20464 remain active, so formal source sync is
-  deferred under the standing AGENTS rule. This is read-only analysis delivery
-  with no instrument I/O. Publication destination is the existing
-  `origin/codex/integration-four-module-scan`; the exact feature commit is recorded
-  in Git and the delivery report.
+  Its five-test validation and unchanged original source/TOML/user notebooks are
+  retained as history. Target was then `9e14d31`; PIDs 22180/20464 were present
+  and formal source sync was deferred.
+- Formal synchronization completed **2026-10-08T12:38:25Z**, fast-forwarding
+  `9e14d31 -> 72c8319`. AST audit including fixed lazy exports established 28
+  unchanged acquisition-dependency modules, byte-identical across both revisions
+  and disjoint from all 15 incoming files. PID 22180 remained present; the
+  dependency audit confirmed that its acquisition source was not changed.
+- Private-TOML and 28 dependency SHA values stayed identical.
+  `notebooks/unified_plotting.ipynb` kept its original bytes. The three-way field
+  merge of `notebooks/sr830_commissioning_sweeps.ipynb` retained user metadata,
+  IDs, outputs, execution counts and one source edit; both notebooks remain `M`
+  for the user changes. Exact backups are in ignored
+  `Integration/run_data/operator_sync_20261008T123216543487Z`.
+- LK_setup `lyr` ran **83 guarded tests, zero skips** against a pristine ignored
+  validation snapshot of feature **72c8319**. Deployed incoming code/test/docs
+  Git blobs matched upstream; merged-Notebook JSON/all-cell compilation, new
+  progress/T-scale controls and individual user-field preservation all passed.
+  The formal `Integration/notebooks/sr830_commissioning_sweeps.ipynb` is now the
+  entry point; restart its analysis kernel to load the synchronized code.
+  Publication destination remains `origin/codex/integration-four-module-scan`.
+  No instrument I/O or acquisition restart was performed.
 
 ## Standalone Lock-in file progress preview (target offline; 2026-10-08)
 
