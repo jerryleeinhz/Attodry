@@ -268,35 +268,76 @@ class Sr865aAdapterTests(unittest.TestCase):
         self.assertEqual(self.resource.writes, [])
 
     def test_external_frequency_allowance_is_bounded_at_low_and_high_frequency(self):
+        # Every harmonic uses the same error in reference-frequency units.
         for reference, difference, accepted in (
-            (17.0, 0.0049, True), (17.0, 0.0051, False),
-            (5000.0, 0.49, True), (5000.0, 0.51, False),
+            (17.0, 0.0049999, True), (17.0, 0.0050001, False),
+            (5000.0, 0.49999, True), (5000.0, 0.50001, False),
         ):
-            for sign in (-1, 1):
-                with self.subTest(reference=reference, difference=sign * difference):
-                    self.resource.responses.update({
-                        "HARM?": "1", "FREQEXT?": str(reference),
-                        "FREQDET?": str(reference + sign * difference),
-                    })
-                    if accepted:
-                        self.assertTrue(self.sample().status.valid)
-                    else:
-                        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
-                            self.sample()
+            for harmonic in (1, 2, 3):
+                for sign in (-1, 1):
+                    with self.subTest(reference=reference, harmonic=harmonic,
+                                      difference=sign * difference):
+                        detection = harmonic * (reference + sign * difference)
+                        self.resource.responses.update({
+                            "HARM?": str(harmonic), "FREQEXT?": str(reference),
+                            "FREQDET?": str(detection),
+                        })
+                        if accepted:
+                            sample = self.sample()
+                            self.assertTrue(sample.status.valid)
+                            self.assertEqual(sample.reference_frequency_hz, reference)
+                            self.assertEqual(sample.detection_frequency_hz, detection)
+                            frequency_reads = [record for record in sample.raw
+                                               if record.command in {"FREQEXT?", "FREQDET?"}]
+                            self.assertEqual([record.response for record in frequency_reads],
+                                             [str(reference), str(detection)])
+                            for record in frequency_reads:
+                                self.assertLessEqual(record.started_at_utc,
+                                                     record.completed_at_utc)
+                        else:
+                            with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+                                self.sample()
         self.assertEqual(self.resource.writes, [])
 
     def test_low_frequency_allowance_keeps_status_faults_invalid(self):
-        for command, value in (
-            ("CUROVLDSTAT?", "8"), ("LIAS?", "8"), ("ERRS?", "4"),
-            ("CUROVLDSTAT?", "4"), ("CUROVLDSTAT?", "16"),
-        ):
-            with self.subTest(command=command, value=value):
-                self.resource.responses.update({
-                    "HARM?": "2", "FREQEXT?": "17.0011", "FREQDET?": "33.9989",
-                    "CUROVLDSTAT?": "0", "LIAS?": "0", "ERRS?": "0",
-                })
-                self.resource.responses[command] = value
-                self.assertFalse(self.sample().status.valid)
+        for harmonic in (1, 2, 3):
+            for command, value in (
+                ("CUROVLDSTAT?", "8"), ("LIAS?", "8"), ("ERRS?", "4"),
+                ("CUROVLDSTAT?", "4"), ("CUROVLDSTAT?", "16"),
+                ("CUROVLDSTAT?", "256"), ("LIAS?", "32"), ("*ESR?", "32"),
+            ):
+                with self.subTest(harmonic=harmonic, command=command, value=value):
+                    self.resource.responses.update({
+                        "HARM?": str(harmonic), "FREQEXT?": "17.0011",
+                        "FREQDET?": str(harmonic * (17.0011 - 0.0049)),
+                        "CUROVLDSTAT?": "0", "LIAS?": "0", "ERRS?": "0", "*ESR?": "0",
+                    })
+                    self.resource.responses[command] = value
+                    self.assertFalse(self.sample().status.valid)
+        self.assertEqual(self.resource.writes, [])
+
+    def test_external_mismatch_reports_reference_and_detection_tolerances(self):
+        for reference, difference, tolerance in ((17.0, 0.007, 0.005),
+                                                 (5000.0, 0.7, 0.5)):
+            self.resource.responses.update({
+                "HARM?": "3", "FREQEXT?": str(reference),
+                "FREQDET?": str(3 * (reference + difference)),
+            })
+            with self.subTest(reference=reference), self.assertRaises(Sr865aError) as caught:
+                self.sample()
+            message = str(caught.exception)
+            for expected in (
+                f"reference={reference:g} Hz", "harmonic=3",
+                f"expected_detection={3 * reference:g} Hz",
+                f"detection={3 * (reference + difference):g} Hz",
+                f"reference_error={difference:g} Hz",
+                f"reference_tolerance={tolerance:g} Hz",
+                f"detection_tolerance={3 * tolerance:g} Hz", "source=external",
+            ):
+                self.assertIn(expected, message)
+            self.assertNotIn(("query", "SNAP? X,Y"), self.resource.events)
+            with self.assertRaisesRegex(Sr865aError, "identity"):
+                self.driver.set_harmonic(1, authorized=True)
         self.assertEqual(self.resource.writes, [])
 
     def test_external_frequency_jitter_limit_does_not_accept_frequency_fault(self):
@@ -316,6 +357,27 @@ class Sr865aAdapterTests(unittest.TestCase):
                 })
                 with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
                     self.sample()
+
+    def test_internal_detection_tolerance_does_not_scale_absolute_floor_with_harmonic(self):
+        for reference in (17.0, 5000.0):
+            for harmonic in (1, 2, 3):
+                expected = harmonic * reference
+                tolerance = max(0.001, expected * 1e-6)
+                for factor, accepted in ((0.99, True), (1.01, False)):
+                    for sign in (-1, 1):
+                        with self.subTest(reference=reference, harmonic=harmonic,
+                                          factor=factor, sign=sign):
+                            self.resource.responses.update({
+                                "RSRC?": "0", "HARM?": str(harmonic),
+                                "FREQINT?": str(reference),
+                                "FREQDET?": str(expected + sign * factor * tolerance),
+                            })
+                            if accepted:
+                                self.assertTrue(self.sample().status.valid)
+                            else:
+                                with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+                                    self.sample()
+        self.assertEqual(self.resource.writes, [])
 
     def test_external_jitter_allowance_does_not_make_unlocked_sample_valid(self):
         self.resource.responses.update({

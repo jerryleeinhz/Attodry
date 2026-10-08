@@ -1,5 +1,25 @@
 # Development stages
 
+## SR865A external fundamental-frequency tolerance (2026-10-08)
+
+- Implemented the user-approved plan: compare External detection/harmonic with
+  the reference; accept absolute fundamental error <= max(5 mHz, reference
+  magnitude * 100 ppm). Detection absolute floors scale to 5/10/15 mHz for
+  h1/h2/h3. The relative threshold no longer grows with a higher detection
+  readback. Internal retains the original 1 ppm / 1 mHz detection comparison.
+- Extended mismatch reports with expected/actual detection, fundamental error,
+  and both effective tolerances. Raw frequencies/timestamps and independent
+  actual-frequency/harmonic, status/lock/error/overload and cleanup gates remain;
+  authorization and experimental configuration are unchanged.
+- New fake-resource tests reproduced the old h2/h3 floor and high-side relative
+  discrepancy before the fix. All 218 relevant guarded lock-in tests passed
+  locally, including low/high positive/negative bounds for h1/h2/h3, the exact
+  reported 17 Hz case, fault invalidation, audit preservation, message fields
+  and strict Internal. Real hardware imports and DLL loading were blocked.
+- Delivery uses the existing origin branch and fresh LK_setup process checks,
+  retaining private settings/data and user notebook changes. No real scan or
+  instrument diagnostic is started for this software-only delivery.
+
 ## SR865A external low-frequency consistency allowance (2026-10-07)
 
 - At the user's explicit request, external-reference detection consistency

@@ -1,8 +1,33 @@
 # Project handoff
 
-Last updated: 2026-10-07
+Last updated: 2026-10-08
 
 ## Current stage
+
+### SR865A external consistency in fundamental-frequency units (2026-10-08)
+
+- User approved the explicit fundamental-frequency plan: External compares
+  `abs(detection/harmonic - reference)` with
+  `max(0.005 Hz, abs(reference) * 100e-6)`, using `<=`. The 5 mHz floor is
+  now in fundamental-frequency units; equivalent detection floors are 5/10/15
+  mHz for h1/h2/h3. The relative bound depends only on the reference readback.
+  This supersedes the 2026-10-07 detection-frequency floor described below.
+- Internal retains its exact `math.isclose` 1 ppm / 1 mHz detection-frequency
+  check. Actual detection/harmonic limits, native unlock/error/overload/unknown
+  status, raw values/query timestamps, write authorization and cleanup remain.
+  Frequency consistency does not certify lock and is not factory accuracy.
+- Errors now report reference/harmonic, expected/actual detection, normalized
+  reference error and both effective tolerances. Identity is still revoked on
+  mismatch; no settings write or sample snapshot follows the rejection.
+- Fake-resource regression first reproduced h2/h3 low-frequency rejection and
+  the old symmetric-relative high-side boundary. All 218 relevant guarded
+  lock-in tests now pass locally: h1/h2/h3 low/high inside/outside bounds, the
+  exact 17.0011 Hz / h2 / 33.9989 Hz values, raw timestamp preservation, native
+  faults despite consistent frequencies, error details and unchanged Internal.
+- Deliver on the existing `origin/codex/integration-four-module-scan`; synchronize
+  LK_setup only after fresh acquisition-owner checks, preserving its current
+  private TOML, data and edited notebooks. This request starts no real scan;
+  real acquisition using this new fundamental-frequency allowance is unverified.
 
 ### SR865A low-frequency external readback allowance (2026-10-07)
 
