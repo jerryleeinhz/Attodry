@@ -1,6 +1,6 @@
 # Development stages
 
-## Optional export without temperature cells (offline complete; 2026-10-08)
+## Optional export without temperature cells (target synchronized; 2026-10-08)
 
 - Fixed a `NameError` when exporting ordinary frequency/excitation results after
   skipping the independent temperature section. Temperature CSV/figures are
@@ -14,6 +14,16 @@
   checks export calls and saved manifests. **80 guarded tests passed, zero skips**
   (3 notebook, 11 report, 54 commissioning-analysis, 12 progress-widget).
   No instrument connection or experiment restart is part of this fix.
+- Feature **55e37ff** was pushed to `origin/codex/integration-four-module-scan`
+  and LK_setup fast-forwarded `ba64d22 -> 55e37ff` at **2026-10-08T16:40:03Z**.
+  Target `lyr` passed the same **80 guarded tests, zero skips**, in a pristine
+  ignored snapshot. All 28 audited acquisition dependencies, private TOML
+  and unified notebook retained their bytes; commissioning notebook user
+  fields were preserved by a three-way field merge. Both user notebooks
+  remain modified and the merged notebook compiles. Audit/backups:
+  `Integration/run_data/operator_optional_export_sync_20261008T163954381931Z`.
+  Reopen the notebook to load the updated export cell; the temperature
+  selector/figure cells may be skipped for ordinary sweep exports.
 
 ## Condensed experimental/fit overlays (target synchronized; 2026-10-08)
 
