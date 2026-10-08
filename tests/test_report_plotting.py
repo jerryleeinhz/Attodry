@@ -260,6 +260,53 @@ class ReportPlottingTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "selection changed"):
             exec(compile(code, "report-cell", "exec"), env)
 
+    def test_notebook_retains_six_channel_merged_report_alongside_channel_reports(self) -> None:
+        import matplotlib.pyplot as plt
+        channels = tuple((role, harmonic) for role in ("xx", "xy") for harmonic in (1, 2, 3))
+        rows = tuple(replace(row, role=role, harmonic=harmonic,
+                             x_v=row.x_v * (index + 1), y_v=row.y_v * (index + 1),
+                             amplitude_v=row.amplitude_v * (index + 1))
+                     for index, (role, harmonic) in enumerate(channels) for row in self._rows())
+        fits = {key: fit_harmonic_scaling(rows, role=key[0], harmonic=key[1]) for key in channels}
+        missing_rows = tuple(replace(row, source_path="missing_scalar.json") for row in self._rows())
+        loaded = (*rows, *missing_rows)
+        env = dict(Path=Path, json=json, plt=plt, display=lambda *args: None,
+                   frequency_rows=(), frequency_excitation_path=None,
+                   excitation_rows=loaded, excitation_excitation_path=None,
+                   harmonic_scaling_rows_snapshot=loaded,
+                   harmonic_scaling_results_by_run={rows[0].source_path: fits},
+                   harmonic_scaling_excitation_paths_by_run={}, SCALING_PLOT_METHODS=("scalar",),
+                   excitation_x_axis_widget=SimpleNamespace(value="sine_output_current_a_rms"),
+                   PHASE_MINIMUM_AMPLITUDE_V=0.0, PHASE_MAXIMUM_STANDARD_DEVIATION_DEG=None)
+        document = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        code = next("".join(cell["source"]) for cell in document["cells"]
+                    if cell["cell_type"] == "code" and "REPORT_AMPLITUDE_CHANNELS =" in "".join(cell["source"]))
+        exec(compile(code, "retained-merged-report", "exec"), env)
+        self.assertEqual(len(env["report_figures"]), 7)
+        self.assertEqual(set(env["merged_report_figures"]), {rows[0].source_path})
+        merged = env["merged_report_figures"][rows[0].source_path]
+        self.assertEqual(len(merged.axes), 1)
+        self.assertEqual(len(merged.axes[0].containers), 6)
+        self.assertEqual(merged.axes[0].get_xscale(), "log")
+        self.assertEqual(merged.axes[0].get_yscale(), "log")
+        labels = [text.get_text() for text in merged.axes[0].get_legend().get_texts()]
+        self.assertEqual(len(labels), 6)
+        for role, harmonic in channels:
+            self.assertTrue(any(f"V{role} h{harmonic}" in label for label in labels))
+        manifest = env["merged_report_manifests"][rows[0].source_path]
+        self.assertEqual(manifest["amplitude_channels"], [list(channel) for channel in channels])
+        self.assertEqual(manifest["source_files"], [rows[0].source_path])
+        self.assertEqual(manifest["scalar_curve"], "scalar_selected_free_model")
+        self.assertEqual(env["merged_report_omissions"]["missing_scalar.json"], [["xy", 2]])
+        self.assertIn(("missing_scalar.json", "xy", 2), env["report_figures"])
+        self.assertFalse(plt.fignum_exists(merged.number))
+        # Preserve the old explicit optional right-phase-axis controls.
+        phase_code = code.replace('REPORT_PHASE_MODE = "none"', 'REPORT_PHASE_MODE = "right"')
+        phase_code = phase_code.replace('REPORT_PHASE_CHANNELS = ()', 'REPORT_PHASE_CHANNELS = (("xy", 2),)')
+        exec(compile(phase_code, "retained-merged-report-phase", "exec"), env)
+        self.assertEqual(len(env["merged_report_figures"][rows[0].source_path].axes), 2)
+        self.assertEqual(env["merged_report_manifests"][rows[0].source_path]["phase_mode"], "right")
+
     @staticmethod
     def _rows():
         rows = []

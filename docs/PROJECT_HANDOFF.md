@@ -4,6 +4,27 @@ Last updated: 2026-10-08
 
 ## Current stage
 
+### Retained merged and per-channel Condensed reports (offline complete; 2026-10-08)
+
+- Restored the original per-run multi-channel scalar I–V merged summary in
+  the Condensed report cell, alongside all newer per-channel experiment/fit
+  figures. Its old scalar-fit-qualified points, final curve/equation/metrics,
+  log axes and optional right-phase controls retain their original semantics.
+- No cross-run pooling or refitting. Channels lacking a final scalar fit are
+  explicitly listed and remain visible in per-channel experimental figures.
+  Both REPORT_OUTPUT_STEM and Optional export retain both layouts, with distinct
+  filenames and cached per-figure provenance; selection metadata records layout
+  and merged omissions. Existing optional-temperature/report skipping remains.
+- **82 guarded tests passed, zero skips** (4 notebook, 12 report, 54
+  commissioning-analysis, 12 progress-widget). The restored six-channel
+  notebook regression first failed before the fix; now merged/channel
+  coexistence, per-run separation, missing-fit reporting and optional phase
+  pass. Real export regressions cover both layouts in PNG/PDF/SVG with
+  independent cached manifests and names. Two synthetic renders were
+  visually checked; 600 dpi PNG metadata and legend bounds passed.
+  No hardware/acquisition source, private
+  configuration, experimental parameters or raw records were changed.
+
 ### Condensed reports in Optional export (target synchronized; 2026-10-08)
 
 - `sr830_commissioning_sweeps.ipynb` Optional export now saves all cached

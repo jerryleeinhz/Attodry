@@ -171,9 +171,17 @@ class NotebookTests(unittest.TestCase):
                 manifests[key] = {"source_files": [key[0]], "channel": list(key[1:]),
                                   "fit_methods": ["complex"], "fit": {"exponent": 2.1},
                                   "phase_minimum_amplitude_v": 1e-8}
+            merged_figures = {keys[0][0]: figures[keys[0]], keys[-1][0]: figures[keys[-1]]}
+            merged_manifests = {
+                name: {"source_files": [name], "amplitude_channels": [["xy", 2]],
+                       "scalar_curve": "scalar_selected_free_model", "phase_mode": "none"}
+                for name in merged_figures
+            }
+            frozen_merged = json.loads(json.dumps(merged_manifests))
             frozen_manifests = json.loads(json.dumps(list(manifests.values())))
             exporter = Mock(wraps=export_publication_figure_set)
             scope.update(report_figures=figures, report_manifests=manifests,
+                         merged_report_figures=merged_figures, merged_report_manifests=merged_manifests,
                          export_publication_figure_set=exporter,
                          plot_experiment_fit_report=Mock(side_effect=AssertionError("Do not replot.")),
                          experiment_fit_report_manifest=Mock(side_effect=AssertionError("Do not relabel.")))
@@ -184,12 +192,13 @@ class NotebookTests(unittest.TestCase):
             exec(code, scope)
             output = scope["OUTPUT_DIRECTORY"]
             selection = json.loads((output / "selection_manifest.json").read_text())
-            self.assertEqual(exporter.call_count, 3)
-            self.assertEqual(len(selection["condensed_report"]), 3)
+            self.assertEqual(exporter.call_count, 5)
+            self.assertEqual(len(selection["condensed_report"]), 5)
             stems = ("condensed_report_run01_xx_h1", "condensed_report_run01_xy_h2",
                      "condensed_report_run02_xy_h2")
             for key, stem, entry in zip(keys, stems, selection["condensed_report"]):
                 exporter.assert_any_call(figures[key], output / stem)
+                self.assertEqual(entry["layout"], "per_channel")
                 self.assertEqual(entry["source_path"], key[0])
                 self.assertEqual((entry["role"], entry["harmonic"]), key[1:])
                 expected = {str(output / (stem + suffix)) for suffix in (".png", ".pdf", ".svg")}
@@ -198,12 +207,31 @@ class NotebookTests(unittest.TestCase):
                     self.assertGreater(Path(filename).stat().st_size, 100)
                 saved = json.loads(Path(entry["manifest_file"]).read_text())
                 self.assertEqual(saved, manifests[key])
+            for index, (name, entry) in enumerate(
+                zip(merged_figures, selection["condensed_report"][3:]), start=1
+            ):
+                stem = f"condensed_report_run{index:02d}_merged"
+                exporter.assert_any_call(merged_figures[name], output / stem)
+                self.assertEqual(entry["layout"], "merged")
+                self.assertEqual(entry["source_path"], name)
+                self.assertEqual(entry["amplitude_channels"], [["xy", 2]])
+                expected = {str(output / (stem + suffix)) for suffix in (".png", ".pdf", ".svg")}
+                self.assertEqual(set(entry["figure_files"]), expected)
+                for filename in expected:
+                    self.assertGreater(Path(filename).stat().st_size, 100)
+                self.assertEqual(json.loads(Path(entry["manifest_file"]).read_text()), merged_manifests[name])
+            self.assertEqual(merged_manifests, frozen_merged)
             self.assertEqual(list(manifests.values()), frozen_manifests)
             scope["plot_experiment_fit_report"].assert_not_called()
             scope["experiment_fit_report_manifest"].assert_not_called()
             # A retained figure with missing provenance must prompt a report rerun.
             exporter.reset_mock()
             del manifests[keys[-1]]
+            with self.assertRaisesRegex(RuntimeError, "rerun.*Condensed report"):
+                exec(code, scope)
+            exporter.assert_not_called()
+            manifests[keys[-1]] = frozen_manifests[-1]
+            del merged_manifests[keys[-1][0]]
             with self.assertRaisesRegex(RuntimeError, "rerun.*Condensed report"):
                 exec(code, scope)
             exporter.assert_not_called()

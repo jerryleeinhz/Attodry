@@ -440,6 +440,20 @@ and channel to the saved files. Export does not reread, replot, refit or apply
 new controls to the report metadata. Missing provenance asks for a report rerun;
 skipping the report cell is supported and records an empty report list.
 
+The original multi-channel merged scalar summary is also generated, one per
+loaded excitation run, alongside the newer per-channel experiment/fit figures.
+It retains log-current/log-R axes, fit-qualified observations, one final
+`scalar_selected_free_model` curve per available channel, equation/metrics
+legends, and the original `REPORT_PHASE_MODE`/`REPORT_PHASE_CHANNELS` controls
+for optional right-axis phase. No cross-run pooling occurs. Channels lacking
+a final scalar fit are explicitly identified and kept in the per-channel
+experimental figures; the merged view does not invent missing curves.
+Both export paths save the merged Figures and their cached provenance:
+Optional export uses `condensed_report_runNN_merged`, while an explicit
+`REPORT_OUTPUT_STEM` uses a separate `_merged_NN` suffix. Selection entries
+identify `layout` as `merged` or `per_channel`; omissions are recorded in
+the merged manifest and `condensed_report_omissions`.
+
 For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
 `amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency
 readback. This keeps frequency-dependent I--V curves separate and makes any
