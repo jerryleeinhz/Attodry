@@ -430,6 +430,16 @@ stale fits are rejected. No records are reread by the report cell and runs are
 never pooled. The earlier `plot_condensed_iv_report` scalar-only Python API is
 preserved for existing callers.
 
+The final **Optional export** also includes the already generated Condensed
+report figures when `SAVE_OUTPUTS=True`, without requiring `REPORT_OUTPUT_STEM`.
+Run the report cell first. Each run/channel gets PNG/PDF/SVG and its cached
+provenance JSON, named `condensed_report_runNN_ROLE_hN`; numbering keeps
+different runs distinct even when their source filenames are identical.
+The `condensed_report` list in `selection_manifest.json` maps each source path
+and channel to the saved files. Export does not reread, replot, refit or apply
+new controls to the report metadata. Missing provenance asks for a report rerun;
+skipping the report cell is supported and records an empty report list.
+
 For a combined record, `plot_multi_frequency_iv_curves` accepts `x_v`, `y_v`,
 `amplitude_v`, or `phase_deg` and groups points by the actual SR830 frequency
 readback. This keeps frequency-dependent I--V curves separate and makes any

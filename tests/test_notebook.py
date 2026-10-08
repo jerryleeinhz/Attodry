@@ -57,39 +57,7 @@ class NotebookTests(unittest.TestCase):
             for with_temperature in (False, True):
                 with self.subTest(enabled=enabled, with_temperature=with_temperature):
                     with tempfile.TemporaryDirectory() as directory:
-                        scope = {
-                            "PROJECT_ROOT": Path(directory), "Path": Path,
-                            "json": json, "asdict": Mock(return_value={}),
-                            "DATA_DIRECTORY": Path(directory),
-                            "TEMPERATURE_DATA_DIRECTORY": Path(directory),
-                            "RECORD_STATUSES": {"completed"}, "SAMPLE_STATUSES": {"clean"},
-                            "INCLUDE_REJECTED": False, "PHASE_MINIMUM_AMPLITUDE_V": 0.0,
-                            "PHASE_MAXIMUM_STANDARD_DEVIATION_DEG": 10.0,
-                            "SCALING_RULES": object(), "SCALING_PLOT_METHODS": ("scalar",),
-                            "harmonic_scaling_results": {}, "harmonic_scaling_results_by_run": {},
-                            "harmonic_scaling_figures": {}, "repeatability_summary": {},
-                            "FREQUENCY_EXCLUDED_TARGET_HZ": set(),
-                            "EXCITATION_EXCLUDED_SOURCE_V_RMS": set(),
-                            "COMBINED_EXCLUDED_FREQUENCIES_HZ": set(),
-                            "COMBINED_EXCLUDED_EXCITATIONS_V_RMS": set(),
-                            "export_commissioning_csv": Mock(),
-                            "export_temperature_excitation_csv": Mock(),
-                            "export_publication_figure_set": Mock(), "display": Mock(),
-                        }
-                        for name, value in (
-                            ("excitation_x_axis_widget", "current"),
-                            ("repeatability_metrics_widget", ("amplitude_v",)),
-                            ("repeatability_x_scale_widget", "linear"),
-                            ("frequency_baseline_widget", None),
-                            ("excitation_baseline_widget", None),
-                            ("combined_baseline_widget", None),
-                        ):
-                            scope[name] = SimpleNamespace(value=value)
-                        for name in ("frequency", "excitation", "combined"):
-                            scope[name + "_rows"] = (object(),) if name in enabled else ()
-                            scope[name + "_paths"] = (Path(directory) / (name + ".json"),)
-                        scope.update(frequency_figures={}, current_voltage_figures={},
-                                     combined_iv_figures={}, combined_phase_figures={})
+                        scope = self._optional_export_scope(directory, enabled)
                         if with_temperature:
                             scope.update(
                                 temperature_excitation_rows=(object(),),
@@ -127,6 +95,118 @@ class NotebookTests(unittest.TestCase):
                             scope["export_publication_figure_set"].assert_not_called()
                             self.assertIsNone(manifest["temperature_excitation"])
                             self.assertNotIn("temperature_excitation_rows", scope)
+
+    @staticmethod
+    def _optional_export_scope(directory, enabled=()):
+        from types import SimpleNamespace
+
+        scope = {
+            "PROJECT_ROOT": Path(directory), "Path": Path,
+            "json": json, "asdict": Mock(return_value={}),
+            "DATA_DIRECTORY": Path(directory),
+            "TEMPERATURE_DATA_DIRECTORY": Path(directory),
+            "RECORD_STATUSES": {"completed"}, "SAMPLE_STATUSES": {"clean"},
+            "INCLUDE_REJECTED": False, "PHASE_MINIMUM_AMPLITUDE_V": 0.0,
+            "PHASE_MAXIMUM_STANDARD_DEVIATION_DEG": 10.0,
+            "SCALING_RULES": object(), "SCALING_PLOT_METHODS": ("scalar",),
+            "harmonic_scaling_results": {}, "harmonic_scaling_results_by_run": {},
+            "harmonic_scaling_figures": {}, "repeatability_summary": {},
+            "FREQUENCY_EXCLUDED_TARGET_HZ": set(),
+            "EXCITATION_EXCLUDED_SOURCE_V_RMS": set(),
+            "COMBINED_EXCLUDED_FREQUENCIES_HZ": set(),
+            "COMBINED_EXCLUDED_EXCITATIONS_V_RMS": set(),
+            "export_commissioning_csv": Mock(),
+            "export_temperature_excitation_csv": Mock(),
+            "export_publication_figure_set": Mock(), "display": Mock(),
+        }
+        for name, value in (
+            ("excitation_x_axis_widget", "current"),
+            ("repeatability_metrics_widget", ("amplitude_v",)),
+            ("repeatability_x_scale_widget", "linear"),
+            ("frequency_baseline_widget", None),
+            ("excitation_baseline_widget", None),
+            ("combined_baseline_widget", None),
+        ):
+            scope[name] = SimpleNamespace(value=value)
+        for name in ("frequency", "excitation", "combined"):
+            scope[name + "_rows"] = (object(),) if name in enabled else ()
+            scope[name + "_paths"] = (Path(directory) / (name + ".json"),)
+        scope.update(frequency_figures={}, current_voltage_figures={},
+                     combined_iv_figures={}, combined_phase_figures={})
+        return scope
+
+    def test_optional_export_includes_cached_condensed_report_figures_and_manifests(self) -> None:
+        import tempfile
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from attodry_control.scientific_plotting import export_publication_figure_set
+
+        document = json.loads(
+            (PROJECT_ROOT / "notebooks/sr830_commissioning_sweeps.ipynb")
+            .read_text(encoding="utf-8")
+        )
+        source = next("".join(cell["source"]) for cell in document["cells"]
+                      if cell["cell_type"] == "code"
+                      and "selection_manifest = {" in "".join(cell["source"]))
+        tree = ast.parse(source)
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "SAVE_OUTPUTS"
+                for target in node.targets
+            ):
+                node.value = ast.Constant(True)
+        code = compile(ast.fix_missing_locations(tree), "report-export", "exec")
+        with tempfile.TemporaryDirectory() as directory:
+            scope = self._optional_export_scope(directory)
+            keys = (("first/same.json", "xx", 1), ("first/same.json", "xy", 2),
+                    ("second/same.json", "xy", 2))
+            figures, manifests = {}, {}
+            for key in keys:
+                figure, axis = plt.subplots(figsize=(2, 1))
+                axis.plot((1, 2), (3, 4), label="experiment")
+                axis.plot((1, 2), (3.1, 3.9), label="fitting")
+                figures[key] = figure
+                plt.close(figure)  # The displayed report closes pyplot, retaining its Figure.
+                manifests[key] = {"source_files": [key[0]], "channel": list(key[1:]),
+                                  "fit_methods": ["complex"], "fit": {"exponent": 2.1},
+                                  "phase_minimum_amplitude_v": 1e-8}
+            frozen_manifests = json.loads(json.dumps(list(manifests.values())))
+            exporter = Mock(wraps=export_publication_figure_set)
+            scope.update(report_figures=figures, report_manifests=manifests,
+                         export_publication_figure_set=exporter,
+                         plot_experiment_fit_report=Mock(side_effect=AssertionError("Do not replot.")),
+                         experiment_fit_report_manifest=Mock(side_effect=AssertionError("Do not relabel.")))
+            # The existing export switch must still gate every output.
+            exec(compile(source, "disabled-export", "exec"), scope)
+            exporter.assert_not_called()
+            self.assertFalse(scope["OUTPUT_DIRECTORY"].exists())
+            exec(code, scope)
+            output = scope["OUTPUT_DIRECTORY"]
+            selection = json.loads((output / "selection_manifest.json").read_text())
+            self.assertEqual(exporter.call_count, 3)
+            self.assertEqual(len(selection["condensed_report"]), 3)
+            stems = ("condensed_report_run01_xx_h1", "condensed_report_run01_xy_h2",
+                     "condensed_report_run02_xy_h2")
+            for key, stem, entry in zip(keys, stems, selection["condensed_report"]):
+                exporter.assert_any_call(figures[key], output / stem)
+                self.assertEqual(entry["source_path"], key[0])
+                self.assertEqual((entry["role"], entry["harmonic"]), key[1:])
+                expected = {str(output / (stem + suffix)) for suffix in (".png", ".pdf", ".svg")}
+                self.assertEqual(set(entry["figure_files"]), expected)
+                for filename in expected:
+                    self.assertGreater(Path(filename).stat().st_size, 100)
+                saved = json.loads(Path(entry["manifest_file"]).read_text())
+                self.assertEqual(saved, manifests[key])
+            self.assertEqual(list(manifests.values()), frozen_manifests)
+            scope["plot_experiment_fit_report"].assert_not_called()
+            scope["experiment_fit_report_manifest"].assert_not_called()
+            # A retained figure with missing provenance must prompt a report rerun.
+            exporter.reset_mock()
+            del manifests[keys[-1]]
+            with self.assertRaisesRegex(RuntimeError, "rerun.*Condensed report"):
+                exec(code, scope)
+            exporter.assert_not_called()
 
     def test_temperature_scale_controls_plot_existing_rows_and_export_actual_scale(self) -> None:
         try:

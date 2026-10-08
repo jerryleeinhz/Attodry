@@ -1,5 +1,22 @@
 # Development stages
 
+## Condensed reports in Optional export (offline complete; 2026-10-08)
+
+- `sr830_commissioning_sweeps.ipynb` Optional export now saves all cached
+  Condensed report Figures as PNG/PDF/SVG plus per-run/channel provenance JSON.
+  `selection_manifest.json` maps source paths/channels to those output files.
+  Compact run numbering prevents same-basename runs from overwriting each other.
+- Export reuses the plotted Figures and cached manifests, without replotting,
+  refitting, rereading data or relabelling models from changed controls.
+  Missing provenance requests a report rerun; skipping report/temperature cells
+  remains supported. `SAVE_OUTPUTS=False` still prevents all export writes.
+- **81 guarded tests passed, zero skips** (4 notebook, 11 report, 54
+  commissioning-analysis, 12 progress-widget). A new regression first failed
+  on the old export, then verified real PNG/PDF/SVG files from closed cached
+  Figures, per-figure manifests, same-basename run separation, disabled
+  export and missing-provenance rejection. No acquisition source, private
+  configuration, hardware communication or experiment parameters were changed.
+
 ## Optional export without temperature cells (target synchronized; 2026-10-08)
 
 - Fixed a `NameError` when exporting ordinary frequency/excitation results after
