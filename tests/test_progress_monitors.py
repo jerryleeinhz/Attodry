@@ -12,7 +12,9 @@ from attodry_control.lockin_test import (
     _sweep_progress_formal_sample_callback,
 )
 from attodry_control.lockin_progress_monitor import LockinProgressView, run as run_lockin
-from attodry_control.progress_monitor import JsonlProgressTail, resolve_progress_path
+from attodry_control.progress_monitor import (
+    JsonlProgressTail, ProgressFormatError, resolve_progress_path,
+)
 from attodry_control.temperature_progress_monitor import (
     TemperatureProgressView,
     run as run_temperature,
@@ -39,6 +41,66 @@ class ProgressMonitorTests(unittest.TestCase):
             tail.read_new_events(),
             ({"event": "temperature_sample", "point_index": 1},),
         )
+
+    def test_tailer_defers_a_split_utf8_character_and_crlf(self) -> None:
+        path = self.directory / "progress.jsonl"
+        event = {"event": "scan_started", "name": "磁场"}
+        data = (json.dumps(event, ensure_ascii=False) + "\r\n").encode("utf-8")
+        split = data.index("磁".encode("utf-8")) + 1
+        path.write_bytes(data[:split])
+        tail = JsonlProgressTail(path)
+        self.assertEqual(tail.read_new_events(), ())
+        self.assertEqual(tail.read_new_events(), ())
+        with path.open("ab") as stream:
+            stream.write(data[split:])
+        self.assertEqual(tail.read_new_events(), (event,))
+        self.assertEqual(tail.read_new_events(), ())
+
+    def test_tailer_does_not_skip_complete_corruption_on_refresh(self) -> None:
+        for bad in (b'{bad}\n', b'[]\n', b'{"name":"\xff"}\n'):
+            with self.subTest(bad=bad):
+                path = self.directory / "progress.jsonl"
+                path.write_bytes(b'{"event":"scan_started"}\n' + bad)
+                tail = JsonlProgressTail(path)
+                for _ in range(2):
+                    with self.assertRaises(ProgressFormatError):
+                        tail.read_new_events()
+
+    def test_tailer_restarts_generation_after_replacement_or_truncation(self) -> None:
+        for replacement in ("smaller", "same", "larger", "in_place"):
+            with self.subTest(replacement=replacement):
+                path = self.directory / "progress.jsonl"
+                first = b'{"event":"scan_started","name":"old"}\n'
+                path.write_bytes(first)
+                tail = JsonlProgressTail(path)
+                self.assertEqual(tail.read_new_events()[0]["name"], "old")
+                second = b'{"event":"scan_started","name":"new"}\n'
+                if replacement == "smaller":
+                    second = b'{"event":"scan_started"}\n'
+                elif replacement == "larger":
+                    second += b'{"event":"point"}\n'
+                if replacement == "in_place":
+                    path.write_bytes(second)
+                else:
+                    other = self.directory / "replacement.jsonl"
+                    other.write_bytes(second)
+                    os.replace(other, path)
+                events = tail.read_new_events()
+                self.assertEqual(events[0]["event"], "scan_started")
+                self.assertNotEqual(events[0].get("name"), "old")
+                self.assertEqual(tail.generation, 1)
+                self.assertEqual(tail.read_new_events(), ())
+                self.assertEqual(tail.generation, 1)
+
+    def test_tailer_append_does_not_reset_pending_or_generation(self) -> None:
+        path = self.directory / "progress.jsonl"
+        path.write_bytes(b'{"event":"scan_started"}\n{"event":"point"')
+        tail = JsonlProgressTail(path)
+        self.assertEqual(tail.read_new_events(), ({"event": "scan_started"},))
+        with path.open("ab") as stream:
+            stream.write(b'}\n')
+        self.assertEqual(tail.read_new_events(), ({"event": "point"},))
+        self.assertEqual(tail.generation, 0)
 
     def test_temperature_view_reports_latest_cryostat_state_and_lockin_phase(self) -> None:
         view = TemperatureProgressView()

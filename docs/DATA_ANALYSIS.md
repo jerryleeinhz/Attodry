@@ -159,6 +159,81 @@ compatible `jupyterlab_widgets` frontend in its server environment.
 
 ## Standalone SR830 commissioning sweeps
 
+### Standalone progress preview
+
+`notebooks/sr830_commissioning_sweeps.ipynb` has a separate **File progress
+snapshots (manual refresh)** panel for standalone `frequency`, `excitation`,
+and `frequency_excitation` sweeps. It reads the scan's existing
+`*_lockin_*_progress.jsonl` file while acquisition appends to it. Set
+`DATA_DIRECTORY`, click **Refresh records**, explicitly select the wanted
+file in **Progress file**, and click **Load selected progress**. Click
+**Refresh data and plots** whenever you want the next snapshot. The file selection stays fixed;
+the panel never follows a newer run automatically.
+
+On LK_setup, while acquisition is active, open the independent preview at
+`Integration/run_data/operator_progress_preview_20261008_c10d25846736/live_lockin_progress.ipynb`
+in a new `lyr` kernel and run its cells. It uses the separate
+`attodry_progress_preview` package beside that notebook. Choose the actual
+scan output directory and use the same controls above. This isolated copy was
+verified offline on 2026-10-08; the Integration source remains at `9e14d31`
+because acquisition PIDs 22180 and 20464 were still active at delivery.
+Formal source synchronization is deferred until acquisition exits.
+
+Refresh reads appended complete lines and redraws the selected snapshot. There
+is no timer or background polling. Repeated refresh without new events does
+not duplicate samples. Changing **Metric** or **Excitation X** takes effect on
+the next manual refresh. The panel uses file reads only and can run alongside
+acquisition without restarting it: it does not connect VISA/GPIB, query the
+lock-ins, consume status latches, or change acquisition settings.
+
+**Latest recorded point (historical snapshot)** shows the recorded point index,
+requested SINE OUT, SINE OUT readback and actual frequency. Absent fields show
+**not recorded**. These are saved point values, not a new instrument query.
+
+**Metric** offers **R (amplitude)**, **X**, **Y**, and **Phase**. Curves and
+legends identify the recorded XX/XY role and that role's actual harmonic;
+the selected roles come from each formal sample's `selected_roles`.
+Unselected companion readings remain in the raw stream and are not promoted
+into selected harmonic curves. Frequency sweeps use actual frequency;
+excitation sweeps offer **SINE OUT readback (V RMS)** (default) or **Archived
+estimated current (A RMS)**. Frequency × excitation curves retain separate
+recorded frequencies. The current axis uses the stored
+`nominal_current_a_rms`; the panel does not read today's TOML, apply an
+excitation-path override, or infer resistance from signal/current ratios.
+SINE OUT is an instrument setting readback, and nominal current is an estimate
+from the acquisition's archived resistance model, not an independent current
+measurement.
+
+The snapshot reports **total**, **clean**, and **excluded** selected formal
+reading counts separately for XX and XY. Default curves use only clean readings
+according to that role's archived validity/status; transition and cleanup
+readings do not enter curves. Every raw formal reading remains in the JSONL.
+A clean selected role can remain usable when its companion is invalid. Native SR865A identity/status stays
+native; SR830 LIAS bit meanings are not applied to it. Recorded SR865A zero
+X/Y/R may retain a null phase: its magnitude and X/Y can be plotted, and phase
+remains a gap. No missing role, harmonic, coordinate, or phase is filled with
+zero.
+
+An unfinished last JSON or UTF-8 sequence stays pending until a complete line
+arrives. A malformed complete line reports an error on subsequent refreshes
+until the file is repaired or another file is selected; it is not silently
+skipped. File replacement or truncation resets the snapshot and its sample
+history. Older progress records without `sweep_point` or the required actual
+readbacks are unsupported for this preview; the panel does not reconstruct
+points from event counts or requested settings.
+
+The **Unfinished snapshot** state means only that no `scan_finished` record has
+been observed; it does not establish that acquisition is running. Process
+liveness and current hardware state are unknown. A finish snapshot displays
+outcome and cleanup evidence from that record; it
+does not certify the instruments' present state. A `rejected` or `interrupted`
+finished stream keeps its raw readings and quality counts, but default progress
+plotting rejects it. Inspect those readings through the final JSON's explicit
+audit selection. After acquisition finishes, explicitly select its final JSON
+in the ordinary record browser. Progress
+snapshots provide incomplete-data previews; final fits, exports and scientific
+conclusions continue to use the final JSON and its normal quality filters.
+
 ### Relative complex frequency-response calibration
 
 At the end of `notebooks/sr830_commissioning_sweeps.ipynb`, first load one

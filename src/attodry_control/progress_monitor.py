@@ -7,6 +7,7 @@ progress file for reading and never constructs a DLL, VISA resource, or driver.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -16,61 +17,86 @@ class ProgressFormatError(ValueError):
 
 
 class JsonlProgressTail:
-    """Read appended JSON objects while safely ignoring an unfinished last line."""
+    """Read complete appended UTF-8 events without consuming malformed lines."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._offset = 0
-        self._pending = ""
+        self._pending = b""
+        self._identity: tuple[int, int] | None = None
+        self._prefix = b""
+        self._end_anchor = b""
+        self.generation = 0
 
     def read_new_events(self) -> tuple[dict[str, Any], ...]:
-        """Return complete events appended since the previous call.
+        """Return a file snapshot's new complete events.
 
-        A writer can be interrupted between bytes of one JSONL line.  That line
-        is retained internally until its newline arrives; it is never presented
-        as a partly decoded measurement.
+        Decode only newline-terminated records, so an incomplete UTF-8 character
+        is deferred together with its line. Parsing is transactional: a malformed
+        complete record remains an error on subsequent refreshes. Replacement or
+        truncation starts a new generation for downstream snapshot caches.
         """
 
         try:
-            with self.path.open("r", encoding="utf-8", newline="") as stream:
-                stream.seek(0, 2)
-                size = stream.tell()
-                if size < self._offset:
-                    # A new run may have replaced/truncated the selected file.
+            with self.path.open("rb") as stream:
+                stat = os.fstat(stream.fileno())
+                identity = (stat.st_dev, stat.st_ino)
+                size = stat.st_size
+                reset = (
+                    (self._identity is not None and identity != self._identity)
+                    or size < self._offset
+                )
+                if not reset and self._offset:
+                    stream.seek(0)
+                    prefix_matches = stream.read(len(self._prefix)) == self._prefix
+                    stream.seek(self._offset - len(self._end_anchor))
+                    end_matches = stream.read(len(self._end_anchor)) == self._end_anchor
+                    reset = not (prefix_matches and end_matches)
+                if reset:
                     self._offset = 0
-                    self._pending = ""
+                    self._pending = b""
+                    self._prefix = b""
+                    self._end_anchor = b""
+                    self._identity = identity
+                    self.generation += 1
                 stream.seek(self._offset)
-                appended = stream.read()
-                self._offset = stream.tell()
+                appended = stream.read(size - self._offset)
+                if len(appended) != size - self._offset:
+                    raise ProgressFormatError(
+                        f"Progress file changed while reading {self.path}; refresh again."
+                    )
         except FileNotFoundError as exc:
             raise FileNotFoundError(f"Progress file does not exist: {self.path}") from exc
 
-        if not appended and not self._pending:
-            return ()
-
-        text = self._pending + appended
-        lines = text.splitlines(keepends=True)
-        self._pending = ""
-        if lines and not lines[-1].endswith(("\n", "\r")):
-            self._pending = lines.pop()
-
+        data = self._pending + appended
+        lines = data.split(b"\n")
+        pending = lines.pop()
         events: list[dict[str, Any]] = []
+        line_offset = self._offset - len(self._pending)
         for raw_line in lines:
             line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                decoded = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ProgressFormatError(
-                    f"Invalid JSONL event in {self.path} at byte offset "
-                    f"{self._offset - len(appended)}: {exc.msg}"
-                ) from exc
-            if not isinstance(decoded, dict):
-                raise ProgressFormatError(
-                    f"Progress event in {self.path} must be a JSON object."
-                )
-            events.append(decoded)
+            if line:
+                try:
+                    decoded = json.loads(line.decode("utf-8-sig"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ProgressFormatError(
+                        f"Invalid JSONL event in {self.path} at byte offset "
+                        f"{line_offset}: {exc}"
+                    ) from exc
+                if not isinstance(decoded, dict):
+                    raise ProgressFormatError(
+                        f"Progress event in {self.path} at byte offset "
+                        f"{line_offset} must be a JSON object."
+                    )
+                events.append(decoded)
+            line_offset += len(raw_line) + 1
+
+        # Advance only after every complete line in this snapshot has parsed.
+        self._prefix = (self._prefix + appended)[:512]
+        self._end_anchor = (self._end_anchor + appended)[-512:]
+        self._offset += len(appended)
+        self._pending = pending
+        self._identity = identity
         return tuple(events)
 
 

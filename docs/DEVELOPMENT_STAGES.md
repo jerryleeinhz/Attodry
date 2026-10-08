@@ -1,5 +1,50 @@
 # Development stages
 
+## Standalone Lock-in file progress preview (target offline; 2026-10-08)
+
+- Approved implementation adds a separate manual-refresh file preview to
+  `sr830_commissioning_sweeps.ipynb` for frequency, excitation and
+  frequency_excitation streams. Operator selects one progress JSONL, loads it,
+  then refreshes data/plots explicitly. Selection remains fixed and no timer,
+  acquisition restart, collector, instrument, configuration or communication
+  change is introduced.
+- R/X/Y/Phase plots retain role/harmonic legends and per-role quality counts.
+  Selected formal roles and actual harmonics/native model status remain
+  authoritative; default invalid exclusion preserves raw audit data. Axes use
+  actual frequency, SINE OUT readback or archived nominal current estimates;
+  no current TOML, resistance reconstruction or missing-point inference.
+- Incremental reading handles incomplete last JSON/UTF-8, persistent malformed
+  complete-line errors, replacement/truncation resets and repeated-refresh
+  deduplication. Unfinished means no observed finish record; archived outcome and
+  cleanup are historical evidence. Final analysis/fits use the explicitly
+  selected final JSON after the run, not an incomplete progress snapshot.
+  Rejected/interrupted finished streams retain raw readings/counts but default
+  progress plotting rejects them; failed-data inspection uses final-JSON audit.
+- Final local verification: **97 guarded tests passed** using
+  `python -s tools/run_guarded_tests.py tests.test_progress_monitors tests.test_commissioning_progress_analysis tests.test_commissioning_progress_widgets tests.test_commissioning_analysis tests.test_notebook`.
+  Tests include complete progress/final-JSON parity for all three standalone
+  scan types: raw/clean rows, archived coordinates and R/X/Y/Phase aggregation.
+  Five synthetic PNG figures passed visual checks of legends, signed signals
+  and axes. Notebook and widget coverage is included in the guarded suite.
+- Explicit saved-file compatibility checks passed for an actively appended
+  frequency/excitation stream and a completed excitation stream. Selected XX h1
+  and native SR865A XY h2 loaded correctly; unchanged refresh did not duplicate
+  counts. Hardware/acquisition imports and DLL loading were blocked. Raw
+  experimental filenames/data remain uncommitted.
+- At **2026-10-08T11:44:16Z**, the isolated LK_setup package passed **25 offline
+  tests with zero skips**, blocking real hardware imports and DLL loading.
+  File-only preview is available through a new `lyr` kernel at
+  `Integration/run_data/operator_progress_preview_20261008_c10d25846736/live_lockin_progress.ipynb`,
+  using its sibling `attodry_progress_preview` package. Before/after source-tree,
+  private-TOML, two user-notebook and HEAD hashes were identical.
+- Target remains `9e14d31`. Acquisition PIDs 22180 and 20464 were still active,
+  so formal source synchronization is **deferred until acquisition exits** under
+  the standing AGENTS rule. Only the separate ignored analysis copy was added;
+  no experiment was started/restarted and no instrument I/O was performed.
+  Publication destination is the existing
+  `origin/codex/integration-four-module-scan`; the exact feature commit is recorded
+  in Git and the delivery report.
+
 ## SR865A external fundamental-frequency tolerance (2026-10-08)
 
 - Implemented the user-approved plan: compare External detection/harmonic with

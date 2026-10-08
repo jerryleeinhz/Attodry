@@ -3918,7 +3918,9 @@ def _formal_lockin_model(instrument: Mapping[str, object]) -> str | None:
     return next(iter(models)) if models else None
 
 
-def _formal_phase_deg(instrument: Mapping[str, object], *, role: str) -> float | None:
+def _formal_phase_deg(
+    instrument: Mapping[str, object], *, role: str, allow_nonfinite: bool = False,
+) -> float | None:
     """SR865 simultaneous X=Y=R=0 has undefined phase, preserved as None."""
     reading = instrument.get("reading")
     if not isinstance(reading, Mapping) or "phase_deg" not in reading:
@@ -3929,7 +3931,7 @@ def _formal_phase_deg(instrument: Mapping[str, object], *, role: str) -> float |
             converted = float(phase)
         except (TypeError, ValueError) as exc:
             raise ValueError("phase_deg must be numeric.") from exc
-        if not math.isfinite(converted):
+        if not allow_nonfinite and not math.isfinite(converted):
             raise ValueError("phase_deg must be finite.")
         return converted
     if _formal_lockin_model(instrument) != "SR865A":
@@ -3954,6 +3956,7 @@ def _commissioning_sample(
     role: str,
     problems: tuple[str, ...],
     recorded_excitation_path: ExcitationPathResistance | None,
+    allow_nonfinite_phase: bool = False,
 ) -> CommissioningSample:
     instrument = sample.get(f"lockin_{role}")
     if not isinstance(instrument, dict):
@@ -4043,7 +4046,9 @@ def _commissioning_sample(
         x_v=float(reading["x_v"]),
         y_v=float(reading["y_v"]),
         amplitude_v=float(reading["amplitude_v"]),
-        phase_deg=_formal_phase_deg(instrument, role=role),
+        phase_deg=_formal_phase_deg(
+            instrument, role=role, allow_nonfinite=allow_nonfinite_phase,
+        ),
         reference_frequency_hz=float(reading["frequency_hz"]),
         locked=bool(reading["locked"]),
         overload=overload,

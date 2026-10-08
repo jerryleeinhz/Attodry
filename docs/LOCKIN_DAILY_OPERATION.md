@@ -907,6 +907,60 @@ excitation_ranges = [
 
 ## 记录、状态和分析
 
+### 扫描期间：Notebook 只读进度预览
+
+运行中的独立扫频、扫幅及频率×幅值扫描可在
+[`../notebooks/sr830_commissioning_sweeps.ipynb`](../notebooks/sr830_commissioning_sweeps.ipynb)
+的 **File progress snapshots (manual refresh)** 面板中预览。开头填写本次输出目录
+`DATA_DIRECTORY`，然后按以下步骤操作：
+
+1. 点击 **Refresh records**，在 **Progress file** 中明确选择本次的
+   `*_lockin_*_progress.jsonl`。
+2. 点击 **Load selected progress**，读取已有的完整事件行并显示进度和曲线。
+3. 扫描继续追加后，点击 **Refresh data and plots** 更新数据及图形。改变
+   **Metric** 或 **Excitation X** 后也通过这个按钮重画。
+
+2026-10-08 的 LK_setup 交付使用独立预览副本。在 `Integration` 目录下打开
+`run_data/operator_progress_preview_20261008_c10d25846736/live_lockin_progress.ipynb`，
+选择**新的 `lyr` kernel** 并运行其中单元，使用同目录的 `attodry_progress_preview`
+包；数据目录填写本次实际输出位置，之后按上述三步操作。该副本通过目标电脑离线检查。
+交付时 PID 22180 和 20464 仍在采集，正式 `Integration/src` 保持原版本
+`9e14d31`，源码同步按项目规则延期至采集退出；现有用户 Notebook 与私有 TOML 未改。
+
+选择始终固定为这一个文件，不自动切到最新运行。刷新只增量读取已经写入的文件；
+重复点击不会重复计入样本，没有 timer 或后台轮询。可与扫描并行使用，无需重启采集。
+面板不连接仪器、不发送查询、不消费锁存位、不修改 TOML 或采集设置。
+
+**Latest recorded point (historical snapshot)** 显示归档的点索引、请求 SINE OUT、
+SINE OUT 读回和实际频率；没有的字段显示 **not recorded**，不是即时查询仪器。
+
+**Metric** 可选 **R (amplitude)**、**X**、**Y** 和 **Phase**，图例标出实际
+XX/XY 角色及每台实际检测的谐波。曲线只使用 `selected_roles` 纳入的正式读数，
+同时显示每个角色所选正式读数的 **total**、**clean** 和 **excluded** 计数。
+默认只画该角色的 clean 正式读数，转换期和清理读数不进入曲线；原始无效及伴随读数继续保留
+在 JSONL 中。SR865A 按原生状态判断，不套用 SR830 LIAS 位；零幅的 null 相位保持缺测。
+
+扫频横轴采用实际频率。扫幅横轴默认 **SINE OUT readback (V RMS)**，也可选
+**Archived estimated current (A RMS)**；后者直接使用本次已经归档的
+`nominal_current_a_rms`，不读取今天的 TOML，也不从信号或电流反推电阻。
+这两个量分别是仪器设置读回和名义电流估值，不是器件端电压或独立电流表测量。
+二维扫描按已记录频率分别显示曲线。
+
+文件末尾尚未写完的 JSON/UTF-8 字节等待下一次刷新；已完整换行但损坏的记录持续报错，
+不跳过。文件被替换或截断后重新建立预览。缺少 `sweep_point` 或所需实际读回的旧
+JSONL 不支持本面板，不按样本数、请求值或当前配置猜测点位。
+
+**Unfinished snapshot** 只表示未看到 `scan_finished`，不能据此确认扫描仍在运行、
+进程存活或当前仪器状态。
+最终 outcome 和 cleanup 来自文件中的结束记录；它们也不是此刻前面板状态的确认。
+结束记录为 `rejected` 或 `interrupted` 时保留原始读数和质量计数，但默认进度绘图
+拒绝该记录；检查失败数据须在最终 JSON 浏览器中显式选择 audit。
+采集结束后在普通记录浏览器中**手动选择本次最终 JSON**，再做完整拟合、导出和最终
+科学判断。进度预览中的未完成数据不代替最终 JSON。
+详细数据语义见 [分析说明](DATA_ANALYSIS.md#standalone-progress-preview)。
+
+### 最终 JSON 与离线分析
+
 在打开 VISA 资源前，程序会先创建并检查记录目录。每次已开始的扫描都会以 UTC
 时间、扫描种类和结果状态原子写入一个 JSON，例如：
 
