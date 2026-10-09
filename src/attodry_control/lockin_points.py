@@ -43,7 +43,16 @@ class _AuditedInstrument:
             if write:
                 self.event("lockin_command_attempt", {"role": role, "method": name,
                                                       "arguments": args})
-            result = method(*args, **kwargs)
+            try:
+                result = method(*args, **kwargs)
+            except Exception as exc:
+                native_audit = daily._native_error_audit(exc)
+                if native_audit:
+                    self.event("lockin_native_error", {
+                        "role": role, "method": name, "captured_at_utc": utc_now(),
+                        "error": str(exc), **native_audit,
+                    })
+                raise
             self.event("lockin_command_return" if write else "lockin_raw_role", {
                 "role": role, "method": name, "captured_at_utc": utc_now(),
                 "reading": (None if write else result if name in {"read_fixed_setting", "read_receiver_invariants"}

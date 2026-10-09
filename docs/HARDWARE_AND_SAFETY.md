@@ -31,6 +31,19 @@ unchanged. Legacy dual-SR830
 commissioning commands reject mixed pairs before connection. See
 [configuration and scope](LOCKIN_DAILY_OPERATION.md#sr865a-作为-xy-接收机).
 
+## Bounded SR865A frequency observation (2026-10-09)
+
+The operator authorized up to two one-second rechecks of an in-range External
+frequency inconsistency. The 100 ppm / fundamental 5 mHz threshold is unchanged.
+Every wait requires a complete clean current/latched status window, with
+explicit status capability and latch-consumption authorization. All raw pairs,
+statuses and timestamps survive success or failure. Unlock, overload, device or
+unknown status, invalid frequency, mode/harmonic drift and communication faults
+stop immediately; a recovered pair still needs the final ordinary status check.
+This only repeats frequency/status observations, with no settings write,
+acquisition retry, failed-run restart or relaxation of setup/cleanup gates.
+See [the exact policy and audit fields](LOCKIN_DAILY_OPERATION.md).
+
 ## Opt-in SR830 overload acquisition policy (2026-09-29)
 
 At the user's request, `lockin_sweep.overload_policy` may explicitly allow

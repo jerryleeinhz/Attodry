@@ -1773,6 +1773,7 @@ def _run_frequency_sweep(
             "cleanup": cleanup,
             "interface_clear": interface_clear,
             "error": None if failure is None else str(failure),
+            **_native_error_audit(failure),
         }
         _emit_sweep_result(record_directory, result, progress_writer=progress_writer)
         if failure is not None:
@@ -2137,6 +2138,7 @@ def _run_frequency_excitation_sweep(
             "cleanup": cleanup,
             "interface_clear": interface_clear,
             "error": None if failure is None else str(failure),
+            **_native_error_audit(failure),
         }
         _emit_sweep_result(record_directory, result, progress_writer=progress_writer)
         if failure is not None:
@@ -2520,6 +2522,7 @@ def _execute_excitation_sweep_on_open_pair(
         "cleanup": cleanup,
         "interface_clear": interface_clear,
         "error": None if failure is None else str(failure),
+        **_native_error_audit(failure),
     }
     _annotate_sweep_quality(result)
     return result, failure
@@ -3701,6 +3704,17 @@ def _harmonic_audit_fields(harmonic: int | Mapping[str, int]) -> dict[str, objec
             "harmonics_by_role": dict(harmonic)}
 
 
+def _native_error_audit(error):
+    """Keep native frequency/status evidence in saved failures, including setup."""
+    evidence = getattr(error, "evidence", None)
+    if evidence is None:
+        return {}
+    return json.loads(json.dumps({
+        "native_error_evidence": evidence,
+        "native_error_raw": getattr(error, "raw", ()),
+    }, default=_json_record_default))
+
+
 def _read_sweep_pair(lockin_xx, lockin_xy, harmonic, record):
     """Retain completed role reads if the companion read or status query fails."""
     audit = {"captured_unix_s": time.time(), **_harmonic_audit_fields(harmonic)}
@@ -3711,6 +3725,7 @@ def _read_sweep_pair(lockin_xx, lockin_xy, harmonic, record):
         return xx, xy
     except BaseException as exc:
         audit["error"] = str(exc) or type(exc).__name__
+        audit.update(_native_error_audit(exc))
         record.setdefault("partial_sample_reads", []).append(audit)
         raise
 

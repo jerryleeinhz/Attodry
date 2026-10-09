@@ -9,11 +9,12 @@ This adapter deliberately has no source-amplitude/offset write or cleanup defaul
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import math
 import re
-from typing import Protocol
+import time
+from typing import Callable, Protocol
 
 from .models import LockinRole
 from . import sr865a_settings as settings
@@ -26,10 +27,19 @@ from . import sr865a_settings as settings
 # frequency/status limits remain; this is not an accuracy specification.
 EXTERNAL_REFERENCE_FREQUENCY_REL_TOLERANCE = 100e-6
 EXTERNAL_REFERENCE_FREQUENCY_ABS_TOLERANCE_HZ = 0.005
+# At most three independent frequency pairs, never an acquisition/setup retry.
+# This counter-observation delay is separate from the configured signal-filter
+# settling time, which remains unchanged in the acquisition layer.
+EXTERNAL_FREQUENCY_MAX_RECHECKS = 2
+EXTERNAL_FREQUENCY_RECHECK_WAIT_S = 1.0
 
 
 class Sr865aError(RuntimeError):
     """Invalid instrument response or unverified setting; audit remains available."""
+
+    def __init__(self, message: str, *, frequency_checks=()):
+        super().__init__(message)
+        self.frequency_checks = tuple(frequency_checks)
 
 
 class AuthorizationRequired(Sr865aError):
@@ -118,6 +128,24 @@ class Sr865aStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class Sr865aFrequencyCheck:
+    attempt: int
+    reference_source: str
+    harmonic: int
+    reference_frequency_hz: float
+    expected_detection_frequency_hz: float
+    detection_frequency_hz: float
+    reference_error_hz: float
+    reference_tolerance_hz: float
+    detection_tolerance_hz: float
+    detection_in_range: bool
+    frequency_consistent: bool
+    observed_at_utc: datetime
+    status: Sr865aStatus | None = None
+    retry_wait_s: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class Sr865aSample:
     role: LockinRole
     identity: str
@@ -133,6 +161,7 @@ class Sr865aSample:
     raw: tuple[QueryRecord, ...]
     amplitude_phase_source: str = "derived_from_simultaneous_xy"
     frequencies_are_sequential: bool = True
+    frequency_checks: tuple[Sr865aFrequencyCheck, ...] = ()
 
 
 _REFERENCE_SOURCES = ("internal", "external", "dual", "chop")
@@ -150,10 +179,12 @@ _CODE_COUNTS = {"RSRC": 4, "RTRG": 3, "REFZ": 2, "OFLT": 22,
 
 
 class Sr865a:
-    def __init__(self, resource: VisaResource, role: LockinRole):
+    def __init__(self, resource: VisaResource, role: LockinRole, *,
+                 sleep: Callable[[float], None] = time.sleep):
         if not isinstance(role, LockinRole):
             raise ValueError("role must be a LockinRole.")
         self._resource = resource
+        self._sleep = sleep
         self.role = role
         self._identity: str | None = None
         self._audit: list[QueryRecord] = []
@@ -348,66 +379,99 @@ class Sr865a:
             raise ValueError("Status capability/consumption flags must be booleans.")
         start = len(self._audit)
         identity = self.query_identity()
-        self._verify_voltage_input()
-        harmonic = self.read_harmonic()
-        reference_source, reference_hz = self._read_reference_source_and_frequency()
+        harmonic, reference_hz, detection_hz, frequency_checks = self._read_consistent_frequencies(
+            consume_status_latches=consume_status_latches,
+            current_status_supported=current_status_supported,
+        )
         try:
-            expected_detection = settings.validate_harmonic_frequency(harmonic, reference_hz)
-        except ValueError as exc:
-            self._identity = None
-            raise Sr865aError(str(exc)) from exc
-        detection_hz = self.read_detection_frequency()
-        reference_error = abs(detection_hz / harmonic - reference_hz)
-        if reference_source == "external":
-            reference_tolerance = max(
-                EXTERNAL_REFERENCE_FREQUENCY_ABS_TOLERANCE_HZ,
-                abs(reference_hz) * EXTERNAL_REFERENCE_FREQUENCY_REL_TOLERANCE,
-            )
-            detection_tolerance = harmonic * reference_tolerance
-            frequency_consistent = reference_error <= reference_tolerance
-        else:
-            # Retain the original internal math.isclose semantics and 1 mHz
-            # absolute floor in detection-frequency units, independent of HARM.
-            detection_tolerance = max(
-                0.001, max(abs(detection_hz), abs(expected_detection)) * 1e-6,
-            )
-            reference_tolerance = detection_tolerance / harmonic
-            frequency_consistent = math.isclose(
-                detection_hz, expected_detection, rel_tol=1e-6, abs_tol=0.001,
-            )
-        if not (
-            settings.MINIMUM_REFERENCE_FREQUENCY_HZ <= detection_hz
-            < settings.MAXIMUM_REFERENCE_FREQUENCY_HZ
-        ) or not frequency_consistent:
-            self._identity = None
-            raise Sr865aError(
-                "Detection frequency does not match harmonic and reference readbacks: "
-                f"reference={reference_hz:.12g} Hz, harmonic={harmonic}, "
-                f"expected_detection={expected_detection:.12g} Hz, "
-                f"detection={detection_hz:.12g} Hz, source={reference_source}, "
-                f"reference_error={reference_error:.12g} Hz, "
-                f"reference_tolerance={reference_tolerance:.12g} Hz, "
-                f"detection_tolerance={detection_tolerance:.12g} Hz."
-            )
-        xy = self._query_text("SNAP? X,Y").split(",")
-        if len(xy) != 2:
-            self._identity = None
-            raise Sr865aError("SR865A SNAP? X,Y must return exactly two fields.")
-        x, y = (self._parse_float(value, "SNAP? X,Y") for value in xy)
-        captured = self._audit[-1].completed_at_utc
-        amplitude = math.hypot(x, y)
-        if not math.isfinite(amplitude):
-            self._identity = None
-            raise Sr865aError("Derived SR865A amplitude is non-finite.")
-        phase = None if x == y == 0 else math.degrees(math.atan2(y, x))
-        status = self.read_status(consume_status_latches=consume_status_latches,
-                                  current_status_supported=current_status_supported)
+            xy = self._query_text("SNAP? X,Y").split(",")
+            if len(xy) != 2:
+                self._identity = None
+                raise Sr865aError("SR865A SNAP? X,Y must return exactly two fields.")
+            x, y = (self._parse_float(value, "SNAP? X,Y") for value in xy)
+            captured = self._audit[-1].completed_at_utc
+            amplitude = math.hypot(x, y)
+            if not math.isfinite(amplitude):
+                self._identity = None
+                raise Sr865aError("Derived SR865A amplitude is non-finite.")
+            phase = None if x == y == 0 else math.degrees(math.atan2(y, x))
+            status = self.read_status(consume_status_latches=consume_status_latches,
+                                      current_status_supported=current_status_supported)
+        except Sr865aError as exc:
+            exc.frequency_checks = frequency_checks
+            raise
         return Sr865aSample(
             role=self.role, identity=identity, harmonic=harmonic, x_v=x, y_v=y,
             amplitude_v=amplitude, phase_deg=phase,
             reference_frequency_hz=reference_hz, detection_frequency_hz=detection_hz,
             captured_at_utc=captured, status=status, raw=tuple(self._audit[start:]),
+            frequency_checks=frequency_checks,
         )
+
+    def _read_consistent_frequencies(self, *, consume_status_latches: bool,
+                                     current_status_supported: bool):
+        checks: list[Sr865aFrequencyCheck] = []
+        initial_state = None
+        try:
+            for attempt in range(1, EXTERNAL_FREQUENCY_MAX_RECHECKS + 2):
+                self._verify_voltage_input()
+                harmonic = self.read_harmonic()
+                source, reference_hz = self._read_reference_source_and_frequency()
+                state = (source, harmonic)
+                if initial_state is None:
+                    initial_state = state
+                elif state != initial_state:
+                    raise Sr865aError("SR865A reference source/harmonic changed during frequency recheck.")
+                try:
+                    expected = settings.validate_harmonic_frequency(harmonic, reference_hz)
+                except ValueError as exc:
+                    raise Sr865aError(str(exc)) from exc
+                detection_hz = self.read_detection_frequency()
+                error = abs(detection_hz / harmonic - reference_hz)
+                if source == "external":
+                    reference_tolerance = max(EXTERNAL_REFERENCE_FREQUENCY_ABS_TOLERANCE_HZ,
+                        abs(reference_hz) * EXTERNAL_REFERENCE_FREQUENCY_REL_TOLERANCE)
+                    detection_tolerance = harmonic * reference_tolerance
+                    consistent = error <= reference_tolerance
+                else:
+                    # Preserve Internal's symmetric math.isclose rule and its
+                    # detection-frequency (not fundamental) 1 mHz floor.
+                    detection_tolerance = max(.001, max(abs(detection_hz), abs(expected)) * 1e-6)
+                    reference_tolerance = detection_tolerance / harmonic
+                    consistent = math.isclose(detection_hz, expected, rel_tol=1e-6, abs_tol=.001)
+                in_range = (settings.MINIMUM_REFERENCE_FREQUENCY_HZ <= detection_hz
+                            < settings.MAXIMUM_REFERENCE_FREQUENCY_HZ)
+                checks.append(Sr865aFrequencyCheck(
+                    attempt, source, harmonic, reference_hz, expected, detection_hz,
+                    error, reference_tolerance, detection_tolerance, in_range, consistent,
+                    self._audit[-1].completed_at_utc))
+                if in_range and consistent:
+                    return harmonic, reference_hz, detection_hz, tuple(checks)
+                message = (
+                    "Detection frequency does not match harmonic and reference readbacks: "
+                    f"reference={reference_hz:.12g} Hz, harmonic={harmonic}, "
+                    f"expected_detection={expected:.12g} Hz, "
+                    f"detection={detection_hz:.12g} Hz, source={source}, "
+                    f"reference_error={error:.12g} Hz, "
+                    f"reference_tolerance={reference_tolerance:.12g} Hz, "
+                    f"detection_tolerance={detection_tolerance:.12g} Hz."
+                )
+                if not in_range or source != "external":
+                    raise Sr865aError(message)
+                if not (consume_status_latches and current_status_supported):
+                    raise Sr865aError(message + " Recheck requires authorized complete current/latched status.")
+                status = self.read_status(consume_status_latches=True, current_status_supported=True)
+                checks[-1] = replace(checks[-1], status=status)
+                if status.valid is not True:
+                    raise Sr865aError(message + " Frequency recheck blocked by unsafe/unknown status.")
+                if attempt == EXTERNAL_FREQUENCY_MAX_RECHECKS + 1:
+                    raise Sr865aError(message + f" Frequency checks exhausted ({attempt}/{attempt}).")
+                checks[-1] = replace(checks[-1], retry_wait_s=EXTERNAL_FREQUENCY_RECHECK_WAIT_S)
+                self._sleep(EXTERNAL_FREQUENCY_RECHECK_WAIT_S)
+        except Sr865aError as exc:
+            self._identity = None
+            exc.frequency_checks = tuple(checks)
+            raise
 
     def close(self) -> None:
         self._identity = None

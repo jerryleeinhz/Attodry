@@ -216,7 +216,9 @@ class Sr865aReceiver:
         try:
             return method(*args, **kwargs)
         except Sr865aError as exc:
-            raise ElectricalLockinError(str(exc), raw=self.audit) from exc
+            evidence = ({"frequency_checks": _json(exc.frequency_checks)}
+                        if exc.frequency_checks else None)
+            raise ElectricalLockinError(str(exc), evidence=evidence, raw=self.audit) from exc
 
     def _authorized(self):
         if not self.authorize_writes:

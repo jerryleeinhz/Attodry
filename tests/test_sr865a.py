@@ -86,6 +86,7 @@ class Sr865aAdapterTests(unittest.TestCase):
     def setUp(self):
         self.resource = FakeResource()
         self.driver = Sr865a(self.resource, LockinRole.XX)
+        self.driver._sleep = lambda seconds: None
 
     def verify_identity(self):
         self.driver.query_identity()

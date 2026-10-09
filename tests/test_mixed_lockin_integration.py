@@ -426,6 +426,106 @@ autorange_stable_samples = 2
         self.assertNotIn("CUROVLDSTAT?", fixture.xy.queries)
         self.assertEqual(fixture.xx.writes + fixture.xy.writes, [])
 
+    def inject_frequency_mismatch(self, fixture, count):
+        """Only the first h2 read at a swept frequency is affected; cleanup is clean."""
+        from attodry_control.sr865a import Sr865a
+        original_init = Sr865a.__init__
+        def initialize(driver, resource, role, **kwargs):
+            original_init(driver, resource, role, sleep=lambda _: None)
+        initialize_patch = patch.object(Sr865a, "__init__", initialize)
+        initialize_patch.start()
+        self.addCleanup(initialize_patch.stop)
+        original_query = fixture.xy.query
+        injected = []
+        def query(command):
+            reply = original_query(command)
+            if (command == "FREQDET?" and fixture.frequency["hz"] == 100000.
+                    and fixture.xy.responses["HARM?"] == "2" and len(injected) < count):
+                reply = str(float(reply) * 1.00012)
+                injected.append(reply)
+            return reply
+        fixture.xy.query = query
+        return injected
+
+    def assert_saved_recheck(self, payload, attempts):
+        # Find the actual retained native evidence independent of the point's
+        # qualification/formal-read location; do not infer it from the error text.
+        def histories(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key == "frequency_checks":
+                        yield item
+                    else:
+                        yield from histories(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from histories(item)
+        checks = next((h for h in histories(payload) if len(h) == attempts), None)
+        self.assertIsNotNone(checks)
+        self.assertFalse(checks[0]["frequency_consistent"])
+        self.assertEqual(checks[0]["retry_wait_s"], 1.)
+        self.assertEqual(checks[0]["status"]["lia_status_raw"], 0)
+        self.assertIn("observed_at_utc", checks[0])
+
+    def test_frequency_recheck_survives_standalone_saved_json_and_cleanup(self):
+        for mismatches in (1, 3):
+            with self.subTest(mismatches=mismatches):
+                fixture = self.fixture(mode="frequency")
+                injected = self.inject_frequency_mismatch(fixture, mismatches)
+                output = io.StringIO()
+                with patch("attodry_control.lockin_test.load_config", return_value=self.standalone_config(fixture)), redirect_stdout(output):
+                    arguments = ["sweep-frequency", "--config", str(fixture.path), "--authorize-writes"]
+                    if mismatches == 3:
+                        with self.assertRaisesRegex(ElectricalLockinError, "3/3"):
+                            standalone_cli(arguments, resource_manager_factory=lambda: fixture.manager)
+                    else:
+                        self.assertEqual(standalone_cli(arguments, resource_manager_factory=lambda: fixture.manager), 0)
+                record = json.loads(output.getvalue())
+                self.assertEqual(record["completed"], mismatches == 1)
+                self.assertEqual(len(injected), mismatches)
+                self.assertTrue(record["cleanup"]["verified"], record["cleanup"])
+                self.assertEqual(float(fixture.xx.responses["SLVL?"]), .004)
+                self.assertEqual(fixture.xy.responses["HARM?"], "1")
+                saved = list((fixture.path.parent / "sweeps").glob("*_frequency_*.json"))
+                self.assertEqual(len(saved), 1)
+                persisted = json.loads(saved[0].read_text(encoding="utf-8"))
+                self.assert_saved_recheck(persisted, 2 if mismatches == 1 else 3)
+                if mismatches == 3:
+                    self.assertEqual(len(persisted["native_error_evidence"]["frequency_checks"]), 3)
+                    self.assertTrue(persisted["native_error_raw"])
+                    self.assertFalse(any(p.get("samples") for p in record["points"]))
+                else:
+                    self.assertEqual(len(record["points"]), 2)
+                    self.assertEqual(fixture.xx.writes.count("FREQ 100000"), 1)
+                self.assert_receiver_owns_no_source_writes(fixture)
+                self.assertTrue(fixture.xx.closed and fixture.xy.closed and fixture.manager.closed)
+
+    def test_frequency_recheck_survives_combination_sqlite_and_cleanup(self):
+        for mismatches in (1, 3):
+            with self.subTest(mismatches=mismatches):
+                fixture = self.fixture(mode="frequency")
+                injected = self.inject_frequency_mismatch(fixture, mismatches)
+                result = self.execute(fixture, "recheck")
+                self.assertEqual(result["status"], "completed" if mismatches == 1 else "failed", result.get("error"))
+                self.assertEqual(len(injected), mismatches)
+                self.assertEqual(result["cleanup"]["clean"], mismatches == 1)
+                self.assertEqual(result["cleanup"]["manual_verification_required"], mismatches == 3)
+                reset = next(a["result"] for a in result["cleanup"]["actions"] if a["module"] == "lockin")
+                self.assertTrue(reset["verified"], reset.get("errors"))
+                events = self.events(fixture)
+                self.assert_saved_recheck([payload for _, payload in events], 2 if mismatches == 1 else 3)
+                if mismatches == 3:
+                    errors = [p for name, p in events if name == "lockin_native_error"]
+                    self.assertEqual(len(errors), 1)
+                    self.assertEqual(len(errors[0]["native_error_evidence"]["frequency_checks"]), 3)
+                    self.assertTrue(errors[0]["native_error_raw"])
+                    self.assertFalse(any(name == "lockin_formal_pair" for name, _ in events))
+                else:
+                    self.assertEqual(len(load_combination_rows(fixture.database, run_id="recheck")), 2)
+                    self.assertEqual(fixture.xx.writes.count("FREQ 100000"), 1)
+                self.assert_receiver_owns_no_source_writes(fixture)
+                self.assertTrue(fixture.xx.closed and fixture.xy.closed and fixture.manager.closed)
+
     def test_high_frequency_xx_h1_and_xy_h2_use_role_specific_capabilities(self):
         fixture = self.fixture(mode="frequency")
         result = self.execute(fixture, "high-frequency")

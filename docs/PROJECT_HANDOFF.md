@@ -1,8 +1,40 @@
 # Project handoff
 
-Last updated: 2026-10-08
+Last updated: 2026-10-09
 
 ## Current stage
+
+### Bounded SR865A External frequency rechecks (offline verified; 2026-10-09)
+
+- At the operator's request, keep the External fundamental-frequency threshold
+  at max(5 mHz, 100 ppm), and re-observe a sole in-range frequency inconsistency
+  at most twice, one second apart (three pairs total). A complete, authorized,
+  clean current/latched status window is required before each wait. Internal
+  tolerances, detection/harmonic limits, filter settling and excitation remain
+  unchanged. A passing first pair adds no delay or extra status queries.
+- No acquisition/setup replay or setting writes are performed by the recheck.
+  Unlock, overload, device/configuration/unknown status, reference-mode/harmonic
+  drift, malformed/out-of-range readbacks or communication errors fail closed.
+  A consistent pair still requires the ordinary final native status check.
+- Retain every frequency pair, fundamental/detection tolerance, observation time,
+  wait and intermediate status in native_sample.frequency_checks, with raw query
+  timestamps. Standalone rejected JSON also retains native_error_evidence/raw;
+  combination records lockin_native_error even when setup/transition fails before
+  a formal sample. Partial reads remain diagnostic, excluded from accepted data.
+  Verified recovery cleanup never reclassifies a failed combination as successful.
+- **329 guarded tests passed, zero skips** across SR865A/SR830 drivers, receiver,
+  standalone/combination sweeps, harmonic scheduling, overload and cleanup.
+  The original 71.124229431 / h2 / 142.2336731 Hz case was reproduced before the
+  change. Tests cover h1/h2/h3, both tolerance regimes, bounded recovery/exhaustion,
+  faults/latches, missing capabilities, transport failure, Internal invariance,
+  saved JSON/SQLite evidence and preserved receiver source/cleanup.
+- The preceding separately authorized 60-second real diagnostic found 61 clean
+  samples at fixed frequency, with fundamental readback differences from
+  -74.551 to +61.254 ppm. This supports checking fresh sequential estimates;
+  it does not establish the cause of the earlier failure or exclude sweep
+  switching transients. This code delivery itself launches no real scan.
+- Delivery to the existing origin/codex/integration-four-module-scan and LK_setup
+  is pending; preserve private TOML, data and user-edited analysis notebooks.
 
 ### Retained merged and per-channel Condensed reports (target synchronized; 2026-10-08)
 
