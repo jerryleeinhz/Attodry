@@ -196,13 +196,18 @@ python -m attodry_control.magnetic_field_monitor --help
 python -m attodry_control.lockin_test --help
 ```
 
-To explicitly apply one role's approved fixed input/filter/range/Reserve values
-from `hardware.local.toml`, use `apply-toml --role lockin_xy` (or
-`lockin_xx`) with its write, latch-consumption, and physical XY-output
-confirmations. It does not change reference, frequency, harmonic, phase, or
-SINE OUT settings; each authorized hardware attempt is saved as a
-completed/rejected commissioning JSON. It does not connect to hardware unless
-invoked with the explicit flags.
+To remotely prepare both lock-ins from `hardware.local.toml`, use
+`apply-toml --role "xx,xy"` with `--authorize-writes`,
+`--authorize-status-latch-consumption`, and `--confirm-xy-sine-disconnected`.
+It records the current state, lowers XX to 4 mVrms, configures references,
+h1, measurement settings and frequency, verifies them, then applies the TOML
+XX excitation amplitude within existing limits. XY source outputs and PHAS
+are preserved; success holds the requested state. A communication failure
+stops further commands and requires manual verification.
+Single-role `--role xx` / `xy` (full role names also accepted) retains the
+existing fixed-setting operation and baseline checks. Each attempt is saved
+as a completed/rejected commissioning JSON. See the
+[operating sequence](docs/LOCKIN_DAILY_OPERATION.md).
 
 日常温控参数统一写在已忽略的 `config/hardware.local.toml` 的
 `[temperature_run]` 表中，通常只修改 `target_k`。运行

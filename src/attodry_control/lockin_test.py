@@ -278,21 +278,21 @@ def build_parser() -> argparse.ArgumentParser:
     apply_toml = subparsers.add_parser(
         "apply-toml",
         help=(
-            "Apply one role's configured fixed input/filter/range/Reserve settings "
-            "and verify readbacks."
+            "Apply one role's measurement settings, or prepare both roles from TOML "
+            "including XX excitation and references; verify all readbacks."
         ),
     )
     _add_pair_arguments(apply_toml)
     apply_toml.add_argument(
         "--role",
-        choices=("lockin_xx", "lockin_xy"),
+        type=_parse_apply_roles,
         required=True,
-        help="Semantic Lock-in role to configure; only this instrument receives writes.",
+        help='Role xx / xy, or "xx,xy" to prepare both instruments from TOML.',
     )
     apply_toml.add_argument(
         "--authorize-writes",
         action="store_true",
-        help="Explicitly authorize the selected role's fixed-setting and RMOD writes.",
+        help="Explicitly authorize the selected roles and pair excitation writes.",
     )
     apply_toml.add_argument(
         "--authorize-status-latch-consumption",
@@ -873,6 +873,20 @@ def _run_set_xx_sensitivity(
     return 0
 
 
+def _parse_apply_roles(value: str) -> str:
+    aliases = {"xx": "lockin_xx", "xy": "lockin_xy",
+               "lockin_xx": "lockin_xx", "lockin_xy": "lockin_xy"}
+    if value.strip() == "both":
+        return "lockin_xx,lockin_xy"
+    parts = [part.strip() for part in value.split(",")]
+    if any(part not in aliases for part in parts):
+        raise argparse.ArgumentTypeError('Use xx, xy, or "xx,xy" (full role names also accepted).')
+    roles = [aliases[part] for part in parts]
+    if len(set(roles)) != len(roles):
+        raise argparse.ArgumentTypeError("Do not repeat an apply-toml role.")
+    return ",".join(sorted(roles))
+
+
 def _run_apply_toml(
     args: argparse.Namespace, factory: Callable[[], object]
 ) -> int:
@@ -891,6 +905,10 @@ def _run_apply_toml(
         raise AuthorizationRequired(
             "Physical disconnection of lockin_xy SINE OUT was not confirmed."
         )
+
+    if args.role == "lockin_xx,lockin_xy":
+        from .lockin_apply import apply_pair_toml
+        return apply_pair_toml(args, settings, factory)
 
     role = LockinRole.XX if args.role == "lockin_xx" else LockinRole.XY
     target_config = config.lockin_xx if role is LockinRole.XX else config.lockin_xy

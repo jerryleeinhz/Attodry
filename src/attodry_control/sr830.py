@@ -336,6 +336,8 @@ class Sr830:
         """Write one validated input/filter setting for read-before-write setup."""
 
         allowed = {
+            "reference_mode": ("FMOD", (1,) if self.role is LockinRole.XX else (0,)),
+            "reference_slope": ("RSLP", (1,) if self.role is LockinRole.XY else ()),
             "input_mode": ("ISRC", range(0, 4)),
             "shield_grounding": ("IGND", range(0, 2)),
             "input_coupling": ("ICPL", range(0, 2)),
@@ -353,6 +355,8 @@ class Sr830:
         """Read one input/filter code without consuming SR830 status latches."""
 
         queries = {
+            "reference_mode": ("FMOD?", (0, 1)),
+            "reference_slope": ("RSLP?", (0, 1, 2)),
             "input_mode": ("ISRC?", range(0, 4)),
             "shield_grounding": ("IGND?", range(0, 2)),
             "input_coupling": ("ICPL?", range(0, 2)),

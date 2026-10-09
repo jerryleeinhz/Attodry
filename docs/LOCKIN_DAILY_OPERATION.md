@@ -534,6 +534,48 @@ python -m attodry_control.lockin_test recover-interface
 该命令只打开两台已配置的 SR830、清理 VISA 接口并输出 JSON，`settings_changed` 必须
 为 `false`。通信故障后仍须人工确认前面板和接线；接口清理不能证明仪器处于安全状态。
 
+### 按 TOML 远程准备双机（SR830 XX + SR830 / SR865A XY）
+
+当前实机的频率、激励或 h1 设置与 TOML 不同时，使用双角色模式：
+
+```powershell
+python -m attodry_control.lockin_test apply-toml `
+  --config config\hardware.local.toml `
+  --role "xx,xy" `
+  --authorize-writes `
+  --authorize-status-latch-consumption `
+  --confirm-xy-sine-disconnected
+```
+
+`"xx, xy"`、`"lockin_xx,lockin_xy"` 和 `both` 等价，角色顺序不影响先准备 XX
+的顺序。PowerShell 中有空格时必须加引号，不要写成两个独立参数。单独 `xx` / `xy`
+是完整角色名的别名，仍采用下节的单角色固定设置语义。
+
+双机模式读取身份、完整状态和当前设置后，先把 XX 降到 **4 mVrms 并回读**，再应用
+XX 内部参考、XY 外部 TTL、两台 h1、输入/滤波/量程与 SR830 Reserve，最后设置 XX
+的 TOML 频率。SR865A 采用原生 IRNG/SCAL、REFZ 和 TTL 边沿，不写 Reserve。
+扩大满量程先于 Reserve 切换；缩窄满量程后于 Reserve 切换。XY 的
+SINE OUT 必须物理断开，代码保留它的输出；SR865A 的 SLVL/SOFF/REFM/BLAZEX 和
+两台 PHAS 均保留。XY TOML 的 `source_voltage_v` 不是对器件提供的第二路激励。
+
+配置改变后按两台较大的 TOML TC × `settle_time_constants` 等待（至少 1.5 s），
+记录一次过渡读数，再等同样时间进行严格验证。只有实际频率/参考/谐波切换产生的
+频率变化或 XY 失锁锁存、实际 SR830 OFLT 修改产生的 TC 锁存可在过渡窗口记录一次；
+最终窗口必须通过完整检查。SR865A 当前失锁、设备错误、未知状态或过载始终拒绝。
+SR830 未使用输出通道的单独 bit 2 保持原有仅记录政策。
+
+准备验证成功后，才应用 `lockin_xx.source_voltage_v`，等待并再次确认。该值必须通过
+原有硬件幅值上限和配置电路的名义电流/电压计算限值；名义计算不是实测电流或硬件
+保护。XX 与 XY TOML 的参考频率必须相同。实际 FREQ?/SNAP? 使用已有扫频显示分辨率
+检查，SR865A 的检测频率/基频一致性与真实锁定检查保持原规则。
+成功后保持 TOML 设置，两台均 h1；扫描用的谐波列表仍在扫描时生效。
+
+身份/状态/未知码不合格时不会开始应用。通信明确且已经写入后发生验证失败，尝试将
+XX 降到并验证 4 mVrms；不恢复旧的较高激励。仪器调用异常导致通信或写入结果不确定时
+停止后续指令，保留最后确认状态并要求人工核验。即使最小输出恢复成功，原应用记录
+仍然失败。独立 JSON 保留 before/transition/prepared/after、每步请求与回读时间、
+原生审计、清理和错误。不要与扫描或其他 VISA 客户端同时运行。
+
 ### 按 TOML 应用一台 SR830 的固定设置
 
 仪器面板设置与本地 TOML 不一致时，可在没有扫描或其他程序占用仪器的前提下，明确
@@ -548,7 +590,7 @@ python -m attodry_control.lockin_test apply-toml `
   --confirm-xy-sine-disconnected
 ```
 
-每次只允许选择 `lockin_xx` 或 `lockin_xy` 一个角色。命令会检查双机身份、参考角色、
+单角色模式选择 `lockin_xx` / `xx` 或 `lockin_xy` / `xy`。命令会检查双机身份、参考角色、
 h1、频率和两台 SINE OUT 的 4 mVrms 基线，但只向所选角色写入
 `ISRC`/`IGND`/`ICPL`/`OFLT`/`OFSL`/`SENS`/`RMOD`；不会写参考源、参考边沿、频率、谐波、
 相位或 SINE OUT。等待时间由该角色 TOML 时间常数乘以配置的

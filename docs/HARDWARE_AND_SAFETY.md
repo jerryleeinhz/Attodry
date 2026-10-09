@@ -31,6 +31,26 @@ unchanged. Legacy dual-SR830
 commissioning commands reject mixed pairs before connection. See
 [configuration and scope](LOCKIN_DAILY_OPERATION.md#sr865a-作为-xy-接收机).
 
+## Explicit dual-role TOML application (2026-10-09)
+
+`apply-toml --role "xx,xy"` prepares both lock-ins under the existing three
+explicit confirmations. Valid current frequency/source/settings differences
+are pending changes; device faults, unknown status and malformed readbacks
+remain preflight blockers. XX is first readback-verified at 4 mVrms; the TOML
+final excitation is applied only after both references, h1, measurement settings
+and frequency pass settling and verification. Existing source/device-estimate
+limits apply. Widen range before Reserve changes and narrow after them.
+Preserve both phases and the disconnected XY source (including SR865A
+SLVL/SOFF/REFM/BLAZEX); XY never becomes a second excitation source.
+One audited transition window may consume documented setting-change latches;
+a second settled window must be clean. Native current unlock, unknown/device
+status and overload remain blockers. On a known-state verification failure,
+verify XX minimum output without restoring prior high excitation; on uncertain
+instrument I/O, issue no further commands and require manual verification.
+Failed attempts remain failed even if the minimum is subsequently verified.
+Single-role behavior is unchanged. This command must have exclusive VISA access;
+it opens no magnetic, temperature, SMU or optical connection.
+
 ## Bounded SR865A frequency observation (2026-10-09)
 
 The operator authorized up to two one-second rechecks of an in-range External

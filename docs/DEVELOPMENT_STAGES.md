@@ -1,5 +1,36 @@
 # Development stages
 
+## Dual-role remote TOML preparation (target update deferred; 2026-10-09)
+
+- User-approved `apply-toml --role "xx,xy"` / `"xx, xy"` / full role names /
+  `both` prepares both instruments; `xx` and `xy` alias the unchanged single-role
+  fixed-setting command. All three existing explicit confirmations remain.
+- Preserve the initial diagnostic and audit each action/readback with timestamps.
+  Valid differences are pending changes. Lower and verify XX at 4 mVrms before
+  reference/h1/input/filter/range/Reserve and source-frequency preparation;
+  widen sensitivity before Reserve, narrow after it. Then settle, retain one
+  transition window and require a second clean window. Only afterwards apply
+  the TOML XX source amplitude within the existing safety/nominal-device limits.
+- Success holds requested settings and h1. Preserve PHAS and disconnected XY
+  source, including SR865A SLVL/SOFF/REFM/BLAZEX; use native IRNG/SCAL/reference
+  controls without Reserve. No additional module is opened. Existing native
+  frequency, unknown-status, device-error, unlock and overload gates remain.
+- Known-state validation failure attempts verified XX 4 mVrms; uncertain I/O
+  stops further commands. Preserve partial evidence and manual-review failure
+  even when minimum output is verified; never restore old higher excitation.
+- The original 10 Hz / 8 mVrms preparation problem and unsupported comma roles
+  were reproduced offline. **342 guarded tests passed, zero skips**: 13 new
+  pair-apply cases plus the existing 329 native/legacy driver, harmonic,
+  standalone, overload and combination tests. Native source ownership, single
+  role scope, idempotence, range ordering and communication failures are covered.
+- LK_setup remains at `e528f6256b49d9a14713cd42bfd370776155e430`.
+  Pre-deployment inventory found a new `lockin_test sweep-excitation` process,
+  PID 21544 (creation Unix time 1791555098.6155422), plus file-only progress
+  monitor PID 8960. Source synchronization and the separately authorized
+  500 Hz / 4 mVrms application are deferred until acquisition/VISA ownership
+  ends. No process was terminated or instrument connected for this delivery.
+  The private TOML and both user-edited notebooks remain untouched.
+
 ## Bounded SR865A External frequency rechecks (target synchronized; 2026-10-09)
 
 - At the operator's request, keep the External fundamental-frequency threshold
