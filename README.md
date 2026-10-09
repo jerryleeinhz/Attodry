@@ -2,6 +2,13 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
+2026-10-06：光电点流程新增 `optical_scan.target_deviation_policy = "record_continue"`。
+初始按容差和稳定窗口调功；之后仅功率偏离目标时记录实测值并继续，硬故障检查
+保持。分析使用 `measured.optical_power_w`，目标、功率读数和时间分别保存。
+省略策略保持原来的 `abort`；独立光学旧扫描入口不支持此非默认策略。
+`power_feedback.target_mapping = "cartesian"` 可把每条波长/带宽设置与全部目标
+功率自动组合；一行配六功率得到六点，两行配六功率得到十二点。省略保持旧逐行模式。
+
 2026-10-05：photonics combination profile 现按用户确认支持 XX=SR830、XY=SR865A，
 PEM → XY REF IN，XY SINE OUT+ → XX REF IN，XX SINE OUT → 样品。
 新拓扑为 `pem_xy_xx_sine`；原 `pem_xx_xy` 及显式双 SR865A 配置继续保留。
@@ -11,6 +18,10 @@ PEM → XY REF IN，XY SINE OUT+ → XX REF IN，XX SINE OUT → 样品。
 目标电脑已完成此前离线验证，本次设置只读核验及软件更新另行记录；完整实机
 级联/有光扫描尚未验收。配置模板与命令见
 [光电联合操作指南](docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
+
+PEM 无法建立合格外参考时，可用独立的 XY SR865A 内参考缓冲诊断比较暗态/照光的
+差频响应。XX 激励线须实际从样品断开；代码及模拟验证不代表真实照光验收。
+配置、运行和分析入口见 [PEM 内参考诊断指南](docs/PEM_INTERNAL_DIAGNOSTIC_GUIDE.md)。
 
 锁相扫描新增可选过载继续采集策略（默认仍中止），保留原始过载与按测量路的
 有效性标记；配置见 [日常操作说明](docs/LOCKIN_DAILY_OPERATION.md)。

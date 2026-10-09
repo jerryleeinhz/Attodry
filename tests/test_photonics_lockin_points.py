@@ -15,7 +15,7 @@ class PhotonicsPointTests(unittest.TestCase):
         waits = []
         session = PhotonicsLockinPointSession("fake.toml", cfg,
             (lambda kind, payload: events.append((kind, payload))) if event is None else event,
-            manager_factory=lambda: mgr, sleep=waits.append)
+            manager_factory=lambda: mgr, sleep=waits.append, clock=lambda: sum(waits))
         return session, mgr, events, waits
 
     def ready(self, document=None):
@@ -73,6 +73,49 @@ class PhotonicsPointTests(unittest.TestCase):
         self.assertTrue(session.cleanup()["verified"])
         session.close()
 
+    def test_legacy_topology_records_sr865a_output_and_sr830_filter_overload_for_each_harmonic(self):
+        doc = fixture_document()
+        doc["photonics_lockin"]["overload_policy"] = "record_continue"
+        session, manager, _, _ = self.ready(doc)
+        self.addCleanup(session.close)
+        manager.resources["FAKE::XX"].responses["CUROVLDSTAT?"] = "1"
+
+        def filter_overload(resource, command):
+            if command == "LIAS?":
+                resource.responses[command] = str(int(resource.responses[command]) | 2)
+
+        manager.resources["FAKE::XY"].on_query = filter_overload
+        reading = session.sample_point()
+        self.assertFalse(reading["clean"])
+        self.assertTrue(reading["overload_continuation"])
+        self.assertEqual(reading["problems"], ["lockin_xx output-scale overload", "lockin_xy filter overload"])
+        self.assertEqual(len(reading["status"]["samples"]), 2)
+        for entry in reading["status"]["samples"]:
+            self.assertEqual(entry["valid_for_analysis_by_role"], {"lockin_xx": False, "lockin_xy": False})
+            self.assertTrue(entry["settings_verified"])
+            self.assertEqual(entry["blocking_problems"], [])
+        self.assertIn("transition", reading["status"]["samples"][1]["bracket_samples"])
+        self.assertIn("lockin_xx_h3_x_v", reading["measurements"])
+        self.assertTrue(session.cleanup()["source_protection_verified"])
+
+    def test_record_continue_never_excuses_frequency_settings_identity_or_communication_failure(self):
+        for query, value in (("FREQEXT?", "52000"), ("ADVFILT?", "1"),
+                ("*IDN?", "Stanford_Research_Systems,SR865A,replacement,v1.00"),
+                ("CUROVLDSTAT?", TimeoutError("injected status timeout"))):
+            with self.subTest(query=query):
+                doc = fixture_document()
+                doc["photonics_lockin"]["overload_policy"] = "record_continue"
+                session, manager, _, _ = self.ready(doc)
+                self.addCleanup(session.close)
+                xx = manager.resources["FAKE::XX"]
+                xx.responses["LIAS?"] = "16"
+                xx.responses[query] = value
+                with self.assertRaises((ValueError, RuntimeError)):
+                    session.sample_point()
+                self.assertTrue(session.failed)
+                self.assertFalse(any(command.startswith("FREQ ") for command in xx.writes))
+                session.cleanup()
+
     def test_source_protection_can_precede_reference_startup(self):
         session, mgr, _, _ = self.make()
         xx = mgr.resources["FAKE::XX"]
@@ -88,6 +131,104 @@ class PhotonicsPointTests(unittest.TestCase):
         self.assertEqual(xx.responses["RSRC?"], "1")
         session.cleanup()
         session.close()
+
+    def test_configuration_waits_before_first_pair_check_then_keeps_filter_settling(self):
+        doc = fixture_document()
+        doc["photonics_lockin"]["reference_lock_wait_s"] = 45.0
+        session, mgr, events, waits = self.make(doc)
+        self.addCleanup(session.close)
+        xx, xy = mgr.resources["FAKE::XX"], mgr.resources["FAKE::XY"]
+        xx.responses["SLVL?"] = "0.008"
+        xy.responses["FREQ?"] = "50030"
+        xy.responses["LIAS?"] = "8"
+
+        def settle(seconds):
+            waits.append(seconds)
+            if seconds == 1:
+                self.assertEqual(xx.responses["SLVL?"], "0.004")
+                self.assertEqual(xy.responses["OFLT?"], "6")
+                self.assertNotIn("HARM 2", xy.writes)
+                xy.responses["FREQ?"] = "50027"
+
+        session.sleep = settle
+        session.open()
+        session.configure()
+        self.assertEqual(waits, [1.0, session.config.settle_s])
+        self.assertEqual([kind for kind, _ in events if "reference_wait" in kind],
+                         ["lockin_reference_wait_started", "lockin_reference_wait_finished"])
+        session.read_coordinates()
+        session.read_reference_frequencies()
+        session.wait_for_reference_lock()
+        self.assertEqual(waits.count(1), 1)
+        self.assertTrue(session.cleanup()["source_protection_verified"])
+
+    def test_reference_wait_does_not_relax_persistent_frequency_failure(self):
+        doc = fixture_document()
+        doc["photonics_lockin"]["reference_lock_wait_s"] = 45.0
+        session, mgr, _, waits = self.make(doc)
+        self.addCleanup(session.close)
+        mgr.resources["FAKE::XY"].responses["FREQ?"] = "50030"
+        session.open()
+        with self.assertRaisesRegex(ValueError, "external references disagree"):
+            session.configure()
+        self.assertEqual(waits, [1.0])
+        self.assertEqual(mgr.resources["FAKE::XX"].responses["SLVL?"], "0.004")
+        self.assertNotIn("HARM 2", mgr.resources["FAKE::XY"].writes)
+        self.assertTrue(session.failed)
+        self.assertTrue(session.cleanup()["source_protection_verified"])
+
+    def test_optical_transition_waits_once_before_deferred_point_readback(self):
+        doc = fixture_document()
+        doc["photonics_lockin"]["reference_lock_wait_s"] = 45.0
+        session, mgr, events, waits = self.ready(doc)
+        self.addCleanup(session.close)
+        session.prepare_reference_transition()
+        self.assertEqual(sum(kind == "lockin_reference_wait_finished" for kind, _ in events), 1)
+        xy = mgr.resources["FAKE::XY"]
+        xy.responses["FREQ?"] = "50030"
+        xy.responses["LIAS?"] = "8"
+
+        def settle(seconds):
+            waits.append(seconds)
+            if seconds == 1:
+                self.assertEqual(mgr.resources["FAKE::XX"].responses["SLVL?"], "0.004")
+                xy.responses["FREQ?"] = "50027"
+
+        session.sleep = settle
+        session.set_point(0.006)
+        self.assertEqual(waits.count(1), 2)
+        self.assertTrue(session.reference_transition_pending)
+        session.wait_for_reference_lock()
+        session.read_reference_frequencies()
+        session.restore_source_after_reference_transition()
+        self.assertEqual(sum(kind == "lockin_reference_wait_finished" for kind, _ in events), 2)
+        self.assertEqual(mgr.resources["FAKE::XX"].responses["SLVL?"], "0.006")
+        self.assertTrue(session.cleanup()["source_protection_verified"])
+
+    def test_interrupted_reference_wait_never_restores_excitation(self):
+        doc = fixture_document()
+        doc["photonics_lockin"]["reference_lock_wait_s"] = 45.0
+        session, mgr, events, _ = self.ready(doc)
+        self.addCleanup(session.close)
+        session.prepare_reference_transition()
+        xx = mgr.resources["FAKE::XX"]
+        mgr.resources["FAKE::XY"].responses["LIAS?"] = "8"
+        writes = len(xx.writes)
+
+        def interrupt(seconds):
+            self.assertEqual(seconds, 1.0)
+            raise KeyboardInterrupt()
+
+        session.sleep = interrupt
+        with self.assertRaises(KeyboardInterrupt):
+            session.restore_source_after_reference_transition()
+        self.assertTrue(session.failed)
+        self.assertTrue(session.reference_wait_pending)
+        self.assertEqual(len(xx.writes), writes)
+        self.assertEqual(xx.responses["SLVL?"], "0.004")
+        self.assertEqual(sum(kind == "lockin_reference_wait_started" for kind, _ in events), 2)
+        self.assertEqual(sum(kind == "lockin_reference_wait_finished" for kind, _ in events), 1)
+        self.assertTrue(session.cleanup()["source_protection_verified"])
 
     def test_nonzero_source_dc_rejects_before_configuration_writes(self):
         session, mgr, _, _ = self.make()

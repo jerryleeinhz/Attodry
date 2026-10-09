@@ -12,7 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 hardware = ["pyvisa==1.16.2", "qcodes>=0.47,<1", "pyserial>=3.5,<4"]
-analysis = ["matplotlib==3.10.9", "ipywidgets>=8,<9"]
+analysis = ["numpy>=1.24,<3", "matplotlib==3.10.9", "ipywidgets>=8,<9"]
 
 [project.scripts]
 attodry-lockin-test = "attodry_control.lockin_test:main"
@@ -30,6 +30,7 @@ attodry-three-smu = "attodry_control.three_smu_cli:main"
 attodry-magnetic-field = "attodry_control.magnetic_field_cli:main"
 attodry-field-monitor = "attodry_control.magnetic_field_monitor:main"
 attodry-optical = "attodry_control.optical_cli:main"
+attodry-pem-internal = "attodry_control.pem_internal_diagnostic:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

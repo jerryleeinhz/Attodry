@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from enum import Enum
 import hashlib
+import math
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,6 +51,7 @@ class HardwareCombinationConfig:
     lockin_mode: str = "excitation"
     optical: object | None = None
     reference_topology: str = "internal_xx_xy"
+    illumination_policy: str = "off_before_axis_change"
 
 
 def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
@@ -70,7 +72,10 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     configuration._strict_keys_with_optional(
         table, "combination_scan",
         {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"},
-        {"lockin_mode", "run_id", "reference_topology"})
+        {"lockin_mode", "run_id", "reference_topology", "illumination_policy"})
+    illumination = table.get("illumination_policy", "off_before_axis_change")
+    if illumination not in ("off_before_axis_change", "continuous_gate_scan"):
+        raise ValueError("Unsupported combination_scan.illumination_policy")
     topology = table.get("reference_topology", "internal_xx_xy")
     if topology not in {"internal_xx_xy", *PHOTONICS_REFERENCE_TOPOLOGIES}:
         raise ValueError("Unsupported combination reference_topology")
@@ -207,9 +212,24 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         optical = load_optical_point_config(path)
         if photonics and not optical.scan.use_pem:
             raise ValueError("PEM reference optical scans require PEM enabled")
-        axes["optical"] = ScanAxis("optical", tuple(AxisPoint(values, "main", "ordered")
-                                                   for values in optical.points))
+        axes["optical"] = ScanAxis("optical", tuple(AxisPoint(values, "main", "ordered",
+            {"optical_point_index": index}) for index, values in enumerate(optical.points)))
         hardware["optical"] = _json(asdict(optical))
+    if illumination == "continuous_gate_scan":
+        if order != ["optical", "smu", "lockin"] or not photonics or mode != "excitation":
+            raise ValueError("continuous_gate_scan requires optical -> smu -> lockin with PEM excitation")
+        if len(axes["lockin"].points) != 1:
+            raise ValueError("continuous_gate_scan requires one fixed lock-in excitation point")
+        if not optical.nkt.emit or optical.scan.mode != "power_stabilized" or optical.pm is None:
+            raise ValueError("continuous_gate_scan requires illuminated, power-stabilized PM acquisition")
+        active_gates = smu.hardware.by_role()
+        if not active_gates or any(role not in {"gate_top", "gate_bottom"}
+                                  or device.source_mode is not SourceMode.VOLTAGE
+                                  for role, device in active_gates.items()):
+            raise ValueError("continuous_gate_scan supports only voltage-source gates; smu_bias must be off")
+        if any(getattr(smu.plan, role).ramp is None
+               and getattr(smu.plan, role).zero_readback_tolerance_v is None for role in active_gates):
+            raise ValueError("continuous_gate_scan direct gates require explicit zero_readback_tolerance_v")
     addresses = []
     if smu is not None:
         addresses += [h.address.strip().upper() for h in smu.hardware.by_role().values()]
@@ -236,6 +256,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     snapshot = plan.snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     lockin_mode=mode,
+                    illumination_policy=illumination,
                     hardware=_json(hardware), config_path=str(path),
                     config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                     cleanup_policy={"lockin": ("4mV_restore_ranges_h1" if mode == "excitation"
@@ -257,7 +278,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if not database.is_absolute():
         database = path.parent / database
     return HardwareCombinationConfig(path, plan, smu, lockin, snapshot, temperature, magnetic,
-                                     cryostat, database.resolve(), run_id, mode, optical, topology)
+                                     cryostat, database.resolve(), run_id, mode, optical, topology, illumination)
 
 
 class _Events:
@@ -293,6 +314,8 @@ class HardwareCombinationStation:
         self.open_completed = False
         self.cryo = None
         self.dll, self.monotonic = dll, monotonic
+        self._optical_group_ready = False
+        self._optical_group_sequence = 0
 
     def set_event_sink(self, sink):
         self.events = _Events(sink)
@@ -312,11 +335,15 @@ class HardwareCombinationStation:
                 kwargs["adapter_factory"] = self.smu_adapter_factory
             if self.sleep is not None:
                 kwargs["sleep"] = self.sleep
+            if self.monotonic is not None:
+                kwargs["monotonic"] = self.monotonic
             self.smu = ThreeSmuSession.open(
                 self.config.smu.hardware, self.config.smu.plan, authorize_writes=True,
                 authorize_status_consumption=True,
                 on_preflight=lambda role, state: self.events.event(
                     "smu_preflight_role", {"role": role, "state": asdict(state)}), **kwargs)
+            if self.config.illumination_policy == "continuous_gate_scan":
+                self.smu.enable_guarded_direct_gates()
             preflight["smu"] = {r: asdict(v) for r, v in self.smu.preflight.items()}
             self.events.event("smu_preflight", preflight["smu"])
         if self.config.lockin is not None:
@@ -324,7 +351,9 @@ class HardwareCombinationStation:
             if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
                 from .photonics_lockin_points import PhotonicsLockinPointSession
                 session_type = PhotonicsLockinPointSession
-            kwargs = {"sleep": self.sleep} if self.sleep is not None and session_type is not LockinPointSession else {}
+            kwargs = ({key: value for key, value in {"sleep": self.sleep,
+                "clock": self.monotonic}.items() if value is not None}
+                if session_type is not LockinPointSession else {})
             self.lockin = session_type(
                 self.config.path, self.config.lockin, self.events.event,
                 manager_factory=self.manager_factory, mode=self.config.lockin_mode, **kwargs)
@@ -337,6 +366,8 @@ class HardwareCombinationStation:
                 "sleep": self.sleep}.items() if value is not None}
             self.optical = OpticalPointSession(self.config.optical, self.events.event, **kwargs)
             preflight["optical"] = self.optical.open(authorize_writes=True, confirm_manual_route=True)
+        if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
+            self.lockin.reference_recovery_guard = self._reference_recovery_guard
         # All active preflights must succeed before any configuration writes.
         if self.optical is not None:
             if self.lockin is not None:
@@ -357,15 +388,21 @@ class HardwareCombinationStation:
         return _json({"mode": "hardware", "identities_and_initial_state": preflight})
 
     def apply(self, module, point):
+        if self.config.illumination_policy == "continuous_gate_scan":
+            return self._apply_continuous_gate(module, point)
         # All axis movement occurs with confirmed laser OFF, including electrical
         # inner-axis changes while the optical coordinates themselves stay fixed.
         if self.optical is not None:
             self.optical.suspend()
         if module == "optical":
             axis = next(a for a in self.config.plan.axes if a.module == "optical")
+            index = point.metadata.get("optical_point_index")
+            if (type(index) is not int or not 0 <= index < len(axis.points)
+                    or axis.points[index] != point):
+                raise ValueError("Optical point identity does not match the approved grid")
             if self.lockin is not None:
                 self.lockin.prepare_reference_transition()
-            return self.optical.set_point(axis.points.index(point))
+            return self.optical.set_point(index)
         if module in {"temperature", "magnetic"}:
             return self.cryo.apply(module, point)
         if module == "smu":
@@ -381,7 +418,66 @@ class HardwareCombinationStation:
         return {"actual": self.lockin.set_point(point.values["lockin_excitation_v_rms"],
             point.values["lockin_frequency_hz"], point_index=index)}
 
+    def _guard_continuous_optical(self):
+        if not self._optical_group_ready:
+            raise ValueError("A continuous optical group must qualify before gate movement")
+        return self.optical.observe_hold(phase="gate_transition")
+
+    def _apply_continuous_gate(self, module, point):
+        if module == "optical":
+            self._optical_group_ready = False
+            self.optical.suspend()
+            axis = next(a for a in self.config.plan.axes if a.module == "optical")
+            index = point.metadata.get("optical_point_index")
+            if (type(index) is not int or not 0 <= index < len(axis.points)
+                    or axis.points[index] != point):
+                raise ValueError("Optical point identity does not match the approved grid")
+            self.lockin.prepare_reference_transition()
+            prepared = self.optical.set_point(index)
+            fixed = next(a for a in self.config.plan.axes if a.module == "lockin").points[0]
+            # The fixed excitation is selected while dark, before any gate is
+            # moved. The coordinator later reapplies this inner axis; that call
+            # verifies the held setting rather than writing or suspending light.
+            self.lockin.set_point(fixed.values["lockin_excitation_v_rms"],
+                fixed.values["lockin_frequency_hz"], point_index=0)
+            self._verify_optical_reference()
+            self.lockin.restore_source_after_reference_transition()
+            self.lockin.qualify()
+            self.optical.qualify()
+            self.lockin.qualify()
+            self._verify_optical_reference()
+            self._optical_group_sequence += 1
+            self._optical_group_ready = True
+            self.events.event("continuous_optical_group_qualified", {
+                "group_sequence": self._optical_group_sequence,
+                "optical_point_index": index, "illumination_policy": self.config.illumination_policy,
+                "fixed_lockin": fixed.values, "requested": point.values})
+            return {**prepared, "optical_group_qualified": True,
+                    "group_sequence": self._optical_group_sequence}
+        if module == "smu":
+            self._guard_continuous_optical()
+            self._verify_optical_reference()
+            self.point = point
+            self.smu.set_point({key[:-2]: value for key, value in point.values.items()},
+                segment=point.segment, transition_guard=self._guard_continuous_optical)
+            self._guard_continuous_optical()
+            return {"requested": point.values, "illumination_held": True,
+                    "group_sequence": self._optical_group_sequence}
+        if module == "lockin":
+            fixed = next(a for a in self.config.plan.axes if a.module == "lockin").points[0]
+            if point != fixed:
+                raise ValueError("The illuminated gate group cannot change lock-in excitation")
+            self._guard_continuous_optical()
+            return {"actual": self.lockin.read_coordinates(), "source_settings_reused": True}
+        raise ValueError("Unsupported axis in continuous_gate_scan")
+
     def qualify(self, modules):
+        if self.config.illumination_policy == "continuous_gate_scan":
+            self._guard_continuous_optical()
+            self.lockin.qualify()
+            self._verify_optical_reference()
+            return {"ready": True, "mode": "hardware", "active_modules": modules,
+                    "illumination_held": True, "group_sequence": self._optical_group_sequence}
         if self.optical is not None and self.lockin is not None:
             # Prepared PEM frequency must match the external clock while XX is
             # still protected, before restoring excitation or enabling emission.
@@ -403,7 +499,13 @@ class HardwareCombinationStation:
     def begin_sample(self):
         if self.optical is not None:
             self.optical.begin_sample()
-            self._verify_optical_reference()
+            try:
+                self._verify_optical_reference()
+            except BaseException:
+                # begin_sample may fail after the optical bracket has opened.
+                # Close/check that bracket before any whole-window retry.
+                self.optical.end_sample()
+                raise
         if self.cryo is not None:
             self.cryo.begin_sample()
 
@@ -421,21 +523,55 @@ class HardwareCombinationStation:
             raise errors[0]
         self._verify_optical_reference()
 
+    def run_sample_operation(self, operation):
+        """Retry the whole before/all-modules/after window, never a partial pair."""
+        if self.config.reference_topology not in PHOTONICS_REFERENCE_TOPOLOGIES:
+            return operation()
+        return self.lockin.run_reference_operation("combination_formal_sample", operation)
+
+    def _reference_recovery_guard(self, deadline):
+        if self.optical is not None:
+            self.optical.guard_reference_recovery(deadline=deadline)
+            if self.lockin.configured:
+                self._check_pem_reference(wait_for_lock=False)
+        if self.cryo is not None:
+            self.cryo.capture("reference_recovery")
+
     def _verify_optical_reference(self):
+        if self.config.reference_topology not in PHOTONICS_REFERENCE_TOPOLOGIES or self.optical is None:
+            return
+        return self.lockin.run_reference_operation("optical_reference_check", self._check_pem_reference)
+
+    def _check_pem_reference(self, *, wait_for_lock=True):
         if self.config.reference_topology not in PHOTONICS_REFERENCE_TOPOLOGIES or self.optical is None:
             return
         if self.optical.pem is None or self.optical.last_state is None:
             raise ValueError("Prepared PEM reference evidence is missing")
-        reference_frequencies = self.lockin.read_reference_frequencies()
+        if wait_for_lock:
+            self.lockin.wait_for_reference_lock()
+        reference_frequencies = (self.lockin.read_reference_frequencies() if wait_for_lock
+                                else self.lockin.read_reference_frequencies(wait_for_lock=False))
         pem_frequency = self.optical.last_state["pem"]["frequency_hz"]
+        if not math.isfinite(pem_frequency) or pem_frequency <= 0:
+            raise ValueError("PEM mechanical frequency must be positive and finite")
+        pem_reference_harmonic = self.config.lockin.pem_reference_harmonic
+        expected_reference = pem_reference_harmonic * pem_frequency
         self.events.event("photonics_reference_check", {
             "pem_frequency_hz": pem_frequency,
+            "pem_reference_harmonic": pem_reference_harmonic,
+            "expected_external_reference_hz": expected_reference,
             "xx_reference_frequency_hz": reference_frequencies["xx"],
             "xy_reference_frequency_hz": reference_frequencies["xy"],
             "pair_tolerance_hz": self.config.lockin.pair_tolerance_hz,
             "captured_at_utc": utc_now()})
-        if any(abs(pem_frequency - value) > self.config.lockin.pair_tolerance_hz for value in reference_frequencies.values()):
-            raise ValueError("PEM frequency differs from the lock-in external reference")
+        if any(abs(expected_reference - value) > self.config.lockin.pair_tolerance_hz for value in reference_frequencies.values()):
+            from .reference_transients import ReferenceTransientError
+            raise ReferenceTransientError("PEM frequency differs from the lock-in external reference after applying the selected harmonic",
+                kind="pem_reference_mismatch", evidence={"pem_frequency_hz": pem_frequency,
+                    "pem_reference_harmonic": pem_reference_harmonic,
+                    "expected_external_reference_hz": expected_reference,
+                    "reference_frequencies_hz": reference_frequencies,
+                    "pair_tolerance_hz": self.config.lockin.pair_tolerance_hz})
 
     def read(self, module):
         if module == "optical":
@@ -478,15 +614,17 @@ class HardwareCombinationStation:
     def cleanup(self, module, failed):
         self.events.cleaning = True
         if module == "optical" and self.optical is not None:
-            # Keep the PEM reference active until the source cleanup below.
-            result = self.optical.cleanup(finish_pem=False)
+            self._optical_group_ready = False
+            # PM100D and lock-ins can share the default VISA manager. Keep it
+            # and the PEM reference open until all electrical protection finishes.
+            result = self.optical.cleanup(finish_pem=False, close_meter=False)
             clean = result["verified"]
         elif module == "lockin" and self.lockin is not None:
             result = self.lockin.cleanup()
             clean = result["verified"]
             self.source_cleanup_verified = result.get("source_protection_verified", False) is True
         elif module == "smu" and self.smu is not None:
-            result = self.smu.cleanup_points(self.events, reason="failed" if failed else "completed")
+            result = self.smu.cleanup_points(self.events, reason="failed" if failed else "completed", failed=failed)
             clean = not result["manual_verification_required"]
         elif module in {"temperature", "magnetic"} and self.cryo is not None:
             try:

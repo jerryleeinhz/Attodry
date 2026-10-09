@@ -150,6 +150,15 @@ class FeedbackConfig:
     source_current_step_pct: float | None = None
     minimum_signal_power_w: float | None = None
     reduce_above_power_w: float | None = None
+    target_mapping: str = "paired"
+    initial_current_mode: str = "point"
+    initial_source_levels_pct: tuple[float, ...] | tuple[tuple[float, ...], ...] | None = None
+
+    @property
+    def targets_per_optical_point(self):
+        if self.target_mapping not in ("paired", "cartesian"):
+            raise NktError("target_mapping must be paired or cartesian")
+        return len(self._targets()) if self.target_mapping == "cartesian" else 1
 
     def _targets(self):
         if (self.target_power_w is None) == (self.target_powers_w is None):
@@ -167,22 +176,120 @@ class FeedbackConfig:
             return target * number(self.target_tolerance_fraction, "target_tolerance_fraction", 0, 1)
         return number(self.target_tolerance_w, "target_tolerance_w", 0, target)
 
+    def _check_initial_current_mode(self):
+        if self.initial_current_mode not in ("point", "per_target", "previous", "grid"):
+            raise NktError("initial_current_mode must be point, per_target, previous or grid")
+        if self.initial_current_mode != "point" and self.actuator != "source_current":
+            raise NktError("initial_current_mode requires the source_current actuator")
+        if self.initial_current_mode != "point" and self.target_mapping != "cartesian":
+            raise NktError("Non-default initial_current_mode requires Cartesian target_mapping")
+        levels = self.initial_source_levels_pct
+        if self.initial_current_mode in ("point", "previous"):
+            if levels is not None:
+                raise NktError("point and previous initial_current_mode must omit initial_source_levels_pct")
+            return
+        if type(levels) is not tuple or not levels:
+            raise NktError("initial_source_levels_pct must be a nonempty immutable array")
+
+    def _validate_initial_current_values(self):
+        """Validate the complete immutable current array during preflight."""
+        self._check_initial_current_mode()
+        if self.initial_source_levels_pct is None:
+            return
+        levels = self.initial_source_levels_pct
+        lower = number(self.source_current_min_pct, "source_current_min_pct", 0, 100)
+        upper = number(self.source_current_max_pct, "source_current_max_pct", lower, 100)
+        targets = self._targets()
+        rows = (levels,) if self.initial_current_mode == "per_target" else levels
+        from .nkt_config import tenths
+        for row in rows:
+            if type(row) is not tuple or len(row) != len(targets):
+                raise NktError("initial_source_levels_pct requires exactly one current per target in every row")
+            for value in row:
+                tenths(number(value, "initial source current", lower, upper))
+
+    def _check_initial_grid_size(self, point_count):
+        """Constant-time outer dimensions; every row is checked by preflight."""
+        integer(point_count, "point_count", 1, 10000)
+        self._check_initial_current_mode()
+        factor = self.targets_per_optical_point
+        if self.target_mapping == "cartesian" and point_count % factor:
+            raise NktError("Cartesian point_count must cover complete target groups")
+        rows = point_count // factor
+        if self.initial_current_mode == "per_target" and rows != 1:
+            raise NktError("per_target initial_current_mode requires exactly one nkt_run.points row")
+        if self.initial_current_mode == "grid" and len(self.initial_source_levels_pct) != rows:
+            raise NktError("grid initial_source_levels_pct row count must match nkt_run.points")
+
+    def validate_initial_currents(self, point_count, nkt_max_level_pct=None):
+        """Check all starts against the expanded grid before constructing resources."""
+        self._check_initial_grid_size(point_count)
+        self._validate_initial_current_values()
+        if nkt_max_level_pct is not None:
+            number(nkt_max_level_pct, "NKT source current maximum", 0, 100)
+            levels = self.initial_source_levels_pct
+            if levels is not None:
+                current_rows = (levels,) if self.initial_current_mode == "per_target" else levels
+                for row in current_rows:
+                    for value in row:
+                        number(value, "initial source current", 0, nkt_max_level_pct)
+
+    def initial_source_level_pct(self, index, point_count, point_default):
+        """Resolve a static start; previous-mode history belongs to the point session.
+
+        Indices use row-major expanded order (optical row, then target power).
+        Previous returns the row's default; only a qualified runtime readback can
+        replace it. Scalar resolved feedback objects do not retain plan arrays.
+        """
+        integer(point_count, "point_count", 1, 10000)
+        integer(index, "point index", 0, point_count - 1)
+        self._check_initial_grid_size(point_count)
+        selected = point_default
+        if self.initial_current_mode == "per_target":
+            row = self.initial_source_levels_pct
+            if len(row) != self.targets_per_optical_point:
+                raise NktError("initial_source_levels_pct requires exactly one current per target")
+            selected = row[index]
+        elif self.initial_current_mode == "grid":
+            factor = self.targets_per_optical_point
+            row = self.initial_source_levels_pct[index // factor]
+            if type(row) is not tuple or len(row) != factor:
+                raise NktError("initial_source_levels_pct requires exactly one current per target in every row")
+            selected = row[index % factor]
+        from .nkt_config import tenths
+        lower, upper = 0, 100
+        if self.actuator == "source_current":
+            lower = number(self.source_current_min_pct, "source_current_min_pct", 0, 100)
+            upper = number(self.source_current_max_pct, "source_current_max_pct", lower, 100)
+        value = number(selected, "initial source current", lower, upper)
+        tenths(value)
+        return value
+
     def for_point(self, index, point_count):
         """Resolve one explicit NKT point to scalar W target and tolerance."""
         integer(point_count, "point_count", 1, 10000)
         integer(index, "point index", 0, point_count - 1)
+        self._check_initial_grid_size(point_count)
+        if self.initial_current_mode in ("per_target", "grid"):
+            self.initial_source_level_pct(index, point_count, None)
         targets = self._targets()
-        if self.target_powers_w is not None and len(targets) != point_count:
+        factor = self.targets_per_optical_point
+        if self.target_mapping == "cartesian" and point_count % factor:
+            raise NktError("Cartesian point_count must cover complete target groups")
+        if self.target_mapping == "paired" and self.target_powers_w is not None and len(targets) != point_count:
             raise NktError("target_powers_w length must match nkt_run.points")
         limit = number(self.max_power_w, "feedback max_power_w", 1e-15, 1e6)
-        target = number(targets[index] if self.target_powers_w is not None else targets[0],
+        target_index = index % factor if self.target_mapping == "cartesian" else index
+        target = number(targets[target_index] if self.target_powers_w is not None else targets[0],
                         "target_power_w", 1e-15, limit)
         resolved = replace(self, target_power_w=target, target_tolerance_w=self._tolerance(target),
-                           target_powers_w=None, target_tolerance_fraction=None)
+                           target_powers_w=None, target_tolerance_fraction=None,
+                           initial_current_mode="point", initial_source_levels_pct=None)
         resolved.validate()
         return resolved
 
     def validate(self):
+        self.targets_per_optical_point
         if self.actuator not in ("varia_nd", "source_current"):
             raise NktError("Feedback actuator must be varia_nd or source_current")
         self.window.validate()
@@ -228,6 +335,7 @@ class FeedbackConfig:
             number(self.source_current_step_pct, "source_current_step_pct", 0.1, 100)
             for value in current_values:
                 tenths(value)
+        self._validate_initial_current_values()
 
 
 @dataclass(frozen=True)
@@ -238,11 +346,22 @@ class ScanConfig:
     sample_interval_s: float
     peak_retardance_waves: float | None = None
     feedback: FeedbackConfig | None = None
+    target_deviation_policy: str = "abort"
+
+    def require_standalone_scan(self):
+        if self.target_deviation_policy != "abort" or (self.feedback and
+                (self.feedback.target_mapping != "paired" or self.feedback.initial_current_mode != "point")):
+            raise NktError("target_deviation_policy, Cartesian target_mapping and initial_current_mode are optical point session "
+                           "options, unsupported by the standalone optical scan")
 
     def validate(self, nkt, pem=None, pm=None):
         nkt.validate()
         if self.mode not in ("direct", "power_stabilized"):
             raise NktError("Optical mode must be direct or power_stabilized")
+        if self.target_deviation_policy not in ("abort", "record_continue"):
+            raise NktError("target_deviation_policy must be abort or record_continue")
+        if self.mode != "power_stabilized" and self.target_deviation_policy != "abort":
+            raise NktError("target_deviation_policy requires power_stabilized mode")
         boolean(self.use_pem, "use_pem")
         boolean(self.use_power_meter, "use_power_meter")
         number(self.sample_interval_s, "sample_interval_s", 0.001, 3600)
@@ -270,8 +389,11 @@ class ScanConfig:
                 number(self.feedback.source_current_max_pct, "source current maximum", 0, nkt.max_level_pct)
             if self.feedback.max_power_w > pm.max_power_w:
                 raise NktError("Feedback limit exceeds PM limit")
+            factor = self.feedback.targets_per_optical_point
+            integer(len(nkt.points) * factor, "expanded optical point count", 1, 10000)
+            self.feedback.validate_initial_currents(len(nkt.points) * factor, nkt.max_level_pct)
             for i, point in enumerate(nkt.points):
-                self.feedback.for_point(i, len(nkt.points))
+                self.feedback.for_point(i * factor, len(nkt.points) * factor)
                 if self.feedback.actuator == "varia_nd":
                     number(point.nd_pct, "initial ND", self.feedback.nd_min_pct, self.feedback.nd_max_pct)
                 else:
@@ -308,7 +430,7 @@ def load_scan_config(path, nkt):
     doc = document(path)
     table = doc.get("optical_scan", {})
     keys(table, "optical_scan", {"mode", "use_pem", "use_power_meter", "sample_interval_s"},
-         {"peak_retardance_waves"})
+         {"peak_retardance_waves", "target_deviation_policy"})
     feedback = None
     if table["mode"] == "power_stabilized":
         raw = doc.get("power_feedback", {})
@@ -316,7 +438,8 @@ def load_scan_config(path, nkt):
         optional = {"target_power_w", "target_powers_w", "target_tolerance_w", "target_tolerance_fraction",
                     "actuator", "nd_min_pct", "nd_max_pct", "nd_step_pct", "increasing_nd_increases_power",
                     "source_current_min_pct", "source_current_max_pct", "source_current_step_pct",
-                    "minimum_signal_power_w", "reduce_above_power_w"}
+                    "minimum_signal_power_w", "reduce_above_power_w", "target_mapping",
+                    "initial_current_mode", "initial_source_levels_pct"}
         keys(raw, "power_feedback", names - optional, optional)
         window = raw["window"]
         keys(window, "power_feedback.window", {f.name for f in fields(WindowConfig)})
@@ -328,6 +451,11 @@ def load_scan_config(path, nkt):
             if type(values["target_powers_w"]) is not list:
                 raise NktError("target_powers_w must be an array")
             values["target_powers_w"] = tuple(values["target_powers_w"])
+        if "initial_source_levels_pct" in values:
+            if type(values["initial_source_levels_pct"]) is not list:
+                raise NktError("initial_source_levels_pct must be an array")
+            values["initial_source_levels_pct"] = tuple(
+                tuple(row) if type(row) is list else row for row in values["initial_source_levels_pct"])
         feedback = FeedbackConfig(**values)
     pem = load_pem_config(path) if table["use_pem"] else None
     pm = load_pm_config(path) if table["use_power_meter"] else None

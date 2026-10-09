@@ -313,6 +313,72 @@ class JointTests(unittest.TestCase):
 
 
 class ConfigAndCliTests(unittest.TestCase):
+    def test_point_session_options_reject_before_standalone_resource_factories(self):
+        original = (ROOT / "config/optical_source_current_simulation.toml").read_text(encoding="utf-8")
+        for table, key, value in (("optical_scan", "target_deviation_policy", "record_continue"),
+                                  ("power_feedback", "target_mapping", "cartesian")):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as td:
+                path = Path(td) / "config.toml"
+                path.write_text(original.replace('[' + table + ']', '[' + table + ']\n' +
+                    key + ' = "' + value + '"'), encoding="utf-8")
+                with patch("attodry_control.optical_cli.SimulatedNkt") as backend, \
+                     patch("attodry_control.optical_cli._device") as device, \
+                     redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors:
+                    self.assertEqual(scan_main(["simulate", "--config", str(path)]), 2)
+                backend.assert_not_called()
+                device.assert_not_called()
+                self.assertIn("standalone optical scan", errors.getvalue())
+
+    def test_target_mapping_loading_and_legacy_length_contract(self):
+        original = (ROOT / "config/optical_source_current_simulation.toml").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "config.toml"
+            nkt = load_nkt_config(ROOT / "config/optical_source_current_simulation.toml")
+            for value in ('"paired"', '"cartesian"', '"auto"', 'true', '2', '["paired"]'):
+                with self.subTest(value=value):
+                    path.write_text(original.replace('[power_feedback]',
+                        '[power_feedback]\ntarget_mapping = ' + value), encoding="utf-8")
+                    if value in ('"paired"', '"cartesian"'):
+                        config, _, _ = load_scan_config(path, nkt)
+                        self.assertEqual(config.feedback.target_mapping, json.loads(value))
+                    else:
+                        with self.assertRaises(NktError):
+                            load_scan_config(path, nkt)
+            path.write_text(original, encoding="utf-8")
+            with self.assertRaisesRegex(NktError, "length must match"):
+                load_scan_config(path, replace(nkt, points=nkt.points[:1]))
+            config, _, _ = load_scan_config(path, nkt)
+            self.assertEqual(config.feedback.target_mapping, "paired")
+        s = scanner(mode="power_stabilized")
+        s.config = replace(s.config, feedback=replace(s.config.feedback, target_mapping="cartesian"))
+        with self.assertRaisesRegex(NktError, "standalone optical scan"):
+            s.run()
+        self.assertEqual(s.nkt.backend.commands, [])
+
+    def test_target_deviation_policy_is_explicit_validated_and_point_session_only(self):
+        original = (ROOT / "config/optical_source_current_simulation.toml").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "config.toml"
+            path.write_text(original, encoding="utf-8")
+            nkt = load_nkt_config(path)
+            config, pem, pm = load_scan_config(path, nkt)
+            self.assertEqual(config.target_deviation_policy, "abort")
+            for value in ('"abort"', '"record_continue"', '"ignore"', 'true', '1', '["abort"]'):
+                with self.subTest(value=value):
+                    path.write_text(original.replace('[optical_scan]',
+                        '[optical_scan]\ntarget_deviation_policy = ' + value), encoding="utf-8")
+                    if value in ('"abort"', '"record_continue"'):
+                        loaded, _, _ = load_scan_config(path, nkt)
+                        self.assertEqual(loaded.target_deviation_policy, json.loads(value))
+                    else:
+                        with self.assertRaises(NktError):
+                            load_scan_config(path, nkt)
+        s = scanner(mode="power_stabilized")
+        s.config = replace(s.config, target_deviation_policy="record_continue")
+        with self.assertRaisesRegex(NktError, "standalone optical scan"):
+            s.run()
+        self.assertEqual(s.nkt.backend.commands, [])
+
     def test_unverified_feedback_cli_rejects_before_sdk_construction_and_still_simulates(self):
         original = EXAMPLE.read_text().replace('backend = "simulation"', 'backend = "nkt_sdk"', 1)
         original = original.replace('mode = "direct"', 'mode = "power_stabilized"')

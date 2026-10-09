@@ -85,6 +85,7 @@ def launch_summary(config, database, run_id):
         "samples_per_condition": config.plan.samples_per_condition,
         "total_samples": count * config.plan.samples_per_condition,
         "cleanup": config.snapshot["cleanup_policy"], "hardware_resume": False}
+    summary["illumination_policy"] = config.illumination_policy
     if config.magnetic is not None:
         summary["field_transition_policy"] = config.magnetic.run.transition_policy.value
         policy = config.snapshot["field_readback_policy"]
@@ -95,7 +96,10 @@ def launch_summary(config, database, run_id):
     if config.smu is not None:
         summary["smu"] = {role: {"source_mode": device.source_mode.value,
             "max_abs_voltage_v": device.max_abs_voltage_v,
-            "max_abs_current_a": device.max_abs_current_a}
+            "max_abs_current_a": device.max_abs_current_a,
+            "zero_readback_tolerance_v": getattr(config.smu.plan, role).zero_readback_tolerance_v,
+            "ramp": (asdict(getattr(config.smu.plan, role).ramp)
+                     if getattr(config.smu.plan, role).ramp is not None else None)}
             for role, device in config.smu.hardware.by_role().items()}
     from .photonics_lockin_config import PHOTONICS_REFERENCE_TOPOLOGIES
     if config.lockin is not None and config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
@@ -104,8 +108,17 @@ def launch_summary(config, database, run_id):
         summary["lockin"] = {
             "mode": config.lockin_mode, "internal_order": ["excitation"],
             "reference_topology": config.reference_topology,
+            "pem_reference_harmonic": device_config.pem_reference_harmonic,
+            "pem_harmonics_by_role": {role: [device_config.pem_reference_harmonic * h for h in harmonics]
+                                      for role, harmonics in hardware["harmonics_by_role"].items()},
+            "expected_detection_hz_by_role": {role: [device_config.reference_expected_hz * h for h in harmonics]
+                                              for role, harmonics in hardware["harmonics_by_role"].items()},
             "harmonics_by_role": hardware["harmonics_by_role"],
-            "skipped_harmonics_by_frequency": {}, "overload_policy": "abort",
+            "skipped_harmonics_by_frequency": {}, "overload_policy": config.lockin.overload_policy,
+            "reference_unlock_policy": device_config.reference_unlock_policy,
+            "reference_transient_policy": device_config.reference_transient_policy,
+            "reference_recovery_timeout_s": device_config.reference_recovery_timeout_s,
+            "reference_recovery_consecutive_good": device_config.reference_recovery_consecutive_good,
             "settle_time_constants": device_config.settle_time_constants,
             "baseline_frequency_hz": device_config.reference_expected_hz,
             "reference_bounds_hz": [device_config.reference_min_hz, device_config.reference_max_hz],

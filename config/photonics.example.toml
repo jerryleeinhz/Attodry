@@ -1,9 +1,9 @@
 # 光电联合配置模板；解释见 docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md。
-# 本源模板不保存本机地址；LK_setup 上的同名未提交副本可填入只读核验值。
+# 本源模板不保存本机地址；复制到 ignored photonics.local.toml 后填入核验值。
 # 当前接线：PEM REF OUT -> XY(SR865A) REF IN；
 # XY SINE OUT+ -> XX(SR830) REF IN；XX SINE OUT -> 样品，无外部50Ω终端。
 # 示例数字不代表样品安全限值，也不代表 h2 相位已标定。
-# Copy to ignored hardware.local.toml; copy the companion safety example to
+# Copy to ignored photonics.local.toml; copy the companion safety example to
 # ignored photonics_lockin_safety.local.toml beside it. Replace every CHANGE_ME
 # and verify ALL settings against the station/sample before commissioning.
 # Deliberately invalid placeholders make strict offline loading fail closed.
@@ -20,10 +20,16 @@ backend = "hardware"
 # 可选：pem_xy_xx_sine（当前接线）；pem_xx_xy（原 PEM->XX->XY TTL 链）；
 # internal_xx_xy（旧双 SR830 电学路径，不使用这份光电锁相配置）。
 reference_topology = "pem_xy_xx_sine"
-# PEM 拥有基频；光电 profile 当前只能 excitation，不能扫内部频率。
+# PEM 拥有机械基频；所选1f/2f参考由下方pem_reference_harmonic声明。
+# 光电 profile 当前只能 excitation，不能扫内部频率。
 lockin_mode = "excitation"
 # 顺序为外层 -> 内层。也可 ["lockin", "optical"]；加入环境/SMU须补对应表。
 order = ["optical", "lockin"]
+# 可选：off_before_axis_change（省略时默认，每次轴变化前关光）；
+# continuous_gate_scan（仅 optical -> smu -> lockin、固定一个激励点、voltage gate）。
+# 后者每个光学组合先调功/dwell一次，组内持续照光；gate可直接跳转或可选ramp。
+# 直接跳转须在active gate计划子表设置zero_readback_tolerance_v，实际回零才确认完成。
+illumination_policy = "off_before_axis_change"
 # 两项均为 1--1000 的整数；总正式样本数不得超过 100000。
 samples_per_condition = 1
 repeats = 1
@@ -45,13 +51,38 @@ timeout_ms = 5000
 schema_version = 1
 # 相对本 TOML 的路径；不能直接用旧 lockin_safety.toml 代替。
 safety_file = "photonics_lockin_safety.local.toml"
-# Illustrative interval around the observed approximately 50.027 kHz PEM 1f.
-# Validate actual PEM/XX/XY readbacks and receiver thresholds at the station.
+# 可选整数1 / 2，省略默认1；声明硬件已选的PEM REF OUT倍数，不写PEM输出选择命令。
+# 先在PEM硬件选1f/2f；运行时要求XX/XY实际参考均接近本倍数×PEM机械基频。
+pem_reference_harmonic = 1
+# 以下范围/计划坐标描述两台锁相收到的外参考频率，不是PEM机械基频。
+# 1f示例：49000 / 51000 / 50027 Hz。
+# 2f示例：将上面设为2，并把下面三项分别改为98000 / 102000 / 100054 Hz。
+# [pem].frequency_min_hz/max_hz仍保持机械基频49000 / 51000 Hz。
 reference_min_hz = 49000.0
 reference_max_hz = 51000.0
 reference_expected_hz = 50027.0
-# PEM、XX、XY 的实际基频差上限；不因一次失配自动放宽。
+# XX↔XY及(倍数×PEM机械基频)↔XX/XY的频差上限；单位是锁相外参考Hz。
+# 不因一次失配自动放宽，也不随倍数自动放大。
+# 单位 Hz，必须为有限正数；不再按 reference_min_hz 的 0.1% 限制配置上限。
 pair_tolerance_hz = 0.5
+# 可选 abort / record_continue；省略默认 abort。此项同时适用于XX和XY。
+# record_continue保存过载原始读数并继续；受影响角色标为无效，默认分析排除。
+# 参考失锁由下方独立策略控制；通信/仪器错误、未知状态、同步滤波故障和功率检查仍会中止。
+overload_policy = "record_continue"
+# 可选 abort / record_continue；省略默认 abort。适用于XX/XY当前和锁存的参考失锁。
+# record_continue保留原始失锁状态并继续；共同参考链受影响的正式Vxx/Vxy两路均标无效，默认分析排除。
+# 若45秒仍未锁定，保存超时与最后状态后继续；仍须通过频率范围/频差、激励、设置和功率检查。
+reference_unlock_policy = "record_continue"
+# 0–600 秒；省略/0保留原转换检查而不额外轮询。外参或PEM准备后每1秒检查一次。
+# 两台锁定且频率一致就继续；45秒是超时，过载按上述策略处理。保持XX低激励，滤波等待另计。
+reference_lock_timeout_s = 45.0 # 每1秒检查；abort策略超时中止，record_continue策略保存失锁超时后继续频率检查。
+# 可选 abort / wait_stable；省略默认 abort。仅恢复已知参考瞬态，不忽略真正设置/通信/功率错误。
+# wait_stable：保留SR830 RANGE16、参考越界/频差异常，重取完整光电采样窗口。
+reference_transient_policy = "wait_stable"
+# (0,600]秒；同一失败操作的恢复/滤波等待/重试共用截止时间，不因再次异常重置。
+reference_recovery_timeout_s = 45.0
+# 1..100整数；每1秒检查，连续合格后按settle_time_constants等待，期间仍监控。
+reference_recovery_consecutive_good = 3
 # >=10；实际每次等待 = 此值 * max(XX tau, XY tau)。可设 15.0。
 settle_time_constants = 10.0
 # >=0，单位秒；同一条件第2次及后续电学样本前的额外等待。
@@ -124,7 +155,8 @@ sensitivity_mode = "fixed"
 sensitivity_full_scale_v = "CHANGE_ME_XX_FULL_SCALE_V"
 # 数字-180..180度；设置PHAS，不是测量结果phase_deg，不自动标定。
 phase_shift_deg = "CHANGE_ME_XX_PHASE_DEG"
-# 当前约50kHz，SR830 h3超102kHz，故XX示例只用h1；可[1,2]须逐点频率允许。
+# 1f参考约50kHz时可[1,2]；2f参考约100kHz时SR830只能[1]，上限102kHz。
+# h1/h2相对锁相收到的参考定义：2f参考下h1=PEM2f，h2=PEM4f。
 harmonics = [1]
 
 [lockin_xx.sr830]
@@ -161,6 +193,7 @@ sensitivity_full_scale_v = "CHANGE_ME_XY_FULL_SCALE_V"
 # 当前读回PHAS若来自h1，填入不代表h2相位已标定。
 phase_shift_deg = "CHANGE_ME_XY_PHASE_DEG"
 # 仅支持1/2/3的软件采样列表；唯一升序，如[2]、[1,2,3]。
+# 2f参考下[1]测PEM2f、[2]测PEM4f、[1,2]分别测两者；SR865A仍检查检测频率上限。
 harmonics = [2]
 
 [lockin_xy.sr865a]
@@ -237,8 +270,11 @@ output_directory = "../run_data/photonics/optical"
 run_name = "CHANGE_ME_OPTICAL_RUN_NAME"
 note = "Explicit 2-wavelength x 2-power point grid; no approved limits in this template"
 # Row order: (lambda_A, P_A), (lambda_A, P_B), (lambda_B, P_A), (lambda_B, P_B).
-# target_powers_w below maps one-to-one to these rows. A one-point first test
-# must reduce BOTH lists to one element. Omitted ND/PP are preserved and checked.
+# paired 模式下 target_powers_w 与这些行一一对应；单点测试须同时减少两组。
+# cartesian 模式下只减少需要的波长行/功率轴。省略的 ND/PP 保留并核验。
+# 下面的四行演示paired；改用cartesian时，每个波长只保留一行，功率数组只写一次。
+# 单波长光强扫描：保留一行630nm，在power_feedback设target_mapping="cartesian"，
+# 再写target_powers_w=[10e-6,100e-6,500e-6,1e-3,2e-3,3e-3]，得到1x6点。
 # 每行source_level_pct是初始电流%，不是W；反馈后实际电流可能不同。
 # VARIA中心波长400--840nm，带宽10--100nm；两滤波边沿也须在400--840内。
 # 格式示例（非实验授权）：{source_level_pct=5.0,wavelength_nm=630.0,bandwidth_nm=10.0}
@@ -295,6 +331,11 @@ max_power_w = "CHANGE_ME_APPROVED_MEASURED_POWER_LIMIT_W"
 measurement_plane = "CHANGE_ME_ACTUAL_POWER_MEASUREMENT_PLANE"
 
 [optical_scan]
+# abort / record_continue；省略默认abort。仅光学点流程（组合扫描/PEM诊断）使用。
+# 初始调功仍须达到下面的容差和稳定窗口；之后功率偏离只记录、不调功、不拒绝数据。
+# 实测功率用于分析；硬功率上限、降功率阈值、有效读数及仪器安全检查仍生效。
+# 独立 optical_cli/optical_test 的旧调功扫描不接受此非默认策略。
+target_deviation_policy = "record_continue"
 # power_stabilized / direct；direct不执行目标W闭环，切换需移除反馈相关表。
 mode = "power_stabilized"
 # 当前PEM参考组合要求true；有W反馈时功率计也必须true。
@@ -306,13 +347,27 @@ sample_interval_s = "CHANGE_ME_OPTICAL_SAMPLE_INTERVAL_S"
 peak_retardance_waves = "CHANGE_ME_REQUESTED_RETARDANCE_WAVES"
 
 [power_feedback]
+# paired / cartesian；省略默认paired。
+# paired: 数组与nkt_run.points逐行对应。cartesian: 每条光学行 x 全部目标功率。
+# 如cartesian，一行630nm + 六个功率 = 6点；两行630/650nm + 六功率 = 12点。
+# 顺序是第一行依次扫全部功率，再第二行；勿重复写同一波长行以复制目标功率。
+# 要用自动组合，把下一行改为 target_mapping = "cartesian"。
+# paired仍允许有意重复点；cartesian也不会自动去重，展开光学点总数1--10000。
+target_mapping = "paired"
 # source_current / varia_nd；后者须另行实机验证ND控制并配置其边界。
 # 当前模板为source_current，保持ND和pulse picker现值。
 actuator = "source_current"
 # 二选一：逐行target_powers_w数组，或所有光学行共用target_power_w标量。
-# 数组长度必须等于nkt_run.points行数；下面是2波长x2功率的对应顺序。
+# paired: 数组长度等于nkt_run.points行数；下面演示2波长x2功率逐行对应。
+# cartesian: 数组是各波长共用的功率轴，长度无需等于光学行数。
 target_powers_w = ["CHANGE_ME_P_A_W", "CHANGE_ME_P_B_W", "CHANGE_ME_P_A_W", "CHANGE_ME_P_B_W"]
 # target_power_w = 10e-6  # W，仅语法示例；启用时删除上面的数组。
+# cartesian功率轴示例（单位W；只保留一条active target_powers_w或target_power_w）：
+# target_powers_w = [10e-6,100e-6,500e-6,1e-3,2e-3]        # 5个功率
+# target_powers_w = [10e-6,100e-6,500e-6,1e-3,2e-3,3e-3]  # 6个功率
+# 一条nkt_run.points行 x 五/六功率 = 5/6点；两条不同波长行 x 六功率 = 12点。
+# source_level_pct=25.0 是25%初始电流；wavelength_nm=630.0是中心波长；bandwidth_nm=10.0是带宽。
+# 实际发光功率取决于光路，并记录在optical_power_w；功率目标不能替代实测值。
 # 二选一：相对误差fraction(0--1，如0.05=5%)，或绝对target_tolerance_w。
 target_tolerance_fraction = "CHANGE_ME_POWER_FRACTIONAL_TOLERANCE"
 # target_tolerance_w = 0.5e-6
@@ -339,3 +394,47 @@ min_samples = "CHANGE_ME_POWER_WINDOW_MIN_SAMPLES"
 sample_interval_s = "CHANGE_ME_POWER_SAMPLE_INTERVAL_S"
 # W绝对峰峰波动阈值，例如0.5e-6；不是目标容差fraction，也不是标准差。
 max_peak_to_peak_w = "CHANGE_ME_POWER_WINDOW_PEAK_TO_PEAK_W"
+
+# 光学 × gate × lockin 示例：启用时修改上方order及illumination_policy，
+# 将下方相关行取消注释；硬件边界/地址必须填写已确认值。不要重复同名表。
+# [gate_bottom]
+# model = "Keithley2400"
+# address = "CHANGE_ME_GATE_BOTTOM_VISA_ADDRESS"
+# source_mode = "voltage" # continuous_gate_scan只支持gate_top/gate_bottom的voltage。
+# max_abs_voltage_v = "CHANGE_ME_APPROVED_GATE_VOLTAGE_LIMIT_V"
+# max_abs_current_a = "CHANGE_ME_APPROVED_GATE_CURRENT_LIMIT_A" # 当前样品示例1e-5=10uA。
+# nplc = 1.0
+# source_auto_range = true
+# measure_auto_range = true
+# four_wire = false
+# [three_smu_run]
+# output_directory = "../run_data/three_smu"
+# run_name = "gate-under-light"
+# note = "XX excitation physically disconnected from sample when measuring pure optical response"
+# mode = "bottom_gate_transfer" # 单bottom gate；双gate使用现有multi_smu_map契约。
+# samples_per_point = 1 # combination由samples_per_condition接管。
+# delay_s = 0.1 # gate设置完成后额外电学等待，不代替锁相滤波settle。
+# serpentine = false # 此模式不会自动跨光学组合反转扫压方向。
+# finish_action = "zero_disable"
+# point_count = 1
+# pulse_high_s = 0.0
+# pulse_period_s = 0.0
+# [three_smu_run.smu_bias]
+# role = "off" # 持续照光gate模式禁止bias扫描。
+# [three_smu_run.gate_top]
+# role = "off"
+# [three_smu_run.gate_bottom]
+# role = "sweep"
+# ranges = [{min=-35.0,max=35.0,scale="linear",points=21}] # 正式目标示例，须样品批准。
+# bidirectional = false # true追加反向点；21点变41点。
+# zero_readback_tolerance_v = 0.05 # 直接跳转时实际回零容差(V)，有限>0；不是电流限额。
+# 不写下方ramp表即直接跳到每个正式目标（跨组也直接跳转）。保留V/I及compliance检查。
+# [three_smu_run.gate_bottom.ramp]
+# 可选小步进：该表存在时以下四项全部必填；省略表使用direct，不产生内部中间点。
+# 启用ramp时删除上方zero_readback_tolerance_v；回零改用ramp.readback_tolerance_v。
+# max_step_v = 0.5 # >0V，内部请求台阶上限；中间点只审计，不增加正式点。
+# step_interval_s = 0.2 # >0s，每步至少等待；读回/功率查询会额外耗时。
+# readback_tolerance_v = 0.05 # >0且<max_step_v/2；实际V与每步目标的容差，非厂家精度保证。
+# timeout_s = 600.0 # >0s，单次ramp全程预算，包含守卫/等待/查询；不延长调功预算。
+# 启用gate_top时同样添加[gate_top]及计划子表；direct设置zero_readback_tolerance_v，ramp表可选。
+# 任何已观察到的compliance/超流/未知状态/通信错误均停止，不受lockin record_continue影响。

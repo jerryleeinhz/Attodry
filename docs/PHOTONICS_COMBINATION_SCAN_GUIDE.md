@@ -1,5 +1,291 @@
 # Photonics / nonlinear Hall combination scan
 
+## 持续照光 gate 扫描与直接跳转（2026-10-06）
+
+用户批准的模式适用于 `order=["optical","smu","lockin"]`、PEM 外参考、
+一个固定锁相激励点及 voltage-source 的 gate_top/gate_bottom。`smu_bias` 必须 off。
+电流/电压、激光功率/电流、型号/谐波、参考状态和通信保护保持原规则。
+
+在已有 `[combination_scan]` 中选择：
+
+```toml
+illumination_policy = "continuous_gate_scan"
+```
+
+可选值是 `off_before_axis_change`（省略时默认旧流程）和 `continuous_gate_scan`。
+持续照光模式不支持 bias/current source、软件 pulse、温度/磁场轴或多个激励点。
+每个 active gate 可以直接跳转，也可显式配置 ramp；旧模式仍可单独启用 ramp。
+
+流程：确认关光 → 准备波长、功率和 PEM → 暗态选择固定锁相点并核验参考
+→ 开光/闭环调功/完成一次 `nkt_run.dwell_s` → 设置第一个 gate。
+组内后续 gate 持续照光，设置 gate 后等待 `three_smu_run.delay_s`，再进行电学/
+锁相稳定等待与采样；固定锁相激励点重用并读回核验，不重复写激励或重新调功。
+每个正式样本继续保存新鲜功率及 before/formal/after 检查，目标偏离按原
+`target_deviation_policy` 处理。切换下一个光学点、结束及异常清理均先关光。
+调功仍可能为调整激光电流而关开光。重复光学行/目标以及 repeats 均保留身份，
+各自重新资格。
+
+直接跳转示例（合并到已有计划子表，不要重复同名表）：
+
+```toml
+[three_smu_run.gate_bottom]
+role = "sweep"
+ranges = [{min=-30.0, max=30.0, scale="linear", points=11}]
+bidirectional = false
+zero_readback_tolerance_v = 0.05
+```
+
+删除整个 `[three_smu_run.gate_bottom.ramp]` 表及其四项参数，即每点只发送一次
+目标电压。跨光学组的 +30 V → −30 V 也直接跳转。`zero_readback_tolerance_v`
+是正常清理时实际回零的电压容差，持续照光 direct 模式必须显式设置，有限且 >0，
+不得超过该 gate 的电压上限；示例 0.05 V 沿用当前样品原已批准的回零容差。
+它不设置扫压步长，不增加正式点，也不更改电流限制。gate_top 使用同名参数。
+
+每次 direct 写前及 `delay_s` 后读取新鲜实际 V/I、source register、output、
+compliance 和错误状态，期间继续核验光照；原始检查进入审计，不增加正式样本。
+写后 source register 必须等于请求目标；不符时保留目标/寄存器/实际读数并停止，
+不自动放宽寄存器确认。扫点不另设实际电压与目标的偏差容差；实际 V/I 按原限值检查。
+超流、限流、未知状态、通信或设置异常仍中断。lockin 的 record_continue
+不能覆盖 SMU 保护。直接跳转及保护轮询不能保证没有更短的充电电流尖峰。
+
+若以后恢复小步进，删除 direct 的 `zero_readback_tolerance_v`，再添加以下可选表：
+
+```toml
+[three_smu_run.gate_bottom.ramp]
+max_step_v = 0.5
+step_interval_s = 0.2
+readback_tolerance_v = 0.05
+timeout_s = 600.0
+```
+
+四项全部必填：均为有限正数，`readback_tolerance_v < max_step_v/2`。
+启动、普通点、跨组回跳与正常回零采用已配置 ramp，每步保留新鲜保护检查。
+`step_interval_s` 是最少等待，IO/功率守卫额外耗时；timeout 包括读回、等待和守卫，
+不重置或放宽光学调功预算。中间点仅审计，不改变正式 points 数目。
+
+正常 direct 清理直接请求 0 V，经等待及实际零点核验后关闭输出；ramp 清理仍
+逐步回零。失败或状态不可信时优先关闭输出，保留最后确认读数和人工核验标记。
+source register=0 或输出 OFF 均不能证明栅极电容已经放空。XX 测纯光学响应时
+须按用户确认实际断开 SINE OUT→样品；4 mV 设置不能代替物理隔离。
+
+LK_setup 当前计划保持5个波段×6个目标光强×11个gate（−30至+30 V），
+共330个条件、每条件3次正式采样。每组仅进行一次光学资格流程，共30次；
+锁相积分、h1/h2切换、settle及实际IO仍需等待。direct 变更只做离线验证和文件
+部署，用户已停止的扫描不自动重启；此前停止后的实际栅压仍需人工核验。
+
+
+## 波长设置 × 目标功率自动组合（2026-10-06）
+
+以下片段合并进原有完整 TOML，其他仪器、反馈和安全参数继续保留：
+
+```toml
+[nkt_run]
+points = [
+  {source_level_pct = 25.0, wavelength_nm = 630.0, bandwidth_nm = 10.0},
+]
+
+[power_feedback]
+target_mapping = "cartesian"
+target_powers_w = [10e-6, 100e-6, 500e-6, 1e-3, 2e-3, 3e-3]
+```
+
+这段数组有6个功率，所以一条光学行自动生成1×6=6点；写5个功率才是1×5。
+再添加一行不同波长（如650nm），即2×6=12点。按光学行在外、目标功率在内
+展开：630nm依次六功率，然后650nm依次六功率。每行的初始电流、带宽、ND/PP
+等完整设置随该行保留；不自动去重，也不把source_level_pct当成光功率。
+示例数字沿用本次实验/语法说明，不为其他样品提供安全授权。
+
+`target_mapping` 可选 `paired` / `cartesian`，省略默认 `paired`。旧模式的数组
+仍须逐行对应，长度等于nkt_run.points；标量target_power_w两种模式均可用于
+所有光学行。cartesian数组长度独立，所有展开的目标都须通过原功率/容差限值，
+展开后的光学总点数最多10000。显式重复的光学行/功率会保留，计入总点数。
+锁相激励轴、其他环境轴和重复次数在这之后继续组合；groups/sample不是功率点数。
+
+读取和展开发生在离线加载阶段，预览会显示输入行数、模式和实际展开点数，
+每个condition保存其波长/目标功率组合。原始TOML、输入行、展开计划和策略
+都保留在运行快照。组合扫描及PEM诊断共用此点流程；独立光学旧循环不接受cartesian。
+
+## 每个目标功率的起始电流（2026-10-06）
+
+`power_feedback.initial_current_mode` 决定闭环调功从哪个电流设置开始，
+不增加扫描轴，也不改变目标容差、稳定窗口、hold、总超时或正式功率采集。
+开始发光后仍须用功率计实际测量并完成反馈资格检查；起始电流不是目标功率的保证。
+电流单位是 NKT 驱动电流百分比，不是样品光电流，也不是光功率百分比。
+
+| 模式 | `initial_source_levels_pct` | 含义与限制 |
+|---|---|---|
+| `point`，省略时默认 | 不得提供 | 每个点使用原 `nkt_run.points` 行的 `source_level_pct`；兼容 `paired` 和 `cartesian`。 |
+| `previous` | 不得提供 | 只用于 `cartesian`。每条原始光学行第一点使用行内起始电流，其后使用上一合格点实测确认的电流。 |
+| `per_target` | 一维数组，长度 N | 只用于 `cartesian` 且原光学行只有一条；第 j 个电流对应功率轴的第 j 个目标。 |
+| `grid` | 二维数组，M 行 × N 列 | 只用于 `cartesian`；第 i 行对应原 `nkt_run.points` 第 i 条，第 j 列对应功率轴第 j 个目标。 |
+
+M 是展开前的原始光学行数，N 是目标功率轴的长度；若使用标量
+`target_power_w`，N=1。显式重复行/功率仍分别占一行/列，不能省略其电流值。
+所有起始电流须为有限数字、以 0.1% 为步进，并落在
+`source_current_min_pct..source_current_max_pct` 和 NKT 源允许区间内。
+原行的 `source_level_pct` 也继续受原配置边界校验。
+数组形状、模式组合和边界在打开仪器前校验，错误时不会开始发光。
+
+下面片段替换完整配置中的对应表/字段；其余身份、接线和批准限值继续保留，
+不要在同一 TOML 重复添加同名表或同名键。`previous`、`per_target` 和 `grid`
+仅支持 `actuator="source_current"`，用于组合扫描和共用 OpticalPointSession 的
+PEM 内参考诊断。独立 `optical_cli`/`optical_test` 的旧调功循环在资源构造前
+拒绝这三种模式。保留旧入口时使用 `point` 及该入口原有的目标映射策略。
+
+### 自动继承上一点：`previous`
+
+```toml
+[nkt_run]
+points = [
+  {source_level_pct = 25.0, wavelength_nm = 630.0, bandwidth_nm = 10.0},
+  {source_level_pct = "CHANGE_ME_650NM_FIRST_CURRENT_PCT", wavelength_nm = 650.0, bandwidth_nm = 10.0},
+]
+
+[power_feedback]
+actuator = "source_current"
+target_mapping = "cartesian"
+target_powers_w = [10e-6, 100e-6, 500e-6, 1e-3, 2e-3, 3e-3]
+initial_current_mode = "previous"
+# 不填写initial_source_levels_pct。
+```
+
+630 nm 的第一个功率从25%起步；若调功合格时读回29%，第二个功率从29%起步。
+650 nm 的第一点重新用第二条光学行指定的起点，不能沿用630 nm最后一点的电流。
+这里的650 nm起点未标定，必须把占位换成已确认的数字。
+行身份以输入行号区分：即使两行波长相同，也不能自动跨行继承。
+上一点失败、没有合格且确认的读回或访问乱序时，继承状态重置；
+重新运行也不会从旧数据库恢复电流。只复用调功合格时确认的电流，不复用旧功率读数，
+不把后续偏离目标的正式读数反过来当作新的标定。
+
+### 单波长快速起步：`per_target`
+
+```toml
+[nkt_run]
+points = [
+  {source_level_pct = 25.0, wavelength_nm = 630.0, bandwidth_nm = 10.0},
+]
+
+[power_feedback]
+actuator = "source_current"
+target_mapping = "cartesian"
+target_powers_w = [10e-6, 100e-6, 500e-6, 1e-3, 2e-3, 3e-3]
+initial_current_mode = "per_target"
+initial_source_levels_pct = [29.0, 39.2, 51.5, 63.0, 81.0, 99.0]
+```
+
+两个数组按位置对应：1 mW从63%起步；1个光学行×6个目标仍是6点。
+这组六个电流来自2026-10-06的630 nm、10 nm带宽和当次光路实测，
+只是可参考起点，不是其他波长/带宽/光路/样品的通用标定，也不自动批准这些电流。
+3 mW对应99%已接近源上限，仍须确认配置允许并重新调功；不可据此向上越界。
+该模式只接受一条原始光学行，防止默默把630 nm起点套用到其他波长。
+
+### 多波长独立起步：`grid`
+
+```toml
+[nkt_run]
+points = [
+  {source_level_pct = 25.0, wavelength_nm = 630.0, bandwidth_nm = 10.0},
+  {source_level_pct = "CHANGE_ME_650NM_FIRST_CURRENT_PCT", wavelength_nm = 650.0, bandwidth_nm = 10.0},
+]
+
+[power_feedback]
+actuator = "source_current"
+target_mapping = "cartesian"
+target_powers_w = [10e-6, 100e-6, 500e-6, 1e-3, 2e-3, 3e-3]
+initial_current_mode = "grid"
+initial_source_levels_pct = [
+  [29.0, 39.2, 51.5, 63.0, 81.0, 99.0],
+  ["CHANGE_ME_650NM_P1_CURRENT_PCT", "CHANGE_ME_650NM_P2_CURRENT_PCT", "CHANGE_ME_650NM_P3_CURRENT_PCT",
+   "CHANGE_ME_650NM_P4_CURRENT_PCT", "CHANGE_ME_650NM_P5_CURRENT_PCT", "CHANGE_ME_650NM_P6_CURRENT_PCT"],
+]
+```
+
+这是2条原始光学行×6个功率，展开12点。二维电流表第一行对应630 nm，
+第二行对应650 nm；两行各自六列依次对应同一功率轴。650 nm的电流未实测，
+模板保留占位，不能把第一行复制过去冒充标定。增加或调整光学行、功率轴的顺序时，
+必须同步调整电流表的行/列；shape不符会离线拒绝。
+
+`per_target`和`grid`提供的电流直接用作该点起点；`previous`按点流程中的合格读回
+选择起点。实际反馈后的电流可能不同，运行证据分别保存行内原始起点、所选起点、
+选择模式和实际确认的电流。模式不改变功率计测量平面，也不改变每次改电流的
+关光、设置、开光和读回验证流程。本功能只优化起点；反馈步长仍使用现有策略。
+
+## 目标功率近似调节与实测功率采集（2026-10-06）
+
+```toml
+[optical_scan]
+target_deviation_policy = "record_continue" # abort / record_continue；省略默认abort
+```
+
+目标功率用于初始调功；`target_tolerance_fraction`/`target_tolerance_w`、
+稳定窗口、`hold_s` 和 `timeout_s` 仍决定何时完成调节。初始目标一直不可达或
+功率窗口始终不稳定仍失败；此策略不允许无限调功或跳过初始资格。
+调功成功后，在观察等待、重新资格确认、测量前/期间/后和参考恢复期间，
+仅因偏离目标则保存偏差并继续，不改电流/ND，不拒绝该组 Vxx/Vxy。
+功率硬上限、`reduce_above_power_w`、最低有效照明、功率计量程/状态、
+设备设置与通信失败仍按原有规则停止和清理。
+
+每组正式采样以组合 run/condition/attempt/sample ID 关联功率读数与锁相信号。
+两个绘图 Notebook 使用仓库内正式 `src`，不依赖 `.test-tmp` 分析副本。
+选择 SQLite 数据库后，在 Run IDs 选中需要的运行，再点 Load / refresh runs。
+切换坐标、过滤和分组使用已加载的快照；再次点击加载才读取新的样本。
+查看仍在运行或失败的记录须启用 Include rejected/problem records，通道质量筛选
+仍然独立生效。导出保留加载时间和所选 run ID；继续采集不会向已加载的图混入新点。
+Notebook 中 `target Optical source setting (%)` 不再是必须分组或固定的条件，
+不会因不同起始激光电流阻止绘图。电流设定仍保存并导出，也可手动作为坐标、
+分组或过滤。已有 setup 若明确按它分组，请将 Stack/group 改为 None，或改选
+所需的波长/目标光功率。波长、带宽、光功率、栅压和频率等其他变化条件仍须
+用坐标、分组或固定过滤说明；质量过滤和同一 condition 内的统计规则不变。
+更新 notebook 后重新运行开头两格即可启用，不需要停止正在采集的扫描。
+复现此绘图规则时请同时保留更新后的 notebook；导出 manifest 中的公共绘图模块
+哈希本身不包含 notebook 分析进程内的这项分组规则。
+
+`requested.optical_target_power_w` 是目标，`measured.optical_power_w` 是该组光学
+模块的一次正式 PM READ；初始合格均值在 `status.optical.feedback.feedback_result`。
+测量前/正式/后的原始功率和时间保留在 `status.optical.sample_brackets`，
+`power_bracket_summary` 另外给出读数均值、标准差、最小/最大、序号与偏离次数，
+不替代正式 READ，也不是同步或连续时间平均。功率计所在测量平面仍由配置说明，
+不能自动当成样品处功率。各锁相通道和功率计保留自己的时间戳。
+
+`optical_power_quality.target_in_tolerance`、`target_deviation_w`、
+`target_deviation_fraction`、`target_deviation_continued` 是分析表中的信息列；
+单纯偏离目标不令数据无效。以 `measured.optical_power_w` 作横轴分析 Vxx/Vxy，
+波长、电激励、重复等条件继续用于分组；目标光强不作为该曲线的分组条件。
+失锁/过载和失败运行的数据有效性仍按已有规则判断。
+
+新记录采用 `requested-target-actual-power-v2` 标记，`actual.optical_target_power_w`
+也保留真实目标；旧记录中该字段曾存实测功率，原始记录不重写。监控利用旧记录
+已有的 `status.power_target_w` 分别显示目标和实测值。
+
+此策略适用于组合扫描及共用 OpticalPointSession 的 PEM 内参考诊断。独立
+`optical_cli`/`optical_test` 的旧扫描入口有自己的重新调功循环，显式拒绝
+`record_continue`，不能把它与本次点流程策略混用。日常组合运行命令保持不变。
+
+## 参考瞬态恢复（2026-10-05）
+
+在 `[photonics_lockin]` 中可配置：
+
+```toml
+reference_transient_policy = "wait_stable" # abort（省略默认）/ wait_stable
+reference_recovery_timeout_s = 45.0        # 有限正数，最大600秒
+reference_recovery_consecutive_good = 3    # 1..100整数，每1秒检查
+```
+
+SR830 RANGE16（含与UNLK合并的24）、参考频率越界、参考链频差或SR865A
+检测频率/谐波不一致先保存原始证据，再进入有限恢复。连续合格并确认锁定、
+设置不变后，完成已有 `settle_time_constants × max(tau)` 滤波等待；等待仍检查
+参考与光功率。同一失败操作的等待和重试共用截止时间，不因再次异常重置。
+光学设定保持，不自动调功率或延长 `power_feedback.timeout_s`。
+
+正式窗口包括光学/环境前检查、全部模块读数和后检查。任一环节的参考异常会
+保存整个候选为拒绝审计记录，重新取得完整窗口；不拼接旧XX和新XY，不计入
+要求完成的样本数。旧异常不会被后来的正常读数覆盖。`record_continue` 对
+单纯过载/失锁仍按现有策略执行，失锁双路无效标记不会因恢复而消失。
+
+真正设置变化、SR830 TC32、SR865A配置/滤波故障、未知状态、通信、光功率或
+环境错误仍中止。恢复超时也中止并执行原有清理。监控中的恢复事件显示连续
+合格次数、已用时间和剩余预算；它们是记录值，不是额外仪器连接。
+
 最后更新：2026-10-05。本入口用一份实验 TOML 配置 NKT/VARIA、PEM、功率计和
 两路锁相，由 combination scan 管理点顺序、正式采样、记录与清理。当前用户确认
 **XX=SR830、XY=SR865A**；XX 提供样品激励并测 Vxx，XY 测 Vxy，同时为 XX 提供
@@ -14,7 +300,7 @@
 
 ```mermaid
 flowchart LR
-    PEM[PEM REF OUT: 1f 约 50 kHz] -->|TTL| XY[lockin_xy: SR865A REF IN]
+    PEM[PEM REF OUT: 所选1f或2f] -->|TTL| XY[lockin_xy: SR865A REF IN]
     XY -->|SINE OUT+ 正弦参考| XX[lockin_xx: SR830 REF IN]
     XX -->|SINE OUT 电压激励| SAMPLE[样品]
     SAMPLE -->|纵向电压 A-B| VXX[XX 测 Vxx]
@@ -58,14 +344,74 @@ OUT 有物理连线，因此两路都是 true；XY 的连线去 XX REF IN，不�
 XX 的正弦过零触发对应 SR830 `RSLP=0`。收到 TTL 时才使用
 `external_ttl` 配合 `rising`/`falling`，不能把正弦波标记成 TTL。
 
+XY SR865A 在外参模式测 h2 时，SINE OUT 仍输出收到的外参考频率。PEM 选择
+1f参考时，XX 的 h1约为50 kHz，XY的h2约为100 kHz；选择2f参考时，这两个
+检测频率分别约为100 kHz和200 kHz。频差检查比较 XX `FREQ?`
+与 XY `FREQEXT?`，不是 XY 的 `FREQDET?`。详见
+[SR865A 手册外参/谐波说明，印刷页 75、79](https://www.thinksrs.com/downloads/pdfs/manuals/SR865Am.pdf#page=97)。
+
 当前 `lockin_xy.sr865a.sync_output_mode="preserve"` 保留未使用的 BlazeX 模式，
 不重写 BLAZEX。只有原 `pem_xx_xy` 路径使用 `unipolar_sync`/`bipolar_sync`，
 其电平兼容性仍须按实际接法验证。
 
-`photonics_lockin.reference_min_hz` / `reference_max_hz` 是这次实验允许的基频
+`photonics_lockin.reference_min_hz` / `reference_max_hz` 是这次实验允许的锁相外参考
 区间，`reference_expected_hz` 是区间内的计划坐标，不会写入仪器强迫 PEM 改频。
-`pair_tolerance_hz` 限制 XX↔XY、PEM↔XX 和 PEM↔XY 的实际基频差，不能把
-两段误差相加后放宽；实际频率还需满足每路 `harmonic × f_ref` 的型号检测边界。
+`pair_tolerance_hz` 限制 XX↔XY、所选倍数×PEM机械基频↔XX/XY 的频差，不能把
+两段误差相加后放宽。2026-10-05 按用户要求删除 `reference_min_hz × 0.001`
+的配置上限，仅要求 `pair_tolerance_hz` 是有限正数；每次比较直接采用其配置值。
+此光电配置还以同一基频容差检查 SR865A 顺序读回的
+`FREQDET? / harmonic` 与 `FREQEXT?`，不再额外套用另一处固定的 1 ppm 判据；
+两项真实读数及采用的容差都保留在审计中。独立驱动未传此参数时保留原判据。
+实际频率仍须满足每路 `harmonic × f_ref` 的型号检测边界，谐波和状态检查不变。
+
+### 1.1 PEM 2f参考与锁相检测阶数（2026-10-07）
+
+`[photonics_lockin].pem_reference_harmonic` 只接受整数 `1` 或 `2`，省略默认
+`1`，保留旧配置的1f行为。此项声明操作者已经在PEM硬件选择的参考输出倍数；
+软件不发送 `:DET:HARMT`，也不会因为声明2f而自行切换硬件。
+两路参考必须各自满足 `abs(f_ref - pem_reference_harmonic * f_PEM) <= pair_tolerance_hz`，
+同时继续满足XX↔XY频差、允许频率区间、真实锁定/设置和型号检测能力检查。
+该容差始终以收到的锁相参考Hz为单位，不自动翻倍。错误倍数进入原参考异常
+策略；`wait_stable` 只在原有截止期限内恢复，不会绕过校验。
+
+保持PEM 2f REF OUT → XY SR865A REF IN → XY SINE OUT+ → XX SR830 REF IN。
+在已有表中修改下面字段，不要追加重复的同名TOML表；其余地址、激励幅值、
+灵敏度、光功率和等待参数沿用这次实验批准的值：
+
+```toml
+[photonics_lockin]
+pem_reference_harmonic = 2
+reference_min_hz = 98000.0
+reference_max_hz = 102000.0
+reference_expected_hz = 100054.0 # 机械1f约50027 Hz的2f计划坐标
+
+[pem]
+frequency_min_hz = 49000.0
+frequency_max_hz = 51000.0
+
+[lockin_xx]
+harmonics = [1]
+
+[lockin_xy]
+harmonics = [1, 2] # 也可只选[1]或[2]
+```
+
+| 参考输出 | 锁相h1 | 锁相h2 | XX SR830 |
+|---|---|---|---|
+| PEM 1f，约50.027 kHz | PEM 1f，约50.027 kHz | PEM 2f，约100.054 kHz | 可[1]或[1,2]，检测上限102 kHz |
+| PEM 2f，约100.054 kHz | PEM 2f，约100.054 kHz | PEM 4f，约200.108 kHz | 只能[1]，h2在离线配置阶段拒绝 |
+
+XY SR865A 可测新参考的h1/h2；软件仍只支持检测阶数1/2/3并逐阶检查能力。
+PEM 的 `:MOD:FREQ?` 和 `[pem].frequency_min_hz/max_hz` 始终描述机械1f。
+`optical_scan.peak_retardance_waves=0.5` 另外描述λ/2峰值延迟，不选择2f输出。
+现有 `lockin_xx_h1_*` / `lockin_xy_h2_*` 数据列继续相对锁相参考命名，历史
+数据不重标。新run的配置快照、轴metadata和原始角色事件保留参考倍数；正式
+`harmonic_metadata`逐角色保存 `pem_reference_harmonic`、`pem_harmonic`、
+`reference_frequency_hz` 和 `detection_frequency_hz`。PEM阶次来自倍数声明；参考频率
+来自实际读回，SR830检测频率由该读回×检测阶次计算，SR865A检测频率由仪器查询。
+原始样本中的 `detection_frequency_source` 保留这些来源，不能视为同时测得的频率。
+启动摘要同时列出锁相阶数、对应PEM阶数和计划检测频率。
+这些记录是软件校验和数据解释依据；实机2f锁定及完整扫描仍需单独验证。
 
 ## 2. 配置文件、默认入口与 backend
 
@@ -330,8 +676,8 @@ picker，点表不要添加这两项。`varia_nd` 需要另行确认 ND 控制�
 
 ## 7. 功率 × 波长 × 激励点表
 
-光学使用显式 `nkt_run.points` 行，`power_feedback.target_powers_w` 按相同行号
-对应。二维光学点表例如：
+默认 `target_mapping="paired"` 使用显式 `nkt_run.points` 行，
+`power_feedback.target_powers_w` 按相同行号对应。二维光学点表例如：
 
 | 光学行 | 波长 | 目标功率 |
 |---|---|---|
@@ -340,9 +686,12 @@ picker，点表不要添加这两项。`varia_nd` 需要另行确认 ND 控制�
 | 2 | λB | PA |
 | 3 | λB | PB |
 
-模板中四行光学点对应 `[PA,PB,PA,PB]`，两者长度必须相等。固定波长时重复该
-波长并列不同功率；固定功率时可用一个 `target_power_w`。软件不自动把两个
-光学数组做笛卡尔积。只做一行首次测试时，光学点和目标功率数组必须同时缩为一行。
+模板默认paired，四行光学点对应 `[PA,PB,PA,PB]`，两者长度必须相等。
+改用 `target_mapping="cartesian"` 时，每个波长/带宽设置只写一行，
+功率数组只写一次；两条光学行×两个功率同样生成上表四个坐标。
+固定功率可用一个 `target_power_w`，固定波长首次测试可用一行×一个目标。
+`initial_current_mode` 的上一点继承、一维/二维起点表见前面的起始电流章节；
+它们只选择初始电流，不增加光学点数。
 
 `order=["optical","lockin"]` 在每个光学坐标下扫电激励；反过来则在每个电激励
 下扫光学表。四行光学点、两个激励点、一次重复产生八个 condition，每个条件
@@ -355,8 +704,28 @@ picker，点表不要添加这两项。`varia_nd` 需要另行确认 ND 控制�
 
 ## 8. 三个 sample_interval 与实际逐点时序
 
+`photonics_lockin.overload_policy` 可选 `abort`（省略时默认）或
+`record_continue`。本次用户已明确选择后者：XX SR830 与 XY SR865A 的输入和
+输出量程过载均保留原始状态并继续，包括启动、转换、资格检查及正式采样。
+正式数据分别记录 `valid_for_analysis_by_role`；过载通道及其采样前后检查窗口
+影响的读数不进入默认分析，正常的另一通道仍可使用。`clean=false` 与
+`overload_continuation=true` 表示记录了诊断数据，不等于无过载的有效测量。
+参考失锁由独立的 `photonics_lockin.reference_unlock_policy` 控制，可选
+`abort`（省略时默认）或 `record_continue`。当前用户明确选择后者：当前失锁和
+读取后清除的历史锁存都记录原始状态并继续。任何正式样本或其前后/转场检查
+出现失锁，说明共同参考链受影响，该组 Vxx/Vxy 两路均标为无效，默认分析排除；
+原始诊断数值继续保存。`reference_unlock_continuation=true` 表示保留了失锁数据，
+不会把旧 rejected 运行重新解释成成功。
+参考等待仍每1秒检查，最多45秒；record_continue 在未锁定超时时保存事件与
+最后状态，再继续原频率检查。abort 策略仍超时中止。频率必须在批准区间内，
+两台差值仍须满足 pair_tolerance_hz；无有效频率读回仍拒绝。
+通信/仪器错误、未知状态、开机事件、SR865A 同步滤波故障、设置或激励变化及
+频率/光功率异常仍停止扫描；两种继续策略不会放大量程或提高光功率上限。
+
 | 设置 | 用在什么阶段 |
 |---|---|
+| `photonics_lockin.reference_unlock_policy` | `abort`（默认）或 `record_continue`。后者保存当前/锁存失锁及等待超时并继续；受影响的正式 Vxx/Vxy 两路都排除出默认分析。 |
+| `photonics_lockin.reference_lock_timeout_s` | 外参考设置或 PEM 变化后的锁定轮询超时，例如 45.0 s。立即检查一次，此后按 1 s 间隔检查两台状态，锁定且频率一致就继续，不固定等待 45 s；查询耗时计入超时。激光保持关闭、XX 保持保护幅值。过载按 overload_policy 处理，错误或未知状态立即停止。每轮原始状态及开始/结束事件均保存；原滤波稳定等待仍保留。省略或 0 保留原转换检查而不额外轮询。旧字段 reference_lock_wait_s 兼容为同一超时含义，两字段不能同时出现。 |
 | `photonics_lockin.settle_time_constants` | 电学状态/阶次变化后等待的倍数；当前至少 10，实际等待 = 倍数 × max(XX tau,XY tau)。例如两路最大 tau=1 s、倍数=15 时为 15 s。 |
 | `photonics_lockin.sample_interval_s` | 同一条件第二次及后续正式电学样本前的额外间隔，直接填秒；用途对应旧 sample_interval_time_constants，而非 settle_time_constants。阶次变化仍另需滤波稳定等待。 |
 | `power_feedback.window.sample_interval_s` | 调功率和 hold 阶段读 PM100D 的间隔，参与滚动功率窗口；不控制电学采样频率。 |

@@ -18,7 +18,7 @@ OTHER_TABLES = {
     "temperature_scan", "cleanup", "visa", "lockin_xx", "lockin_xy",
     "lockin_sweep", "gate_top", "gate_bottom", "smu_bias", "three_smu_run",
     "pem", "pem_run", "pm100d", "pm100d_run", "optical_scan", "power_feedback",
-    "combination_scan", "photonics_lockin",
+    "combination_scan", "photonics_lockin", "pem_internal_diagnostic",
     "temperature_excitation_scan", "magnetic_field_run",
 }
 

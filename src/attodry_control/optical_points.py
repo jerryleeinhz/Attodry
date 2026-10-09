@@ -9,10 +9,11 @@ its independent run loop is never invoked.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import time
+import statistics
 
-from .nkt_config import NktError, load_nkt_config
+from .nkt_config import NktError, load_nkt_config, number, tenths
 from .nkt_control import SimulatedNkt, utc_now
 from .optical_config import load_scan_config
 from .optical_scan import OpticalScan
@@ -41,16 +42,29 @@ class OpticalPointConfig:
             raise NktError("PEM and NKT cannot own the same serial port")
 
     @property
+    def nkt_points(self):
+        feedback = self.scan.feedback
+        factor = feedback.targets_per_optical_point if feedback else 1
+        if len(self.nkt.points) * factor > 10000:
+            raise NktError("Expanded optical point count exceeds 10000")
+        points = tuple(point for point in self.nkt.points for _ in range(factor))
+        if feedback and feedback.initial_current_mode in ("per_target", "grid"):
+            return tuple(replace(point, source_level_pct=feedback.initial_source_level_pct(
+                index, len(points), point.source_level_pct)) for index, point in enumerate(points))
+        return points
+
+    @property
     def points(self):
         result = []
-        for index, point in enumerate(self.nkt.points):
+        nkt_points = self.nkt_points
+        for index, point in enumerate(nkt_points):
             values = {"optical_source_level_pct": point.source_level_pct}
             for field in ("wavelength_nm", "bandwidth_nm", "nd_pct", "pulse_picker_ratio"):
                 value = getattr(point, field)
                 if value is not None:
                     values["optical_" + field] = value
             if self.scan.feedback:
-                feedback = self.scan.feedback.for_point(index, len(self.nkt.points))
+                feedback = self.scan.feedback.for_point(index, len(nkt_points))
                 values["optical_target_power_w"] = feedback.target_power_w
             result.append(values)
         return tuple(result)
@@ -61,6 +75,10 @@ class OpticalPointConfig:
                 "pem": asdict(self.pem) if self.pem else None,
                 "pm100d": asdict(self.pm) if self.pm else None,
                 "formal_power_evidence": "before/during/after sequential electrical reads",
+                "point_grid": {"target_mapping": self.scan.feedback.target_mapping if self.scan.feedback else None,
+                               "initial_current_mode": self.scan.feedback.initial_current_mode if self.scan.feedback else None,
+                               "input_point_count": len(self.nkt.points), "expanded_point_count": len(self.nkt_points),
+                               "order": "optical_row_then_target_power"},
                 "sampling_owner": "combination_scan.samples_per_condition"}
 
 
@@ -94,8 +112,10 @@ class OpticalPointSession:
         self.sample_evidence = []
         self.last_state = None
         self.cleanup_result = {"verified": False, "off_confirmed": False,
-                               "reference_cleanup_pending": False, "actions": {}, "errors": []}
+                               "reference_cleanup_pending": False, "meter_cleanup_pending": False,
+                               "actions": {}, "errors": []}
         self._pem_finished = self._meter_closed = False
+        self._previous_current = None
 
     def _event(self, kind, **payload):
         if self.event_sink:
@@ -208,26 +228,63 @@ class OpticalPointSession:
         if self.sample_active:
             raise NktError("Cannot change optical state inside a formal sample")
         self.qualified = False
-        self.engine.nkt.turn_off()
+        try:
+            self.engine.nkt.turn_off()
+        except BaseException:
+            self._previous_current = None
+            raise
         return {"off_confirmed": True, "pem_reference_preserved": self.pem is not None}
 
     def set_point(self, index):
+        try:
+            return self._prepare_point(index)
+        except BaseException:
+            self._previous_current = None
+            self.qualified = False
+            raise
+
+    def _prepare_point(self, index):
         self._require_open()
         if not self.configured or self.sample_active:
             raise NktError("Configure first; no optical changes during formal samples")
-        if type(index) is not int or not 0 <= index < len(self.config.nkt.points):
+        nkt_points = self.config.nkt_points
+        if type(index) is not int or not 0 <= index < len(nkt_points):
             raise NktError("Optical point index is out of range")
         self.qualified = False
         self.index = index
-        self.point = self.config.nkt.points[index]
-        self.feedback = (self.config.scan.feedback.for_point(index, len(self.config.nkt.points))
+        self.point = nkt_points[index]
+        original_feedback = self.config.scan.feedback
+        initial_current = None
+        if original_feedback and original_feedback.actuator == "source_current":
+            factor = original_feedback.targets_per_optical_point
+            input_index, target_index = divmod(index, factor)
+            mode = original_feedback.initial_current_mode
+            previous = self._previous_current
+            self._previous_current = None
+            source = mode if mode in ("per_target", "grid") else "point"
+            previous_index = None
+            if (mode == "previous" and previous is not None
+                    and previous["index"] + 1 == index
+                    and previous["input_point_index"] == input_index):
+                current = number(previous["source_level_pct"], "previous qualified source current",
+                    original_feedback.source_current_min_pct, original_feedback.source_current_max_pct)
+                tenths(current)
+                self.point = replace(self.point, source_level_pct=current)
+                source, previous_index = "previous", previous["index"]
+            initial_current = {"mode": mode, "input_point_index": input_index, "target_index": target_index,
+                "configured_source_level_pct": self.config.nkt.points[input_index].source_level_pct,
+                "selected_source_level_pct": self.point.source_level_pct,
+                "source": source, "previous_point_index": previous_index}
+        self.feedback = (self.config.scan.feedback.for_point(index, len(nkt_points))
                          if self.config.scan.feedback else None)
         self.deadline = self.clock() + self.feedback.timeout_s if self.feedback else None
         self.row = {"condition_id": f"optical-{index:06d}", "attempt_index": 1, "accepted": False,
-                    "requested": asdict(self.point), "effective_requested": asdict(self.point),
+                    "requested": asdict(nkt_points[index]), "effective_requested": asdict(self.point),
                     "power_samples": [], "nd_iterations": [], "source_current_iterations": [],
                     "feedback_windows": [], "feedback_config": asdict(self.feedback) if self.feedback else None,
                     "measurement_plane": self.config.pm.measurement_plane if self.config.pm else None}
+        if initial_current is not None:
+            self.row["initial_current"] = initial_current
         self.engine.record["points"].append(self.row)
         readback = self.engine.nkt.prepare_point(self.point, deadline=self.deadline)
         filt = readback["filter"]
@@ -243,6 +300,14 @@ class OpticalPointSession:
         return {"requested": self.config.points[index], "emission_started": False}
 
     def qualify(self):
+        try:
+            return self._qualify_point()
+        except BaseException:
+            self._previous_current = None
+            self.qualified = False
+            raise
+
+    def _qualify_point(self):
         self._require_open()
         if self.point is None or self.sample_active:
             raise NktError("Prepare an optical point before qualification")
@@ -258,7 +323,8 @@ class OpticalPointSession:
             self.point, result, _ = self.engine._stabilize(
                 self.row, self.point, self.wavelength, self.deadline, self.feedback)
             self.row["feedback_result"] = result
-        # Formal dwell cannot silently retune; a drift rejects the condition.
+        # Keep the tuned settings throughout dwell and acquisition. The selected
+        # policy decides whether target drift is fatal or informational.
         until = self.clock() + self.config.nkt.dwell_s
         while True:
             self._guard_sample("qualification", deadline=self.deadline)
@@ -267,6 +333,15 @@ class OpticalPointSession:
             self.sleep(min(self.config.scan.sample_interval_s, until - self.clock()))
         self.qualified = True
         self.row["effective_requested"] = asdict(self.point)
+        original_feedback = self.config.scan.feedback
+        if original_feedback and original_feedback.initial_current_mode == "previous":
+            current = number(self.last_state["nkt"]["source"]["level_pct"],
+                "qualified source current readback", original_feedback.source_current_min_pct,
+                original_feedback.source_current_max_pct)
+            tenths(current)
+            self._previous_current = {"index": self.index,
+                "input_point_index": self.index // original_feedback.targets_per_optical_point,
+                "source_level_pct": current}
         self._event("optical_condition_qualified", evidence=self.row)
         return {"ready": True, "evidence": deepcopy(self.row)}
 
@@ -275,21 +350,61 @@ class OpticalPointSession:
             return self._collect_guard_sample(phase, deadline=deadline)
         except BaseException:
             self.qualified = False
+            self._previous_current = None
             raise
 
     def _collect_guard_sample(self, phase, *, deadline=None):
         self.last_state = self.engine._verify(self.point, self.wavelength, self.config.nkt.emit, deadline)
         sample = None
+        assessment = None
         if self.meter:
             sample = self.engine._sample(self.row, self.point, self.wavelength, deadline, phase)
-            if self.feedback and (sample["above_reduce_threshold"] or not target_in_tolerance(sample["power_w"], self.feedback)):
-                self.qualified = False
-                raise NktError("Formal optical power left its qualified target; no automatic correction")
+            if self.feedback:
+                within_target = target_in_tolerance(sample["power_w"], self.feedback)
+                deviation = sample["power_w"] - self.feedback.target_power_w
+                assessment = {"policy": self.config.scan.target_deviation_policy,
+                    "target_power_w": self.feedback.target_power_w,
+                    "actual_power_w": sample["power_w"],
+                    "target_tolerance_w": self.feedback.target_tolerance_w,
+                    "target_deviation_w": deviation,
+                    "target_deviation_fraction": deviation / self.feedback.target_power_w,
+                    "target_in_tolerance": within_target,
+                    "target_deviation_continued": (not within_target and
+                        self.config.scan.target_deviation_policy == "record_continue" and
+                        not sample["above_reduce_threshold"])}
         evidence = {"phase": phase, "captured_at_utc": utc_now(), "state": deepcopy(self.last_state),
-                    "power_sample": deepcopy(sample)}
+                    "power_sample": deepcopy(sample), "power_target_assessment": assessment}
         self.sample_evidence.append(evidence)
         self._event("optical_sample_guard", evidence=evidence)
+        if sample is not None and sample["above_reduce_threshold"]:
+            raise NktError("Formal optical power exceeds reduction threshold; no automatic correction")
+        if assessment and not assessment["target_in_tolerance"] and assessment["policy"] == "abort":
+            raise NktError("Formal optical power left its qualified target; no automatic correction")
         return evidence
+
+    def guard_reference_recovery(self, *, deadline):
+        """Observe the held optical state without retuning or extending its budget."""
+        self._require_open()
+        if self.qualified:
+            # The discarded bracket is closed by the coordinator before
+            # recovery. During a fresh retry, timed electrical settling may
+            # already be inside its new bracket; append fresh guards there.
+            return self._guard_sample("reference_recovery", deadline=deadline)
+        # Before illumination the prepared point must still be confirmed OFF.
+        # A failed illuminated guard clears qualified; it must never enter here
+        # and be treated as permission to illuminate or retune.
+        self.last_state = self._verify_dark_point(deadline)
+        self._event("optical_reference_recovery_guard", state=deepcopy(self.last_state),
+                    captured_at_utc=utc_now(), emission_expected=False)
+        return deepcopy(self.last_state)
+
+    def _verify_dark_point(self, deadline):
+        try:
+            return self.engine._verify(self.point, self.wavelength, False, deadline)
+        except BaseException:
+            self.qualified = False
+            self._previous_current = None
+            raise
 
     def begin_sample(self):
         if not self.qualified or self.sample_active:
@@ -297,6 +412,33 @@ class OpticalPointSession:
         self.sample_evidence = []
         self._guard_sample("before_electrical")
         self.sample_active = True
+
+    def observe_hold(self, *, phase="held_optical_condition"):
+        """Fresh checks between gate transitions, without retuning or a new dwell."""
+        self._require_open()
+        if not self.qualified or self.sample_active:
+            raise NktError("Held optical checks require a qualified point outside formal sampling")
+        return self._guard_sample(phase)
+
+    def observe_dark(self, *, phase="diagnostic_dark", deadline=None):
+        """Verify a prepared dark point, including PEM readiness, without power READ.
+
+        A dark meter reading is not subjected to a lit target/minimum-signal
+        gate. The unchanged NKT OFF, PEM and meter-settings guards still apply.
+        """
+        self._require_open()
+        if self.point is None or self.sample_active or self.qualified:
+            raise NktError("Dark observation requires a prepared, suspended optical point")
+        self.last_state = self._verify_dark_point(deadline)
+        evidence = {"phase": phase, "captured_at_utc": utc_now(), "state": deepcopy(self.last_state)}
+        self._event("optical_diagnostic_dark_guard", evidence=evidence)
+        return evidence
+
+    def monitor_sample(self, *, phase="diagnostic_capture", deadline=None):
+        """Fresh existing optical guards inside an already bracketed sample."""
+        if not self.qualified or not self.sample_active:
+            raise NktError("Sample monitoring requires a qualified, bracketed optical sample")
+        return self._guard_sample(phase, deadline=deadline)
 
     def end_sample(self, reads=None):
         if not self.sample_active:
@@ -307,6 +449,19 @@ class OpticalPointSession:
                 for reading in reads:
                     if reading.get("module") == "optical":
                         reading["status"]["sample_brackets"] = deepcopy(self.sample_evidence)
+                        samples = [item["power_sample"] for item in self.sample_evidence
+                                   if item.get("power_sample") is not None]
+                        if samples:
+                            powers = [sample["power_w"] for sample in samples]
+                            reading["status"]["power_bracket_summary"] = {
+                                "count": len(samples), "mean_power_w": statistics.mean(powers),
+                                "std_power_w": statistics.pstdev(powers),
+                                "min_power_w": min(powers), "max_power_w": max(powers),
+                                "sequences": [sample["sequence"] for sample in samples],
+                                "target_deviation_count": sum(
+                                    item["power_target_assessment"]["target_in_tolerance"] is False
+                                    for item in self.sample_evidence
+                                    if item.get("power_target_assessment") is not None)}
             return evidence
         finally:
             self.sample_active = False
@@ -331,12 +486,16 @@ class OpticalPointSession:
         if evidence["power_sample"] is not None:
             measured["optical_power_w"] = evidence["power_sample"]["power_w"]
         if "optical_target_power_w" in requested:
-            actual["optical_target_power_w"] = measured["optical_power_w"]
+            # This coordinate is a tuning request, not a wattmeter readback.
+            # Actual watts retain their existing single formal READ semantics.
+            actual["optical_target_power_w"] = self.feedback.target_power_w
         if self.pem:
             measured["pem_frequency_hz"] = self.last_state["pem"]["frequency_hz"]
         return {"module": "optical", "captured_at_utc": utc_now(), "actual": actual,
                 "measurements": measured, "clean": True, "problems": [],
                 "status": {"readback": deepcopy(self.last_state), "power_sample": evidence["power_sample"],
+                           "power_record_contract": "requested-target-actual-power-v2",
+                           "power_target_assessment": deepcopy(evidence["power_target_assessment"]),
                            "sample_brackets": deepcopy(self.sample_evidence), "sequential_reads": True,
                            "measurement_plane": self.config.pm.measurement_plane if self.config.pm else None,
                            "power_target_w": self.feedback.target_power_w if self.feedback else None,
@@ -345,15 +504,18 @@ class OpticalPointSession:
     def expected_measurements(self):
         return ({"optical_power_w"} if self.meter else set()) | ({"pem_frequency_hz"} if self.pem else set())
 
-    def cleanup(self, *, finish_pem=True):
-        """OFF first; optionally retain PEM reference until electrical protection.
+    def cleanup(self, *, finish_pem=True, close_meter=True):
+        """OFF first; retain reference/shared VISA manager until electrical protection.
 
         Each resource action runs independently even if another action or the
         event sink fails. A PEM disable acknowledgment is never physical-off proof.
         """
         if type(finish_pem) is not bool:
             raise NktError("finish_pem must be an explicit boolean")
+        if type(close_meter) is not bool:
+            raise NktError("close_meter must be an explicit boolean")
         self.qualified = self.sample_active = False
+        self._previous_current = None
         result = self.cleanup_result
         actions, errors = result["actions"], result["errors"]
         if "nkt" not in actions:
@@ -373,7 +535,7 @@ class OpticalPointSession:
                 actions["pem"] = self.pem.finish()
             except BaseException as exc:
                 actions["pem"] = {"errors": [f"{type(exc).__name__}: {exc}"]}
-        if self.meter and not self._meter_closed:
+        if self.meter and close_meter and not self._meter_closed:
             self._meter_closed = True
             try:
                 self.meter.close()
@@ -381,6 +543,7 @@ class OpticalPointSession:
             except BaseException as exc:
                 actions["pm100d"] = {"errors": [f"{type(exc).__name__}: {exc}"]}
         result["reference_cleanup_pending"] = self.pem is not None and not self._pem_finished
+        result["meter_cleanup_pending"] = self.meter is not None and not self._meter_closed
         result["off_confirmed"] = actions["nkt"].get("off_confirmed") is True
         # Failed parses may never reach a formal row. Keep device transcripts
         # and last-confirmed evidence even when preparation/sample/cleanup aborts.

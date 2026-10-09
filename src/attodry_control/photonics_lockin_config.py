@@ -89,6 +89,18 @@ class PhotonicsLockinConfig:
     safety_sha256: str
     reference_topology: str = "pem_xx_xy"
     reference_output: PhotonicsReferenceOutputConfig | None = None
+    reference_lock_timeout_s: float = 0.0
+    overload_policy: str = "abort"
+    reference_unlock_policy: str = "abort"
+    reference_transient_policy: str = "abort"
+    reference_recovery_timeout_s: float = 45.0
+    reference_recovery_consecutive_good: int = 3
+    pem_reference_harmonic: int = 1
+
+    @property
+    def reference_lock_wait_s(self):
+        """Compatibility alias; the resolved value is now a polling timeout."""
+        return self.reference_lock_timeout_s
 
     @property
     def settle_s(self) -> float:
@@ -200,9 +212,15 @@ def load_photonics_lockin_config(path, *, document=None, safety_document=None) -
     _keys(profile, {
         "schema_version", "safety_file", "reference_min_hz", "reference_max_hz", "reference_expected_hz",
         "pair_tolerance_hz", "settle_time_constants", "sample_interval_s", "source",
-    }, {"reference_output"} if topology == "pem_xy_xx_sine" else (), name="photonics_lockin")
+    }, {"reference_lock_wait_s", "reference_lock_timeout_s", "overload_policy", "reference_unlock_policy",
+        "reference_transient_policy", "reference_recovery_timeout_s", "reference_recovery_consecutive_good",
+        "pem_reference_harmonic"}
+       | ({"reference_output"} if topology == "pem_xy_xx_sine" else set()), name="photonics_lockin")
     if type(profile["schema_version"]) is not int or profile["schema_version"] != 1:
         raise ValueError("Unsupported photonics_lockin schema version.")
+    pem_reference_harmonic = profile.get("pem_reference_harmonic", 1)
+    if type(pem_reference_harmonic) is not int or pem_reference_harmonic not in (1, 2):
+        raise ValueError("photonics_lockin.pem_reference_harmonic must be integer 1 or 2.")
     if not isinstance(profile["safety_file"], str) or not profile["safety_file"].strip():
         raise ValueError("A separate photonics lock-in safety policy is required.")
     safety_path = (path.parent / profile["safety_file"]).resolve()
@@ -226,10 +244,26 @@ def load_photonics_lockin_config(path, *, document=None, safety_document=None) -
     ref_max = _number(profile["reference_max_hz"], "reference_max_hz", positive=True)
     ref_expected = _number(profile["reference_expected_hz"], "reference_expected_hz", positive=True)
     if not ref_min <= ref_expected <= ref_max:
-        raise ValueError("Expected PEM reference must lie within the explicit reference interval.")
+        raise ValueError("Expected external reference must lie within the explicit reference interval.")
     pair_tolerance = _number(profile["pair_tolerance_hz"], "pair_tolerance_hz", positive=True)
-    if pair_tolerance > ref_min * 0.001:
-        raise ValueError("Reference-pair tolerance may not exceed 0.1% of the minimum reference.")
+    if "reference_lock_wait_s" in profile and "reference_lock_timeout_s" in profile:
+        raise ValueError("Use only reference_lock_timeout_s or its legacy reference_lock_wait_s alias.")
+    timeout_key = "reference_lock_wait_s" if "reference_lock_wait_s" in profile else "reference_lock_timeout_s"
+    reference_wait = _number(profile.get(timeout_key, 0.0), timeout_key)
+    if not 0 <= reference_wait <= 600:
+        raise ValueError(f"{timeout_key} must be between 0 and 600 seconds.")
+    overload_policy = _choice(profile.get("overload_policy", "abort"), ("abort", "record_continue"), "photonics_lockin.overload_policy")
+    reference_unlock_policy = _choice(profile.get("reference_unlock_policy", "abort"),
+                                      ("abort", "record_continue"), "photonics_lockin.reference_unlock_policy")
+    reference_transient_policy = _choice(profile.get("reference_transient_policy", "abort"),
+                                         ("abort", "wait_stable"), "photonics_lockin.reference_transient_policy")
+    recovery_timeout = _number(profile.get("reference_recovery_timeout_s", 45.0),
+                               "reference_recovery_timeout_s", positive=True)
+    if recovery_timeout > 600:
+        raise ValueError("reference_recovery_timeout_s must be positive and at most 600 seconds.")
+    recovery_good = profile.get("reference_recovery_consecutive_good", 3)
+    if type(recovery_good) is not int or not 1 <= recovery_good <= 100:
+        raise ValueError("reference_recovery_consecutive_good must be an integer between 1 and 100.")
     settle = _number(profile["settle_time_constants"], "settle_time_constants", positive=True)
     # SR865A manual rev. 2.11: four RC stages need 10 tau for 1% settling.
     if settle < 10:
@@ -313,5 +347,6 @@ def load_photonics_lockin_config(path, *, document=None, safety_document=None) -
         PhotonicsSourceConfig(wiring, load, definition, dc_mode, offset), points,
         ref_min, ref_max, ref_expected, pair_tolerance, settle, interval, lo, hi, cleanup,
         str(safety_path), hashlib.sha256(raw_safety).hexdigest(),
-        topology, reference_output,
+        topology, reference_output, reference_wait, overload_policy, reference_unlock_policy,
+        reference_transient_policy, recovery_timeout, recovery_good, pem_reference_harmonic,
     )

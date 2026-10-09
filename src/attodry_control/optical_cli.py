@@ -201,6 +201,7 @@ def scan_main(argv=None):
                               "pem": asdict(pem_config) if pem_config else None,
                               "pm100d": asdict(pm_config) if pm_config else None}, indent=2))
             return 0
+        config.require_standalone_scan()
         if not simulation:
             if not args.authorize_writes or not args.confirm_manual_route:
                 raise NktError("Joint run requires --authorize-writes and --confirm-manual-route")

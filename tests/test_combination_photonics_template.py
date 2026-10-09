@@ -43,6 +43,9 @@ def synthetic_replacements():
         "CHANGE_ME_XY_INPUT_RANGE_V_PEAK": xy["sr865a"]["input_range_v_peak"],
         "CHANGE_ME_XY_REF_INPUT_IMPEDANCE_OHM": xy["sr865a"]["reference_input_impedance_ohm"],
         "CHANGE_ME_APPROVED_SOURCE_V_RMS": lockin["lockin_sweep"]["excitation_points_v_rms"][0],
+        "CHANGE_ME_GATE_BOTTOM_VISA_ADDRESS": "FAKE::GATE_BOTTOM",
+        "CHANGE_ME_APPROVED_GATE_VOLTAGE_LIMIT_V": 50.0,
+        "CHANGE_ME_APPROVED_GATE_CURRENT_LIMIT_A": 1e-5,
         "CHANGE_ME_APPROVED_SOURCE_CURRENT_MAX_PCT": nkt["max_level_pct"],
         "CHANGE_ME_VERIFIED_NKT_SDK_DLL_PATH": "FAKE_NOT_A_DLL.dll",
         "CHANGE_ME_NKT_PORT": "FAKE_NKT",
@@ -56,6 +59,13 @@ def synthetic_replacements():
         "CHANGE_ME_QUALIFIED_ILLUMINATION_DWELL_S": run["dwell_s"],
         "CHANGE_ME_OPTICAL_RUN_NAME": run["run_name"],
         "CHANGE_ME_START_CURRENT_PCT": run["points"][0]["source_level_pct"],
+        "CHANGE_ME_650NM_FIRST_CURRENT_PCT": run["points"][0]["source_level_pct"],
+        "CHANGE_ME_650NM_P1_CURRENT_PCT": 10.0,
+        "CHANGE_ME_650NM_P2_CURRENT_PCT": 20.0,
+        "CHANGE_ME_650NM_P3_CURRENT_PCT": 30.0,
+        "CHANGE_ME_650NM_P4_CURRENT_PCT": 38.0,
+        "CHANGE_ME_650NM_P5_CURRENT_PCT": 39.0,
+        "CHANGE_ME_650NM_P6_CURRENT_PCT": 40.0,
         "CHANGE_ME_LAMBDA_A_NM": run["points"][0]["wavelength_nm"],
         "CHANGE_ME_LAMBDA_B_NM": 650.0,
         "CHANGE_ME_BANDWIDTH_NM": run["points"][0]["bandwidth_nm"],
@@ -230,6 +240,58 @@ class PhotonicsTemplateTests(unittest.TestCase):
         self.write_filled(current_status=False)
         with self.assertRaisesRegex(ValueError, "current-status"):
             load_hardware_combination(self.path)
+
+    def test_commented_continuous_gate_example_loads_with_complete_explicit_ramp(self):
+        # Enable the shipped block itself so omissions or stale example fields
+        # fail this test; all replacement values remain synthetic.
+        self.assertEqual(self.template.count("# [gate_bottom]"), 1)
+        prefix, block = self.template.split("# [gate_bottom]", 1)
+        block = re.sub(r"(?m)^# (?=(?:\[[^\]]+\]|[a-z_]+\s*=))", "", block)
+        # Select the documented optional ramp: direct zero tolerance is exclusive.
+        block = re.sub(r"(?m)^zero_readback_tolerance_v\s*=.*(?:\n|$)", "", block)
+        self.template = prefix + "[gate_bottom]" + block
+        self.write_filled()
+        text = replace_settings(self.path.read_text(encoding="utf-8"), {
+            "combination_scan": {"order": ["optical", "smu", "lockin"],
+                "illumination_policy": "continuous_gate_scan"},
+            "lockin_sweep": {"excitation_points_v_rms": [.006]},
+        })
+        self.path.write_text(text, encoding="utf-8")
+        with patch("attodry_control.combination_hardware.HardwareCombinationStation.open") as opened:
+            config = load_hardware_combination(self.path)
+        opened.assert_not_called()
+        self.assertEqual(config.illumination_policy, "continuous_gate_scan")
+        self.assertEqual([axis.module for axis in config.plan.axes], ["optical", "smu", "lockin"])
+        self.assertEqual(set(config.smu.hardware.by_role()), {"gate_bottom"})
+        self.assertEqual(config.smu.hardware.gate_bottom.address, "FAKE::GATE_BOTTOM")
+        self.assertEqual(config.smu.hardware.gate_bottom.max_abs_voltage_v, 50.0)
+        self.assertEqual(config.smu.hardware.gate_bottom.max_abs_current_a, 1e-5)
+        ramp = config.smu.plan.gate_bottom.ramp
+        self.assertEqual((ramp.max_step_v, ramp.step_interval_s,
+                          ramp.readback_tolerance_v, ramp.timeout_s), (.5, .2, .05, 600.0))
+        conditions = config.plan.conditions()
+        self.assertEqual(len(conditions), 4 * 21)
+        self.assertEqual({row["requested"]["lockin_excitation_v_rms"] for row in conditions}, {.006})
+        self.assertEqual({row["requested"]["gate_bottom_v"] for row in conditions},
+                         {-35.0 + 3.5 * index for index in range(21)})
+        # The public example's timeout is mandatory; enabling only part of the
+        # ramp table must reject before a resource could be opened.
+        prefix, block = text.rsplit("[three_smu_run.gate_bottom.ramp]", 1)
+        block = re.sub(r"(?m)^timeout_s\s*=.*(?:\n|$)", "", block)
+        text = prefix + "[three_smu_run.gate_bottom.ramp]" + block
+        self.path.write_text(text, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            load_hardware_combination(self.path)
+
+        # Select direct from the same shipped gate block, retaining its full grid.
+        direct_text = prefix + "zero_readback_tolerance_v = 0.05\n"
+        self.path.write_text(direct_text, encoding="utf-8")
+        with patch("attodry_control.combination_hardware.HardwareCombinationStation.open") as opened:
+            direct = load_hardware_combination(self.path)
+        opened.assert_not_called()
+        self.assertIsNone(direct.smu.plan.gate_bottom.ramp)
+        self.assertEqual(direct.smu.plan.gate_bottom.zero_readback_tolerance_v, .05)
+        self.assertEqual(len(direct.plan.conditions()), 4 * 21)
 
 
 if __name__ == "__main__":

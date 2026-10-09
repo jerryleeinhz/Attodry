@@ -1,5 +1,93 @@
 # Development stages
 
+## Consolidated photonics delivery and portable plotting (2026-10-09)
+
+- Packages the previously approved station photonics source, tests and guides
+  on `integration-photonics-nonlinear-hall`, preserving the existing origin
+  sensitivity/reserve documentation commit in the branch history.
+- Promotes run selection, explicit snapshot refresh and loaded-snapshot export
+  from the station's ignored analysis copy into version-controlled modules.
+  Notebook imports resolve to checkout `src` and retain optical source-setting
+  grouping exemptions; no `.test-tmp` source directory is required.
+- Keeps configured station identities/settings in ignored local files. Notebook
+  checkpoints and the locally installed NKT SDK DLL are ignored. Original station
+  files and local modifications are backed up before any normalization.
+- No instrument access, new scan or changes to unrelated station worktrees are
+  authorized or performed by this source-publication stage.
+- Offline verification exercises all 1,557 suite cases (690.161 s initial run).
+  All 65 affected cases pass the targeted rerun (8.653 s) after correcting Windows
+  temporary-path length, child-interpreter `PYTHONPATH` and the former notebook
+  auto-load expectation. The runner now propagates checkout `src` to children;
+  the notebook regression selects and explicitly loads SQLite run IDs.
+  LK_setup's isolated candidate also passes 120 relevant tests (29.024 s).
+  The final updated runner/notebook tests pass 16 more cases on LK_setup.
+  First-run failures and successful rerun/target logs are retained, not replaced.
+
+## Operator-selected PEM 2f reference (2026-10-07)
+
+- Implements strict optional `photonics_lockin.pem_reference_harmonic=1/2`,
+  default 1. Hardware output selection stays manual; scaled PEM comparisons
+  reuse the existing absolute tolerance and bounded recovery across startup,
+  qualification, held light and full electrical sample windows.
+- Reference interval/XX-XY pair/model detection and all existing hard faults
+  remain independent. XX SR830 h2 at ~100 kHz is rejected offline; XY SR865A
+  h1/h2 is explicitly recorded as PEM 2f/4f. No cleanup/output-write changes.
+- Additive configuration, axis, raw-role and formal harmonic metadata preserve
+  frequency provenance. Preview exposes the selected reference and expected
+  detector frequencies; guide/template list complete 1f/2f examples.
+- Local verification passes 413 hardware-blocked related regressions in
+  273.421 s and 11 dedicated feature cases. Fake success persists SQLite data;
+  wrong ratio fails before laser emission with protected source and closed
+  resources. LK_setup passes 180 related guarded cases and a 2f preview based on
+  its actual TOML in an isolated copy. File-only delivery retains private
+  operating/safety values and existing filled-template values with backup/hash
+  receipts under ignored `pem-reference-2f-20261007`; real commissioning is separate.
+
+## Notebook optical source-setting grouping (2026-10-07)
+
+- The two plotting notebooks apply an analysis-kernel-only exemption for
+  `requested.optical_source_level_pct`. This field no longer blocks a plot or
+  automatically requires separate categories. Explicit saved source groups
+  remain explicit until the operator selects None or the desired physical group.
+- Original source-setting values remain in rows and exported CSV and stay
+  available for optional coordinates, grouping and filtering. Other optical/
+  electrical condition guards and quality/statistical rules are unchanged.
+- All 37 guarded plotting/notebook regressions pass locally and on LK_setup lyr
+  for both candidate and deployed notebooks: repeated bootstrap,
+  curve/map/four-channel and widget rendering, other varying-condition guards,
+  quality exclusions and export metadata. Station notebooks retain unrelated
+  cells/settings with hash-verified backups; source/config/safety hashes match
+  their active-run baseline. No instrument commands are part of this update.
+
+## Continuous illuminated gate scan and direct transitions (2026-10-06)
+
+- User-approved `continuous_gate_scan` qualifies each optical grid index before
+  its gate loop, preserving light and the one fixed lock-in point within the
+  group. Optical -> smu -> lockin, PEM, voltage gate roles and bias-off restrictions
+  remain; omission keeps the original OFF-before-axis behavior.
+- Follow-up operator authorization selects direct gate jumps, including +30 V
+  to -30 V between groups. Omit the optional channel ramp; continuous direct
+  gates explicitly set `zero_readback_tolerance_v`. Current station uses 0.05 V,
+  carried from its previous approved ramp, and retains the 10 uA current limit,
+  0.1 s shared delay and all other operating values.
+- Guarded direct points record fresh V/I, source register, output, compliance
+  and error checks before the single target write and after the shared delay,
+  with held optical guards. Formal power brackets, electrical settling and
+  harmonic qualification are unchanged. Ramp mode remains available.
+- Normal direct cleanup requests zero once and requires measured-zero evidence
+  within the explicit tolerance before certifying zero. Failed/unknown state
+  uses OFF-first protection and retains manual actual-zero verification; source
+  register zero alone is never a capacitor discharge certificate. Audit failure
+  cannot skip protection or resource closure. Legacy non-continuous direct
+  behavior is retained.
+- The station plan remains five bands x six powers x eleven -30..30 V targets,
+  330 conditions and 990 formal samples. This follow-up is code/fake-test and
+  file deployment only: the user-stopped scan is not restarted, and its unknown
+  actual final gate voltage remains explicitly uncertified.
+- Verification evidence is saved in the ignored direct-gate deployment manifest;
+  real instrument imports and DLL loading are blocked during regression tests.
+
+
 ## Photonics sensitivity and reserve documentation (2026-10-06)
 
 - Adds all 28 SR865A voltage sensitivity/SCAL entries (1 V down to 1 nV),
@@ -14,6 +102,469 @@
   change or instrument I/O is required. All 146 related guarded fake tests pass,
   plus table/capability equality and three reserve-mode configure/readback checks.
   Deployment uses file hashes, a no-active-run/owner guard and file backups.
+
+## Optical initial-current strategies (2026-10-06)
+
+- Adds `power_feedback.initial_current_mode` with legacy-compatible omitted
+  `point`, single-row `per_target`, per-original-row `previous`, and multi-row
+  `grid`. Non-default modes require Cartesian source-current optical point
+  sessions; standalone legacy optical scans reject them before resource creation.
+- Explicit starts use a validated immutable `initial_source_levels_pct` array
+  or row-major matrix. All dimensions, finite values, 0.1% quantization and NKT/
+  feedback current limits are checked offline; selected starts do not add a scan
+  axis or certify target watts. Scalar targets are supported as one column.
+- Previous-mode inheritance uses only confirmed current readback after complete
+  initial feedback and dwell qualification. New original rows, repeated/skipped
+  indices, preparation/qualification/guard faults, OFF failures and cleanup reset
+  it. Every target still requalifies; formal acquisition does not retune.
+- Optical axis metadata retains each expanded index so intentional duplicate
+  rows/targets reach their own preparation and original-row reset. Raw records
+  retain configured/selected starts, mode/source and predecessor separately from
+  final tuned current and measured power. Template/guide list all modes/examples.
+- Verification: 224 guarded fake regressions pass locally (153.203 s) and the
+  same 224 pass on LK_setup lyr in an isolated checkout (248.391 s). Real serial/
+  VISA imports and DLL loads are blocked. A final dark-guard cache-reset case
+  and its 48 affected lifecycle/coordinator regressions pass both locally and
+  on the station isolated copy. The station's reviewed configuration
+  resolves to one optical row and six conditions with `previous`; all existing
+  operational values remain unchanged. Delivered to LK_setup after operator
+  scan `20261006T100636256058Z_630nm_test` completed 6/6 and released the OS lease.
+  The guarded deployment acquired the lease, checked no active database run,
+  backed up all existing files and the private configuration under
+  `.test-tmp/photonics-deployment/initial-current-20261006102135Z/backup`,
+  and verified every deployed hash. No instrument I/O or new scan was issued.
+  No illuminated commissioning of the new start modes has been performed.
+
+## Actual-power photonics continuation (2026-10-06)
+
+- Follow-up: explicit `power_feedback.target_mapping = "cartesian"` expands
+  each input optical row over every target, optical row outside/power inside;
+  omission keeps legacy `paired` and its exact length contract. Scalar targets,
+  duplicate observations and all row settings are preserved. Expanded point
+  count is bounded at 10000; the validated plan/snapshot records the grid.
+
+- User approves bounded initial target tuning followed by actual-power
+  acquisition. Added opt-in `optical_scan.target_deviation_policy` with omitted
+  `abort` default and `record_continue` for post-tuning optical point guards.
+- Qualification dwell, requalification, formal brackets and reference recovery
+  record deviations without corrective writes or invalidating optical/electrical
+  samples. Initial tuning and independent hard faults retain existing checks.
+- Preserves single formal measured watts, true requested targets and before/
+  formal/after timestamps; adds informational analysis columns and separate
+  bracket statistics. Corrected new target-coordinate/display semantics while
+  preserving legacy raw records. Shared PEM diagnostic guards honor the policy;
+  standalone optical retuning rejects unsupported opt-in before instrument I/O.
+- First continuation-only deployment passed 232 guarded tests locally and 232
+  on LK_setup lyr. Station initial tolerance is 2% and current step is 1%; both
+  operator values were retained. Only target_deviation_policy was added after
+  backup. Follow-up Cartesian feature passed 238 guarded regressions locally;
+  standalone CLI rejects unsupported options before resource construction.
+  The same 238 passed on LK_setup lyr (341.470 s), followed by verified offline
+  config loading. Backed-up 16-file delivery preserves station addresses and
+  settings; both station TOMLs include choices/defaults and five/six-power
+  examples. Config SHA77324f21 has one Cartesian row and unchanged original six
+  expanded coordinates, with 2% initial tolerance and 1% current step retained.
+  Real 1 mW verification `20261006T091133535717Z_verification-1mW` completed,
+  with two clear h1/h2 pairs, last formal power 1.00415712 mW, no unlock/overload
+  and clean final protection. Original six-power validation
+  `20261006T091837968154Z_verification-six-powers` completed 6/6 with 12 clear
+  h1/h2 pairs, zero overload/unlock/invalid pairs, and three continued post-tuning
+  target-deviation guards. Final laser OFF, electrical protection, closes and
+  audit all verified clean; both children exited 0. Monitoring was file/SQLite
+  only. Raw evidence and Chinese report are retained in the ignored station
+  deployment directory `power-grid-20261006085736Z`.
+
+## PEM internal-reference diagnostic implementation (2026-10-06)
+
+- Added a separate SR865A asynchronous diagnostic CLI and strict unified/
+  referenced TOML table, without broadening existing combination guards.
+- Implements prepared/dark PEM frequency observations and an optical-point ×
+  internal-frequency × time-constant × harmonic dark/light capture matrix.
+  XY binary buffers preserve actual rates, valid bytes, raw X/Y/R, partial
+  failures and finite timeouts; owned STOP and saved buffer configuration are
+  verified before proceeding. Internal-frequency preload avoids exposing XX
+  to an unused oscillator setting during reference switching.
+- Reuses NKT/PEM/PM preparation, bounded power feedback, lit monitoring and
+  final OFF-first cleanup. XX physical isolation is mandatory and cannot be
+  inferred from a 4 mV instrument setting. Source outputs, identity and
+  ordinary RC/input settings remain guarded, with exact baseline restoration.
+- Adds file-only monitoring, immutable raw CSV/config/source provenance,
+  per-sample R and complex FFT analysis, and dark/light PNG/PDF comparisons.
+  Invalid/failed data remains visible but excluded; no formal Hall inference.
+- Implementation/fake verification is authorized. Target offline deployment
+  does not constitute optical or SR865A real-buffer commissioning. See
+  [PEM_INTERNAL_DIAGNOSTIC_GUIDE.md](PEM_INTERNAL_DIAGNOSTIC_GUIDE.md).
+- Verified with 467 guarded fake regressions locally and the same 467 on
+  LK_setup (`lyr`). Target describe/simulate/monitor/analyze/plot smoke passes
+  with 16 explicitly synthetic captures. Code deployment is backed up and
+  hashed; operator `photonics.local.toml` bytes remain unchanged. Real buffer
+  throughput, reference switching and optical response remain uncommissioned.
+
+## Overnight reference-comparison outcome (2026-10-06)
+
+- All seven authorized schemes ran once with unique IDs, from 20:55:15 to
+  21:56:56 UTC on October 5. A/B/C compare 150 Hz and 120/300/600 s waits;
+  D/E/F compare 300/500/1000 Hz with 600 s waits. All six recovery schemes
+  have zero fully qualified recovery polls and zero formal/accepted samples.
+- Recovery poll counts are 95/239/530/557/551/512; corresponding XY current
+  unlock observations are 85/95, 237/239, 78/78, 551/557, 547/551, 511/512.
+  These denominators differ: preceding guard failures can prevent a status
+  query. Zero good polls do not prove continuous physical unlock.
+- E's shared 600 s reference deadline expired inside the optical read-only
+  guard and was labelled NktError optical total timeout. Independent audit
+  confirmed all 1110 E source readbacks OFF, no power/current tuning and full
+  cleanup. Original stopped history remains; new F/G controller reused the
+  original settings/budgets after that narrow audit, without broadening faults.
+- G (1000 Hz/120 s, existing unlock record/continue plus transient abort)
+  recorded and continued its unlock wait timeout. Both roles had 118/120
+  unlock observations. Subsequent XX FREQ=8146.84 Hz and XY FREQEXT=1642.9317627
+  Hz were outside 49--51 kHz; the XX check stopped first. G run ID is
+  `20261005T215449833554Z_overnight_G_unlock_record_diagnostic`.
+- Across all seven runs, 5024 independent NKT source observations were OFF
+  with status zero; no NKT writes, power reads, feedback tuning or formal
+  Hall samples occurred. The illuminated optical scan remains unaccepted.
+  The comparison supports that longer waits/wider pair tolerance alone did
+  not restore a qualified reference, without establishing a physical cause.
+- Every final optical OFF/electrical protection/XY preservation and device
+  close/audit check passed: XX 4 mV/DC0, optical pending false. PEM received
+  disable ACK without physical OFF readback. Failed/unclean records remain.
+  Baseline f624d3db178a9ede3be503ff3a9ffd42bb8b0416e4c653e1789a3841d81a4376,
+  safety file, 86 source files and all trial config hashes were unchanged.
+- Independent 22:11:27 UTC audit found no active run or acquisition owner.
+  The idle one-shot Windows task and thread heartbeat were then removed;
+  raw records were retained. Chinese report and final state snapshots reside
+  in ignored `.test-tmp/photonics-overnight-20261005/` locally and the station
+  continuation directory. No Git push or additional hardware query followed.
+
+## Operator-authorized overnight reference trials (2026-10-05)
+
+- The operator authorizes autonomous overnight scans and comparison of longer
+  reference waits and wider frequency criteria, with conclusions by morning.
+  An ignored station controller reuses the tested CLI; acquisition code and
+  physical source/power/model limits are unchanged.
+- Six control trials compare 150 Hz with 120/300/600 s startup/recovery waits,
+  then 300/500/1000 Hz with 600 s waits. A final raw diagnostic keeps unlock
+  record/continue and uses the existing abort transient policy; RANGE and
+  invalid/out-of-interval frequency still stop it. 1000 Hz is diagnostic,
+  not evidence of phase locking. Invalid formal pairs remain excluded.
+- Each trial is a full six-power 630 nm / XX 4 mV scan. Original runtime bytes
+  remain unchanged; ignored copies relocate only three relative file paths
+  and the explicit reference settings after full TOML semantic comparison.
+  Baseline, safety and source hashes are pinned.
+- A shared controller lease, process/database ownership checks and terminal
+  child status prevent controller overlap. Another trial requires final NKT
+  OFF, XX protection <=4 mV / DC0, XY output preservation, completed optical
+  cleanup and no underlying/close/audit errors. Only the exact software
+  reference deadline plus matching event can explain the failed-run
+  OSError/communication-uncertain aggregate; actual unknown faults stop.
+- Independent controller-only fake tests pass 11 cases locally; LK_setup
+  passes the initial eight before launch. Production guarded regression
+  remains the previously recorded 477 cases. No Git push is performed.
+- A hidden one-shot Windows task owns the acquisition independently of SSH.
+  Run `20261005T205515058112Z_overnight_A_wait120` starts at 20:55:15 UTC;
+  after SSH disconnect its database continues receiving reference queries.
+  A 15-minute thread heartbeat checks files/SQLite, never parallel live I/O.
+  No new trial starts after 04:00 UTC; an already active run finishes its own
+  bounded operation/cleanup. Maximum eight scans include any clean confirmation.
+- Per-trial ignored config/log/results/SQLite evidence is retained in
+  `.test-tmp/photonics-deployment/overnight-20261005T205226997274Z`.
+  Final illuminated success, comparative conclusions and final output states
+  remain pending; the first trial is active.
+
+## Bounded photonics reference-transient recovery (2026-10-05)
+
+- The operator approves implementation and a subsequent illuminated scan.
+  New optional `reference_transient_policy` is `abort` (default) or
+  `wait_stable`, with `reference_recovery_timeout_s=45` and
+  `reference_recovery_consecutive_good=3`. Known SR830 RANGE and valid
+  reference-frequency inconsistencies retain raw evidence and requalify at
+  1 s cadence. Real lock/settings evidence plus the existing filter settling
+  is required; all retries of a failed operation share one absolute deadline.
+- Whole combination windows (optical/environment before, all module reads,
+  and after) are rejected and reacquired together. Candidate audit remains;
+  retries do not count as completed samples or mix old/new role readings.
+  Source/optical settings are held and freshly guarded without feedback
+  retuning or extending the independent optical timeout. Hard faults remain
+  fatal, including when coincident with a reference transient. Existing
+  overload/unlock record-continue and default analysis exclusions are preserved.
+- Runtime and filled station example receive only the three new recovery
+  keys after backup and full parsed-TOML comparison. Initial file-only review
+  finds no running scan; the operator's 150 Hz pair tolerance, 1200 s optical
+  feedback timeout, XX 4 mV, six 630 nm power targets and 25% initial currents
+  are preserved. No branch change or push is part of this request.
+- Configuration/driver/serialization tests pass 122 cases. Local guarded broad
+  regression passes 475 tests in 211.826 s; final dwell-reuse/whole-window/monitor
+  regression passes 83 tests in 15.804 s. TC=1 s, 15 tau, 45 s restore tests finish
+  in 32--33 s by reusing already completed reference settling only before any
+  further output write; subsequent source settling remains complete. A fresh
+  RANGE during the reuse check still rejects and retains the original deadline.
+- LK_setup `lyr` passed 477 guarded tests in 336.258 s. Independent audit
+  matched all 33 deployment hashes and confirmed only the three intended TOML
+  additions. Runtime SHA256 is
+  `f624d3db178a9ede3be503ff3a9ffd42bb8b0416e4c653e1789a3841d81a4376`.
+- Initial background launch `20261005T203736082583Z_630nm_test` lost both
+  acquisition and supervisor processes after the SSH session ended. No normal
+  cleanup was recorded; zero attempts/samples existed. Raw history was retained
+  and the orphaned run marked interrupted, never clean. A separate read-only
+  check confirmed NKT OFF, XX 4 mV and XY 400 mV/zero DC; PEM physical output
+  remained unavailable. Later SSH launches must keep the supervisor connection
+  alive instead of relying on `Start-Process` after remote-session exit.
+- Held-SSH run `20261005T204119424855Z_630nm_test` started 20:41:19 UTC.
+  During configuration SR865A h2 read external 50140.019531 Hz and detection
+  99578.125 Hz; normalized difference 350.957031 Hz exceeded the unchanged
+  150 Hz tolerance and entered the new bounded recovery.
+- Recovery retained 36 complete polls plus the final partial poll over
+  45.031 s. Zero complete polls passed all criteria. XY current status indicated
+  unlocked in 33 of 37 status observations (last current/LIAS=8); XX had no
+  unlock latch in those 37 observations. Additional frequency anomalies were
+  retained. These are query observations, not physical event counts or a
+  measurement of continuous lock duration.
+- Run exited 2 at 20:43:02 UTC after recovery timeout, before illumination or
+  formal sampling (0/6 conditions, zero formal pairs). NKT OFF and XX source
+  protection/XY reference preservation were verified; failed-run/manual-review
+  status remains. Software recovery is verified for the observed bounded-timeout
+  path; full illuminated acquisition and recovery-to-success remain pending.
+  No further retry or tolerance/status-policy change followed.
+
+
+## Operator-selected reference tolerance without a ratio ceiling (2026-10-05)
+
+- The user explicitly requests removal of the profile's 0.1%-of-minimum-reference
+  ceiling. `pair_tolerance_hz` retains positive finite numeric validation and
+  is used unchanged for actual fundamental-frequency differences.
+- Added configuration/runtime regression for values above the old ceiling,
+  invalid values, inclusive tolerance boundaries and rejection beyond the
+  configured tolerance. Reference intervals and model/harmonic guards remain.
+- Local guarded related regression passed 228 tests in 67.284 s with real
+  VISA/serial/QCoDeS imports and DLL loading prohibited.
+- LK_setup `lyr` passed the same 228 guarded tests in 105.114 s after a
+  six-file backup/hash-verified deployment. No real acquisition was started.
+- The operating guide and portable TOML comment document the new contract.
+  Synchronization preserves station-owned TOML values; this stage runs only
+  offline checks and does not restart an illuminated scan.
+
+## Explicit reference-unlock continuation (2026-10-05)
+
+- User authorizes current/latched unlock record/continue and a new run. Added
+  independent optional `reference_unlock_policy` (default abort), scoped to the
+  photonics profile. Finite 1 s/45 s polling records unlock-only timeout before
+  continuing frequency checks; non-status and non-unlock guards remain enforced.
+- Formal or bracket unlock invalidates both roles on the common clock chain;
+  raw diagnostic data persists, default analysis excludes affected lock-in
+  values. Archive continuation requires explicit consistent policies and
+  known native evidence/invalidity, without reinterpreting earlier rejected data.
+- Local guarded related regression passed 342 tests (161.713 s), with latest
+  independent policy/session 41, session 62, legacy/analysis 46 and 13 distinct
+  integration/archive tests passing. All use fake transports.
+- LK_setup backed up/hash-verified 26 deployed files and offline-validated the
+  runtime and filled example with only the new policy field added. Current
+  config hash is `d13e97fbf01078d508263a1d7bc0c3afbc3a9cc2e6047a12522083eda1bac780`.
+- Target `lyr` guarded regression passed 343 tests (207.633 s), with prohibited
+  real VISA/serial/QCoDeS imports/DLL loads. Independent audit verified 26 files
+  and only the two intended policy additions. New authorized run
+  `20261005T184056626519Z_630nm_test` started at 18:40:56 UTC. Five XY unlock
+  observations (including live locked/LIAS8) were recorded and continued;
+  counts describe status observations, not physical event count or duration.
+- First-condition pre-illumination qualification then read XX 50027.3 Hz and
+  XY 50071.539062 Hz; difference 44.239062 exceeded the unchanged 20 Hz pair
+  guard. Run exited 2 at 18:42:11 UTC, zero accepted/formal samples. NKT OFF,
+  XX 4 mV/zero DC and XY reference output preservation were verified; PEM ACK
+  does not prove physical-off. Failed acceptance/manual review remains recorded.
+- Both continuation policies, tolerance 20 Hz and initial current 25% remain.
+  No further retry/frequency exception was added. Actual status-continuation
+  evidence is retained, while complete illuminated acceptance remains pending.
+
+## Operator-updated pair tolerance 20 Hz rerun (2026-10-05)
+
+- User changes runtime pair tolerance 5 -> 20 Hz and authorizes another scan.
+  Independent full-TOML comparison finds no other semantic changes. Six 25%
+  initial currents, six 630 nm power targets, XX 4 mV, current ceiling/step,
+  reference timeout and overload/power policies remain unchanged.
+- Prior process exit verified; new run `20261005T182219548275Z_630nm_test`
+  started at 18:22:19 UTC after offline loading/hash validation. Reference wait
+  passed in 5.157 s/six polls. After the 15 tau transition, XY live status was
+  locked (`CUROVLDSTAT=0`) but new `LIAS=8` recorded an interval reference unlock;
+  errors/ESR were zero. The preserved unlock guard stopped the run, with final
+  role frequencies only 1.55 Hz apart (within the updated 20 Hz criterion).
+- Run exited 2 at 18:22:46 UTC before any condition attempt/formal sample. NKT
+  OFF, XX 4 mV/zero DC and XY reference output preservation were verified;
+  PEM ACK does not prove physical-off. Failed-run acceptance/manual review
+  remains recorded. Config retains 20 Hz tolerance/25% initial current, with
+  no unlock bypass or additional retry. Complete acceptance remains pending.
+
+## Confirmed 25% illuminated initial current retry (2026-10-05)
+
+- Operator confirms the meter receives the laser path and reports validated
+  light onset around 25%. Six initial current entries changed 20 -> 25%, with
+  backup, offline validation and independent full-TOML-only comparison.
+  Target powers, maximum 100%, step 0.3 percentage points, XX 4 mV excitation,
+  reference checks and overload/power policies are unchanged.
+- Run `20261005T181354362001Z_630nm_test` started at 18:13:54 UTC and passed
+  initial reference qualification. The first 10 uW condition qualified near
+  9.78 uW at 28.8% current. Subsequent lock-in coordinate reads were XX
+  50027.3 Hz and XY 50021.488281 Hz: 5.811719 Hz exceeded the existing 5 Hz
+  criterion. File-only source audit confirms the configured tolerance was used.
+- Run exited 2 at 18:16:59 UTC, zero accepted conditions/formal samples. NKT OFF,
+  XX 4 mV/zero DC and XY reference output preservation were verified; PEM ACK
+  does not prove physical-off. Failed acceptance/manual review remains recorded.
+  Initial current stays 25%; raw frequency/power evidence retained, no tolerance
+  increase or further retry. Full optical/electrical acceptance remains pending.
+
+## Explicit 20% initial source current (2026-10-05)
+
+- User-approved local config change: all six initial current points 10 -> 20%,
+  backed up and validated offline; independent full-TOML comparison confirms
+  no other value changed. Target powers/current maximum/step, 4 mV excitation,
+  reference polling, overload continuation and power guards remain unchanged.
+- Run `20261005T180720125077Z_630nm_test` passed reference qualification, reached
+  NKT emission state 3/current 20% and first 10 uW feedback condition. PM100D
+  returned +17.15 nW then -14.93 nW; the negative reading stopped the run at
+  18:08:39 UTC (exit 2) before any accepted condition/formal Vxx/Vxy sample.
+  No automatic retry/current increase/guard bypass followed the invalid reading.
+- Initial current remains 20% in ignored runtime configuration. Raw replies and
+  rejected attempt remain audit evidence; near-zero power does not establish an
+  optical-path, zero-offset or laser-threshold cause. Valid illuminated initial
+  conditions and full optical/electrical acceptance remain pending.
+
+## Reference-resolved photonics rerun (2026-10-05; authorized hardware evidence)
+
+- User reports reference locking solved and authorizes another unchanged scan.
+  All 24 deployed manifest files and runtime config hash were independently
+  verified read-only; no code/config changes or repeat tests were required.
+- Run `20261005T180109861125Z_630nm_test` passed startup reference locking in
+  1.140 s and later requalification in 0.141 s, with both references near
+  50027 Hz and within the existing 5 Hz tolerance. One XY overload history was
+  recorded/continued; the subsequent observations were clean.
+- The first 630 nm/10 uW condition reached emission state 3 with initial source
+  current 10%, ND 25%, passband 625--635 nm. Its first PM100D READ returned
+  -8.40690184e-9 W, triggering the nonnegative-power guard (unit W, calibration
+  630 nm, average 5, questionable condition 0). No valid illumination is inferred
+  and no power-limit/range/feedback guard was changed to search for light.
+- Run exited 2 at 18:02:28 UTC before any formal Vxx/Vxy sample or accepted
+  condition. NKT OFF, XX 4 mV/zero DC and XY output preservation were verified;
+  PEM disable acknowledged. Failed data and raw replies remain ignored audit
+  evidence with manual review. Reference windows passed; illuminated power and
+  complete P5/P6 acceptance remain unresolved. No acquisition is active.
+
+## Explicit photonics overload continuation (2026-10-05)
+
+- User-authorized `photonics_lockin.overload_policy` supports `abort` (omission
+  default) and `record_continue` for both semantic roles and both SR830/SR865A
+  backends. The example documents the choices and retains diagnostic raw data.
+- The exception applies through reference polling, setup, transitions,
+  qualification and formal collection; formal role validity includes bracketing
+  observations. Invalid metrics stay in raw/audit storage; default analysis
+  preserves only uncontaminated role values from otherwise accepted conditions.
+- Formal unlock, errors/unknown status/PON, SR865A synchronous-filter faults,
+  identity/settings/frequency, source/power and cleanup guards remain. Existing
+  one-second reference polling with 45 s timeout and 15 tau settling remain.
+  Deployment must preserve operator-owned local configuration and retain backups.
+- Local guarded regression passed 308 tests in 105.731 s; final status-validation
+  and resolved-policy preview changes passed 106 scoped tests in 13.874 s.
+  Independent review is complete. Analysis verifies actual normalized/native
+  status rather than relying only on declared overload problem strings, with
+  known SR830 transition history retained and mixed/unknown faults rejected.
+- Final station suite: 330 guarded tests passed in 151.654 s; 24 deployed files
+  were backed up and hash checked. Only the overload-policy field was added to
+  the backed-up operator runtime TOML; original optical/electrical limits remain.
+- Actual run `20261005T174803358591Z_630nm_test` reached all 45 one-second lock
+  polls (90 role observations), continuing four XX overload windows and one XY
+  overload window. XY SR865A remained unlocked throughout (current 8; final
+  LIAS 8/ESR 0/ERRS 0), while XX ended clean/locked. Reference deadline caused
+  exit 2 before harmonic-setting writes, emission, attempts or formal samples.
+  The overload feature is implemented/tested/deployed and observed in startup;
+  real continued formal overload acquisition remains uncommissioned.
+- NKT OFF, XX 4 mV/zero DC and XY reference preservation were verified; PEM
+  disable was acknowledged. The failed attempt is retained with manual review,
+  no active acquisition and incomplete P5/P6 acceptance. No reference guard was
+  loosened and the cause of XY unlock was not inferred.
+
+## Reference lock polling instead of fixed delay (2026-10-05)
+
+- The user explicitly authorizes another real scan and 1 s lock-status polling
+  with 45 s timeout, keeping XY 1.0 V peak/fixed 0.02 V sensitivity and all other
+  approved optical/electrical settings. Common audited status-only reads work
+  before valid frequency/sample data; same-instrument IDN checks precede them.
+- New faults abort rather than polling until clear. Expected unlock/setting
+  history is recorded until a clean observation; full filter settling and strict
+  formal acquisition checks remain. A monotonic deadline includes query/audit
+  time, bounds sleeps, rejects late clean results and fails closed on interruption.
+  New timeout config and exclusive legacy alias are documented in the template.
+- Final relevant regression passed 226 tests locally in 64.057 s and all 226 on
+  LK_setup in 92.051 s; seventeen deployed files were backed up/hash checked.
+  The new runtime TOML explicitly uses 45 s timeout, with other settings unchanged.
+- User-authorized run `20261005T172730418867Z_630nm_test` stopped at its first poll
+  on XX SR830 LIAS 25 (input/reserve overload, unlock and range-change history),
+  ERRS 0. Exact event times are unknown; raw latch evidence was saved before
+  rejection. No emission, condition attempts or formal samples occurred and no
+  further run was launched. NKT OFF, XX 4 mV and XY reference protection were
+  verified; PEM disable was acknowledged. Failed-run manual review and P5/P6
+  hardware acceptance remain pending. Hardware/data/secrets remain ignored.
+
+## Real photonics startup and scoped recovery (2026-10-05)
+
+- User-authorized first illuminated-run attempt reached optical preparation but
+  failed its startup reference guard before emission or formal electrical data.
+  The 1 Hz pair guard rejected a 1.340625 Hz readback difference. NKT OFF was
+  confirmed; shared default PyVISA manager closure by PM100D invalidated XX/XY
+  protection queries, so the original failed record remains subject to manual
+  review and PEM was not disabled without verified XX protection.
+- Subsequent authorized diagnostics established fresh source readbacks and
+  observed no new XX latched faults or XY current faults in the test window.
+  This is a recovery observation, not acceptance of the failed attempt or an
+  independent verification of reference phase. The user requests 5 Hz and a
+  longer lock wait for the next run; historical guards/audits remain unchanged.
+- Recovery changes defer the power-meter close until after electrical protection
+  and introduce an optional per-reference-transition wait before the first
+  frequency check. Independent optical-session cleanup retains its defaults.
+  Local 127 relevant guarded tests passed in 56.813 seconds, including 14 new
+  reference-wait/shared-manager regression tests; real hardware imports and DLL
+  loading were blocked. LK_setup passed the same 127 tests in 91.714 seconds
+  after a backed-up, hash-verified twelve-file deployment. Its local config was
+  separately backed up and changed only to 5 Hz tolerance and 45 s reference
+  wait. A new run under the user's instruction passed the reference wait/pair
+  guard but failed a separate SR865A fixed 1 ppm comparison of sequential h2
+  reference/detector frequency queries. The normalized difference was 0.386718 Hz.
+  No emission/formal samples occurred. NKT OFF and XX/XY protection were verified,
+  validating the shared-manager cleanup repair; the failed run stays rejected.
+- The scoped adapter correction applies the optical profile's explicit
+  fundamental-Hz tolerance to that sequential query comparison, preserving the
+  standalone default and all hard frequency/harmonic/status checks. Final guarded
+  regression passed 204 tests locally in 55.470 seconds and 204 on LK_setup in
+  91.132 seconds, including actual-frequency replay, explicit normalized bounds,
+  standalone-default preservation, session forwarding/audit and rejected drift.
+  The backed-up, hash-verified sixteen-file deployment preserves local hardware
+  configuration and all rejected run histories.
+- The next real startup passed frequency checks but stopped on XY transition
+  history (current 0, LIAS 27, ESR 128). The complete raw status was retained;
+  its historical event times are unknown and no overload/PON exception was added.
+  No emission/formal samples occurred. NKT OFF and XX 4 mV/XY reference protection
+  were verified, and PEM disable was acknowledged. The failed run still requires
+  operator review. The user confirms no front-panel overload, only unlock. A
+  saved recovery baseline contained input-overload/unlock history (LIAS 24,
+  current 8); one subsequent 5 s query-only observation reported only unlock
+  with no new overload/error. Enabling PEM recovered lock after the 45 s wait,
+  but stable remained false until normal preparation reapplied the existing
+  157.5 nm target. A fresh input-overload latch (LIAS 16, current 0) then appeared
+  after a clean baseline, so recovery stopped before any new acquisition or
+  emission. Old and new fault evidence are both retained. Fresh hold queries at
+  17:03:35 UTC confirmed NKT OFF, XX 4 mV, XY 0.4 V/h2/current status 0, and PEM
+  stable; reference enable was acknowledged and retained when closing transport.
+  The user explicitly authorized only a 1.0 V peak front-end change. The backed-up
+  local TOML and actual native range readback agree, fixed 0.02 V sensitivity and
+  XY source amplitude/DC were preserved, and the 15 s/45 s waits plus three
+  consecutive clean status windows passed. Maximum frequency-readback spread was
+  0.91875 Hz; no new overload/error occurred, NKT stayed OFF and XX stayed 4 mV.
+  New run `20261005T170850705783Z_630nm_test` then stopped at startup on another
+  XY input-overload latch (LIAS 16, current/ESR/ERRS 0), despite actual 1.0 V peak
+  range and clean preceding recovery. No emission, condition attempts or formal
+  samples occurred; there was no subsequent retry. NKT OFF, XX 4 mV protection,
+  XY 0.4 V/reference preservation and 1.0 V peak/0.02 V settings were verified
+  during cleanup; PEM disable was acknowledged. The failed audit still requires
+  manual review. XY A/B input and front-panel checks have been requested. Some
+  redundant SR865A setting writes are visible in startup code but have not been
+  established as the overload cause. All guards remain; P5/P6 acceptance is
+  pending and no acquisition process is active.
 
 ## User-authorized source publication (2026-10-05)
 

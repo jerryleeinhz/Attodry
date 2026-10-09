@@ -1,5 +1,168 @@
 # Hardware and safety guide
 
+## User-approved continuous illumination and gate transitions (2026-10-06)
+
+The operator approves optical qualification before a gate loop and small-step gate
+voltage transitions; the follow-up authorization permits direct gate jumps.
+Explicit `combination_scan.illumination_policy="continuous_gate_scan"`
+requires optical -> smu -> lockin, the existing PEM topology, one fixed excitation
+point, lit power-stabilized PM measurement and only voltage-source gate roles
+with optional per-channel ramps. A continuous direct gate requires explicit
+`zero_readback_tolerance_v`, finite/positive and within its physical voltage limit.
+Bias, current/pulse or environment axes are rejected offline. Omission retains
+OFF-before-every-axis behavior.
+
+Prepare/select the fixed electrical point while dark, then qualify the light
+before the first gate write. Inner gate changes preserve illumination; later
+fixed-lockin axis applications verify/reuse the setting. Per-gate electrical
+settling, fresh power guards, reference checks and all formal sample brackets
+remain. No target-following correction occurs inside the gate loop. Each optical
+index and repeat gets its own qualification; optical changes and global cleanup
+remain OFF-first.
+
+Optional `three_smu_run.gate_bottom.ramp` / `gate_top.ramp` carries explicit
+max_step_v, step_interval_s, readback_tolerance_v and timeout_s, all positive and
+finite, with tolerance below half a step. These are transition/verification
+settings, not replacement sample V/I limits. Every transition starts from fresh
+sensed voltage, records attempted writes and validates sensed V/I, output,
+current compliance and errors at each intermediate step. Held-light guards
+continue during steps. Intermediates are audit records, not formal grid points.
+Small discrete steps do not guarantee current-peak or hardware slew bounds.
+
+All observed SMU compliance/limit, unknown-status and communication faults abort;
+lock-in continuation policies never excuse a gate fault. Guarded direct changes
+use fresh sensed V/I, source, output, compliance and error checks before their
+single target write and after the shared delay, with held optical guards.
+The post-write source register must equal the requested target; mismatch is a
+hard failure, with actual V/I retained. No new actual-voltage target tolerance
+is inferred from the separate cleanup zero tolerance.
+Normal direct return-to-zero uses one zero request and fresh measured-zero
+verification within the explicit tolerance before certification and disable;
+configured ramps retain their measured-zero verification. Failed/untrusted
+transitions prioritize output disable, preserve last confirmed values and
+uncertified actual-zero state; source-zero/OFF alone is not a discharged-capacitor
+certificate. Legacy non-continuous direct/no-ramp behavior is retained.
+Current station direct mode carries the prior 0.05 V zero tolerance and preserves
+the 10 uA current limit. No current limit is silently widened. This user-approved
+exception supersedes the earlier unconditional laser-OFF/direct-point statements
+only for the opted-in path. Offline/target-offline verification is not real
+illuminated commissioning.
+
+
+## User-approved post-tuning optical target deviation (2026-10-06)
+
+An additional explicit `power_feedback.target_mapping = "cartesian"` expands
+each approved optical setting row across the validated target-power array.
+Default `paired` retains one-to-one mapping. Expansion happens offline, is
+limited to 10000 optical points and preserves all source/filter/PEM constraints.
+Changing the number of requested conditions does not authorize higher power,
+electrical excitation or different routing. Preview exposes the expanded plan.
+
+The operator approves approximate target tuning followed by acquisition at
+actual measured power. Optional `optical_scan.target_deviation_policy` is
+`abort` (omitted default) or `record_continue`. Initial target tolerance,
+window/hold qualification, bounded feedback and actuator stepping are unchanged.
+Only subsequent target mismatch becomes informational, including post-tuning
+dwell, requalification, formal brackets and reference-recovery monitoring.
+Hold optical settings; no target-following writes inside electrical acquisition.
+Actual watts, requested target, deviation and independently timestamped power
+brackets are retained. Off-target alone does not invalidate Vxx/Vxy.
+
+This exception does not cover hard power limits, reduction thresholds, minimum
+valid illumination, PM saturation/invalid readbacks, settings, identity,
+communication, reference or cleanup faults. The common optical point session
+also supplies PEM diagnostic guards; that path uses the same explicit policy.
+The standalone optical retuning loop rejects the non-default policy before I/O.
+Historical data remains unchanged. See the photonics combination guide.
+
+## Isolated-XX PEM internal-reference diagnostic (2026-10-06)
+
+The user-selected SR865A diagnostic is a separate, explicitly authorized
+development path. Its real entry requires confirmed physical disconnection
+of XX SINE OUT from the sample, an available/unarmed XY capture buffer and
+the optical authorization/route flags. Software 4 mV protection is not
+physical isolation. The station's NKT power/current, PEM, PM and model limits
+remain unchanged; original combination reference guards are not bypassed.
+
+Prepare approved internal frequency while XY is still external before
+switching reference source. Unknown, communication, settings, identity,
+power and ownership/cleanup faults stop the run. Existing confirmed overload
+and unlock record/continue policies retain invalid raw diagnostic buffers.
+Check optical guards across each buffer, turn light OFF before analysis,
+protect XX, restore XY, then finish PEM and close all resources. Every failed
+cleanup action stays in the final audit even if a later action succeeds.
+
+Internal clocks supply no PEM phase or signed Hall response. R has positive
+noise bias, and a longer wait cannot recover amplitude suppressed by an
+inappropriate low-pass time constant. No automatic inverse-filter correction
+or conversion from measured voltage to photocurrent is performed. Full
+operator instructions: [PEM_INTERNAL_DIAGNOSTIC_GUIDE.md](PEM_INTERNAL_DIAGNOSTIC_GUIDE.md).
+
+## Bounded reference-transient recovery (2026-10-05)
+
+The operator approves `reference_transient_policy = "wait_stable"` and a new
+illuminated scan with the existing approved settings. Omission defaults to
+`abort`. Only identified SR830 RANGE (bit 4), valid finite reference readings
+outside the selected interval, reference-pair/PEM mismatch and SR865A detection
+frequency mismatch may enter recovery. This does not prove a query glitch.
+Actual configuration changes, SR830 TC bit 5, SR865A configuration/filter faults,
+unknown status, communication, instrument and optical/environment faults retain
+hard failures. No frequency, power, source or field limit is widened.
+
+Recovery requires three consecutive one-second good polls, real lock evidence,
+verified settings and the configured filter settling. A single 45 s deadline
+covers recovery and retries for the failed operation; another anomaly cannot
+reset it. Optical settings and approved electrical outputs remain held while
+fresh power/state checks continue. No feedback retune or optical timeout reset
+is authorized by recovery. A contaminated sample is retained as rejected audit,
+then the entire before/all-modules/after window is reacquired. Existing pure
+unlock/overload record-continue and default analysis invalidity remain intact.
+
+## User-selected absolute photonics reference tolerance (2026-10-05)
+
+The user explicitly removes the software-only
+`pair_tolerance_hz <= reference_min_hz * 0.001` profile ceiling. The configured
+tolerance must still be a positive finite number and is the sole difference
+threshold for XX/XY/PEM fundamental-reference comparisons and SR865A
+`FREQDET / harmonic` versus reference readbacks in this photonics path.
+Actual reference intervals and model/harmonic detection limits remain enforced;
+frequency disagreement beyond the configured tolerance still aborts, independently
+of the status-only reference-unlock continuation policy. Source, power, field,
+identity/settings and cleanup protection retain their existing contracts.
+
+## User-authorized photonics reference-unlock continuation (2026-10-05)
+
+The current user explicitly authorizes
+`photonics_lockin.reference_unlock_policy = "record_continue"` on XX and XY,
+then another illuminated scan. This supersedes the unlock-only rejection below
+for this opted-in photonics profile; omission still defaults to `abort` and
+ordinary electrical acquisition is unchanged. Current and consumed latched
+reference-unlock events remain recorded in setup, transitions, qualification
+and formal sampling. Any unlock within a formal pair or its probe brackets
+invalidates both Vxx/Vxy roles because they depend on the common reference chain;
+raw diagnostic data is retained but default analysis excludes the affected pair.
+The finite 1 s/45 s reference wait records unlock timeout and continues only
+under this explicit policy; frequency range/pair consistency, model capabilities,
+identity/settings, source amplitude/DC, unknown status, PON, synchronous-filter,
+instrument/communication and optical power checks keep their existing guards.
+No sample-source, current, power or magnetic-field limit changes. Separate
+overload policy remains responsible only for overload faults.
+
+## User-authorized photonics overload continuation (2026-10-05)
+
+For the current illuminated photonics scan, the user explicitly authorizes
+`photonics_lockin.overload_policy = "record_continue"` for both XX SR830 and
+XY SR865A. This scoped exception also covers overload observations during
+reference polling, setup, transitions and qualification. Raw current/latched
+status is retained; affected formal readings are invalid for analysis, while
+an unaffected companion role remains usable. Missing policy defaults to `abort`.
+Reference unlock still waits only in an expected reference transition and fails
+in formal acquisition. Communication, identity/settings, unknown status, PON,
+instrument errors, SR865A synchronous-filter faults, frequency, excitation and
+optical power checks retain their original guards. No range or power limit is
+increased. Real acquisition is explicitly authorized in the current session;
+the historical read-only commissioning notes below describe earlier stages.
+
 ## New photonics profile precedence (updated 2026-10-05; offline implemented)
 
 Current user-confirmed wiring supersedes the earlier arrangement below for the

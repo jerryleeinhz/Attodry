@@ -1,0 +1,40 @@
+# Copy to an ignored *.local.toml beside photonics.local.toml.
+# The referenced station file owns all hardware addresses, optical powers,
+# reference safety interval, XX protection and final optical cleanup settings.
+# This profile captures only XY SR865A X/Y. XX SR830 provides protection and
+# status evidence; its excitation must be physically disconnected from sample.
+[pem_internal_diagnostic]
+schema_version = 1
+station_config = "photonics.local.toml"
+run_name = "pem_internal_50khz_diagnostic"
+note = "Noncoherent PEM amplitude diagnostic; no signed Hall or PEM phase"
+output_directory = "../run_data/pem_internal_diagnostic"
+# Zero-based indices of nkt_run.points; begin with one validated optical point.
+optical_point_indices = [0]
+# Compare nominal 50 kHz with the directly observed PEM frequency when enabled.
+# Each actual internal frequency must remain inside the station safety interval.
+internal_frequencies_hz = [50000.0]
+include_pem_frequency = true
+# SR865A ordinary RC filter, 24 dB/oct. Allowed values follow SR865A OFLT table.
+# Suggested initial comparison: 1 ms and 100 us; longer tau attenuates the beat.
+time_constants_s = [0.001, 0.0001]
+harmonics = [1, 2]
+capture_duration_s = 30.0
+# Instrument buffer rate is chosen >= this value; actual rate is archived.
+# Also raised to >= 4/(2*pi*tau) and >= 4*abs(h*(PEM-internal)) to avoid
+# obvious beat/filter-bandwidth aliasing; the rounded hardware rate may be higher.
+# Changing this does not turn a Python polling loop into fast acquisition.
+minimum_capture_rate_hz = 1000.0
+capture_timeout_s = 45.0
+# Slow optical/status guards while the instrument owns fast X/Y acquisition.
+# Allowed 0.1..5.0 s; serial I/O can make actual intervals longer, and is archived.
+monitor_interval_s = 1.0
+# Observe active/stable PEM frequency before captures; 0 disables this window.
+pem_frequency_observation_s = 60.0
+# Set true only after physically removing XX SINE OUT excitation from sample.
+# false permits offline validate/plan, but prohibits a real acquisition.
+xx_excitation_disconnected = false
+# Set true only after confirming no user capture is active/armed, and agreeing
+# that this run may replace the SR865A capture buffer. A zero capture status
+# alone cannot distinguish idle from a capture armed for an external trigger.
+capture_buffer_available = false

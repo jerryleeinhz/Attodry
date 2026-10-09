@@ -89,10 +89,31 @@ def launch_text(summary, width=None):
                          segment["points"]))
     lines += ["", *_table(("Axis", "Segment/direction", "Requested scan", "Points"), axes, width)]
     hardware = []
+    optical = summary.get("optical")
+    if optical is not None and optical["scan"].get("feedback"):
+        grid = optical.get("point_grid")
+        if grid:
+            lines.append(f"Optical power grid: {grid['target_mapping']} | Input rows: "
+                         f"{grid['input_point_count']} | Expanded points: {grid['expanded_point_count']}")
+        initial_mode = optical["scan"]["feedback"].get("initial_current_mode", "point")
+        lines.append(f"Optical initial current: {initial_mode}" +
+                     (" | Previous qualified readback within each input row; reset at new row"
+                      if initial_mode == "previous" else " | Each point still requires power qualification"))
+        lines.append("Optical target deviation: " + optical["scan"].get("target_deviation_policy", "abort") +
+                     " | Target tolerance applies to initial tuning; analysis uses measured power")
     for role, settings in summary.get("smu", {}).items():
         hardware.append((role, settings["source_mode"], "AUTO", "-",
             _number(settings["max_abs_current_a"], "A") + " / " +
             _number(settings["max_abs_voltage_v"], "V") + " max"))
+        if settings.get("ramp"):
+            ramp = settings["ramp"]
+            lines.append(f"{role}: ramp <= {_number(ramp['max_step_v'], 'V')} per step / "
+                         f"{_number(ramp['step_interval_s'], 's')} minimum interval; "
+                         f"timeout {_number(ramp['timeout_s'], 's')}; "
+                         f"actual V tolerance {_number(ramp['readback_tolerance_v'], 'V')}")
+    if summary.get("illumination_policy") == "continuous_gate_scan":
+        lines.append("Illumination: continuous_gate_scan | Optical qualification before gate loop; "
+                     "light held during gate steps; fixed lock-in excitation reused")
     lockin = summary.get("lockin", {})
     for role, settings in lockin.get("roles", {}).items():
         harmonics = lockin["harmonics_by_role"].get(role.removeprefix("lockin_"), [])
@@ -140,6 +161,16 @@ def launch_text(summary, width=None):
             reference_path = ("PEM -> XY -> XX (XY SINE OUT)" if lockin["reference_topology"] == "pem_xy_xx_sine" else "PEM -> XX -> XY")
             lines.append("Reference: " + reference_path + " | Allowed: " +
                 " .. ".join(_number(v, "Hz") for v in lockin["reference_bounds_hz"]))
+            lines.append(f"PEM reference: {lockin.get('pem_reference_harmonic', 1)}f (hardware selected)"
+                         " | Lock-in h1/h2 are relative to this external reference")
+            for role, harmonics in lockin.get("pem_harmonics_by_role", {}).items():
+                lines.append("lockin_" + role + " detection: " + ", ".join(
+                    f"h{h} = PEM {pem_h}f (~{_number(frequency, 'Hz')})"
+                    for h, pem_h, frequency in zip(lockin["harmonics_by_role"][role], harmonics,
+                                                   lockin["expected_detection_hz_by_role"][role])))
+            lines.append("Reference transient: " + lockin.get("reference_transient_policy", "abort") +
+                f" | Recovery: {lockin.get('reference_recovery_timeout_s', 45):g} s total, "
+                f"{lockin.get('reference_recovery_consecutive_good', 3)} consecutive good polls at 1 s")
             lines.append("XX source: " + source["wiring"] + " / " + source["load"] + " | " +
                 source["amplitude_definition"] + " | DC " + source["dc_mode"] +
                 " " + _number(source["dc_offset_v"], "V") + " | Cleanup <= " +
@@ -213,11 +244,31 @@ def snapshot_text(snapshot, width=None):
         lines.append(f"Last event: {event['created_at_utc']} | {event['event_type']}")
     if snapshot.get("error"):
         lines.append("Primary error: " + snapshot["error"])
+    recovery = snapshot.get("reference_recovery")
+    if recovery:
+        payload = recovery["payload"]
+        lines.append("Reference recovery (recorded): " + recovery["event_type"] +
+            " | " + str(payload.get("stage", "unknown")) +
+            (f" | stable {payload.get('consecutive_good', 0)}/{payload['required_good']}"
+             if 'required_good' in payload else '')
+            + f" | elapsed {payload.get('elapsed_s', 0):.1f} s"
+            + f" | remaining {payload.get('remaining_s', payload.get('timeout_s', 0)):.1f} s"
+            + " | " + recovery["created_at_utc"])
     readings = []
     for module, reading in snapshot.get("last_recorded_readings", {}).items():
+        values = {**reading.get("actual", {}), **reading.get("measurements", {})}
+        if module == "optical":
+            status = reading.get("status") or {}
+            if status.get("power_target_w") is not None:
+                # Legacy actual.optical_target_power_w held measured watts.
+                # Display the retained requested target without rewriting data.
+                values["optical_target_power_w"] = status["power_target_w"]
+            assessment = status.get("power_target_assessment")
+            if assessment:
+                values["target_in_tolerance"] = assessment["target_in_tolerance"]
+                values["target_deviation_w"] = assessment["target_deviation_w"]
         readings.append((module, reading.get("captured_at_utc", "?"),
-            json.dumps({**reading.get("actual", {}), **reading.get("measurements", {})},
-                       ensure_ascii=False), str(reading.get("clean", "unknown"))))
+            json.dumps(values, ensure_ascii=False), str(reading.get("clean", "unknown"))))
     if readings:
         lines += ["Last recorded values (not live queries):",
                   *_table(("Module", "Captured UTC", "Readback", "Clean"), readings, width)]

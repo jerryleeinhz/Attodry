@@ -1,8 +1,10 @@
 import math
+import json
 import unittest
 
 from attodry_control.models import LockinRole
 from attodry_control.sr865a import AuthorizationRequired, Sr865a, Sr865aError
+from attodry_control.reference_transients import ReferenceTransientError
 from attodry_control import sr865a_settings as settings
 
 
@@ -257,6 +259,147 @@ class Sr865aAdapterTests(unittest.TestCase):
         self.resource.responses["RSRC?"] = "2"
         with self.assertRaisesRegex(Sr865aError, "Dual/chop"):
             self.sample()
+
+    def test_sequential_h2_readback_replay_uses_explicit_reference_hz_tolerance(self):
+        self.resource.responses.update({"HARM?": "2", "FREQEXT?": "50028.585938",
+                                        "FREQDET?": "100056.39844"})
+        # Reproduce the real sequential-query mismatch under the old default.
+        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+            self.sample()
+        result = self.driver.read_sample(consume_status_latches=True, current_status_supported=True,
+                                         reference_frequency_tolerance_hz=5.0)
+        self.assertAlmostEqual(abs(result.detection_frequency_hz / 2 - result.reference_frequency_hz),
+                               0.386718, places=6)
+        self.assertTrue(result.status.valid)
+        self.assertEqual(self.resource.writes, [])
+
+    def test_explicit_frequency_tolerance_is_normalized_by_harmonic_and_inclusive(self):
+        for harmonic in (1, 2, 3):
+            for sign in (-1, 1):
+                self.resource.responses.update({"HARM?": str(harmonic), "FREQEXT?": "50000",
+                    "FREQDET?": str((50000 + sign * 5) * harmonic)})
+                with self.subTest(harmonic=harmonic, sign=sign):
+                    result = self.driver.read_sample(consume_status_latches=False,
+                                                     reference_frequency_tolerance_hz=5)
+                    self.assertEqual(abs(result.detection_frequency_hz / harmonic - result.reference_frequency_hz), 5)
+                    self.resource.responses["FREQDET?"] = str((50000 + sign * 5.001) * harmonic)
+                    with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+                        self.driver.read_sample(consume_status_latches=False,
+                                                reference_frequency_tolerance_hz=5)
+
+    def test_explicit_frequency_tolerance_does_not_add_the_legacy_relative_allowance(self):
+        self.resource.responses.update({"HARM?": "2", "FREQEXT?": "1000000", "FREQDET?": "2000000.4"})
+        self.driver.read_sample(consume_status_latches=False)
+        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+            self.driver.read_sample(consume_status_latches=False, reference_frequency_tolerance_hz=0.1)
+
+    def test_none_frequency_tolerance_preserves_default_behavior(self):
+        result = self.driver.read_sample(consume_status_latches=False, reference_frequency_tolerance_hz=None)
+        self.assertEqual(result.detection_frequency_hz, 100054)
+        self.resource.responses.update({"FREQEXT?": "50028.585938", "FREQDET?": "100056.39844"})
+        with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
+            self.driver.read_sample(consume_status_latches=False, reference_frequency_tolerance_hz=None)
+
+    def test_finite_detection_disagreement_has_narrow_type_and_complete_readonly_evidence(self):
+        self.resource.responses.update({"FREQEXT?": "50000", "FREQDET?": "100200"})
+        with self.assertRaises(ReferenceTransientError) as caught:
+            self.driver.read_sample(consume_status_latches=True, current_status_supported=True,
+                                    reference_frequency_tolerance_hz=40)
+        error = caught.exception
+        self.assertIsInstance(error, Sr865aError)
+        self.assertIsInstance(error, ValueError)
+        self.assertEqual(error.kind, "detection_frequency_mismatch")
+        evidence = error.evidence
+        self.assertEqual((evidence["harmonic"], evidence["reference_frequency_hz"],
+                          evidence["detection_frequency_hz"]), (2, 50000, 100200))
+        self.assertEqual(evidence["expected_detection_frequency_hz"], 100000)
+        self.assertEqual(evidence["detection_fundamental_frequency_hz"], 50100)
+        self.assertEqual(evidence["reference_difference_hz"], 100)
+        self.assertEqual(evidence["reference_frequency_tolerance_hz"], 40)
+        self.assertEqual((evidence["role"], evidence["model"]), ("xx", "SR865A"))
+        self.assertEqual(self.driver._identity, evidence["identity"])
+        raw = evidence["raw"]
+        self.assertEqual(len(raw), len(self.driver.audit))
+        for normalized, original in zip(raw, self.driver.audit):
+            self.assertEqual(normalized, {"command": original.command, "response": original.response,
+                "started_at_utc": original.started_at_utc.isoformat(),
+                "completed_at_utc": original.completed_at_utc.isoformat(), "error": original.error})
+        self.assertEqual(raw[-1]["command"], "FREQDET?")
+        self.assertEqual(raw[-1]["response"], "100200")
+        self.assertIn("HARM?", [record["command"] for record in raw])
+        self.assertEqual(json.loads(json.dumps(evidence, allow_nan=False)), evidence)
+        self.assertNotIn(("query", "SNAP? X,Y"), self.resource.events)
+        self.assertNotIn(("query", "LIAS?"), self.resource.events)
+        self.assertEqual(self.resource.writes, [])
+        # No implicit retry happened. A separate fresh call can succeed after
+        # a caller has explicitly applied its recovery policy.
+        self.resource.responses["FREQDET?"] = "100000"
+        self.assertEqual(self.sample().detection_frequency_hz, 100000)
+
+    def test_transient_evidence_normalizes_nested_enum_dataclass_and_sequences_but_preserves_nan(self):
+        self.sample()
+        record = self.driver.audit[-1]
+        error = ReferenceTransientError("synthetic reference evidence", kind="reference_mismatch",
+            evidence={"nested": ({"role": LockinRole.XY, "raw": [record]},), "values": (1, 2.5)})
+        self.assertEqual(error.evidence["nested"][0]["role"], "xy")
+        self.assertEqual(error.evidence["nested"][0]["raw"][0]["command"], record.command)
+        self.assertEqual(error.evidence["values"], [1, 2.5])
+        self.assertEqual(json.loads(json.dumps(error.evidence, allow_nan=False)), error.evidence)
+        malformed = ReferenceTransientError("invalid synthetic evidence", kind="reference_mismatch",
+                                             evidence={"frequency": math.nan})
+        self.assertTrue(math.isnan(malformed.evidence["frequency"]))
+        with self.assertRaises(ValueError):
+            json.dumps(malformed.evidence, allow_nan=False)
+
+    def test_default_detection_disagreement_still_raises_without_implicit_recovery(self):
+        self.resource.responses.update({"FREQEXT?": "50000", "FREQDET?": "100200"})
+        with self.assertRaises(Sr865aError) as caught:
+            self.sample()
+        self.assertIsInstance(caught.exception, ReferenceTransientError)
+        self.assertIsNone(caught.exception.evidence["reference_frequency_tolerance_hz"])
+        self.assertEqual(sum(command == "FREQDET?" for _, command in self.resource.events), 1)
+        self.assertEqual(self.resource.writes, [])
+
+    def test_malformed_model_limit_identity_and_io_errors_are_never_reference_transients(self):
+        for command, value in (("FREQDET?", "nan"), ("FREQDET?", "invalid"),
+                               ("FREQDET?", "0"), ("FREQDET?", "4000000"),
+                               ("FREQEXT?", "2000000"), ("HARM?", "100"),
+                               ("RSRC?", "2"), ("IVMD?", "1"),
+                               ("*IDN?", "Wrong,SR865A,000111,v1.23"),
+                               ("FREQDET?", TimeoutError("synthetic timeout"))):
+            with self.subTest(command=command, value=value):
+                resource = FakeResource()
+                driver = Sr865a(resource, LockinRole.XX)
+                resource.responses[command] = value
+                with self.assertRaises(Sr865aError) as caught:
+                    driver.read_sample(consume_status_latches=True, current_status_supported=True,
+                                       reference_frequency_tolerance_hz=40)
+                self.assertNotIsInstance(caught.exception, ReferenceTransientError)
+                self.assertIsNone(driver._identity)
+                self.assertEqual(resource.writes, [])
+
+    def test_invalid_frequency_tolerance_is_rejected_before_any_io(self):
+        for invalid in (True, False, 0, -1, math.nan, math.inf, -math.inf, "5", [], {}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.driver.read_sample(consume_status_latches=False, reference_frequency_tolerance_hz=invalid)
+        self.assertEqual(self.resource.events, [])
+
+    def test_configured_tolerance_does_not_expand_reference_detection_or_harmonic_limits(self):
+        for harmonic, reference, detection in ((1, 3999999, 4000000), (1, 0.001, 0),
+                                              (2, 2000000, 3999999), (100, 1000, 100000),
+                                              (1, 0.0009, 0.001)):
+            self.resource.responses.update({"HARM?": str(harmonic), "FREQEXT?": str(reference),
+                                            "FREQDET?": str(detection)})
+            with self.subTest(harmonic=harmonic, reference=reference, detection=detection), self.assertRaises(Sr865aError):
+                self.driver.read_sample(consume_status_latches=False, reference_frequency_tolerance_hz=5)
+
+    def test_configured_frequency_tolerance_does_not_change_fault_status(self):
+        self.resource.responses.update({"FREQEXT?": "50028.585938", "FREQDET?": "100056.39844",
+                                        "CUROVLDSTAT?": "8"})
+        result = self.driver.read_sample(consume_status_latches=True, current_status_supported=True,
+                                         reference_frequency_tolerance_hz=5)
+        self.assertFalse(result.status.locked)
+        self.assertFalse(result.status.valid)
 
     def test_latches_do_not_claim_present_lock(self):
         status = self.driver.read_status(consume_status_latches=True)

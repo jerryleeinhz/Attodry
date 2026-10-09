@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .combination_store import CombinationStore, utc_now
 from .models import VectorField
+from .reference_transients import ReferenceTransientError
 from .safety import FieldReadbackPolicy, MagnetLimits
 
 
@@ -347,41 +348,67 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 raise ValueError("Condition did not qualify")
             for sample_index in range(plan.samples_per_condition):
                 start = utc_now()
-                reads = []
-                if hasattr(station, "begin_sample"):
-                    station.begin_sample()
-                # All settings/settling precede every fresh SMU/Lock-in read.
-                # Per-instrument times describe sequential, not simultaneous, reads.
-                read_error = None
-                try:
-                    for module in modules:
-                        reading = station.read(module)
-                        emit("raw_reading", {"sample_index": sample_index,
-                                             "reading": _audit_value(reading)})
-                        if reading.get("module") != module:
-                            raise ValueError("Reading belongs to the wrong module")
-                        reads.append(reading)
-                        if not reading_allows_continuation(reading):
-                            # Preserve partial reads and stop later acquisition.
-                            break
-                except BaseException as exc:
-                    read_error = exc
-                    raise
-                finally:
-                    if hasattr(station, "end_sample"):
+                candidate_index = 0
+
+                def acquire_window():
+                    nonlocal candidate_index, start
+                    start = utc_now()
+                    candidate_index += 1
+                    reads = []
+                    try:
+                        if hasattr(station, "begin_sample"):
+                            station.begin_sample()
+                        # Every retry starts fresh optical/environment brackets
+                        # and repeats ALL modules, never joining old/new roles.
+                        read_error = None
                         try:
-                            station.end_sample(reads)
+                            for module in modules:
+                                reading = station.read(module)
+                                emit("raw_reading", {"sample_index": sample_index,
+                                    "candidate_index": candidate_index,
+                                    "reading": _audit_value(reading)})
+                                if reading.get("module") != module:
+                                    raise ValueError("Reading belongs to the wrong module")
+                                reads.append(reading)
+                                if not reading_allows_continuation(reading):
+                                    break
                         except BaseException as exc:
-                            if read_error is None:
-                                raise
-                            read_error.add_note(f"Environmental after-read failed: {exc}")
-                            try:
-                                emit("environment_after_read_failed", {"error": str(exc)})
-                            except BaseException as audit_error:
-                                # A second failure must not replace the original
-                                # instrument error or suppress global cleanup.
-                                cleanup_errors.append(
-                                    f"environment after-read: {exc}; audit: {audit_error}")
+                            read_error = exc
+                            raise
+                        finally:
+                            if hasattr(station, "end_sample"):
+                                try:
+                                    station.end_sample(reads)
+                                except BaseException as exc:
+                                    if (isinstance(exc, ReferenceTransientError)
+                                            and any(not reading_allows_continuation(r) for r in reads)):
+                                        raise ValueError("Noncontinuable formal readback before reference anomaly") from exc
+                                    if read_error is None:
+                                        raise
+                                    # A power/environment fault must not be hidden
+                                    # behind a retryable reference observation.
+                                    if (isinstance(read_error, ReferenceTransientError)
+                                            and not isinstance(exc, ReferenceTransientError)):
+                                        raise exc from read_error
+                                    read_error.add_note(f"Environmental after-read failed: {exc}")
+                                    try:
+                                        emit("environment_after_read_failed", {"error": str(exc)})
+                                    except BaseException as audit_error:
+                                        if isinstance(read_error, ReferenceTransientError):
+                                            raise audit_error from read_error
+                                        cleanup_errors.append(
+                                            f"environment after-read: {exc}; audit: {audit_error}")
+                    except ReferenceTransientError as exc:
+                        emit("reference_sample_rejected", {"sample_index": sample_index,
+                            "candidate_index": candidate_index, "accepted": False,
+                            "valid_for_analysis": False, "reason": str(exc),
+                            "kind": exc.kind, "evidence": exc.evidence,
+                            "partial_reads": _audit_value(reads)})
+                        raise
+                    return reads
+
+                reads = (station.run_sample_operation(acquire_window)
+                         if hasattr(station, "run_sample_operation") else acquire_window())
                 actual: dict = {}
                 measurements: dict = {}
                 for reading in reads:

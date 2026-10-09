@@ -227,6 +227,7 @@ def load_plot_sources(
     sources: Iterable[PlotSource | str | Path],
     *,
     include_audit: bool = False,
+    run_ids: Mapping[str, Sequence[str]] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """Adapt selected project records and numeric CSV rows to one wide schema.
 
@@ -242,7 +243,9 @@ def load_plot_sources(
         if source.kind == "combination_sqlite":
             from .combination_analysis import load_combination_rows
 
-            rows = load_combination_rows(source.path, audit=include_audit)
+            selected = (None,) if run_ids is None else tuple(run_ids.get(str(source.path), ()))
+            rows = (row for run in selected for row in
+                    load_combination_rows(source.path, run_id=run, audit=include_audit))
             result.extend(_decorate(source, rows))
         elif source.kind == "three_smu":
             from .combination_analysis import load_legacy_three_smu
@@ -1005,6 +1008,8 @@ class UnifiedPlotDashboard:
         self.catalog: tuple[PlotSource, ...] = ()
         self._source_by_path: dict[str, PlotSource] = {}
         self._cache: dict[tuple, tuple[dict[str, Any], ...]] = {}
+        self._snapshots: dict[tuple, dict[str, Any]] = {}
+        self._run_catalog: dict[str, tuple[dict, ...]] = {}
         self.cards: list[dict[str, Any]] = []
         self._next_card_id = 1
 
@@ -1072,7 +1077,12 @@ class UnifiedPlotDashboard:
             value=str(default_spec.get("title", "")), description="Title:",
             layout=widgets.Layout(width="100%"),
         )
-        checklist = _CheckboxSourceList(widgets, lambda: self._card_changed(card))
+        checklist = _CheckboxSourceList(widgets, lambda: self._sources_changed(card))
+        runs = widgets.SelectMultiple(options=[], description="Run IDs:", rows=5,
+                                      layout=widgets.Layout(width="100%"))
+        load_runs = widgets.Button(description="Load / refresh runs", icon="refresh",
+                                   layout=widgets.Layout(width="auto"))
+        load_status = widgets.HTML()
         axis = lambda description: widgets.Dropdown(options=[], description=description, layout=widgets.Layout(width="100%"))
         x_axis, y_axis = axis("X:"), axis("Y:")
         z_axis = axis("Color Z:")
@@ -1109,6 +1119,7 @@ class UnifiedPlotDashboard:
         render_card_button = widgets.Button(description="Render this plot", button_style="primary")
         card: dict[str, Any] = {
             "id": card_id, "mode": mode, "title": title, "sources": checklist,
+            "runs": runs, "load_runs": load_runs, "load_status": load_status,
             "x": x_axis, "y": y_axis, "z": z_axis, "group": group_axis,
             "curve_style": curve_style, "x_scale": x_scale, "y_scale": y_scale,
             "filter_box": filter_box, "filters": [], "output": output,
@@ -1121,6 +1132,8 @@ class UnifiedPlotDashboard:
             title,
             widgets.HTML("<b>Choose one or more data sources</b>"),
             checklist.widget,
+            runs,
+            widgets.HBox([load_runs, load_status]),
             widgets.HBox([x_axis, component if mode == "field" else y_axis], layout=widgets.Layout(width="100%")),
             group_axis if mode != "xy_z" else z_axis,
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
@@ -1137,11 +1150,16 @@ class UnifiedPlotDashboard:
         remove_button.on_click(lambda _button, target=card: self._remove_card(target))
         render_card_button.on_click(lambda _button, target=card: self._render_card(target))
         add_filter_button.on_click(lambda _button, target=card: self._add_filter(target))
+        load_runs.on_click(lambda _button, target=card: self._load_selected_runs(target))
+        runs.observe(lambda _change, target=card: self._card_changed(target), names="value")
         for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded):
             control.observe(lambda _change, target=card: self._card_changed(target), names="value")
         self.cards.append(card)
         self.card_box.children = tuple(item["widget"] for item in self.cards)
         checklist.set_sources(self.catalog, default_spec.get("source_paths", ()))
+        self._update_run_options(card, default_spec.get("run_ids", {}))
+        if default_spec.get("run_ids"):
+            self._load_selected_runs(card)
         for key, value in default_spec.get("filters", {}).items():
             self._add_filter(card, str(key), value)
         self._update_card_options(card)
@@ -1165,6 +1183,8 @@ class UnifiedPlotDashboard:
 
     def _refresh(self, _button: Any = None) -> None:
         self._cache.clear()
+        self._snapshots.clear()
+        self._run_catalog.clear()
         for card in self.cards:
             self._invalidate_card(card)
         try:
@@ -1177,6 +1197,7 @@ class UnifiedPlotDashboard:
                 selected = card["sources"].value
                 missing.update(set(selected) - self._source_by_path.keys())
                 card["sources"].set_sources(catalog, selected)
+                self._update_run_options(card)
                 self._update_card_options(card)
             self.status.value = f"Found {len(catalog)} supported data sources under {html.escape(str(root))}."
             if missing:
@@ -1186,11 +1207,13 @@ class UnifiedPlotDashboard:
             self._source_by_path = {}
             for card in self.cards:
                 card["sources"].set_sources(())
+                self._update_run_options(card)
                 self._update_card_options(card)
             self.status.value = f"<span style='color:#a40000'>{html.escape(str(exc))}</span>"
 
     def _audit_changed(self, _change: Any) -> None:
         self._cache.clear()
+        self._snapshots.clear()
         for card in self.cards:
             self._invalidate_card(card)
             self._update_card_options(card)
@@ -1203,18 +1226,96 @@ class UnifiedPlotDashboard:
         card["image"].value = b""
         card["output"].clear_output(wait=False)
 
-    def _selected_rows(self, card: dict[str, Any]) -> tuple[dict[str, Any], ...]:
-        include_audit = bool(self.include_audit.value)
-        result = []
+    def _sources_changed(self, card: dict[str, Any]) -> None:
+        self._update_run_options(card)
+        self._card_changed(card)
+
+    def _update_run_options(self, card, saved=None) -> None:
+        from .combination_analysis import list_combination_runs
+        previous = set(card["runs"].value)
+        options = []
+        was_updating = card["updating"]
+        card["updating"] = True
+        try:
+            for path in card["sources"].value:
+                source = self._source_by_path.get(path)
+                if source is None or source.kind != "combination_sqlite":
+                    continue
+                if path not in self._run_catalog:
+                    self._run_catalog[path] = list_combination_runs(source.path)
+                for run in self._run_catalog[path]:
+                    token = json.dumps({"path": path, "run_id": run["run_id"]})
+                    options.append((f"{source.label} · {run['run_id']} · {run['status']}", token))
+                    if saved and run["run_id"] in saved.get(path, ()):
+                        previous.add(token)
+            card["runs"].options = options
+            card["runs"].value = tuple(token for _, token in options if token in previous)
+        finally:
+            card["updating"] = was_updating
+
+    def _selected_run_ids(self, card) -> dict[str, list[str]]:
+        selected = {}
+        for token in card["runs"].value:
+            run = json.loads(token)
+            if run["path"] in card["sources"].value:
+                selected.setdefault(run["path"], []).append(run["run_id"])
+        return selected
+
+    def _cache_keys(self, card):
+        selected = self._selected_run_ids(card)
         for path in card["sources"].value:
             source = self._source_by_path.get(path)
             if source is None:
                 raise ValueError(f"Selected source is unavailable: {path}")
-            modified = _source_signature(source.path)
-            cache_key = (path, modified, include_audit)
-            if cache_key not in self._cache:
-                self._cache[cache_key] = load_plot_sources([source], include_audit=include_audit)
-            result.extend(dict(row) for row in self._cache[cache_key])
+            runs = selected.get(path, ()) if source.kind == "combination_sqlite" else (None,)
+            for run in runs:
+                yield (path, run, bool(self.include_audit.value)), source
+
+    def _load_source(self, key, source) -> None:
+        path, run, audit = key
+        before = _source_signature(source.path)
+        rows = load_plot_sources([source], include_audit=audit,
+                                 run_ids=None if run is None else {path: [run]})
+        self._cache[key] = rows
+        self._snapshots[key] = {
+            "source_path": path, "run_id": run, "include_audit": audit,
+            "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+            "row_count": len(rows), "source_signature_before": before,
+            "source_signature_after": _source_signature(source.path),
+        }
+
+    def _load_selected_runs(self, card) -> None:
+        keys = list(self._cache_keys(card))
+        # A failed refresh must not leave an old snapshot presented as new.
+        for key, _source in keys:
+            self._cache.pop(key, None)
+            self._snapshots.pop(key, None)
+        for item in self.cards:
+            self._invalidate_card(item)
+        card["load_runs"].disabled = True
+        card["load_status"].value = "Loading selected runs…"
+        error = None
+        try:
+            for key, source in keys:
+                self._load_source(key, source)
+        except Exception as exc:
+            for key, _source in keys:
+                self._cache.pop(key, None)
+                self._snapshots.pop(key, None)
+            error = exc
+        finally:
+            card["load_runs"].disabled = False
+            for item in self.cards:
+                self._update_card_options(item)
+        if error is not None:
+            card["load_status"].value = html.escape(f"Load failed: {error}")
+
+    def _selected_rows(self, card: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+        result = []
+        for cache_key, source in self._cache_keys(card):
+            if cache_key not in self._cache and source.kind != "combination_sqlite":
+                self._load_source(cache_key, source)
+            result.extend(dict(row) for row in self._cache.get(cache_key, ()))
         return tuple(result)
 
     def _update_card_options(self, card: dict[str, Any]) -> None:
@@ -1223,6 +1324,10 @@ class UnifiedPlotDashboard:
         card["updating"] = True
         try:
             rows = self._selected_rows(card)
+            pending = sum(key not in self._cache for key, _source in self._cache_keys(card))
+            card["load_status"].value = (f"{pending} run(s) awaiting Load / refresh runs." if pending
+                else f"Loaded {len(rows)} samples. Select run IDs, then Load / refresh runs."
+                + (" Active/failed runs require Include rejected/problem records." if not self.include_audit.value else ""))
             axes = numeric_columns(rows)
             scalars = scalar_columns(rows)
             for key in ("x", "y", "z"):
@@ -1327,16 +1432,26 @@ class UnifiedPlotDashboard:
             "field_component": card["component"].value,
             "excluded_sample_ids": list(card["excluded"].value),
             "include_audit": bool(self.include_audit.value),
+            "run_ids": self._selected_run_ids(card),
+            "data_snapshots": [dict(self._snapshots[key]) for key, _source in self._cache_keys(card)
+                               if key in self._snapshots],
         }
 
     def _render_card(self, card: dict[str, Any]) -> None:
         self._invalidate_card(card)
         card["output"].clear_output(wait=False)
         try:
+            selected = self._selected_run_ids(card)
+            for path in card["sources"].value:
+                if self._source_by_path[path].kind == "combination_sqlite" and not selected.get(path):
+                    raise ValueError("Select run IDs and click Load / refresh runs first.")
+            if any(key not in self._cache for key, _source in self._cache_keys(card)):
+                raise ValueError("Click Load / refresh runs before rendering selected runs.")
             rows = self._selected_rows(card)
             spec = self._card_spec(card)
             spec["source_paths"] = list(card["sources"].value)
-            spec["source_signatures"] = {p: _source_signature(Path(p)) for p in card["sources"].value}
+            spec["source_signatures"] = {snapshot["source_path"]: snapshot["source_signature_after"]
+                                         for snapshot in spec["data_snapshots"]}
             figure, data = render_plot(rows, spec)
             card["figure"] = figure
             card["rendered"] = {"figure": figure, "data": data, "spec": spec}
@@ -1369,7 +1484,8 @@ class UnifiedPlotDashboard:
                 raise ValueError("Render every plot card successfully before exporting.")
             for card in self.cards:
                 expected = card["rendered"]["spec"]["source_signatures"]
-                if any(_source_signature(Path(p)) != signature for p, signature in expected.items()):
+                if any(self._source_by_path[p].kind != "combination_sqlite"
+                       and _source_signature(Path(p)) != signature for p, signature in expected.items()):
                     self._invalidate_card(card)
                     raise ValueError("A source changed after rendering. Refresh and render again before export.")
             destination = export_plot_bundle(
@@ -1420,6 +1536,14 @@ class UnifiedPlotDashboard:
                 raise ValueError("Setup sources are missing: " + ", ".join(sorted(missing)))
             if any(spec.get("mode") not in ("curve", "xy_z", "field") for spec in payload.get("plots", [])):
                 raise ValueError("Unsupported plot mode in setup.")
+            from .combination_analysis import list_combination_runs
+            for spec in payload.get("plots", []):
+                for source_path, run_ids in spec.get("run_ids", {}).items():
+                    if source_path not in spec.get("source_paths", ()) or source_path not in available:
+                        raise ValueError(f"Setup run source is unavailable: {source_path}")
+                    available_runs = {run['run_id'] for run in list_combination_runs(source_path)}
+                    if set(run_ids) - available_runs:
+                        raise ValueError(f"Setup run IDs are missing from {source_path}")
             self.directory.value = str(payload["data_directory"])
             self.include_audit.value = bool(payload.get("include_audit", False))
             self._refresh()

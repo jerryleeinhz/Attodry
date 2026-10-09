@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 import math
+import struct
+import time
 from typing import Protocol
 
 from .models import LockinRole
@@ -150,6 +152,34 @@ class BackendStatus:
         return self.validity
 
 
+def _sr830_status(lias, error_status, *, consume_status_latches: bool) -> BackendStatus:
+    known = lias is not None and not (lias.raw & 0x80)
+    validity = None
+    if lias is not None:
+        if not known or lias.reference_unlocked or lias.any_overload or error_status != 0:
+            validity = False
+        elif not (lias.frequency_range_changed or lias.time_constant_changed):
+            validity = True
+    return BackendStatus(
+        None if not known else not lias.reference_unlocked,
+        None if not known else lias.input_or_reserve_overload,
+        None if not known else lias.output_overload or lias.filter_overload,
+        None if error_status is None else error_status != 0,
+        "latched_interval" if consume_status_latches else "not_observed",
+        (lias, error_status), validity,
+    )
+
+
+def _sr865a_status(native, *, consume_status_latches: bool, current_status_supported: bool) -> BackendStatus:
+    return BackendStatus(
+        native.locked, native.input_overload, native.output_scale_overload, native.instrument_error,
+        "instantaneous_and_latched" if current_status_supported and consume_status_latches
+        else "instantaneous" if current_status_supported
+        else "latched_interval" if consume_status_latches else "not_observed",
+        native, native.valid,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class BackendSample:
     role: LockinRole
@@ -174,11 +204,13 @@ class LockinBackend(Protocol):
 
     def read_identity(self) -> str: ...
     def read_settings(self) -> BackendSettings: ...
+    def read_reference_status(self, *, current_status_supported: bool = False) -> BackendStatus: ...
     def set_time_constant(self, seconds: float, *, authorize_writes: bool = False) -> None: ...
     def set_sensitivity(self, full_scale_v: float, *, authorize_writes: bool = False) -> None: ...
     def set_harmonic(self, harmonic: int, *, authorize_writes: bool = False) -> None: ...
     def read_sample(
-        self, *, consume_status_latches: bool, current_status_supported: bool = False
+        self, *, consume_status_latches: bool, current_status_supported: bool = False,
+        reference_frequency_tolerance_hz: float | None = None,
     ) -> BackendSample: ...
 
 
@@ -209,6 +241,35 @@ class _AuditedResource:
 
     def clear(self) -> object:
         return self.resource.clear()
+
+    @property
+    def resource_name(self) -> str:
+        return getattr(self.resource, "resource_name", "")
+
+    @property
+    def supports_binary_capture(self) -> bool:
+        return callable(getattr(self.resource, "query_binary_values", None))
+
+    @property
+    def timeout(self):
+        return self.resource.timeout
+
+    @timeout.setter
+    def timeout(self, value):
+        self.resource.timeout = value
+
+    def query_binary_values(self, command: str, **kwargs):
+        started = datetime.now(UTC)
+        try:
+            values = list(self.resource.query_binary_values(command, **kwargs))
+            response = struct.pack("<" + "f" * len(values), *values).hex()
+        except BaseException as exc:
+            self.queries.append(RawIo(command, None, started, datetime.now(UTC),
+                                      repr(exc), "query_binary"))
+            raise
+        self.queries.append(RawIo(command, response, started, datetime.now(UTC),
+                                  operation="query_binary"))
+        return values
 
     def close(self) -> None:
         self.resource.close()
@@ -322,10 +383,18 @@ class PhysicalLockinBackend:
         )
 
     def read_sample(
-        self, *, consume_status_latches: bool, current_status_supported: bool = False
+        self, *, consume_status_latches: bool, current_status_supported: bool = False,
+        reference_frequency_tolerance_hz: float | None = None,
     ) -> BackendSample:
         if type(consume_status_latches) is not bool or type(current_status_supported) is not bool:
             raise ValueError("Status consumption and capability flags must be booleans.")
+        if reference_frequency_tolerance_hz is not None and (
+            isinstance(reference_frequency_tolerance_hz, bool)
+            or not isinstance(reference_frequency_tolerance_hz, (int, float))
+            or not math.isfinite(reference_frequency_tolerance_hz)
+            or reference_frequency_tolerance_hz <= 0
+        ):
+            raise ValueError("reference_frequency_tolerance_hz must be a positive finite number.")
         if self.capabilities.model is LockinModel.SR830 and current_status_supported:
             raise ValueError("SR830 facade does not support instantaneous status queries.")
         start = len(self._resource.queries)
@@ -336,23 +405,8 @@ class PhysicalLockinBackend:
                 raise LockinBackendError("Unknown SR830 reference source readback.")
             if native.input_mode not in (0, 1):
                 raise LockinBackendError("Physical voltage interface requires SR830 voltage input.")
-            lias = native.lia_status
-            known = lias is not None and not (lias.raw & 0x80)
-            validity = None
-            if lias is not None:
-                if not known or lias.reference_unlocked or lias.any_overload or native.error_status != 0:
-                    validity = False
-                elif not (lias.frequency_range_changed or lias.time_constant_changed):
-                    validity = True
-            status = BackendStatus(
-                None if not known else not lias.reference_unlocked,
-                None if not known else lias.input_or_reserve_overload,
-                None if not known else lias.output_overload or lias.filter_overload,
-                None if native.error_status is None else native.error_status != 0,
-                "latched_interval" if consume_status_latches else "not_observed",
-                (lias, native.error_status),
-                validity,
-            )
+            status = _sr830_status(native.lia_status, native.error_status,
+                                   consume_status_latches=consume_status_latches)
             reference = native.snapshot_frequency_hz
             detection = self.capabilities.validate_detection(reference, native.harmonic)
             return BackendSample(
@@ -361,25 +415,21 @@ class PhysicalLockinBackend:
                 reference, detection, "instrument_snapshot", "derived_harmonic_times_reference",
                 status, native, tuple(self._resource.queries[start:]),
             )
-        return self._read_sr865a_sample(start, consume_status_latches, current_status_supported)
+        return self._read_sr865a_sample(
+            start, consume_status_latches, current_status_supported, reference_frequency_tolerance_hz)
 
     def _read_sr865a_sample(
-        self, start: int, consume_status_latches: bool, current_status_supported: bool
+        self, start: int, consume_status_latches: bool, current_status_supported: bool,
+        reference_frequency_tolerance_hz: float | None,
     ) -> BackendSample:
         native = self._driver.read_sample(
             consume_status_latches=consume_status_latches,
             current_status_supported=current_status_supported,
+            reference_frequency_tolerance_hz=reference_frequency_tolerance_hz,
         )
         self.capabilities.validate_detection(native.reference_frequency_hz, native.harmonic)
-        status = BackendStatus(
-            native.status.locked, native.status.input_overload,
-            native.status.output_scale_overload, native.status.instrument_error,
-            "instantaneous_and_latched" if current_status_supported and consume_status_latches
-            else "instantaneous" if current_status_supported
-            else "latched_interval" if consume_status_latches else "not_observed",
-            native.status,
-            native.status.valid,
-        )
+        status = _sr865a_status(native.status, consume_status_latches=consume_status_latches,
+                                current_status_supported=current_status_supported)
         return BackendSample(
             self.role, self.capabilities.model, native.harmonic,
             native.x_v, native.y_v, native.amplitude_v, native.phase_deg,
@@ -388,6 +438,25 @@ class PhysicalLockinBackend:
             status, native, tuple(self._resource.queries[start:]),
         )
 
+    def read_reference_status(self, *, current_status_supported: bool = False) -> BackendStatus:
+        """Consume status latches without requiring valid frequency/sample data.
+
+        Intended for explicit reference polling. Queries, including partial or
+        failed reads, remain in ``audit``; this is not a nondestructive read.
+        """
+        if type(current_status_supported) is not bool:
+            raise ValueError("Status capability flag must be a boolean.")
+        if self.capabilities.model is LockinModel.SR830 and current_status_supported:
+            raise ValueError("SR830 facade does not support instantaneous status queries.")
+        self.read_identity()
+        if self.capabilities.model is LockinModel.SR830:
+            lias, errors = self._driver.read_status_latches()
+            return _sr830_status(lias, errors, consume_status_latches=True)
+        native = self._driver.read_status(consume_status_latches=True,
+                                          current_status_supported=current_status_supported)
+        return _sr865a_status(native, consume_status_latches=True,
+                              current_status_supported=current_status_supported)
+
     def _verify_sr830_voltage_input(self) -> None:
         if self._driver.read_fixed_setting("input_mode") not in (0, 1):
             raise LockinBackendError("Physical voltage interface requires SR830 voltage input.")
@@ -395,6 +464,56 @@ class PhysicalLockinBackend:
     def read_reference_frequency(self) -> float:
         self.read_identity()
         return self._driver.read_reference_frequency()
+
+    def read_internal_frequency(self) -> float:
+        if self.capabilities.model is not LockinModel.SR865A:
+            raise ValueError("Stored internal-frequency readback is implemented only for SR865A.")
+        self.read_identity()
+        return self._driver.read_internal_frequency()
+
+    def set_internal_frequency(self, frequency_hz: float, *, authorize_writes: bool = False) -> float:
+        if self.capabilities.model is not LockinModel.SR865A:
+            raise ValueError("Internal-frequency diagnostic configuration requires SR865A.")
+        # The driver checks parameters and authorization before any I/O.
+        return self._driver.set_internal_frequency(frequency_hz, authorized=authorize_writes)
+
+    def restore_stored_internal_frequency(self, frequency_hz: float, *, authorize_writes: bool = False) -> float:
+        if self.capabilities.model is not LockinModel.SR865A:
+            raise ValueError("Stored internal-frequency restoration requires SR865A.")
+        return self._driver.restore_stored_internal_frequency(frequency_hz, authorized=authorize_writes)
+
+    def configure_internal_reference(self, frequency_hz: float, *, authorize_writes: bool = False) -> float:
+        if self.capabilities.model is not LockinModel.SR865A:
+            raise ValueError("Internal-reference diagnostic configuration requires SR865A.")
+        from .sr865a_settings import finite_number, validate_harmonic_frequency
+        frequency = finite_number(frequency_hz, "internal frequency")
+        self.capabilities.validate_detection(frequency, 1)
+        self._authorize(authorize_writes)
+        validate_harmonic_frequency(self._driver.read_harmonic(), frequency)
+        source = self._resource.query("RSRC?").strip()
+        if source not in ("0", "1"):
+            raise LockinBackendError("Internal diagnostics cannot take over dual/chop or unknown references.")
+        if source == "1":
+            # The SINE OUT feeds the downstream XX reference input. Its unused
+            # oscillator setting may be outside that receiver's approved range:
+            # program/verify the target while external still owns the output.
+            self._driver.restore_stored_internal_frequency(frequency, authorized=True)
+            self._driver.configure_reference("internal", authorized=True)
+        return self._driver.set_internal_frequency(frequency, authorized=True)
+
+    def capture_xy(self, duration_s: float, requested_rate_hz: float, *, timeout_s: float,
+                   authorize_writes: bool = False, clock=time.monotonic,
+                   sleep=time.sleep, on_poll=None, poll_interval_s: float = 1.0):
+        if self.capabilities.model is not LockinModel.SR865A:
+            raise ValueError("The buffered XY diagnostic capture requires SR865A.")
+        return self._driver.capture_xy(duration_s, requested_rate_hz, timeout_s=timeout_s,
+            authorized=authorize_writes, clock=clock, sleep=sleep, on_poll=on_poll,
+            poll_interval_s=poll_interval_s)
+
+    def read_capture_status(self) -> int:
+        if self.capabilities.model is not LockinModel.SR865A:
+            raise ValueError("Buffered capture status is implemented only for SR865A.")
+        return self._driver.read_capture_status()
 
     def configure_external_reference(
         self, *, edge: str, input_impedance_ohm: float | None,

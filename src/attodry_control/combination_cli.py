@@ -121,7 +121,8 @@ def run(argv: list[str] | None = None) -> int:
         config = replace(config, snapshot={**config.snapshot, "launch": {
             "summary": summary, "authorization_method": "explicit_flags" if explicit else "run_command"}})
         database.parent.mkdir(parents=True, exist_ok=True)
-        with CombinationStore(database) as store:
+        from .hardware_lease import station_hardware_lease
+        with station_hardware_lease(config.path), CombinationStore(database) as store:
             result = run_hardware_combination(
                 config, store, run_id, authorize_hardware=True,
                 confirm_xy_sine_disconnected=(config.lockin is not None

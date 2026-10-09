@@ -149,6 +149,7 @@ class OpticalScan:
             self.sleep(min(cfg.window.sample_interval_s, deadline - self.clock()))
 
     def run(self, *, authorize_writes=False, confirm_manual_route=False):
+        self.config.require_standalone_scan()
         # All enabled hardware permissions are checked before any device query.
         if self.nkt.backend.is_hardware:
             self.nkt_config.require_hardware(writes=True)

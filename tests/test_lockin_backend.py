@@ -13,6 +13,7 @@ from attodry_control.lockin_backend import (
 from attodry_control.models import LockinRole
 from attodry_control.sr830 import Sr830Error
 from attodry_control.sr865a import Sr865aError
+from attodry_control.reference_transients import ReferenceTransientError
 
 
 class FakeResource:
@@ -257,6 +258,144 @@ class SetterTests(unittest.TestCase):
 
 
 class ReadbackTests(unittest.TestCase):
+    def test_sr865a_frequency_transient_propagates_without_wrapping_or_retry(self):
+        adapter, resource = backend("SR865A", "lockin_xy")
+        resource.responses["FREQDET?"] = "50100"
+        with self.assertRaises(ReferenceTransientError) as caught:
+            adapter.read_sample(consume_status_latches=True, current_status_supported=True,
+                                reference_frequency_tolerance_hz=40)
+        evidence = caught.exception.evidence
+        self.assertEqual(caught.exception.kind, "detection_frequency_mismatch")
+        self.assertEqual(evidence["role"], "xy")
+        self.assertEqual(evidence["harmonic"], 1)
+        self.assertEqual(evidence["reference_difference_hz"], 73)
+        self.assertEqual(resource.queries.count("FREQDET?"), 1)
+        self.assertEqual(evidence["raw"][-1]["command"], "FREQDET?")
+        self.assertNotIn("SNAP? X,Y", resource.queries)
+        self.assertEqual(resource.writes, [])
+
+    def test_reference_status_can_observe_unlock_without_valid_frequency_or_snapshot(self):
+        for model in LockinModel:
+            adapter, resource = backend(model)
+            resource.responses.update({"FREQ?": "0", "FREQEXT?": "0", "FREQDET?": "0",
+                "SNAP? X,Y": "invalid", "SNAP? 1,2,3,4,9": "invalid",
+                "LIAS?": "8", "CUROVLDSTAT?": "8"})
+            result = adapter.read_reference_status(current_status_supported=model is LockinModel.SR865A)
+            self.assertFalse(result.locked)
+            self.assertFalse(result.clean)
+            self.assertEqual(resource.queries, ["*IDN?", "LIAS?", "ERRS?"] if model is LockinModel.SR830
+                             else ["*IDN?", "CUROVLDSTAT?", "LIAS?", "ERRS?", "*ESR?"])
+            self.assertEqual(resource.writes, [])
+
+    def test_reference_status_preserves_latched_fault_when_current_state_is_clean(self):
+        adapter, resource = backend("SR865A")
+        resource.responses["LIAS?"] = "16"
+        result = adapter.read_reference_status(current_status_supported=True)
+        self.assertTrue(result.locked)
+        self.assertFalse(result.input_overload)
+        self.assertTrue(result.native_status.input_overload_latched)
+        self.assertFalse(result.clean)
+        self.assertEqual(result.observation, "instantaneous_and_latched")
+
+    def test_reference_status_without_current_support_keeps_sr865a_present_lock_unknown(self):
+        adapter, resource = backend("SR865A")
+        result = adapter.read_reference_status()
+        self.assertIsNone(result.locked)
+        self.assertIsNone(result.clean)
+        self.assertTrue(result.native_status.consumed_status_latches)
+        self.assertEqual(result.observation, "latched_interval")
+        self.assertNotIn("CUROVLDSTAT?", resource.queries)
+
+    def test_reference_status_matches_existing_sample_status_semantics(self):
+        for model in LockinModel:
+            for raw in (0, 8, 16, 128):
+                adapter, resource = backend(model)
+                resource.responses["LIAS?"] = str(raw)
+                instantaneous = model is LockinModel.SR865A
+                result = adapter.read_reference_status(current_status_supported=instantaneous)
+                sample = adapter.read_sample(consume_status_latches=True,
+                                             current_status_supported=instantaneous)
+                for field in ("locked", "input_overload", "output_scale_overload", "instrument_error", "observation", "validity"):
+                    self.assertEqual(getattr(result, field), getattr(sample.status, field))
+
+    def test_reference_status_rejects_invalid_capability_before_io(self):
+        for model in LockinModel:
+            adapter, resource = backend(model)
+            for invalid in (None, 1, "true"):
+                with self.assertRaises(ValueError):
+                    adapter.read_reference_status(current_status_supported=invalid)
+            self.assertEqual(resource.queries + resource.writes, [])
+        adapter, resource = backend("SR830")
+        with self.assertRaises(ValueError):
+            adapter.read_reference_status(current_status_supported=True)
+        self.assertEqual(resource.queries + resource.writes, [])
+
+    def test_reference_status_audit_includes_identity_and_consumed_latches(self):
+        for model in LockinModel:
+            adapter, resource = backend(model)
+            adapter.read_reference_status(current_status_supported=model is LockinModel.SR865A)
+            self.assertEqual([item.command for item in adapter.audit], resource.queries)
+            self.assertTrue(all(item.operation == "query" and item.error is None for item in adapter.audit))
+            self.assertTrue(all(item.completed_at_utc >= item.started_at_utc for item in adapter.audit))
+
+    def test_reference_status_query_failure_retains_partial_audit_and_cannot_return_clear(self):
+        for model in LockinModel:
+            adapter, resource = backend(model)
+            resource.responses["ERRS?"] = TimeoutError("injected status timeout")
+            with self.assertRaises((TimeoutError, Sr865aError)):
+                adapter.read_reference_status(current_status_supported=model is LockinModel.SR865A)
+            self.assertEqual(adapter.audit[-1].command, "ERRS?")
+            self.assertIn("TimeoutError", adapter.audit[-1].error)
+            self.assertIn("LIAS?", resource.queries)
+            self.assertEqual(resource.writes, [])
+
+    def test_reference_status_unknown_bits_and_errors_never_certify_clear(self):
+        for model, command, value in (("SR830", "LIAS?", "128"), ("SR830", "ERRS?", "1"),
+                                     ("SR865A", "LIAS?", "4"), ("SR865A", "*ESR?", "32")):
+            adapter, resource = backend(model)
+            resource.responses[command] = value
+            result = adapter.read_reference_status(current_status_supported=model == "SR865A")
+            self.assertFalse(result.clean)
+
+    def test_reference_status_wrong_identity_rejects_before_consuming_latches(self):
+        for model in LockinModel:
+            adapter, resource = backend(model)
+            resource.responses["*IDN?"] = "Stanford_Research_Systems,SR860,wrong,v1.00"
+            with self.assertRaises((Sr830Error, Sr865aError)):
+                adapter.read_reference_status(current_status_supported=model is LockinModel.SR865A)
+            self.assertEqual(resource.queries, ["*IDN?"])
+            self.assertEqual(resource.writes, [])
+
+    def test_sr865a_facade_passes_reference_hz_tolerance_for_sequential_readbacks(self):
+        adapter, resource = backend("SR865A", "lockin_xy")
+        resource.responses.update({"HARM?": "2", "FREQEXT?": "50028.585938",
+                                   "FREQDET?": "100056.39844"})
+        with self.assertRaises(Sr865aError):
+            adapter.read_sample(consume_status_latches=False)
+        result = adapter.read_sample(consume_status_latches=True, current_status_supported=True,
+                                     reference_frequency_tolerance_hz=5)
+        self.assertTrue(result.status.clean)
+        self.assertEqual(result.harmonic, 2)
+        self.assertEqual(resource.writes, [])
+
+    def test_facade_rejects_invalid_reference_tolerance_before_identity_query(self):
+        for model in LockinModel:
+            adapter, resource = backend(model)
+            for invalid in (True, False, 0, -1, math.nan, math.inf, "5"):
+                with self.subTest(model=model, invalid=invalid), self.assertRaises(ValueError):
+                    adapter.read_sample(consume_status_latches=False, reference_frequency_tolerance_hz=invalid)
+            self.assertEqual(resource.queries + resource.writes, [])
+
+    def test_sr830_facade_accepts_common_option_without_changing_native_behavior(self):
+        adapter, resource = backend("SR830")
+        result = adapter.read_sample(consume_status_latches=True, reference_frequency_tolerance_hz=5)
+        self.assertEqual(result.detection_frequency_hz, 50027)
+        self.assertTrue(result.status.clean)
+        self.assertNotIn("FREQDET?", resource.queries)
+        resource.responses.update({"HARM?": "3"})
+        with self.assertRaises(ValueError):
+            adapter.read_sample(consume_status_latches=False, reference_frequency_tolerance_hz=5)
+
     def test_settings_share_physical_units_but_preserve_native_details(self):
         for model in LockinModel:
             adapter, resource = backend(model)

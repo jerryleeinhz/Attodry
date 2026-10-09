@@ -24,32 +24,65 @@ def _flatten(prefix: str, value: Mapping) -> dict:
     return result
 
 
+def list_combination_runs(path: str | Path) -> tuple[dict, ...]:
+    """Read only the small run catalog; do not decode samples or cleanup logs."""
+    with closing(open_readonly(path)) as connection:
+        connection.execute("BEGIN")
+        return tuple(dict(row) for row in connection.execute(
+            "SELECT run_id, status, created_at_utc FROM combination_runs "
+            "ORDER BY created_at_utc DESC, run_id DESC"))
+
+
 def load_combination_rows(path: str | Path, *, run_id: str | None = None,
                           audit: bool = False) -> tuple[dict, ...]:
     """One wide row per formal sample. Audit opt-in exposes failed run samples.
 
     Raw partial reads remain in combination_events, not invented complete rows.
+    An explicitly continued photonics status fault retains usable channels;
+    contaminated measurement columns are omitted only from the default view.
     """
     with closing(open_readonly(path)) as connection:
         connection.execute("BEGIN")
+        # Cleanup transcripts can be large. Decode each once, within the same
+        # read transaction as its samples, rather than joining it onto every row.
+        run_query = "SELECT run_id, schema_version, status, cleanup_json FROM combination_runs"
+        parameters = () if run_id is None else (run_id,)
+        if run_id is not None:
+            run_query += " WHERE run_id=?"
+        runs = {}
+        for run in connection.execute(run_query, parameters):
+            if run["schema_version"] != SCHEMA_VERSION:
+                raise ValueError("Unsupported combination schema")
+            runs[run["run_id"]] = (run["status"], json.loads(run["cleanup_json"] or "{}"))
         rows = connection.execute("""
-            SELECT r.schema_version, r.status AS run_status, r.cleanup_json,
+            SELECT r.status AS run_status,
                    c.context_json, a.status AS attempt_status, s.*
             FROM combination_samples s
             JOIN combination_runs r USING(run_id)
             JOIN combination_conditions c USING(run_id, condition_id)
             JOIN combination_attempts a USING(run_id, condition_id, attempt_index)
-            WHERE (? IS NULL OR r.run_id=?)
+            """ + ("WHERE s.run_id=?" if run_id is not None else "") + """
             ORDER BY r.created_at_utc, c.sequence_index, s.attempt_index, s.sample_index
-        """, (run_id, run_id)).fetchall()
+        """, parameters).fetchall()
     output = []
     for row in rows:
-        if row["schema_version"] != SCHEMA_VERSION:
-            raise ValueError("Unsupported combination schema")
         sample = json.loads(row["payload_json"])
-        cleanup = json.loads(row["cleanup_json"] or "{}")
-        accepted = (row["attempt_status"] == "accepted" and row["run_status"] == "completed"
-                    and cleanup.get("clean") is True and sample.get("clean") is True)
+        cleanup = runs[row["run_id"]][1]
+        completed = (row["attempt_status"] == "accepted" and row["run_status"] == "completed"
+                     and cleanup.get("clean") is True)
+        continued_photonics = False
+        lockin_status = next((reading.get("status") for reading in sample.get("reads", ())
+                              if reading.get("module") == "lockin"), None)
+        if (isinstance(lockin_status, Mapping)
+                and lockin_status.get("schema_version") == "photonics-lockin-v1"
+                and sample.get("acquisition_accepted") is True):
+            from .lockin_overload import reading_allows_continuation
+            continued_photonics = any(reading.get("module") == "lockin"
+                                      and (reading.get("overload_continuation") is True
+                                           or reading.get("reference_unlock_continuation") is True)
+                                      for reading in sample.get("reads", ())) and all(
+                reading_allows_continuation(reading) for reading in sample["reads"])
+        accepted = completed and (sample.get("clean") is True or continued_photonics)
         if not audit and not accepted:
             continue
         context = json.loads(row["context_json"])
@@ -58,6 +91,7 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             "run_id": row["run_id"], "condition_id": row["condition_id"],
             "attempt_index": row["attempt_index"], "sample_index": row["sample_index"],
             "accepted": accepted, "run_status": row["run_status"],
+            "acquisition_accepted": sample.get("acquisition_accepted", sample.get("clean")),
             "attempt_status": row["attempt_status"], "clean": sample["clean"],
             "sequence_index": context["sequence_index"], "repeat_index": context["repeat_index"],
             "loop_order": context["loop_order"],
@@ -69,6 +103,24 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         for reading in sample["reads"]:
             record[f"timestamps.{reading['module']}"] = reading["captured_at_utc"]
             record[f"status.{reading['module']}"] = reading.get("status")
+            if reading["module"] == "optical":
+                assessment = (reading.get("status") or {}).get("power_target_assessment")
+                if assessment:
+                    record.update(_flatten("optical_power_quality", assessment))
+        if isinstance(lockin_status, Mapping) and lockin_status.get("schema_version") == "photonics-lockin-v1":
+            from .analysis_observations import channel_quality
+            channels = {key: channel_quality(record, key) for key in record
+                        if key.startswith(("measured.lockin_xx_h", "measured.lockin_xy_h"))}
+            valid = record["valid_for_analysis_by_channel"] = {
+                key: quality[0] == "clear" for key, quality in channels.items()}
+            record["valid_for_analysis_by_role"] = {
+                role: all(valid[key] for key in valid if key.startswith("measured." + role + "_h"))
+                for role in ("lockin_xx", "lockin_xy")
+                if any(key.startswith("measured." + role + "_h") for key in valid)}
+            if not audit and continued_photonics:
+                for key, usable in valid.items():
+                    if not usable:
+                        record.pop(key)
         output.append(record)
     return tuple(output)
 
@@ -220,7 +272,8 @@ def _column_label(column: str) -> str:
         "temperature_k": "Temperature (K)", "field_x_t": "Bx (T)", "field_z_t": "Bz (T)",
         "lockin_excitation_v_rms": "Excitation (V RMS)", "lockin_frequency_hz": "Frequency (Hz)",
         "lockin_current_a_rms": "Excitation current (A RMS)",
-        "optical_power_w": "Optical power (W)", "optical_target_power_w": "Optical power (W)",
+        "optical_power_w": "Measured optical power (W)",
+        "optical_target_power_w": "Requested optical power (W)",
         "optical_wavelength_nm": "Wavelength (nm)", "optical_bandwidth_nm": "Bandwidth (nm)",
         "optical_source_level_pct": "Optical source setting (%)", "optical_nd_pct": "ND setting (%)",
         "optical_pulse_picker_ratio": "Pulse picker ratio", "pem_frequency_hz": "PEM reference (Hz)",

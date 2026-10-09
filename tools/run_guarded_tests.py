@@ -6,6 +6,7 @@ No arguments discovers the complete suite. Sets this checkout's src explicitly.
 from pathlib import Path
 import ctypes
 import importlib.abc
+import os
 import sys
 import unittest
 
@@ -20,6 +21,10 @@ if sys.platform == "win32":
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT), str(ROOT / "tests")]
+# Lease and CLI regressions launch child interpreters; keep them on this checkout.
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    [str(ROOT / "src"), *filter(None, os.environ.get("PYTHONPATH", "").split(os.pathsep))]
+)
 
 
 class HardwareBlocked(importlib.abc.MetaPathFinder):

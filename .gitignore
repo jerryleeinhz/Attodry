@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.ipynb_checkpoints/
 .coverage
 .firecrawl/
 .venv/
@@ -19,6 +20,10 @@ config/three_smu_hardware.local.toml
 config/three_smu_scan.local.toml
 config/photonics.local.toml
 config/photonics_lockin_safety.local.toml
+config/pem_internal_diagnostic.local.toml
+*.hardware-owner.lock
+# The NKT SDK binary is installed on each control computer.
+vendor/NKTPDLL.dll
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

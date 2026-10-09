@@ -458,13 +458,17 @@ class CombinationTests(unittest.TestCase):
             self.assertEqual(len(dashboard.catalog), 1)
             card = dashboard.cards[0]
             card["sources"].set_sources(dashboard.catalog, [str(self.path)])
-            dashboard._card_changed(card)
+            dashboard._sources_changed(card)
+            self.assertEqual(dashboard._selected_rows(card), ())
+            card["runs"].value = tuple(value for _, value in card["runs"].options)
+            dashboard._load_selected_runs(card)
             self.assertEqual(len(dashboard._selected_rows(card)), 6)
             self.assertEqual(len(card["excluded"].options), 6)
             card["excluded"].value = (card["excluded"].options[0][1],)
             self.assertEqual(len(dashboard._card_spec(card)["excluded_sample_ids"]), 1)
             # Preserve the general SMU/lock-in combinations and independent card axes.
             dashboard.add_plot("curve", {"source_paths": [str(self.path)],
+                "run_ids": dashboard._selected_run_ids(card),
                 "x": "measured.smu_bias_voltage_v", "y": "measured.smu_bias_current_a",
                 "group_by": "requested.lockin_excitation_v_rms"})
             curve = dashboard.cards[-1]

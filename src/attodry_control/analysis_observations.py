@@ -116,6 +116,25 @@ def _photonics_channel_quality(row, column, role, short_role, harmonic, metric, 
             companion_seen |= reading.get("harmonic") == harmonic
             continue
         selected_count += 1
+        # Both channels share the cascaded reference. A current/latched unlock
+        # in either role, or one explicitly aggregated from a bracket, invalidates
+        # the pair even when the selected role's final status has relocked.
+        if entry.get("continued_reference_unlock_problems") or any(
+                _photonics_reference_unlocked(item) for item in readings.values()):
+            issues.append("reference_unlocked")
+        brackets = entry.get("bracket_samples") or {}
+        if isinstance(brackets, Mapping) and any(
+                _photonics_reference_unlocked(item)
+                for stage, pair in brackets.items()
+                if (stage != "transition" or entry.get("reference_unlock_policy") == "record_continue")
+                and isinstance(pair, Mapping) for item in pair.values()):
+            issues.append("reference_unlocked")
+        if entry.get("valid_for_analysis_by_role", {}).get(role) is False:
+            issues.append("recorded_invalid_for_analysis")
+        if entry.get("problems_by_role", {}).get(role):
+            issues.append("formal_problem")
+        if entry.get("settings_verified") is False:
+            issues.append("settings_unverified")
         if type(reading.get("harmonic")) is not int or reading.get("harmonic") != harmonic:
             issues.append("harmonic_readback_mismatch")
         if reading.get("role") != short_role:
@@ -169,6 +188,19 @@ def _photonics_channel_quality(row, column, role, short_role, harmonic, metric, 
         issues.append("not_selected_channel")
     unique = tuple(dict.fromkeys(issues))
     return ("flagged" if unique else "clear" if selected_count and all_known else "unknown"), unique
+
+
+def _photonics_reference_unlocked(reading):
+    if not isinstance(reading, Mapping):
+        return False
+    normalized = reading.get("status") or {}
+    if not isinstance(normalized, Mapping):
+        return False
+    native = normalized.get("native_status")
+    return (normalized.get("locked") is False
+            or isinstance(native, Mapping) and native.get("reference_unlock_latched") is True
+            or isinstance(native, (list, tuple)) and bool(native)
+            and isinstance(native[0], Mapping) and native[0].get("reference_unlocked") is True)
 
 
 def qualify_observations(rows: Sequence[Mapping], columns: Sequence[str], policy="exclude"):

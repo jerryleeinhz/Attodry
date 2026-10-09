@@ -174,6 +174,26 @@ class ThreeSmuHardwareConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class GateVoltageRamp:
+    max_step_v: float
+    step_interval_s: float
+    timeout_s: float
+    readback_tolerance_v: float
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_step_v", "step_interval_s", "timeout_s", "readback_tolerance_v"
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
+                raise ThreeSmuConfigError(f"ramp.{name} must be finite and positive")
+        if self.readback_tolerance_v >= self.max_step_v / 2:
+            raise ThreeSmuConfigError(
+                "ramp.readback_tolerance_v must be less than max_step_v / 2"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class ChannelPlan:
     role: ChannelRole
     bidirectional: bool
@@ -182,8 +202,15 @@ class ChannelPlan:
     stop: float | None = None
     step: float | None = None
     points: tuple[float, ...] | None = None
+    ramp: GateVoltageRamp | None = None
+    zero_readback_tolerance_v: float | None = None
 
     def __post_init__(self) -> None:
+        zero_tolerance = self.zero_readback_tolerance_v
+        if zero_tolerance is not None and (
+                isinstance(zero_tolerance, bool) or not math.isfinite(zero_tolerance)
+                or zero_tolerance <= 0):
+            raise ThreeSmuConfigError("zero_readback_tolerance_v must be finite and positive")
         for field_name in ("fixed", "start", "stop", "step"):
             value = getattr(self, field_name)
             if value is not None and not math.isfinite(value):
@@ -192,6 +219,8 @@ class ChannelPlan:
             if not self.points or not all(math.isfinite(value) for value in self.points):
                 raise ThreeSmuConfigError("channel points must be non-empty and finite")
         if self.role is ChannelRole.OFF:
+            if self.ramp is not None or zero_tolerance is not None:
+                raise ThreeSmuConfigError("off channel does not allow ramp or zero tolerance")
             if self.bidirectional or any(
                 value is not None
                 for value in (self.fixed, self.start, self.stop, self.step, self.points)
@@ -323,6 +352,7 @@ def load_three_smu_operation_config(path: str | Path) -> ThreeSmuOperationConfig
     hardware = ThreeSmuHardwareConfig(
         **{role: parsed_hardware.get(role) for role in SEMANTIC_ROLES}
     )
+    _validate_gate_ramps(hardware, plan)
     output_directory = Path(
         _string(run["output_directory"], "three_smu_run.output_directory")
     )
@@ -344,6 +374,7 @@ def validate_plan_targets(
 ) -> tuple[ScanPoint, ...]:
     active_roles = active_smu_roles(plan)
     hardware.require_ready(active_roles)
+    _validate_gate_ramps(hardware, plan)
     points = generate_scan_points(plan)
     for point in points:
         for role, target in point.coordinates.items():
@@ -368,6 +399,32 @@ def active_smu_roles(plan: ThreeSmuScanPlan) -> tuple[str, ...]:
         for role, channel in plan.by_role().items()
         if channel.role is not ChannelRole.OFF
     )
+
+
+def _validate_gate_ramps(
+    hardware: ThreeSmuHardwareConfig, plan: ThreeSmuScanPlan
+) -> None:
+    for role, channel in plan.by_role().items():
+        if channel.zero_readback_tolerance_v is not None:
+            if role not in ("gate_top", "gate_bottom"):
+                raise ThreeSmuConfigError("zero_readback_tolerance_v is supported only on voltage-source gates")
+            device = hardware.require_role(role)
+            if device.source_mode is not SourceMode.VOLTAGE:
+                raise ThreeSmuConfigError(f"{role}.zero_readback_tolerance_v requires source_mode='voltage'")
+            if device.max_abs_voltage_v is not None and channel.zero_readback_tolerance_v > device.max_abs_voltage_v:
+                raise ThreeSmuConfigError(f"{role}.zero_readback_tolerance_v exceeds max_abs_voltage_v")
+            if channel.ramp is not None:
+                raise ThreeSmuConfigError("direct zero_readback_tolerance_v and ramp are mutually exclusive")
+            if plan.mode is ScanMode.SOFTWARE_PULSE:
+                raise ThreeSmuConfigError("direct zero_readback_tolerance_v is not supported in software_pulse mode")
+        if channel.ramp is None:
+            continue
+        if role not in ("gate_top", "gate_bottom"):
+            raise ThreeSmuConfigError("ramp is supported only on voltage-source gate roles")
+        if plan.mode is ScanMode.SOFTWARE_PULSE:
+            raise ThreeSmuConfigError("ramp is not supported in software_pulse mode")
+        if hardware.require_role(role).source_mode is not SourceMode.VOLTAGE:
+            raise ThreeSmuConfigError(f"{role}.ramp requires source_mode='voltage'")
 
 
 def generate_scan_points(plan: ThreeSmuScanPlan) -> tuple[ScanPoint, ...]:
@@ -584,6 +641,8 @@ def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
         "stop",
         "step",
         "points",
+        "ramp",
+        "zero_readback_tolerance_v",
     }
     if channel_role is ChannelRole.OFF:
         unknown = sorted(set(table) - channel_fields)
@@ -591,6 +650,8 @@ def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
             raise ThreeSmuConfigError(
                 f"{role} has unknown field(s): {', '.join(unknown)}"
             )
+        if "zero_readback_tolerance_v" in table:
+            raise ThreeSmuConfigError("zero_readback_tolerance_v requires an active voltage-source gate")
         return ChannelPlan(role=ChannelRole.OFF, bidirectional=False)
     base = {"role", "bidirectional"}
     if channel_role is ChannelRole.FIXED:
@@ -603,6 +664,10 @@ def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
                 f"{role} sweep requires exactly one of points or ranges"
             )
         expected = base | ({"points"} if has_points else {"ranges"})
+    if "ramp" in table:
+        expected.add("ramp")
+    if "zero_readback_tolerance_v" in table:
+        expected.add("zero_readback_tolerance_v")
     _strict_keys(table, role, expected)
     return ChannelPlan(
         role=channel_role,
@@ -621,7 +686,23 @@ def _parse_channel(table: Mapping[str, Any], role: str) -> ChannelPlan:
                 else None
             )
         ),
+        ramp=(
+            _parse_gate_ramp(_table(table, "ramp"), f"{role}.ramp")
+            if "ramp" in table else None
+        ),
+        zero_readback_tolerance_v=(
+            _positive(table["zero_readback_tolerance_v"], f"{role}.zero_readback_tolerance_v")
+            if "zero_readback_tolerance_v" in table else None
+        ),
     )
+
+
+def _parse_gate_ramp(table: Mapping[str, Any], name: str) -> GateVoltageRamp:
+    fields = {"max_step_v", "step_interval_s", "timeout_s", "readback_tolerance_v"}
+    _strict_keys(table, name, fields)
+    return GateVoltageRamp(**{
+        field: _positive(table[field], f"{name}.{field}") for field in fields
+    })
 
 
 def _parse_sweep_ranges(value: Any, name: str) -> tuple[float, ...]:

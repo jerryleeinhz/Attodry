@@ -20,6 +20,7 @@ from .keithley2400 import (
 )
 from .three_smu_config import (
     FinishAction,
+    GateVoltageRamp,
     SEMANTIC_ROLES,
     ScanPoint,
     SmuHardwareConfig,
@@ -117,6 +118,8 @@ class ThreeSmuSession:
         self._point_recorder = None
         self._point_started = 0.0
         self._points_cleaned = False
+        self._ramp_untrusted = False
+        self._guarded_direct_roles: set[str] = set()
 
     @classmethod
     def open(
@@ -234,22 +237,29 @@ class ThreeSmuSession:
         return self
 
     def __exit__(self, exc_type: Any, exc: BaseException | None, tb: Any) -> None:
+        errors: list[BaseException] = []
         if self._run_active:
             reason = (
                 "context exited before scan generator completed"
                 if exc is None
                 else f"context exited with {type(exc).__name__}: {exc}"
             )
-            self._abort_active_run(reason, interrupted=isinstance(exc, KeyboardInterrupt))
-        if exc is None:
-            self.close()
-        else:
             try:
-                self.close()
-            except Exception:
-                # Preserve the acquisition exception; cleanup audit already marks
-                # any state that could not be confirmed.
-                pass
+                self._abort_active_run(reason, interrupted=isinstance(exc, KeyboardInterrupt))
+            except BaseException as cleanup_error:
+                errors.append(cleanup_error)
+        try:
+            self.close()
+        except BaseException as close_error:
+            errors.append(close_error)
+        if exc is not None:
+            for error in errors:
+                exc.add_note(f"SMU exit cleanup/close failed: {type(error).__name__}: {error}")
+        elif errors:
+            primary = errors[0]
+            for error in errors[1:]:
+                primary.add_note(f"Additional SMU close error: {type(error).__name__}: {error}")
+            raise primary
 
     def run(
         self,
@@ -319,15 +329,16 @@ class ThreeSmuSession:
                 recorder.event("finish_hold", cleanup)
             recorder.finalize("completed", cleanup=cleanup)
             completed = True
-        except GeneratorExit:
-            self._abort_active_run("scan consumer closed generator", interrupted=True)
+        except GeneratorExit as exc:
+            self._abort_preserving_error("scan consumer closed generator", exc, interrupted=True)
             raise
         except KeyboardInterrupt as exc:
-            self._abort_active_run(str(exc) or "KeyboardInterrupt", interrupted=True)
+            self._abort_preserving_error(str(exc) or "KeyboardInterrupt", exc, interrupted=True)
             raise
         except BaseException as exc:
-            self._abort_active_run(
+            self._abort_preserving_error(
                 f"{type(exc).__name__}: {exc}",
+                exc,
                 interrupted=False,
             )
             raise
@@ -355,6 +366,20 @@ class ThreeSmuSession:
         if errors:
             raise ThreeSmuError("Could not close all SMUs: " + "; ".join(errors))
 
+    def enable_guarded_direct_gates(self) -> None:
+        """Register the continuous direct cleanup policy before any configuration."""
+        if self._configured or self._point_recorder is not None or self._recorder is not None:
+            raise ThreeSmuError("guarded direct gates must be registered before configuration")
+        for role in active_smu_roles(self.plan):
+            channel = self.plan.by_role()[role]
+            if channel.ramp is not None:
+                continue
+            if (role not in ("gate_top", "gate_bottom")
+                    or self.hardware.require_role(role).source_mode is not SourceMode.VOLTAGE
+                    or channel.zero_readback_tolerance_v is None):
+                raise ThreeSmuSafetyError("guarded direct gates require voltage gates and explicit zero tolerance")
+            self._guarded_direct_roles.add(role)
+
     def begin_points(self, recorder) -> None:
         """Configure once; the external owner must always call cleanup_points.
 
@@ -368,16 +393,46 @@ class ThreeSmuSession:
         self._configure(recorder)
 
     def set_point(self, coordinates: dict[str, float], *, index: int = 0,
-                  segment: str = "main") -> None:
+                  segment: str = "main",
+                  transition_guard: Callable[[], None] | None = None) -> None:
         if self._point_recorder is None or self._closed:
             raise ThreeSmuError("begin_points is required")
         if set(coordinates) != self._active_roles:
             raise ThreeSmuSafetyError("A point must specify exactly the active SMU roles")
         for role, target in coordinates.items():
             self._validate_source_target(role, target)
-        self._apply_point(ScanPoint(index, segment, coordinates), self._point_recorder)
-        if self.plan.delay_s:
-            self.sleep(self.plan.delay_s)
+        direct_roles = tuple(role for role in active_smu_roles(self.plan)
+                             if transition_guard is not None
+                             and role in ("gate_top", "gate_bottom")
+                             and self.hardware.require_role(role).source_mode is SourceMode.VOLTAGE
+                             and self.plan.by_role()[role].ramp is None)
+        self._guarded_direct_roles.update(direct_roles)
+        try:
+            for role in direct_roles:
+                if self.plan.by_role()[role].zero_readback_tolerance_v is None:
+                    raise ThreeSmuSafetyError("guarded direct gates require explicit zero_readback_tolerance_v")
+            self._apply_point(
+                ScanPoint(index, segment, coordinates), self._point_recorder,
+                transition_guard=transition_guard,
+            )
+            if self.plan.delay_s:
+                self._guarded_sleep(self.plan.delay_s, transition_guard)
+            for role in direct_roles:
+                self._direct_gate_read(role, self._point_recorder, phase="after_delay",
+                                       target=coordinates[role], guard=transition_guard)
+        except BaseException as exc:
+            if direct_roles:
+                self._ramp_untrusted = True
+                try:
+                    self._point_recorder.event("gate_direct_error", {
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "roles": list(direct_roles),
+                        "last_confirmed": {role: _timed_reading_dict(self.last_confirmed[role])
+                                           for role in direct_roles if role in self.last_confirmed},
+                    })
+                except BaseException as audit_error:
+                    exc.add_note(f"Gate direct error audit failed: {audit_error}")
+            raise
 
     def sample_point(self, coordinates: dict[str, float], *, index: int = 0,
                      sample_index: int = 0, segment: str = "main") -> ThreeSmuSample:
@@ -390,9 +445,12 @@ class ThreeSmuSession:
             self._point_started, self._point_recorder,
         )
 
-    def cleanup_points(self, recorder, *, reason: str) -> dict:
+    def cleanup_points(self, recorder, *, reason: str,
+                       failed: bool | None = None) -> dict:
         """Zero then disable configured roles; never clean up off roles."""
-        result = self._cleanup(recorder, reason=reason)
+        if failed is None:
+            failed = reason not in ("completed", "normal completion")
+        result = self._cleanup(recorder, reason=reason, failed=failed)
         self._points_cleaned = True
         return result
 
@@ -478,15 +536,205 @@ class ThreeSmuSession:
             if problems:
                 raise ThreeSmuSafetyError("; ".join(problems))
 
-    def _apply_point(self, point: ScanPoint, recorder: "_RunRecorder") -> None:
+    def _apply_point(self, point: ScanPoint, recorder: "_RunRecorder", *,
+                     transition_guard: Callable[[], None] | None = None) -> None:
         for role in active_smu_roles(self.plan):
             if role not in point.coordinates:
                 continue
             target = point.coordinates[role]
             self._validate_source_target(role, target)
+            ramp = self.plan.by_role()[role].ramp
+            if ramp is not None:
+                self._ramp_voltage(
+                    role, target, ramp, recorder, transition_guard=transition_guard,
+                    point_index=point.index, segment=point.segment,
+                )
+                continue
+            if transition_guard is not None:
+                transition_guard()
+            if role in self._guarded_direct_roles:
+                self._direct_gate_read(role, recorder, phase="before_write",
+                                       target=target, guard=transition_guard)
+                recorder.event("gate_direct_write_attempt", {"role": role, "target": target})
             self.adapters[role].set_source(target)
             self.last_commanded[role] = target
             recorder.event("source_set", {"role": role, "target": target})
+
+    def _direct_gate_read(self, role: str, recorder, *, phase: str, target: float,
+                          guard: Callable[[], None] | None) -> TimedReading:
+        timed = self._read_one(role)
+        problems = self._gate_transition_reading_problems(role, timed.reading)
+        if phase == "after_delay" and timed.reading.source_setpoint != target:
+            problems.append(f"{role} source setpoint did not acknowledge direct target")
+        recorder.event("gate_direct_readback", {
+            "role": role, "target": target, "phase": phase,
+            "reading": _timed_reading_dict(timed), "problems": problems,
+        })
+        if problems:
+            raise ThreeSmuSafetyError("; ".join(problems))
+        if guard is not None:
+            guard()
+        return timed
+
+    def _guarded_sleep(
+        self, duration: float, guard: Callable[[], None] | None, *,
+        deadline: float | None = None,
+    ) -> None:
+        remaining = duration
+        while remaining > 0:
+            if deadline is not None:
+                self._check_ramp_deadline(deadline)
+            interval = min(remaining, 1.0) if guard is not None else remaining
+            if deadline is not None:
+                interval = min(interval, deadline - self.monotonic())
+                if interval <= 0:
+                    self._check_ramp_deadline(deadline)
+            self.sleep(interval)
+            remaining -= interval
+            if guard is not None:
+                guard()
+            if deadline is not None:
+                self._check_ramp_deadline(deadline)
+
+    def _check_ramp_deadline(self, deadline: float) -> None:
+        if self.monotonic() >= deadline:
+            raise ThreeSmuSafetyError("gate voltage ramp timeout")
+
+    def _ramp_read(
+        self, role: str, recorder, *, deadline: float,
+        guard: Callable[[], None] | None,
+        target: float | None, ramp: GateVoltageRamp, step_index: int,
+    ) -> TimedReading:
+        self._check_ramp_deadline(deadline)
+        timed = self._read_one(role)
+        reading = timed.reading
+        problems = self._ramp_reading_problems(role, reading, target=target, ramp=ramp)
+        recorder.event("gate_ramp_readback", {
+            "role": role, "step_index": step_index, "target": target,
+            "reading": _timed_reading_dict(timed), "problems": problems,
+        })
+        if problems:
+            raise ThreeSmuSafetyError("; ".join(problems))
+        if guard is not None:
+            guard()
+        self._check_ramp_deadline(deadline)
+        return timed
+
+    def _ramp_reading_problems(
+        self, role: str, reading: KeithleyReading, *,
+        target: float | None, ramp: GateVoltageRamp,
+    ) -> list[str]:
+        problems = self._gate_transition_reading_problems(role, reading)
+        if target is not None:
+            if abs(reading.voltage_v - target) > ramp.readback_tolerance_v:
+                problems.append(
+                    f"{role} actual voltage {reading.voltage_v:g} V differs from "
+                    f"ramp target {target:g} V beyond readback_tolerance_v "
+                    f"{ramp.readback_tolerance_v:g} V"
+                )
+            if abs(reading.source_setpoint - target) > ramp.readback_tolerance_v:
+                problems.append(f"{role} source setpoint did not acknowledge ramp target")
+        return problems
+
+    def _gate_transition_reading_problems(self, role: str, reading: KeithleyReading) -> list[str]:
+        problems = self._reading_problems(role, reading, expected_output=True)
+        if type(reading.compliance_trip) is not bool:
+            problems.append(f"{role} compliance state is unknown")
+        if type(reading.output_enabled) is not bool:
+            problems.append(f"{role} output state is unknown")
+        try:
+            status_code = float(str(reading.status).strip().split(",", 1)[0])
+        except ValueError:
+            status_code = math.nan
+        if status_code != 0:
+            problems.append(f"{role} ramp instrument status is unknown or nonzero")
+        limit = self.hardware.require_role(role).max_abs_voltage_v
+        assert limit is not None
+        if abs(reading.source_setpoint) > limit:
+            problems.append(f"{role} source setpoint exceeds max_abs_voltage_v")
+        return problems
+
+    def _ramp_voltage(
+        self, role: str, target: float, ramp: GateVoltageRamp, recorder, *,
+        transition_guard: Callable[[], None] | None = None,
+        point_index: int | None = None, segment: str = "cleanup",
+    ) -> TimedReading:
+        """Audited voltage transition; sensed voltage is never inferred from ACK."""
+        self._validate_source_target(role, target)
+        deadline = self.monotonic() + ramp.timeout_s
+        step_index = 0
+        recorder.event("gate_ramp_start", {
+            "role": role, "target": target, "point_index": point_index,
+            "segment": segment, "ramp": asdict(ramp),
+        })
+        try:
+            if transition_guard is not None:
+                transition_guard()
+            timed = self._ramp_read(
+                role, recorder, deadline=deadline, guard=transition_guard,
+                target=None, ramp=ramp, step_index=step_index,
+            )
+            previous_command = self.last_commanded.get(role, timed.reading.source_setpoint)
+            needs_write = timed.reading.source_setpoint != target
+            while (needs_write or previous_command != target or
+                   abs(timed.reading.voltage_v - target) > ramp.readback_tolerance_v):
+                actual = timed.reading.voltage_v
+                source_register = timed.reading.source_setpoint
+                anchors = (actual, source_register, previous_command)
+                lower = max(value - ramp.max_step_v for value in anchors)
+                upper = min(value + ramp.max_step_v for value in anchors)
+                if lower > upper:
+                    raise ThreeSmuSafetyError(f"{role} fresh voltage cannot safely join ramp path")
+                next_target = min(max(target, lower), upper)
+                # Avoid a binary floating-point subtraction exceeding the declared
+                # maximum by one ULP at an interpolated endpoint.
+                for _ in range(4):
+                    if all(abs(next_target - value) <= ramp.max_step_v for value in anchors):
+                        break
+                    next_target = math.nextafter(next_target, actual)
+                if any(abs(next_target - value) > ramp.max_step_v for value in anchors):
+                    raise ThreeSmuSafetyError(f"{role} ramp step exceeds max_step_v")
+                self._validate_source_target(role, next_target)
+                self._check_ramp_deadline(deadline)
+                if transition_guard is not None:
+                    transition_guard()
+                self._check_ramp_deadline(deadline)
+                step_index += 1
+                recorder.event("gate_ramp_write_attempt", {
+                    "role": role, "step_index": step_index, "target": next_target,
+                    "final_target": target, "start_actual_v": actual,
+                    "previous_requested_v": previous_command,
+                    "confirmed_source_setpoint_v": source_register,
+                })
+                self.adapters[role].set_source(next_target)
+                self.last_commanded[role] = next_target
+                self._check_ramp_deadline(deadline)
+                self._guarded_sleep(ramp.step_interval_s, transition_guard, deadline=deadline)
+                timed = self._ramp_read(
+                    role, recorder, deadline=deadline, guard=transition_guard,
+                    target=next_target, ramp=ramp, step_index=step_index,
+                )
+                previous_command = next_target
+                needs_write = False
+            recorder.event("gate_ramp_complete", {
+                "role": role, "target": target, "step_count": step_index,
+                "reading": _timed_reading_dict(timed),
+            })
+            return timed
+        except BaseException as exc:
+            self._ramp_untrusted = True
+            try:
+                recorder.event("gate_ramp_error", {
+                    "role": role, "target": target, "step_index": step_index,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "last_confirmed": (
+                        _timed_reading_dict(self.last_confirmed[role])
+                        if role in self.last_confirmed else None
+                    ),
+                })
+            except BaseException as audit_error:
+                exc.add_note(f"Gate ramp error audit failed: {audit_error}")
+            raise
 
     def _formal_sample(
         self,
@@ -647,12 +895,23 @@ class ThreeSmuSession:
                 f"{role} source target {target:g} exceeds max_abs limit {limit:g}"
             )
 
-    def _cleanup(self, recorder: "_RunRecorder", *, reason: str) -> dict[str, Any]:
+    def _cleanup(self, recorder: "_RunRecorder", *, reason: str,
+                 failed: bool = False) -> dict[str, Any]:
         actions: list[dict[str, Any]] = []
         cleanup_errors: list[dict[str, str]] = []
         manual = False
         for role in active_smu_roles(self.plan):
             if role not in self._configured:
+                continue
+            ramp = self.plan.by_role()[role].ramp
+            if ramp is not None or role in self._guarded_direct_roles:
+                action, errors = self._cleanup_ramped_role(
+                    role, ramp, recorder, failed=failed or self._ramp_untrusted,
+                )
+                actions.append(action)
+                cleanup_errors.extend(errors)
+                if errors or not action["zero_readback_recorded"]:
+                    manual = True
                 continue
             zero_readback_recorded = False
             try:
@@ -678,14 +937,15 @@ class ThreeSmuSession:
                     )
                     zero_payload = {"state": _jsonable(asdict(zero_state))}
                 zero_readback_recorded = not problems
-                recorder.event(
+                self._cleanup_event(
+                    recorder,
                     "cleanup_zero",
                     {
                         "role": role,
                         "target": 0.0,
                         **zero_payload,
                         "problems": problems,
-                    },
+                    }, cleanup_errors, role=role,
                 )
                 if problems:
                     raise ThreeSmuSafetyError("; ".join(problems))
@@ -720,13 +980,14 @@ class ThreeSmuSession:
                             "error": "; ".join(problems),
                         }
                     )
-                recorder.event(
+                self._cleanup_event(
+                    recorder,
                     "cleanup_disable",
                     {
                         "role": role,
                         "state": _jsonable(asdict(disabled_state)),
                         "problems": problems,
-                    },
+                    }, cleanup_errors, role=role,
                 )
             except BaseException as exc:
                 manual = True
@@ -737,9 +998,11 @@ class ThreeSmuSession:
                         "error": f"{type(exc).__name__}: {exc}",
                     }
                 )
-                recorder.event(
+                self._cleanup_event(
+                    recorder,
                     "cleanup_disable_error",
                     {"role": role, "error": f"{type(exc).__name__}: {exc}"},
+                    cleanup_errors, role=role,
                 )
             actions.append(
                 {
@@ -753,6 +1016,7 @@ class ThreeSmuSession:
                     ),
                 }
             )
+        manual = manual or bool(cleanup_errors)
         result = {
             "result": "manual_verification_required" if manual else "confirmed_safe",
             "reason": reason,
@@ -764,21 +1028,169 @@ class ThreeSmuSession:
                 for role, reading in self.last_confirmed.items()
             },
         }
-        recorder.event("cleanup_complete", result)
+        if not self._cleanup_event(
+            recorder, "cleanup_complete", result, cleanup_errors, role="session",
+        ):
+            result["result"] = "manual_verification_required"
+            result["manual_verification_required"] = True
         return result
+
+    def _cleanup_event(self, recorder, kind: str, payload: dict[str, Any],
+                       errors: list[dict[str, str]], *, role: str) -> bool:
+        """An audit fault is retained but cannot prevent protection operations."""
+        try:
+            recorder.event(kind, payload)
+            return True
+        except BaseException as exc:
+            errors.append({"role": role, "stage": f"audit:{kind}",
+                           "error": f"{type(exc).__name__}: {exc}"})
+            self._ramp_untrusted = True
+            return False
+
+    def _cleanup_ramped_role(self, role: str, ramp: GateVoltageRamp | None, recorder, *,
+                             failed: bool) -> tuple[dict[str, Any], list[dict[str, str]]]:
+        errors: list[dict[str, str]] = []
+        zero_confirmed = False
+        output_off_confirmed = False
+        disabled_state: KeithleyPreflight | None = None
+        zero_tolerance = (ramp.readback_tolerance_v if ramp is not None
+                          else self.plan.by_role()[role].zero_readback_tolerance_v)
+        if zero_tolerance is None:
+            failed = True
+            errors.append({"role": role, "stage": "zero_policy",
+                           "error": "direct actual-zero tolerance is unavailable"})
+        if not failed and self.output_enabled[role]:
+            try:
+                if ramp is not None:
+                    self._ramp_voltage(role, 0.0, ramp, recorder)
+                else:
+                    if not self._cleanup_event(recorder, "cleanup_zero_attempt", {
+                        "role": role, "target": 0.0, "zero_readback_tolerance_v": zero_tolerance,
+                    }, errors, role=role):
+                        raise ThreeSmuSafetyError("direct zero attempt audit failed")
+                    self.adapters[role].set_source(0.0)
+                    self.last_commanded[role] = 0.0
+                if self.plan.delay_s:
+                    self.sleep(self.plan.delay_s)
+                timed = self._read_one(role)
+                if ramp is not None:
+                    problems = self._ramp_reading_problems(role, timed.reading, target=0.0, ramp=ramp)
+                else:
+                    problems = self._gate_transition_reading_problems(role, timed.reading)
+                    if timed.reading.source_setpoint != 0.0:
+                        problems.append(f"{role} zero source register is not confirmed")
+                    if abs(timed.reading.voltage_v) > zero_tolerance:
+                        problems.append(f"{role} actual zero voltage is not verified")
+                self._cleanup_event(recorder, "cleanup_zero", {
+                    "role": role, "target": 0.0,
+                    "reading": _timed_reading_dict(timed), "problems": problems,
+                }, errors, role=role)
+                if problems:
+                    raise ThreeSmuSafetyError("; ".join(problems))
+                zero_confirmed = True
+            except BaseException as exc:
+                self._ramp_untrusted = True
+                errors.append({"role": role, "stage": "zero",
+                               "error": f"{type(exc).__name__}: {exc}"})
+        # Failure/unknown state gets OFF immediately: no ramp, delay or held-light
+        # guard may postpone this protection attempt.
+        self._cleanup_event(recorder, "cleanup_disable_attempt", {"role": role},
+                            errors, role=role)
+        try:
+            self.adapters[role].set_output(False)
+            self.output_enabled[role] = False
+            disabled_state = self.adapters[role].preflight()
+            problems = self._preflight_problems(role, disabled_state, expected_output=False)
+            if zero_confirmed and ((ramp is None and disabled_state.source_setpoint != 0.0)
+                                   or (ramp is not None and abs(disabled_state.source_setpoint) > zero_tolerance)):
+                problems.append(f"{role} disabled source setpoint is not zero")
+            output_off_confirmed = not problems
+            self._cleanup_event(recorder, "cleanup_disable", {
+                "role": role, "state": _jsonable(asdict(disabled_state)), "problems": problems,
+            }, errors, role=role)
+            if problems:
+                errors.append({"role": role, "stage": "disable_readback",
+                               "error": "; ".join(problems)})
+        except BaseException as exc:
+            errors.append({"role": role, "stage": "disable",
+                           "error": f"{type(exc).__name__}: {exc}"})
+            self._cleanup_event(recorder, "cleanup_disable_error",
+                                {"role": role, "error": str(exc)}, errors, role=role)
+        if not zero_confirmed:
+            self._cleanup_event(recorder, "cleanup_zero_attempt", {
+                "role": role, "target": 0.0, "actual_zero_unverified": True,
+            }, errors, role=role)
+            try:
+                self.adapters[role].set_source(0.0)
+                self.last_commanded[role] = 0.0
+                disabled_state = self.adapters[role].preflight()
+                problems = self._preflight_problems(
+                    role, disabled_state, expected_output=False, expected_source=0.0,
+                )
+                self._cleanup_event(recorder, "cleanup_zero_register", {
+                    "role": role, "state": _jsonable(asdict(disabled_state)),
+                    "problems": problems, "actual_zero_unverified": True,
+                }, errors, role=role)
+                if problems:
+                    errors.append({"role": role, "stage": "zero_register",
+                                   "error": "; ".join(problems)})
+            except BaseException as exc:
+                errors.append({"role": role, "stage": "zero_register",
+                               "error": f"{type(exc).__name__}: {exc}"})
+        return {
+            "role": role, "zero_readback_recorded": zero_confirmed,
+            "output_off_confirmed": output_off_confirmed,
+            "final_state": None if disabled_state is None else _jsonable(asdict(disabled_state)),
+        }, errors
 
     def _abort_active_run(self, reason: str, *, interrupted: bool) -> None:
         if not self._run_active or self._recorder is None:
             return
         recorder = self._recorder
-        recorder.event("error", {"message": reason})
-        cleanup = self._cleanup(recorder, reason=reason)
-        recorder.finalize(
-            "interrupted" if interrupted else "rejected",
-            cleanup=cleanup,
-            error=reason,
-        )
-        self._run_active = False
+        audit_errors: list[dict[str, str]] = []
+        self._cleanup_event(recorder, "error", {"message": reason}, audit_errors,
+                            role="session")
+        cleanup = self._cleanup(recorder, reason=reason, failed=True)
+        if audit_errors:
+            cleanup["cleanup_errors"].extend(audit_errors)
+            cleanup["result"] = "manual_verification_required"
+            cleanup["manual_verification_required"] = True
+        status = "interrupted" if interrupted else "rejected"
+        try:
+            recorder.finalize(status, cleanup=cleanup, error=reason)
+        except BaseException as finalize_error:
+            cleanup["cleanup_errors"].append({
+                "role": "session", "stage": "audit:finalize",
+                "error": f"{type(finalize_error).__name__}: {finalize_error}",
+            })
+            cleanup["result"] = "manual_verification_required"
+            cleanup["manual_verification_required"] = True
+            metadata = getattr(recorder, "metadata", None)
+            if isinstance(metadata, dict):
+                metadata.update(status=status, accepted=False, cleanup=_jsonable(cleanup), error=reason)
+                write_metadata = getattr(recorder, "_write_metadata", None)
+                if callable(write_metadata):
+                    try:
+                        write_metadata()
+                    except BaseException as metadata_error:
+                        cleanup["cleanup_errors"].append({
+                            "role": "session", "stage": "audit:metadata",
+                            "error": f"{type(metadata_error).__name__}: {metadata_error}",
+                        })
+                        metadata["cleanup"] = _jsonable(cleanup)
+                        finalize_error.add_note(f"SMU rejected metadata write failed: {metadata_error}")
+            raise
+        finally:
+            self._run_active = False
+
+    def _abort_preserving_error(self, reason: str, primary: BaseException, *,
+                                interrupted: bool) -> None:
+        try:
+            self._abort_active_run(reason, interrupted=interrupted)
+        except BaseException as cleanup_error:
+            primary.add_note(
+                f"SMU abort audit/cleanup failed: {type(cleanup_error).__name__}: {cleanup_error}"
+            )
 
 
 class _RunRecorder:

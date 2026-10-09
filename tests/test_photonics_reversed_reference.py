@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from attodry_control.photonics_lockin_config import load_photonics_lockin_config
 from attodry_control.photonics_lockin_points import PhotonicsLockinPointSession
+from attodry_control.lockin_overload import reading_allows_continuation
 from tests.photonics_lockin_helpers import FakeManager, reversed_sine_document, reversed_sine_safety_document
 
 
@@ -20,16 +21,61 @@ class ReversedReferenceTests(unittest.TestCase):
         xy.responses["BLAZEX?"] = "0"
         waits, events = [], []
         session = PhotonicsLockinPointSession("fake.toml", self.load(doc),
-            lambda kind, payload: events.append((kind, payload)), manager_factory=lambda: manager, sleep=waits.append)
+            lambda kind, payload: events.append((kind, payload)), manager_factory=lambda: manager, sleep=waits.append,
+            clock=lambda: sum(waits))
         self.addCleanup(session.close)
         return session, manager, events, waits
 
-    def ready(self):
-        session, manager, events, waits = self.make()
+    def ready(self, document=None):
+        session, manager, events, waits = self.make(document)
         session.open()
         session.configure()
         session.set_point(0.006)
         return session, manager, events, waits
+
+    def test_configured_frequency_tolerance_reaches_sr865a_sample_and_audit(self):
+        doc = reversed_sine_document()
+        doc["photonics_lockin"]["pair_tolerance_hz"] = 5.0
+        session, manager, events, _ = self.make(doc)
+        xy = manager.resources["FAKE::XY"]
+
+        def sequential_readback(resource, command):
+            if command == "FREQDET?":
+                resource.responses[command] = str(int(resource.responses["HARM?"]) *
+                                                  (float(resource.responses["FREQEXT?"]) + 0.4))
+
+        xy.on_query = sequential_readback
+        session.open()
+        session.configure()
+        session.set_point(0.006)
+        sample = session.sample_point()
+        self.assertTrue(sample["clean"])
+        records = [payload for kind, payload in events
+                   if kind == "lockin_raw_role" and payload["role"] == "lockin_xy"]
+        self.assertTrue(records)
+        self.assertTrue(all(payload["reference_frequency_tolerance_hz"] == 5 for payload in records))
+        self.assertFalse(any(command.startswith(("SLVL ", "SOFF ", "REFM ")) for command in xy.writes))
+        self.assertTrue(session.cleanup()["source_protection_verified"])
+
+    def test_sr865a_detection_mismatch_beyond_configured_tolerance_still_rejects(self):
+        doc = reversed_sine_document()
+        doc["photonics_lockin"]["pair_tolerance_hz"] = 5.0
+        session, manager, _, _ = self.make(doc)
+        session.open()
+        session.configure()
+        session.set_point(0.006)
+        xy = manager.resources["FAKE::XY"]
+
+        def mismatched_readback(resource, command):
+            if command == "FREQDET?":
+                resource.responses[command] = str(int(resource.responses["HARM?"]) *
+                                                  (float(resource.responses["FREQEXT?"]) + 5.1))
+
+        xy.on_query = mismatched_readback
+        with self.assertRaisesRegex(RuntimeError, "Detection frequency"):
+            session.sample_point()
+        self.assertTrue(session.failed)
+        self.assertTrue(session.cleanup()["source_protection_verified"])
 
     def test_explicit_roles_physical_connection_and_source_definitions(self):
         cfg = self.load()
@@ -41,6 +87,30 @@ class ReversedReferenceTests(unittest.TestCase):
         self.assertFalse(cfg.reference_output.sample_connected)
         self.assertEqual(cfg.source.dc_mode, "not_supported")
         self.assertEqual(cfg.source.amplitude_definition, "sr830_instrument_rms_setting")
+
+    def test_reference_lock_wait_preserves_xy_source_and_precedes_h2_write(self):
+        doc = reversed_sine_document()
+        doc["photonics_lockin"]["reference_lock_wait_s"] = 45.0
+        session, manager, _, waits = self.make(doc)
+        xy = manager.resources["FAKE::XY"]
+        xy.responses["FREQEXT?"] = "50030"
+        xy.responses["CUROVLDSTAT?"] = "8"
+
+        def settle(seconds):
+            waits.append(seconds)
+            if seconds == 1:
+                self.assertNotIn("HARM 2", xy.writes)
+                self.assertEqual(xy.responses["SLVL?"], "0.2")
+                xy.responses["FREQEXT?"] = "50027"
+                xy.responses["CUROVLDSTAT?"] = "0"
+
+        session.sleep = settle
+        session.open()
+        session.configure()
+        self.assertEqual(waits, [1.0, session.config.settle_s])
+        self.assertEqual(xy.responses["HARM?"], "2")
+        self.assertFalse(any(cmd.startswith(("SLVL ", "SOFF ", "REFM ")) for cmd in xy.writes))
+        self.assertTrue(session.cleanup()["source_protection_verified"])
 
     def test_wrong_model_reference_trigger_or_disconnected_declaration_reject(self):
         for role, key, value in (
@@ -120,7 +190,9 @@ class ReversedReferenceTests(unittest.TestCase):
         config = SimpleNamespace(reference_topology="pem_xy_xx_sine", lockin=self.load())
         station = HardwareCombinationStation(config)
         station.set_event_sink(lambda *_: None)
-        station.lockin = SimpleNamespace(read_reference_frequencies=lambda: {"xx": 50027.75, "xy": 50028.5})
+        station.lockin = SimpleNamespace(wait_for_reference_lock=lambda: None,
+            run_reference_operation=lambda stage, operation: operation(),
+            read_reference_frequencies=lambda: {"xx": 50027.75, "xy": 50028.5})
         station.optical = SimpleNamespace(pem=object(), last_state={"pem": {"frequency_hz": 50027.0}})
         with self.assertRaisesRegex(ValueError, "PEM frequency"):
             station._verify_optical_reference()
@@ -187,6 +259,112 @@ class ReversedReferenceTests(unittest.TestCase):
         self.assertEqual(manager.resources["FAKE::XX"].responses["SLVL?"], "0.006")
         self.assertTrue(session.sample_point()["clean"])
         self.assertTrue(session.cleanup()["verified"])
+
+    def test_record_continue_covers_setup_excitation_optical_qualify_and_formal_stages(self):
+        doc = reversed_sine_document()
+        doc["photonics_lockin"]["overload_policy"] = "record_continue"
+        session, manager, events, _ = self.make(doc)
+        for role, resource in manager.resources.items():
+            bit = 1 if role == "FAKE::XX" else 16
+
+            def overload(resource, command, bit=bit):
+                if command == "LIAS?":
+                    resource.responses[command] = str(int(resource.responses[command]) | bit)
+
+            resource.on_query = overload
+        session.open()
+        session.configure()
+        session.set_point(0.006)
+        session.prepare_reference_transition()
+        session.restore_source_after_reference_transition()
+        session.qualify()
+        sample = session.sample_point()
+        self.assertFalse(sample["clean"])
+        self.assertFalse(sample["valid_for_analysis"])
+        self.assertTrue(sample["overload_continuation"])
+        self.assertTrue(reading_allows_continuation(sample))
+        self.assertEqual(sample["problems"], ["lockin_xx input/reserve overload", "lockin_xy input/reserve overload"])
+        for entry in sample["status"]["samples"]:
+            self.assertTrue(entry["settings_verified"])
+            self.assertEqual(entry["overload_policy"], "record_continue")
+            self.assertEqual(entry["blocking_problems"], [])
+            self.assertEqual(entry["valid_for_analysis_by_role"], {"lockin_xx": False, "lockin_xy": False})
+            self.assertFalse(entry["samples"]["xy"]["status"]["input_overload"])
+            self.assertTrue(entry["samples"]["xy"]["status"]["native_status"]["input_overload_latched"])
+        self.assertTrue(any(p.get("continued_overload_problems") for k, p in events if k == "lockin_raw_role"))
+        self.assertTrue(session.cleanup()["source_protection_verified"])
+        self.assertFalse(any(c.startswith(("SLVL ", "SOFF ", "REFM ")) for c in manager.resources["FAKE::XY"].writes))
+
+    def test_each_formal_bracket_overload_invalidates_only_affected_role_then_recovers(self):
+        for role in ("xx", "xy"):
+            for poll_index in (1, 2, 3):
+                with self.subTest(role=role, poll_index=poll_index):
+                    doc = reversed_sine_document()
+                    doc["photonics_lockin"]["overload_policy"] = "record_continue"
+                    session, manager, _, _ = self.ready(doc)
+                    resource = manager.resources["FAKE::" + role.upper()]
+                    count = [0]
+
+                    def overload_once(resource, command):
+                        if command == "LIAS?":
+                            count[0] += 1
+                            if count[0] == poll_index:
+                                resource.responses[command] = "1" if role == "xx" else "16"
+
+                    resource.on_query = overload_once
+                    sample = session.sample_point()
+                    entry = sample["status"]["samples"][0]
+                    companion = "xy" if role == "xx" else "xx"
+                    self.assertFalse(entry["valid_for_analysis_by_role"]["lockin_" + role])
+                    self.assertTrue(entry["valid_for_analysis_by_role"]["lockin_" + companion])
+                    self.assertEqual(entry["problems_by_role"]["lockin_" + companion], [])
+                    self.assertTrue(reading_allows_continuation(sample))
+                    if poll_index != 2:
+                        self.assertTrue(entry["samples"][role]["status"]["validity"])
+                        stage = "before" if poll_index == 1 else "after"
+                        self.assertFalse(entry["bracket_samples"][stage][role]["status"]["validity"])
+                    self.assertIn(f"lockin_{role}_h{1 if role == 'xx' else 2}_x_v", sample["measurements"])
+                    self.assertEqual(sample["overload_summary"]["overloaded_pairs_by_role"]["lockin_" + role], 1)
+                    recovered = session.sample_point()
+                    self.assertTrue(recovered["clean"])
+                    self.assertFalse(recovered["overload_continuation"])
+
+    def test_record_continue_preserves_non_overload_failures_in_formal_and_qualify(self):
+        faults = (("XX", "LIAS?", "9"), ("XX", "LIAS?", "129"), ("XX", "ERRS?", "1"),
+                  ("XX", "LIAS?", "17"), ("XX", "LIAS?", "33"),
+                  ("XY", "CUROVLDSTAT?", "8"), ("XY", "LIAS?", "48"), ("XY", "LIAS?", "80"),
+                  ("XY", "LIAS?", "20"), ("XY", "*ESR?", "128"), ("XY", "ERRS?", "1"),
+                  ("XY", "*ESR?", "64"))
+        for action in ("qualify", "sample_point"):
+            for role, query, value in faults:
+                with self.subTest(action=action, role=role, query=query, value=value):
+                    doc = reversed_sine_document()
+                    doc["photonics_lockin"]["overload_policy"] = "record_continue"
+                    session, manager, events, _ = self.ready(doc)
+                    resource = manager.resources[f"FAKE::{role}"]
+                    resource.responses["LIAS?"] = "1" if role == "XX" else "16"
+                    resource.responses[query] = value
+                    with self.assertRaises(ValueError):
+                        getattr(session, action)()
+                    self.assertTrue(session.failed)
+                    self.assertTrue(any(p.get("blocking_problems") for k, p in events if k == "lockin_raw_role"))
+                    self.assertTrue(session.cleanup()["source_protection_verified"])
+
+    def test_record_continue_cannot_hide_unlock_during_excitation_transition(self):
+        doc = reversed_sine_document()
+        doc["photonics_lockin"]["overload_policy"] = "record_continue"
+        session, manager, _, _ = self.ready(doc)
+        xx = manager.resources["FAKE::XX"]
+
+        def inject_after_source(resource, command):
+            if command.startswith("SLVL "):
+                manager.resources["FAKE::XY"].responses["LIAS?"] = "24"
+
+        xx.on_write = inject_after_source
+        with self.assertRaisesRegex(ValueError, "reference unlocked"):
+            session.set_point(0.004)
+        self.assertTrue(session.failed)
+        self.assertTrue(session.cleanup()["source_protection_verified"])
 
 
 if __name__ == "__main__":

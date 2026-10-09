@@ -508,6 +508,14 @@ output/trip/status。requested/readback 差异保留审计，不单独 rejection
 非有限值、output/status 异常仍 fail closed。cleanup 直接请求零、等待同一 delay、读回记录、
 关闭输出；通信失败要求人工确认。
 
+2026-10-06 用户批准的例外：在 gate 计划子表中可显式增加 `ramp`（不是硬件表
+的独立安全上限），配置 max_step_v、step_interval_s、readback_tolerance_v、timeout_s。
+仅 gate_top/gate_bottom 的 voltage-source 非pulse模式支持，省略保持上方direct流程。
+持续照光 gate 组合模式要求每个active gate有ramp，并先完成光学资格再改gate；
+中间V/I/output/compliance/status及写尝试保留审计，不增加正式条件。
+正常回零核验实际V；失败优先关闭输出，不能由设定零推断栅极电容放空。
+详见[光电联合指南](PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
+
 不要预先填猜测的 SMU 边界。用户需要先提供：确切型号/手册、VISA 地址、三角色接线、
 source mode、2/4-wire、guard/ground/common、每台最大绝对 V/I、output-off/zero 语义、
 interlock 和容性负载限制。
