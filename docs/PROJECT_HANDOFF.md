@@ -4,7 +4,7 @@ Last updated: 2026-10-09
 
 ## Current stage
 
-### Bounded SR865A External frequency rechecks (offline verified; 2026-10-09)
+### Bounded SR865A External frequency rechecks (target synchronized; 2026-10-09)
 
 - At the operator's request, keep the External fundamental-frequency threshold
   at max(5 mHz, 100 ppm), and re-observe a sole in-range frequency inconsistency
@@ -33,8 +33,19 @@ Last updated: 2026-10-09
   -74.551 to +61.254 ppm. This supports checking fresh sequential estimates;
   it does not establish the cause of the earlier failure or exclude sweep
   switching transients. This code delivery itself launches no real scan.
-- Delivery to the existing origin/codex/integration-four-module-scan and LK_setup
-  is pending; preserve private TOML, data and user-edited analysis notebooks.
+- Feature `328423ab13ca7181bdbab6b6e57e17c969f1b3e5` was pushed to
+  `origin/codex/integration-four-module-scan`; LK_setup fast-forwarded from
+  `38e44d2e6d1a06af4b255926aa42490e9c515a3b` at **2026-10-09T13:24:20Z**.
+  The station's fixed `lyr` interpreter passed the same **329 guarded tests,
+  zero skips**, in a pristine incoming checkout before deployment. Only the
+  previously identified, user-confirmed analysis Jupyter processes remained.
+- All 18 protected TOML/notebook files (including checkpoints) retained their
+  SHA256 values; both user-edited notebooks remain modified. Incoming files
+  exactly match the tested snapshot. Station audit and test log:
+  `run_data/operator_frequency_recheck_sync_20261009T132329239414Z/`.
+  No instrument connection, real scan or process termination was performed
+  for this code delivery. New command invocations use the policy automatically;
+  no TOML field is required. Existing command authorization rules still apply.
 
 ### Retained merged and per-channel Condensed reports (target synchronized; 2026-10-08)
 
