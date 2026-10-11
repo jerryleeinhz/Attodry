@@ -188,6 +188,62 @@ note = "Fake devices only"
             for kind, payload in self.events()
         ))
 
+    def _offset_xy_snapshot_frequency(self, offset_hz):
+        original = self.xy.query
+        def query(command):
+            value = original(command)
+            if command == "FREQ?":
+                return str(float(value) + offset_hz) + "\n"
+            if command == "SNAP? 1,2,3,4,9":
+                fields = value.strip().split(",")
+                fields[-1] = str(float(fields[-1]) + offset_hz)
+                return ",".join(fields) + "\n"
+            return value
+        self.xy.query = query
+        self.write_config(("lockin",), source=self.base.replace(
+            "frequency_hz = 17.777", "frequency_hz = 300"))
+
+    def test_external_frequency_quantization_passes_formal_samples_and_cleanup(self):
+        self._offset_xy_snapshot_frequency(.007)
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["cleanup"]["clean"], result)
+        final = next(payload["result"] for kind, payload in self.events()
+                     if kind == "cleanup_result" and payload["module"] == "lockin")
+        self.assertEqual(final["final"]["lockin_xy"]["snapshot_frequency_hz"], 300.007)
+        self.assertTrue(final["verified"], final)
+        self.assertEqual(len(load_combination_rows(self.database)), 2)
+
+    def test_external_frequency_outside_100ppm_still_fails(self):
+        self._offset_xy_snapshot_frequency(.031)
+        result = self.execute()
+        self.assertEqual(result["status"], "failed", result)
+        self.assertIn("frequency", result["error"])
+        self.assertEqual(load_combination_rows(self.database), ())
+        self.assertEqual(float(self.xx.responses["SLVL?"]), .004)
+
+    def test_external_frequency_inside_100ppm_passes(self):
+        self._offset_xy_snapshot_frequency(.029)
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["cleanup"]["clean"], result)
+
+    def test_frequency_tolerance_cannot_excuse_device_error(self):
+        self._offset_xy_snapshot_frequency(.007)
+        self.xy.responses["ERRS?"] = "32"
+        result = self.execute()
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(load_combination_rows(self.database), ())
+        self.assertFalse(result["cleanup"]["clean"])
+
+    def test_frequency_tolerance_cannot_excuse_unlock(self):
+        self._offset_xy_snapshot_frequency(.007)
+        self.xy.responses["LIAS?"] = "8"
+        result = self.execute()
+        self.assertEqual(result["status"], "failed", result)
+        self.assertEqual(load_combination_rows(self.database), ())
+        self.assertFalse(result["cleanup"]["clean"])
+
     def test_smu_trip_retained_excluded_and_zero_off(self):
         self.modify_adapter = lambda a: setattr(a, "trip_on_read", 2)
         result = self.execute()

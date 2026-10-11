@@ -5000,9 +5000,16 @@ def _restore_scan_state(
     verify_frequency_match: bool = True,
     ignore_output_overload: bool = False,
     harmonic_control: HarmonicSensitivitySession | None = None,
+    frequency_rel_tolerance: float | None = None,
 ) -> dict[str, object]:
     if not writes_started:
         return {"attempted": False, "verified": True, "errors": []}
+    # Combination acquisition and its cleanup must use the same frequency
+    # policy. Other callers retain their original default tolerances.
+    cleanup_frequency_rel_tolerance = (
+        frequency_rel_tolerance if frequency_rel_tolerance is not None else
+        SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
+    )
     errors: list[str] = []
     diagnostics: dict[str, object] = {}
     actions: list[tuple[str, Callable[[], None]]] = [
@@ -5173,6 +5180,8 @@ def _restore_scan_state(
                 xy,
                 check_frequency_match=verify_frequency_match,
                 ignore_output_overload=ignore_output_overload,
+                frequency_rel_tolerance=(frequency_rel_tolerance
+                    if frequency_rel_tolerance is not None else 1e-5),
             )
         )
         minimum_tolerance = 1e-9 if model_name(lockin_xy) == "SR865A" else 0.001
@@ -5183,9 +5192,7 @@ def _restore_scan_state(
                 baseline_hz,
                 xx.frequency_hz,
                 xy.frequency_hz,
-                rel_tolerance=(
-                    SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
-                ),
+                rel_tolerance=cleanup_frequency_rel_tolerance,
                 absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
                 check_match=verify_frequency_match,
             )
@@ -5193,9 +5200,7 @@ def _restore_scan_state(
                 baseline_hz,
                 xx.snapshot_frequency_hz,
                 xy.snapshot_frequency_hz,
-                rel_tolerance=(
-                    SWEEP_FREQUENCY_REL_TOLERANCE if restore_frequency else 1e-5
-                ),
+                rel_tolerance=cleanup_frequency_rel_tolerance,
                 absolute_tolerance_hz=SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
                 check_match=verify_frequency_match,
             )
@@ -5428,6 +5433,7 @@ def _diagnostic_problems(
     *,
     check_frequency_match: bool = True,
     ignore_output_overload: bool = False,
+    frequency_rel_tolerance: float = 1e-5,
 ) -> list[str]:
     problems: list[str] = []
     if xx.identity == xy.identity:
@@ -5447,7 +5453,7 @@ def _diagnostic_problems(
     if check_frequency_match and not math.isclose(
         xx.snapshot_frequency_hz,
         xy.snapshot_frequency_hz,
-        rel_tol=1e-5,
+        rel_tol=frequency_rel_tolerance,
         abs_tol=PAIR_FREQUENCY_ABS_TOLERANCE_HZ,
     ):
         problems.append("lock-in reference frequencies differ")

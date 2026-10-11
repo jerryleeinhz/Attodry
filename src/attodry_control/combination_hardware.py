@@ -190,6 +190,14 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     # Include point engines and shared safety code, not just the Cartesian loop.
     snapshot["source_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in Path(__file__).parent.glob("*.py")}
+    if lockin is not None:
+        from .lockin_test import SWEEP_FREQUENCY_REL_TOLERANCE, SWEEP_FREQUENCY_ABS_TOLERANCE_HZ
+        snapshot["lockin_frequency_readback_policy"] = {
+            "relative_tolerance": SWEEP_FREQUENCY_REL_TOLERANCE,
+            "absolute_tolerance_hz": SWEEP_FREQUENCY_ABS_TOLERANCE_HZ,
+            "applies_to": ["point_coordinates", "formal_samples", "cleanup"],
+            "lock_status_required": True,
+        }
     database = project.database_path
     if not database.is_absolute():
         database = path.parent / database

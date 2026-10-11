@@ -195,7 +195,7 @@ class LockinPointSession:
                                              self.point_record)
             daily._verify_frequency_readbacks(self.target_frequency_hz,
                 xx.read_reference_frequency(), xy.read_reference_frequency(),
-                rel_tolerance=1e-5,
+                rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
                 absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
             if target_hz != self.target_frequency_hz:
                 xx.set_minimum_sine_output()
@@ -242,7 +242,8 @@ class LockinPointSession:
         frequency, companion = xx.read_reference_frequency(), xy.read_reference_frequency()
         daily._verify_frequency_readbacks(
             self.target_frequency_hz, frequency, companion,
-            rel_tolerance=1e-5, absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+            rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
+            absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
         self.point_record.update(source_readback_v_rms=source,
                                  actual_frequency_hz=frequency,
                                  frequency_readback_hz={"lockin_xx": frequency, "lockin_xy": companion},
@@ -274,7 +275,7 @@ class LockinPointSession:
                     self.point_harmonics, self.harmonics_by_role),
                 harmonic_settle_s=self.args.settle_s, samples=1,
                 sample_interval_s=self.args.sample_interval_s, record=record,
-                frequency_rel_tolerance=1e-5,
+                frequency_rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
                 harmonic_control=self.harmonic_control,
                 measurement_context=measurement_context,
                 on_formal_sample_recorded=lambda payload: self.event("lockin_formal_pair", payload),
@@ -327,6 +328,7 @@ class LockinPointSession:
             harmonic_control=self.harmonic_control,
             restore_frequency=self.mode != "excitation", settle_s=self.args.settle_s, writes_started=True,
             ignore_output_overload=True,
+            frequency_rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
         )
         if (self.fixed_setup and self.fixed_setup.get("verified")
                 and self.frequency_setup and self.frequency_setup.get("verified")
