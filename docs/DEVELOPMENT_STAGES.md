@@ -1,5 +1,19 @@
 # Development stages
 
+## Combination frequency quantization recovery (2026-10-12)
+
+- Reuse the existing 100 ppm / 0.00101 Hz sweep frequency criterion consistently
+  for combination point coordinates, formal samples and cleanup, and archive it
+  in the normalized run snapshot. Ordinary diagnostics and other cleanup defaults
+  remain unchanged. No weakened unlock/error/overload/finite/range or cryostat gate.
+- Real 300.007 versus 300 Hz failure and independent query-only reproduction
+  motivated the correction. Keep the original failed run; any authorized recovery
+  is a separate full run with its own ID, database, baseline and one-shot claim.
+- **237 guarded tests passed, zero skips**: quantized FREQ/SNAP, 100 ppm boundaries,
+  unlock/device error, combination/temperature cleanup, mixed lock-ins, apply and
+  bounded SR865A rechecks. Real DLL/VISA imports were blocked throughout.
+
+
 ## Dual-role remote TOML preparation (target update deferred; 2026-10-09)
 
 - User-approved `apply-toml --role "xx,xy"` / `"xx, xy"` / full role names /

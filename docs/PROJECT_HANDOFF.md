@@ -1,8 +1,30 @@
 # Project handoff
 
-Last updated: 2026-10-09
+Last updated: 2026-10-12
 
 ## Current stage
+
+### Combination frequency quantization recovery (2026-10-12)
+
+- Combination point coordinates, formal samples and cleanup now explicitly use
+  the existing sweep frequency policy: 100 ppm or 0.00101 Hz, whichever is larger.
+  The policy is stored in the run snapshot. Default diagnostic/apply tolerances
+  and other cleanup callers retain their previous behavior; lock, error, overload,
+  finite/range, temperature and physical safety checks remain mandatory.
+- Real dual-SR830 300 Hz temperature/excitation acquisition stopped at 2/836
+  accepted conditions because a 300.007 Hz external readback exceeded 10 ppm.
+  Independent authorized queries reproduced that 23 ppm quantization with clear
+  status/error and both outputs at 4 mV/h1. Original failure/manual-review history
+  must remain intact. A subsequent full run needs a new identity/database, owner
+  exclusion and a fresh physical baseline; this change is not hardware resume.
+- **237 hardware-blocked tests passed**, zero skips, including 300.007 Hz formal
+  acquisition/cleanup, 100 ppm inner/outer boundaries, unlock/device-error rejection,
+  the 64 module orders, temperature hold/failure cleanup, mixed receivers and
+  existing bounded SR865A rechecks. No instrument I/O occurs in these tests.
+- Normal temperature completion still holds the final target with control enabled;
+  actual temperature is the recorded readback, not inferred from the target.
+  Failure still disables control. The overnight recovery is privately audited in
+  LK_setup run_data, with no private TOML/data/notebook changes in this commit.
 
 ### Dual-role remote TOML preparation (target update deferred; 2026-10-09)
 
