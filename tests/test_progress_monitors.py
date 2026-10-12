@@ -178,6 +178,55 @@ class ProgressMonitorTests(unittest.TestCase):
         self.assertIn("Vxx: R=0.0012 V phase=12.5 deg [locked]", rendered)
         self.assertIn("Vxy: R=2.5e-06 V phase=-91 deg [locked]", rendered)
 
+    def test_temperature_power_is_tied_to_state_sample_and_never_carried_forward(self) -> None:
+        view = TemperatureProgressView()
+        view.update({
+            "event": "temperature_telemetry", "sample_id": "first",
+            "state": {"sample_temperature_k": 5.7, "vti_temperature_k": 4.5},
+            "heater_power": {"sample_w": 1.3, "vti_w": 1.4},
+            "telemetry_complete": True,
+            "heater_power_read_timing": {"finished_unix_s": 1234.5},
+        })
+        self.assertIn("sample-heater=1.3 W", view.format())
+        self.assertIn("vti-heater=1.4 W", view.format())
+        self.assertIn("power-query-finished-unix=1234.5", view.format())
+        self.assertIn("recorded for latest state", view.format())
+        view.update({"event": "temperature_sample", "sample_id": "second",
+                     "state": {"sample_temperature_k": 23.47}})
+        self.assertIn("sample=23.47 K", view.format())
+        self.assertIn("vti=--", view.format())
+        self.assertIn("sample-heater=--", view.format())
+        self.assertIn("vti-heater=--", view.format())
+        self.assertIn("not recorded for latest state", view.format())
+        self.assertNotIn("1234.5", view.format())
+
+    def test_temperature_partial_power_keeps_current_partial_value_and_error(self) -> None:
+        view = TemperatureProgressView()
+        view.update({
+            "event": "measurement_temperature_sample", "sample_id": "partial",
+            "state": {"sample_temperature_k": 17.3},
+        })
+        view.update({
+            "event": "temperature_telemetry", "sample_id": "partial",
+            "state": {"sample_temperature_k": 17.3},
+            "heater_power": {"sample_w": 0.0, "vti_w": None},
+            "telemetry_complete": False, "heater_power_read_error": "VTI read failed",
+        })
+        self.assertIn("lockin measurement", view.format())
+        self.assertIn("sample-heater=0 W", view.format())
+        self.assertIn("vti-heater=--", view.format())
+        self.assertIn("partial / not completed", view.format())
+        self.assertIn("VTI read failed", view.format())
+
+    def test_temperature_daily_run_start_and_finish_are_recognized(self) -> None:
+        view = TemperatureProgressView()
+        view.update({"event": "temperature_run_started", "temperature_run": {"target_k": 17.3}})
+        self.assertIn("command=temperature-run", view.format())
+        self.assertIn("target=17.3 K", view.format())
+        view.update({"event": "temperature_run_finished", "completed": False, "error": "read failed"})
+        self.assertIn("temperature run finished", view.format())
+        self.assertIn("outcome=failed", view.format())
+
     def test_lockin_progress_events_reuse_point_readback_without_hardware_io(self) -> None:
         path = self.directory / "lockin_progress.jsonl"
         writer = _JsonlProgressWriter(path)

@@ -4,6 +4,31 @@ Last updated: 2026-10-12
 
 ## Current stage
 
+### Four-channel temperature telemetry (2026-10-12)
+
+- Daily temperature conditioning, stability scans, temperature/excitation and
+  temperature-selected combination scans persist sample/VTI temperatures (K)
+  and sample/VTI heater powers (W) on the existing synchronous owned connection.
+  Raw state is durable before validation; fresh power follows all relevant guards.
+  Sample IDs link raw and completed events, including partial power failures.
+  Query brackets are host timings, not simultaneous firmware sample timestamps.
+- Daily runs now have durable JSONL. The file-only monitor clears stale powers
+  on a newer state. The new temperature_trace_analysis CLI reads JSONL or an
+  explicitly selected read-only SQLite run, exports raw CSV and aligned PNG/PDF,
+  retains rejected observations and gaps, and accepts old files without powers.
+- Experimental settings, temperature tolerances, overshoot/hard bounds, field
+  invariant, normal hold/failure disable and lock-in behavior are unchanged.
+  Fault-trigger state is retained before cleanup; optional diagnostic power is
+  queried only after confirmed temperature disable. No real scan was launched
+  for this code delivery. Usage and schema: docs/TEMPERATURE_TELEMETRY.md.
+- **271 guarded tests passed, zero skips** using fake DLL/VISA only, including
+  raw-before-rejection, partial reads, fault cleanup priority, power-query Ctrl+C
+  policies, all 64 module orders, legacy analysis, SQLite run isolation and real
+  Agg exports. Existing 382-sample heating JSONL also exported read-only; its
+  missing historical power was left blank. Private target deployment audit:
+  run_data/operator_temperature_telemetry_delivery_20261012.
+
+
 ### Combination frequency quantization recovery (2026-10-12)
 
 - Combination point coordinates, formal samples and cleanup now explicitly use

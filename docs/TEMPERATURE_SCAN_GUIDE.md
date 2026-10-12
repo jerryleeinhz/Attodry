@@ -1,5 +1,8 @@
 # Temperature stability scan 运行指南
 
+2026-10-12：稳定等待等采样新增两路加热功率，沿用原温度保护和结束策略。
+字段、顺序查询时间戳和纯文件导出见 [温度与加热功率记录](TEMPERATURE_TELEMETRY.md)。
+
 ## 当前边界
 
 `attodry-temperature-scan` 是独立的 Temperature commissioning 模块，用于按

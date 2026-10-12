@@ -1,5 +1,21 @@
 # Development stages
 
+## Four-channel temperature telemetry (2026-10-12)
+
+- Add sample/VTI temperatures and heater powers to all four temperature paths,
+  using raw-before-validation events, linked sample IDs and sequential host query
+  brackets. Preserve partial failures, and prioritize disable over failure power
+  diagnostics. No changed experimental settings, stability/safety or cleanup policy.
+- Add durable daily-run JSONL, fresh-power file monitor, old/new JSONL and explicit
+  read-only SQLite trace loading, raw CSV and aligned temperature/power PNG/PDF.
+  Missing values remain blank/gaps; rejected observations remain auditable.
+- See docs/TEMPERATURE_TELEMETRY.md for schema, timing limits and command examples.
+- **271 hardware-blocked tests passed, zero skips**, covering partial power/error
+  evidence, preserved interrupt policy, disable-before-diagnostics, original
+  temperature/combination gates, all module orders, old/new analysis and Agg
+  PNG/PDF exports. Real historical heating data loaded without modification.
+
+
 ## Combination frequency quantization recovery (2026-10-12)
 
 - Reuse the existing 100 ppm / 0.00101 Hz sweep frequency criterion consistently

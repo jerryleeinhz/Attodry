@@ -41,6 +41,7 @@ from .models import CryostatState
 from .sr830 import Sr830Error
 from .temperature_run import _close_with_note, _record_failure_diagnostic
 from .temperature_scan import (
+    _attach_temperature_telemetry,
     SCHEMA_VERSION,
     _JsonlWriter,
     _git_commit,
@@ -237,6 +238,7 @@ def run(
         connection_authorized=True,
         writes_authorized=True,
     )
+    _attach_temperature_telemetry(driver, writer)
     connected = False
     mutation_attempted = False
 
@@ -245,10 +247,15 @@ def run(
         connected = True
         initial_state = driver.read_state()
         summary["preflight"] = {"initial_cryostat_state": asdict(initial_state)}
+        initial_sample = driver.temperature_telemetry.start(
+            initial_state, phase="preflight", captured_unix_s=wall_time()
+        )
+        writer.append({"event": "temperature_snapshot", **initial_sample})
         if initial_state.error_code:
             raise AttoDryError(
                 f"attoDRY preflight error code {initial_state.error_code}."
             )
+        driver.temperature_telemetry.finish(initial_sample)
 
         # The pair stays open for the full outer loop. Each inner sweep retains
         # its own verified preflight and cleanup record.
@@ -258,6 +265,11 @@ def run(
             ):
                 target_k = temperature_points_k[temperature_index]
                 before_state = driver.read_state()
+                before_sample = driver.temperature_telemetry.start(
+                    before_state, phase="point_preflight", temperature_index=temperature_index,
+                    requested_temperature_k=target_k, captured_unix_s=wall_time(),
+                )
+                writer.append({"event": "temperature_snapshot", **before_sample})
                 _write_temperature_preflight(
                     writer,
                     before_state,
@@ -269,6 +281,7 @@ def run(
                 _validate_prewrite_temperature_move(
                     before_state, target_k, config.temperature_run
                 )
+                driver.temperature_telemetry.finish(before_sample)
 
                 mutation_attempted = True
                 force_reapply = not before_state.temperature_control_enabled
@@ -278,8 +291,9 @@ def run(
                     sleeper=sleeper,
                 )
                 confirmed_state = driver.read_state()
-                _validate_point_state(
-                    confirmed_state, target_k, config.temperature_run
+                confirmed_sample = driver.temperature_telemetry.start(
+                    confirmed_state, phase="setpoint_confirmed", temperature_index=temperature_index,
+                    requested_temperature_k=target_k, captured_unix_s=wall_time(),
                 )
                 writer.append(
                     {
@@ -290,8 +304,11 @@ def run(
                         "actual_setpoint_k": confirmed_state.user_temperature_k,
                         "force_reapply": force_reapply,
                         "state": asdict(confirmed_state),
+                        **confirmed_sample,
                     }
                 )
+                _validate_point_state(confirmed_state, target_k, config.temperature_run)
+                driver.temperature_telemetry.finish(confirmed_sample)
 
                 stable_summary = _wait_for_stable_point(
                     driver,
@@ -412,10 +429,16 @@ def run(
                     )
 
                 post_excitation_state = driver.read_state()
+                post_sample = driver.temperature_telemetry.start(
+                    post_excitation_state, phase="post_excitation", temperature_index=temperature_index,
+                    requested_temperature_k=target_k, captured_unix_s=wall_time(),
+                )
+                writer.append({"event": "temperature_snapshot", **post_sample})
                 _validate_point_state(
                     post_excitation_state, target_k, config.temperature_run
                 )
                 condition["post_excitation_state"] = asdict(post_excitation_state)
+                condition["post_excitation_telemetry"] = driver.temperature_telemetry.finish(post_sample)
                 completed_conditions.append(condition)
                 summary.pop("partial_condition", None)
                 writer.append(
@@ -428,10 +451,16 @@ def run(
                 )
 
         final_state = driver.read_state()
+        final_sample = driver.temperature_telemetry.start(
+            final_state, phase="final", requested_temperature_k=temperature_points_k[-1],
+            captured_unix_s=wall_time(),
+        )
+        writer.append({"event": "temperature_snapshot", **final_sample})
         _validate_point_state(
             final_state, temperature_points_k[-1], config.temperature_run
         )
         summary["final_state"] = asdict(final_state)
+        summary["final_temperature_telemetry"] = driver.temperature_telemetry.finish(final_sample)
         driver.close()
         connected = False
         summary["disconnected"] = True
@@ -455,7 +484,7 @@ def run(
             "interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected"
         )
         if connected:
-            _record_failure_diagnostic(summary, driver, wall_time=wall_time)
+            _record_failure_diagnostic(summary, driver, wall_time=wall_time, read_heater_power=False)
         if connected and mutation_attempted:
             try:
                 driver.ensure_temperature_control(
@@ -464,6 +493,7 @@ def run(
                 summary["recovery_actions"].append(
                     "temperature_control_disabled_after_failure"
                 )
+                _record_failure_diagnostic(summary, driver, wall_time=wall_time)
             except BaseException as recovery_error:
                 summary["recovery_error"] = str(recovery_error)
                 exc.add_note(f"Temperature recovery also failed: {recovery_error}")
@@ -618,15 +648,11 @@ def _temperature_measurement_context(
 
     def capture(stage: str, harmonic: int, sample_index: int) -> Mapping[str, object]:
         state = driver.read_state()
-        _validate_point_state(state, target_k, request)
-        sample = {
-            "stage": stage,
-            "harmonic": harmonic,
-            "sample_index": sample_index,
-            "captured_monotonic_s": monotonic(),
-            "captured_unix_s": wall_time(),
-            "state": asdict(state),
-        }
+        sample = driver.temperature_telemetry.start(
+            state, stage=stage, harmonic=harmonic, sample_index=sample_index,
+            captured_monotonic_s=monotonic(), captured_unix_s=wall_time(),
+            temperature_index=temperature_index, requested_temperature_k=target_k,
+        )
         writer.append(
             {
                 "event": "measurement_temperature_sample",
@@ -635,7 +661,8 @@ def _temperature_measurement_context(
                 **sample,
             }
         )
-        return sample
+        _validate_point_state(state, target_k, request)
+        return driver.temperature_telemetry.finish(sample)
 
     return capture
 

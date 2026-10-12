@@ -6,6 +6,7 @@ are not a claim of continuous monitoring while a VISA call is in progress.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import asdict, replace
 import math
 import time
@@ -19,6 +20,7 @@ from .safety import (FieldReadbackPolicy, FieldScanMode, MagnetLimits,
                      SafetyViolation, float32_field, validate_vector_field)
 from .temperature_scan import _validate_point_state
 from .temperature_excitation_scan import _temperature_window_statistics
+from .temperature_telemetry import TemperatureTelemetryRecorder, TEMPERATURE_TELEMETRY_POLICY
 
 
 class _AuditedDriver(AttoDryDriver):
@@ -31,9 +33,14 @@ class _AuditedDriver(AttoDryDriver):
     def read_state(self):
         state = super().read_state()
         # Persist even an unsafe complete readback before rejecting it.
-        self.owner.event("cryostat_state", {
+        record = {
             "captured_at_utc": utc_now(), "state": asdict(state),
-            "recovery_action": self.owner.recovery_action})
+            "recovery_action": self.owner.recovery_action}
+        if self.owner.telemetry is not None:
+            record.pop("state")
+            record = self.owner.telemetry.start(state, **record)
+            self.owner.pending_temperature_record = (state, record)
+        self.owner.event("cryostat_state", record)
         self.owner.validate_state(state)
         return state
 
@@ -46,6 +53,8 @@ class CryostatPointSession:
         self.monotonic = monotonic or time.monotonic
         self.sleep = sleep or time.sleep
         self.driver = None
+        self.telemetry = None
+        self.pending_temperature_record = None
         self.connection_owned = False
         self.temperature_target = self.field_target = None
         self.temperature_changed = False
@@ -142,10 +151,27 @@ class CryostatPointSession:
         self.driver = _AuditedDriver.from_config(
             self.config, dll=self.dll, connection_authorized=True, writes_authorized=True)
         self.driver.owner = self
+        if self.temperature is not None:
+            self.telemetry = TemperatureTelemetryRecorder(self.driver, self.event)
         self.driver.field_readback_policy = self.field_policy
         self.driver.connect(**self.clock)
         self.connection_owned = True
-        return asdict(self.driver.read_state())
+        state = self.driver.read_state()
+        self._finish_temperature_record(state, stage="preflight")
+        return {**asdict(state), **({"temperature_telemetry_policy": TEMPERATURE_TELEMETRY_POLICY}
+                                  if self.telemetry is not None else {})}
+
+    def _temperature_record(self, state, **metadata):
+        if self.telemetry is None:
+            return {"state": asdict(state), **metadata}
+        pending_state, pending = self.pending_temperature_record
+        if pending_state is not state:
+            raise AttoDryError("Temperature telemetry does not match the current state read")
+        return {**deepcopy(pending), **metadata}
+
+    def _finish_temperature_record(self, state, **metadata):
+        record = self._temperature_record(state, **metadata)
+        return self.telemetry.finish(record) if self.telemetry is not None else record
 
     def apply(self, module, point):
         if self.cleaning:
@@ -172,6 +198,7 @@ class CryostatPointSession:
         self.temperature_ceiling = max(target, before.sample_temperature_k) + request.max_overshoot_k
         if self.temperature_ceiling > self.config.cryostat.temperature_max_k:
             raise ValueError("Temperature transition ceiling exceeds configured maximum")
+        self._finish_temperature_record(before, stage="before_temperature_command")
         stability = self.config.temperature_stability
         self.minimum_response = (stability.min_response_k if changed and
             stability.acceptance_mode is TemperatureStabilityMode.STABLE_READBACK else 0.0)
@@ -183,6 +210,7 @@ class CryostatPointSession:
         self.temperature_changed = True
         self.validate_state(state)
         self.event("temperature_command_confirmed", {"target_k": target, "state": asdict(state)})
+        self._finish_temperature_record(state, stage="temperature_command_confirmed", target_k=target)
         return {"state": asdict(state)}
 
     def qualify(self):
@@ -195,6 +223,11 @@ class CryostatPointSession:
             samples = []
             self.event("temperature_qualification_started", {
                 "target_k": self.temperature_target, "after_all_axis_settings": True})
+            def on_sample(state, elapsed):
+                # read_state has already persisted and validated this state.
+                self._finish_temperature_record(state, stage="temperature_qualification",
+                                                elapsed_s=elapsed, target_k=self.temperature_target)
+                samples.append((elapsed, state.sample_temperature_k))
             self.driver.wait_for_temperature(
                 self.temperature_target,
                 max_overshoot_k=(self.temperature_ceiling - self.temperature_target
@@ -202,7 +235,7 @@ class CryostatPointSession:
                 maximum_accepted_k=self.temperature_target + self.temperature.temperature_run.max_overshoot_k,
                 minimum_response_k=self.minimum_response if self.temperature_changed else 0.0,
                 response_reference_k=self.response_reference,
-                on_sample=lambda state, elapsed: samples.append((elapsed, state.sample_temperature_k)),
+                on_sample=on_sample,
                 **self.clock)
             cutoff = samples[-1][0] - self.config.temperature_stability.criteria.dwell_s
             values = [value for elapsed, value in samples if elapsed >= cutoff]
@@ -215,9 +248,9 @@ class CryostatPointSession:
 
     def capture(self, stage, harmonic=None, sample_index=None):
         state = self.driver.read_state()
-        record = {"stage": stage, "harmonic": harmonic, "sample_index": sample_index,
-                  "captured_at_utc": utc_now(), "captured_monotonic_s": self.monotonic(),
-                  "state": asdict(state)}
+        record = self._temperature_record(
+            state, stage=stage, harmonic=harmonic, sample_index=sample_index,
+            captured_at_utc=utc_now(), captured_monotonic_s=self.monotonic())
         if self.field_policy is not None:
             record["field_readback_assessment"] = self.field_policy.assessment(state.field)
         self.event("environment_sample", record)
@@ -239,6 +272,9 @@ class CryostatPointSession:
             if (self.config.temperature_stability.acceptance_mode is TemperatureStabilityMode.TARGET
                     and abs(state.sample_temperature_k - self.temperature_target) > criteria.tolerance):
                 raise AttoDryError("Temperature readback outside target tolerance")
+        if self.telemetry is not None:
+            completed = self.telemetry.finish(record)
+            record.update(completed)
         return record
 
     def read(self, module):
@@ -328,7 +364,10 @@ class CryostatPointSession:
                         abs(state.field.bz_t - self.field_target.bz_t) > tolerance or
                         (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance)):
                     raise AttoDryError("Field hold readback outside tolerance")
+        telemetry = (self._finish_temperature_record(state, stage="cleanup", cleanup_policy=policy)
+                     if module == "temperature" else None)
         return {"attempted": True, "verified": True, "policy": policy, "state": asdict(state),
+                **({"temperature_telemetry": telemetry} if telemetry is not None else {}),
                 "scan_limits_violated": self.recovery_scan_limits_violated}
 
     def close(self):

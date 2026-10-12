@@ -1,5 +1,8 @@
 # Four-module combination scans — bounded hardware validation complete
 
+2026-10-12：选择 temperature 的运行新增两路温度/两路功率关联事件及只读 SQLite
+轨迹导出。见 [温度与加热功率记录](TEMPERATURE_TELEMETRY.md)；仅磁场运行不增加功率查询。
+
 2026-09-30 更新：短命令启动和 Lock-in frequency / frequency-excitation 模式已加入，
 完成离线假仪器验证；新增扫频路径尚未实机验收。下面的 2026-09-24 实机范围只涵盖固定频率。
 

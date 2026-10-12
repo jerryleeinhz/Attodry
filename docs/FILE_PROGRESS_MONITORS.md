@@ -1,5 +1,8 @@
 # 温度与 Lock-in 纯文件进度监控
 
+2026-10-12：温度 monitor 同时支持日常运行 JSONL，显示两路温度/功率并区分新样本
+功率尚未补全与读取失败。CSV/PNG/PDF 导出见 [温度与加热功率记录](TEMPERATURE_TELEMETRY.md)。
+
 这两个命令只读取正在追加的 JSONL 文件。它们不加载 attoDRY DLL、不打开 COM 口、
 不打开 VISA/GPIB、不发送 SR830 查询，也不读取或清除 `LIAS?`/`ERRS?`。因此可与
 同一台电脑上的温度、Lock-in 或温度—激励扫描并行运行。

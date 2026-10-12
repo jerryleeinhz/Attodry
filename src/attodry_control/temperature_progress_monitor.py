@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from .progress_monitor import JsonlProgressTail, resolve_progress_path
 TEMPERATURE_PROGRESS_PATTERNS = (
     "*_temperature_scan_progress.jsonl",
     "*_temperature_excitation_progress.jsonl",
+    "*_temperature_run_progress.jsonl",
 )
 
 
@@ -60,6 +62,11 @@ class TemperatureProgressView:
         self.control_enabled: object | None = None
         self.error_code: object | None = None
         self.measurement_temperature_k: object | None = None
+        self.state_sample_id: object | None = None
+        self.sample_heater_power_w: object | None = None
+        self.vti_heater_power_w: object | None = None
+        self.heater_power_captured_at: object | None = None
+        self.heater_power_status = "not recorded for latest state"
         self.last_event = "none"
 
     def update(self, event: Mapping[str, Any]) -> None:
@@ -70,10 +77,16 @@ class TemperatureProgressView:
         command = event.get("command")
         if isinstance(command, str):
             self.command = command
+        if event_name == "temperature_run_started":
+            self.command = "temperature-run"
+            request = event.get("temperature_run")
+            if isinstance(request, Mapping):
+                self.requested_temperature_k = request.get("target_k")
         if "temperature_index" in event:
             self.temperature_index = event["temperature_index"]
         if "point_index" in event and event_name in {
             "temperature_sample",
+            "temperature_telemetry",
             "point_preflight",
             "setpoint_confirmed",
             "point_completed",
@@ -86,9 +99,35 @@ class TemperatureProgressView:
         state = event.get("state")
         if isinstance(state, Mapping):
             self._update_state(state)
+            self.state_sample_id = event.get("sample_id")
+            # A new temperature observation invalidates a previous power display.
+            # Completion events carry their own state and matching sample ID.
+            self.sample_heater_power_w = None
+            self.vti_heater_power_w = None
+            self.heater_power_captured_at = None
+            self.heater_power_status = "not recorded for latest state"
+            power = event.get("heater_power")
+            if isinstance(power, Mapping):
+                self.sample_heater_power_w = power.get("sample_w")
+                self.vti_heater_power_w = power.get("vti_w")
+                timing = event.get("heater_power_read_timing")
+                if isinstance(timing, Mapping):
+                    self.heater_power_captured_at = timing.get("finished_unix_s")
+                self.heater_power_status = (
+                    "recorded for latest state" if event.get("telemetry_complete") is True
+                    else "partial / not completed for latest state"
+                )
+                if all(value is None for value in (
+                    self.sample_heater_power_w, self.vti_heater_power_w,
+                )):
+                    self.heater_power_status = "not recorded for latest state"
+            if event.get("heater_power_read_error"):
+                self.heater_power_status += f"; read failed: {event['heater_power_read_error']}"
 
         if event_name == "temperature_sample":
             self.phase = str(event.get("phase", "stability"))
+        elif event_name == "temperature_telemetry" and "phase" in event:
+            self.phase = str(event["phase"])
         elif event_name == "measurement_temperature_sample":
             self.phase = "lockin measurement"
         elif event_name == "temperature_stable":
@@ -108,6 +147,9 @@ class TemperatureProgressView:
         elif event_name == "scan_finished":
             self.phase = "scan finished"
             self.outcome = _optional_text(event.get("outcome"))
+        elif event_name == "temperature_run_finished":
+            self.phase = "temperature run finished"
+            self.outcome = "completed" if event.get("completed") is True else "failed"
 
     def _update_state(self, state: Mapping[str, Any]) -> None:
         for attribute, field in (
@@ -117,8 +159,7 @@ class TemperatureProgressView:
             ("control_enabled", "temperature_control_enabled"),
             ("error_code", "error_code"),
         ):
-            if field in state:
-                setattr(self, attribute, state[field])
+            setattr(self, attribute, state.get(field))
 
     def format(self) -> str:
         parts = ["TEMPERATURE", self.phase]
@@ -132,6 +173,9 @@ class TemperatureProgressView:
                 f"setpoint={_format_k(self.actual_setpoint_k)}",
                 f"sample={_format_k(self.sample_temperature_k)}",
                 f"vti={_format_k(self.vti_temperature_k)}",
+                f"sample-heater={_format_number(self.sample_heater_power_w, suffix=' W')}",
+                f"vti-heater={_format_number(self.vti_heater_power_w, suffix=' W')}",
+                f"power-status={self.heater_power_status}",
             )
         )
         if self.measurement_temperature_k is not None:
@@ -140,6 +184,10 @@ class TemperatureProgressView:
             parts.append(f"control={self.control_enabled}")
         if self.error_code is not None:
             parts.append(f"error_code={self.error_code}")
+        if self.heater_power_captured_at is not None:
+            parts.append(f"power-query-finished-unix={self.heater_power_captured_at}")
+        if self.state_sample_id is not None:
+            parts.append(f"state-sample-id={self.state_sample_id}")
         if self.outcome:
             parts.append(f"outcome={self.outcome}")
         parts.append(f"event={self.last_event}")
@@ -193,7 +241,7 @@ def _format_k(value: object) -> str:
 def _format_number(value: object, *, suffix: str = "") -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return "--"
-    return f"{float(value):.6g}{suffix}"
+    return f"{float(value):.6g}{suffix}" if math.isfinite(value) else "--"
 
 
 def _optional_text(value: object) -> str | None:

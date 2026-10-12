@@ -1,5 +1,8 @@
 # Temperature module 运行指南
 
+2026-10-12：日常运行新增持续 JSONL，两路温度及两路功率的字段、时间戳、
+纯文件监控和导出见 [温度与加热功率记录](TEMPERATURE_TELEMETRY.md)。
+
 ## 结论
 
 Temperature 已经是独立模块。日常使用者不需要阅读或修改 Python 文件，只需要：

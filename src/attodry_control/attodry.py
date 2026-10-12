@@ -240,6 +240,12 @@ class AttoDryDriver:
         self.writes_authorized = writes_authorized
         self.connected = False
         self.last_confirmed_state: CryostatState | None = None
+        # Host query brackets are audit metadata, not firmware sample timestamps.
+        # Keep this clock separate from injected stability clocks in offline tests.
+        self.telemetry_monotonic = time.monotonic
+        self.telemetry_wall_time = time.time
+        self.last_state_read_timing: dict[str, object] | None = None
+        self.last_heater_power_read_attempt: dict[str, object] | None = None
         self._next_field_command_index = 0
 
     @classmethod
@@ -328,6 +334,17 @@ class AttoDryDriver:
             raise
 
     def read_state(self) -> CryostatState:
+        timing = self._start_read_timing()
+        self.last_state_read_timing = timing
+        try:
+            return self._read_state_snapshot()
+        except BaseException as exc:
+            timing["error"] = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            self._finish_read_timing(timing)
+
+    def _read_state_snapshot(self) -> CryostatState:
         self._require_connected()
         sample_temperature = self._get_float(
             "getSampleTemperature", "AttoDRY_Interface_getSampleTemperature"
@@ -383,16 +400,48 @@ class AttoDryDriver:
         return state
 
     def read_heater_powers(self) -> HeaterPowerState:
-        self._require_connected()
-        sample_w = self._get_float(
-            "getSampleHeaterPower", "AttoDRY_Interface_getSampleHeaterPower"
-        )
-        vti_w = self._get_float(
-            "getVtiHeaterPower", "AttoDRY_Interface_getVtiHeaterPower"
-        )
-        if sample_w < 0 or vti_w < 0:
-            raise AttoDryError("attoDRY heater power readback cannot be negative.")
-        return HeaterPowerState(sample_w=sample_w, vti_w=vti_w)
+        attempt: dict[str, object] = {
+            "heater_power": {"sample_w": None, "vti_w": None},
+            "timing": self._start_read_timing(),
+            "reads": {},
+            "complete": False,
+        }
+        self.last_heater_power_read_attempt = attempt
+        try:
+            self._require_connected()
+            for key, label, symbol in (
+                ("sample_w", "getSampleHeaterPower", "AttoDRY_Interface_getSampleHeaterPower"),
+                ("vti_w", "getVtiHeaterPower", "AttoDRY_Interface_getVtiHeaterPower"),
+            ):
+                timing = self._start_read_timing()
+                attempt["reads"][key] = timing
+                try:
+                    value = self._get_float(label, symbol)
+                    if value < 0:
+                        raise AttoDryError("attoDRY heater power readback cannot be negative.")
+                    attempt["heater_power"][key] = value
+                except BaseException as exc:
+                    timing["error"] = f"{type(exc).__name__}: {exc}"
+                    raise
+                finally:
+                    self._finish_read_timing(timing)
+            attempt["complete"] = True
+            return HeaterPowerState(**attempt["heater_power"])
+        except BaseException as exc:
+            attempt["error"] = f"{type(exc).__name__}: {exc}"
+            raise
+        finally:
+            self._finish_read_timing(attempt["timing"])
+
+    def _start_read_timing(self) -> dict[str, object]:
+        return {
+            "started_unix_s": self.telemetry_wall_time(),
+            "started_monotonic_s": self.telemetry_monotonic(),
+        }
+
+    def _finish_read_timing(self, timing: dict[str, object]) -> None:
+        timing["finished_monotonic_s"] = self.telemetry_monotonic()
+        timing["finished_unix_s"] = self.telemetry_wall_time()
 
     def set_temperature(
         self,
