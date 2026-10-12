@@ -22,7 +22,7 @@ allowed_pp_ratios = []
 monitor_present = false
 
 [nkt_run]
-backend = "simulation" # Other backends fail before any driver construction.
+backend = "simulation" # Real acquisition uses separate hardware templates and run flags.
 mode = "varia_bandpass"
 manual_route = "SIMULATED VARIA route"
 emit = true # Only simulated emission.

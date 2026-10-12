@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "attodry-transport-control"
 version = "0.1.0"
-description = "Safety-first attoDRY transport control and offline DC photoresponse acquisition"
+description = "Safety-first attoDRY transport control and DC photoresponse acquisition"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []

@@ -2,38 +2,46 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
-## DC photoresponse - offline foundation
+## DC photoresponse - acquisition software and offline validation
 
-Status: offline foundation complete (2026-10-12); physical P0 closure, hardware
-write/trigger adapters, target validation and all photoresponse commissioning pending.
+Status: P1-P7 acquisition software in the scoped work package is offline complete
+(2026-10-12). Physical P0 closure and end-to-end hardware commissioning remain pending.
 
-- User confirmed photovoltage and photocurrent in stages, SuperK or CLD1010LP
-  (approximately 760 nm; diode model unknown), 6221 DC/none and 2182A/2400 sensing.
-  Development continues on the existing `module/NKT-photonics` branch.
-- Added strict independent photoresponse config, three simulated electrical modes,
-  optical/bias/repeat grids and dark-before/light/dark-after raw acquisition.
-  `none` has null current and no source commands; DC 0 A remains a separate mode.
-- Exposed NKT single-use point sessions with authorization/preflight, off-state
-  preparation, fresh settings checks before emission, formal readback barriers,
-  faulted-session refusal and confirmed-off cleanup. Existing standalone run reuses them.
-- Added time-based linear dark interpolation, per-sample before/after state, JSON/JSONL,
-  conservative whole-run accepted promotion, partial/error retention and read-only analysis.
-  No calibrated watts, environment or measured current is inferred from settings.
-- Added fake-tested 6221/2182 query adapters without resource open, settings writes,
-  trigger or error-queue consumption. 2182 FETCh is explicitly stale; 6221 settings
-  do not establish safe DC takeover. Exact query/identity still needs real validation.
-- Added CLI, simulation/example configuration, [work package](modules/PHOTORESPONSE.md)
-  and [offline guide](PHOTORESPONSE_GUIDE.md). Hardware mode fails before construction.
-- Validation: 29 new photoresponse/query tests and 30 existing NKT tests passed;
-  complete suite 444/444 passed with Python 3.12.7, `PYTHONPATH=src`,
-  `PYTHONNOUSERSITE=1`, `python -s -m unittest discover -s tests -q`.
-  The initial ordinary run had an existing user-site NumPy 2 / Anaconda Matplotlib
-  ABI conflict; excluding user-site packages resolved it without installing anything.
-  Normal temporary-directory access was required outside the restricted sandbox.
-  Source/test compilation and CLI simulation -> accepted-results analysis also passed.
-- No real instrument was connected or written, no LK_setup operation was performed,
-  and no hardware authorization was implied. SQLite/resume, real electrical control,
-  CLD1010LP and joint environment/power acquisition remain planned.
+- Completed three electrical modes: no-excitation voltage, 6221 DC-current voltage,
+  and 2400 voltage-bias current. 2182A supports direct VISA and the 6221 RS-232 relay.
+  Fresh READ conversions, processing/range readbacks, exact identities, compliance,
+  bounded ramps, independent shutdown and failed-session refusal are implemented.
+- Reused NKT point sessions and EXTREME/VARIA SDK; added TL4000/CLD point sessions
+  with no-reset init, diode/TEC limits, interlock, thermal dwell and off verification.
+  Unknown diode/model/limits/wiring fail before hardware creation. Real DLL/firmware
+  and diode behavior still need physical commissioning; LLTF remains unimplemented.
+- Added optional existing-driver attoDRY T/Bx/Bz scans, source-off transitions,
+  feedback-before-setpoint sequence, maximum temperature step/overshoot, measured
+  environment, 3 T invariant and zero-on-failure cleanup with last-known field retention.
+- Added JSON/JSONL and separate SQLite photo_* audit tables, process locks, explicit
+  retry as a new full attempt and one accepted condition per series. Failed raw data
+  remain available; accepted-only CSV/manifest and read-only analysis Notebook added.
+- Added complete placeholder templates and CLI describe/validate/simulate/diagnose/
+  run/test-6221/analyze/export. No discovery/reset or implicit source takeover.
+- Validation: **483/483 local offline tests passed**, including **68 photoresponse
+  tests**, using Python 3.12.7, PYTHONPATH=src, PYTHONNOUSERSITE=1 and python -s.
+  The **67/68 photoresponse tests also passed in LK_setup's existing lyr environment**
+  in a fresh temporary staging directory. No packages or active lab checkout changed,
+  and that validation opened no instruments. NKT+environment CLI produced four accepted
+  synthetic conditions; CLD CLI/SQLite/export passed. Notebook cells executed and the
+  plot was rendered and checked for clipped labels. Test temporary files needed the
+  approved sandbox override; the existing NumPy user-site conflict was not modified.
+- Earlier authorized real identity queries confirmed 6221 and downstream 2182A.
+  The user approved an empty-load 6221 plan at 0.1 V compliance, 4 pA to 10 nA, five
+  linear points. Its attempted run stopped at empty IDN, before any source settings;
+  later queries timed out. No output test passed. The user then confirmed SR830 work
+  on the same GPIB bus: all real bus access is stopped until that test is finished.
+- User explicitly deferred real 2400 (connected to sample) and CLD (unwired) tests.
+  Today neither is opened. No optical, temperature or magnetic-field write occurred.
+  Station identities/addresses and raw diagnostics remain ignored, outside the commit.
+- [Work package](modules/PHOTORESPONSE.md), [run guide](PHOTORESPONSE_GUIDE.md) and
+  current handoff are synchronized. Calibrated power/PEM and optional gate sweeps
+  remain separate module work; no responsivity or unmeasured current is invented.
 
 ## NKT Photonics module - standalone offline implementation
 

@@ -103,34 +103,47 @@ Signed resistance is `Vxx_X / I_rms`. The software never infers `I_rms` from the
 SR830 amplitude unless the operator explicitly supplies the complete excitation
 path resistance, including series components and termination/loading effects.
 
-## DC photoresponse profile (offline implementation, 2026-10-12)
+## DC photoresponse profile (2026-10-12)
 
-The photoresponse profile is independent of the historical dual-SR830 path.
-Its public CLI accepts simulation only and rejects hardware configuration before
-constructing any backend. It has no hardware connect, trigger or output command.
+This independent profile has offline-tested acquisition adapters and explicit hardware
+entry points. It does not construct SR830 or open unselected instruments. Loading and
+validating configuration perform no I/O. Real run requires complete physical limits,
+confirmed wiring/optical route and connection/write authorization; environment control
+requires its separate flag. `diagnose` is electrical-query-only; `test-6221` opens only
+its source. Neither operation opens a laser or unused detector.
 
-- `open_circuit_voltage`: no excitation source object or source commands; the real
-  wiring must later confirm an unloaded voltage measurement. 0 A is not a disconnect.
-- `dc_current_voltage`: 6221 current bias plus 2182A/2400 voltage sensing; source
-  setpoint readback is not measured current, including at 0 A.
-- `voltage_bias_current`: 2400 voltage bias and current sensing; never implicitly
-  enable a 6221 simultaneously in the same device loop.
-- A 2400 voltmeter needs a separately verified measure-only configuration and
-  output-off/loading contract; do not reuse gate zero-disable logic blindly.
-- Laser emission requires a verified route, interlocks and exact diode/source
-  limits. CLD1010LP is a controller; approximately 760 nm does not identify the
-  diode, pinout, permitted current or TEC limits.
-- Future integrated cleanup attempts laser off, mode-specific electrical cleanup,
-  then the existing monitored field-zero policy. Failure of one action must not
-  prevent the others. Only final readback can establish off/zero; retain unknown
-  state and require manual inspection when communication fails.
-- Temperature/field are not connected in the current simulation. Their values are
-  null rather than invented zero/stable readings. Future control keeps the 3 T
-  vector invariant and records actual sample temperature.
+- No excitation is a physically isolated external source path, not a 0 A command.
+  A relay-host 6221 may still be queried, but no output controller is constructed.
+- 6221 starts at zero/off, disarms waveform/sweep before DC setup, verifies each
+  bounded step and rejects compliance. Minimum voltage compliance is 0.1 V.
+- 2182A READ changes trigger state and requires write authorization; stale FETCh
+  readings are never accepted as new samples. The error queue also needs write permission.
+- 2400 voltmeter uses its documented 0 A/fixed-range, OUTPUT-on configuration.
+  Confirm loading/compliance before use. Current mode sources voltage. Both return
+  to zero and confirmed HIMP/off; an already active sample is not taken over.
+- Laser emission checks source identity, settings and interlocks. CLD additionally
+  requires the exact diode model/pinout, current/voltage limits and TEC range/protection.
+  An approximate 760 nm wavelength does not establish those limits. TL4000 init never resets.
+- Environment changes occur with light and electrical sources off. Reuse the
+  commissioned feedback-before-temperature sequence, bounded overshoot, existing field
+  path validation and `sqrt(Bx^2+Bz^2) <= 3 T`. Record actual temperature/field.
+- Cleanup independently attempts optical off, electrical zero/off, then field zero
+  on failure (hold/zero on normal completion). A failed action does not skip later
+  attempts. Communication failure leaves state unknown and preserves last-confirmed
+  readback; require manual verification, never infer zero/off.
+- VISA resource locks do not establish exclusive use of an entire GPIB controller.
+  Coordinate other programs sharing the bus. No discovery, interface clear or bus reset.
+  A timeout prevents continuing acquisition in that session; shutdown writes alone
+  cannot certify physical safety.
+- All failed/rejected raw data remain in local audit; default analysis accepts only
+  wholly completed runs with verified cleanup. Resume creates a fresh whole attempt.
 
-Query contracts in `photoresponse_keithley.py` do not reset instruments or consume
-error queues. `FETCh?` is explicitly stale/diagnostic; `READ?` changes the trigger
-state and is not a read-only diagnostic. Real acquisition remains unimplemented.
+The user authorized an unloaded 6221 five-point test at 0.1 V compliance, but its
+attempt stopped at IDN before any setting/output write. Subsequent communication timed
+out. All real access is now stopped while the user runs SR830 on the shared bus.
+Do not open the sample-connected 2400 or unwired CLD today. New combined hardware
+commissioning and diode/sample limits remain outstanding; offline completion is not
+hardware acceptance. See [photoresponse guide](PHOTORESPONSE_GUIDE.md).
 
 ## Vendor files
 

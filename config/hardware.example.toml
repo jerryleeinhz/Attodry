@@ -354,8 +354,11 @@ nd_pct = "CHANGE_ME" # VARIA only, 0-100%, 0.1% steps.
 # Broadband points: source_level_pct only. Repeat [[nkt_run.points]] for a scan.
 # Every completed/interrupted write run attempts emission OFF, then verifies it.
 
-# DC photoresponse: this release exposes SIMULATION ONLY, no hardware acquisition.
+# DC photoresponse: hardware adapters are offline tested; physical commissioning pending.
 # See config/photoresponse_simulation.toml for a runnable synthetic example.
+# Copy the needed photoresponse_hardware/6221/2182/2400 tables from
+# photoresponse_hardware.example.toml or photoresponse_cld_hardware.example.toml.
+# For CLD set photoresponse.light_source="cld1010lp" and supply [cld1010].
 # The NKT tables above remain the single optical/run metadata source.
 # Other independent module loaders ignore this table; no sample limits are inferred.
 [photoresponse]

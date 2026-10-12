@@ -4,31 +4,36 @@ Last updated: 2026-10-12
 
 ## Current stage
 
-DC photoresponse offline foundation (2026-10-12):
+DC photoresponse software delivery (2026-10-12):
 
-- User approved staged photovoltage and photocurrent development on the current
-  `module/NKT-photonics` branch. Source choices are SuperK and CLD1010LP with an
-  approximately 760 nm diode (exact model unknown); electrical roles are 6221
-  DC/none and 2182A/2400 voltage or 2400 current measurement.
-- Implemented strict mode configuration, three-mode dark/light/dark simulation,
-  NKT public point-session barriers, drift interpolation, raw JSON/JSONL and
-  accepted-only analysis. None never constructs a current source; DC 0 A remains
-  explicitly distinct. Unknown hardware configuration fails before driver creation.
-- Added conservative injected-resource 6221/2182 query contracts, fake-tested only.
-  No real open/write/trigger interface exists in the photoresponse CLI. Physical P0
-  limits/wiring, full write/trigger adapters, target validation and real commissioning
-  remain pending. CLD1010LP and environment integration are not implemented.
-- NKT emission now rechecks prepared settings immediately before giving light;
-  a changed point or faulted session cannot continue. Real NKT commissioning remains
-  separate from this offline completion. PM100D/PEM can reuse the new point barriers.
-- 29 new tests, 30 NKT tests and the full 444-test offline suite passed. Full suite
-  used Python 3.12.7 with PYTHONPATH=src and PYTHONNOUSERSITE=1 (`python -s`) to avoid
-  a pre-existing user-site NumPy/Matplotlib ABI conflict; no package changes.
-- See [work package](modules/PHOTORESPONSE.md) and [offline guide](PHOTORESPONSE_GUIDE.md).
-  Next: close physical contract, implement separately tested 2182 fresh acquisition
-  and 6221 bounded DC control, then target-offline and staged real commissioning.
-  No instruments or LK_setup were accessed. Earlier local PM100D/PEM documents and
-  figures are preserved separately from this feature's commit.
+- User requested complete development on `module/NKT-photonics`: SuperK/CLD1010LP,
+  6221 DC/none, 2182A/2400 voltage, 2400 photocurrent. The approximate 760 nm CLD
+  diode model/limits are still unknown. Full physical configuration gates hardware.
+- Implemented authorized VISA/6221 serial relay, bounded DC control, fresh detector
+  reads, 2400 voltmeter/current modes, CLD TL4000 and thermal/interlock checks,
+  existing-driver attoDRY environment scan, JSON/JSONL/SQLite audit, new-attempt retry,
+  accepted-only CSV and read-only Notebook. Existing NKT barriers and SMU ramp logic
+  are reused. No SR830 is constructed by the new path; LLTF real SDK remains blocked.
+- Local full regression **483/483 passed**, photoresponse **68/68 passed**. The same
+  68 tests passed offline in LK_setup's `lyr` environment in a fresh temporary folder.
+  No active checkout/environment packages or instrument state changed in that target
+  test. CLI NKT+environment and CLD+SQLite/export passed; Notebook cells/render verified.
+- Earlier authorized queries successfully identified 6221 and the RS-232-connected
+  2182A. Local ignored audit retains full identities, addresses and raw XON/XOFF bytes.
+- User approved 6221 EMPTY-LOAD output testing at **0.1 V** compliance, current points
+  **4 pA, 2.503 nA, 5.002 nA, 7.501 nA, 10 nA**. The attempted test stopped at an
+  empty IDN; subsequent communication timed out. **No output/configuration write was
+  executed, and the five-point hardware test remains incomplete.**
+- The user is testing SR830 on the same GPIB bus. Do not query/open real bus devices
+  again until the user confirms that work is finished. Bus contention is possible,
+  not a proven diagnosis. Do not reset/clear the shared interface to recover it.
+- **Do not access the 2400 today: it is connected to a sample. Do not access the CLD
+  today: it is unwired.** User plans physical tests tomorrow; no automation was created.
+  NKT emission, attoDRY writes and complete photoresponse hardware commissioning are
+  still pending; offline delivery is not physical acceptance.
+- See [work package](modules/PHOTORESPONSE.md), [run guide](PHOTORESPONSE_GUIDE.md)
+  and tracked placeholder templates. Preserve pre-existing local PM100D/PEM notes
+  and figures separately; keep hardware.local.toml, addresses and raw run data ignored.
 
 NKT Photonics offline implementation update (2026-09-22):
 

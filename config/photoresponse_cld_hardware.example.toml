@@ -1,0 +1,59 @@
+# Incomplete physical contract: must reject before DLL/VISA creation.
+# User's CLD diode is approximately 760 nm; its model and limits are UNKNOWN.
+# 2400 remains connected to a sample: this template does not authorize access.
+[photoresponse]
+light_source = "cld1010lp"
+mode = "voltage_bias_current"
+detector = "keithley2400"
+bias_voltage_points_v = ["CHANGE_ME"] # Include 0 V for short-circuit photocurrent.
+samples_per_window = 3
+repeats = 1
+sample_interval_s = 0.1
+settle_s = "CHANGE_ME"
+max_abs_voltage_v = "CHANGE_ME"
+max_abs_current_a = "CHANGE_ME"
+
+[photoresponse_hardware]
+timeout_ms = 10000
+wiring_confirmed = false
+no_excitation_isolated = false
+detector_transport = "visa"
+
+[photoresponse_2400]
+address = "CHANGE_ME"
+expected_idn = "CHANGE_ME_FULL_2400_IDN"
+voltage_range_v = "CHANGE_ME" # 0.2, 2, 20, 200 V
+current_range_a = "CHANGE_ME" # 1u, 10u, 100u, 1m, 10m, 100m, 1 A
+compliance = "CHANGE_ME" # Amperes for voltage_bias_current; volts for voltmeter.
+nplc = "CHANGE_ME"
+max_step_v = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+tolerance_v = "CHANGE_ME"
+
+[cld1010]
+backend = "tl4000"
+dll_path = "CHANGE_ME_TL4000_64_DLL"
+address = "CHANGE_ME_EXPLICIT_VISA_RESOURCE"
+expected_serial = "CHANGE_ME_SERIAL"
+diode_model = "CHANGE_ME_EXACT_DIODE_MODEL"
+diode_wiring_confirmed = false
+wavelength_nm = 760.0 # Nominal only. Replace with the diode's confirmed wavelength.
+current_points_a = ["CHANGE_ME"]
+max_current_a = "CHANGE_ME"
+max_voltage_v = "CHANGE_ME"
+max_tec_current_a = "CHANGE_ME"
+temperature_min_c = "CHANGE_ME"
+temperature_max_c = "CHANGE_ME"
+temperature_c = "CHANGE_ME"
+temperature_tolerance_c = "CHANGE_ME"
+stable_dwell_s = "CHANGE_ME"
+current_tolerance_a = "CHANGE_ME"
+manual_route = "CHANGE_ME_PHYSICAL_ROUTE"
+timeout_s = 120.0
+poll_interval_s = 0.2
+output_directory = "../run_data/photoresponse"
+run_name = "CHANGE_ME_RUN_NAME"
+note = ""
+
+[photoresponse_storage]
+database_path = "../run_data/photoresponse/audit.sqlite"

@@ -1,113 +1,96 @@
 # DC photoresponse work package
 
-Updated: 2026-10-12. Branch: `module/NKT-photonics` (user-selected existing branch).
+Updated: 2026-10-12. User-selected branch: `module/NKT-photonics`.
 
-## Confirmed objective
+## Scope and delivered software
 
-Both photovoltage and photocurrent, implemented in stages. Use SuperK or a
-CLD1010LP-controlled laser diode (approximately 760 nm; exact diode model unknown),
-6221 DC current or no electrical excitation, 2182A/2400 voltage detection and
-2400 current detection. Reuse attoDRY temperature/field and existing SMU assets.
-The optical source and excitation source are separate semantic roles.
+Photovoltage and photocurrent share a dark-before/light/dark-after coordinator.
+Optical roles: SuperK EXTREME/VARIA through existing NKT SDK, or CLD1010LP through
+TL4000. Electrical roles: no external excitation, 6221 DC current, or 2400 voltage
+bias; fresh voltage from 2182A/2400 and current from 2400. Existing SR830 workflows
+remain independent. This implementation does not use lock-ins in the photoresponse path.
 
-## Current delivery and boundaries
-
-- Strict, module-specific `PhotoresponseConfig`; unused hardware tables need not
-  be configured. Unknown active fields and incompatible bias/meter modes fail.
-- A hardware-free dark-before/light/dark-after runner for three electrical modes,
-  explicit NKT optical points, bias points and repeat indices.
-- Public NKT `begin`, `prepare_point`, `set_emission`, `verify_point`, `finish`
-  barriers reuse the existing controller. Fresh settings are verified before
-  emission and around each electrical sample. Faulted sessions can only finish.
-- `none` has no current-source object/commands and a null current setting.
-  `dc_current` at 0 A remains a connected, enabled simulated source.
-- JSON/JSONL preserves partial raw readings, window identity, acquisition times,
-  settings, primary/cleanup errors and last-confirmed states. Accepted promotion
-  waits until all conditions and cleanup succeed. Default analysis is accepted-only.
-- Differential voltage/current uses actual sample midpoint times to interpolate
-  the dark baseline. No resistance, photocurrent, power, environment, uncertainty
-  or responsivity is invented from unavailable measurements.
-- Injected-resource 6221/2182 query adapters have fake transcript tests only.
-  They do not open resources, write settings, reset, trigger or consume error queues.
-  A source snapshot cannot prove DC takeover is safe; a fetched 2182 reading is stale.
-
-This is an **offline foundation**, not completion of P0 physical contract, real
-Keithley output/trigger adapters, P2 hardware acquisition, target validation or
-commissioning. CLD1010LP, joint SQLite/resume, environment integration, power-meter
-integration, Notebook UI and real electrical source safety controllers remain planned.
-The simulation deliberately has no production hardware entry point or auto-resume.
-
-## Development sequence
-
-| Stage | Work | Acceptance |
+| Stage | Software status | Physical acceptance still required |
 |---|---|---|
-| P0 | Physical modes, wiring, exact manuals/identity, limits, dark switching, shutdown | Operator-confirmed contract; unknown values block hardware, not fake work |
-| P1 | Strict config, NKT barriers, simulated electrical states, query adapters, faults | Offline foundation delivered; complete write/trigger adapters after contract audit |
-| P2 | SuperK + 2182A, no excitation, repeated dark/light/dark voltage | Full raw trace, verified optical windows and cleanup; real commissioning required |
-| P3 | 6221 bounded DC bias and current sweeps | Mode-specific preflight, compliance, bounded changes, final readback |
-| P4 | 2400 voltage-bias/current measurement and independent voltmeter mode | Photocurrent and dark/light I-V; no conflicting source ownership |
-| P5 | CLD1010LP exact SDK/diode/TEC contract and adapter | Same sampling interface; separate optical/electrical safety commissioning |
-| P6 | Temperature, vector field, wavelength/intensity and optional gates | Stable actual environment, full 3 T path validation and joint cleanup |
-| P7 | SQLite/checkpoints, notebook, export, daily operation | Reproducible accepted results; explicit restart preflight; audit-safe recovery |
+| P0 physical contract | Strict mode, exact identity, wiring/limit and permission checks | Sample wiring/limits; exact CLD diode/TEC/pinout; optical route |
+| P1 simulation/transport | Three modes, NKT/CLD simulations, audited VISA and RS-232 relay, fault tests | Stable shared-bus operation and actual response formats |
+| P2 photovoltage | Fresh 2182A READ acquisition; no-excitation mode; direct or 6221 relay | Complete dark/light/dark voltage with real optics |
+| P3 current bias | Bounded DC ramps, readback, compliance stop and zero/off cleanup | Authorized unloaded five-point 6221 test still not completed |
+| P4 photocurrent | 2400 V-source/I-measure and 0 A/fixed-range voltmeter, 24-bit status checks | 2400 is on a sample; no real access authorized today |
+| P5 CLD | TL4000 binding and point controller with TEC/interlock/current checks | Installed DLL ABI/firmware, exact diode and wiring, optical commissioning |
+| P6 environment | Existing attoDRY driver, explicit T/Bx/Bz points, stability, 3 T and cleanup | New joint experiment commissioning; optional gate scans remain separate Three-SMU work |
+| P7 data | JSON/JSONL, SQLite WAL/FULL audit, new-attempt retry, accepted-only Notebook/CSV | Target offline validation recorded in development stages; scientific noise/settling validation remains experimental |
 
-Every hardware module follows offline -> target offline (`LK_setup`, `lyr`) ->
-authorized real queries -> separately authorized status consumption if needed ->
-smallest write -> standalone acceptance -> integration. These stages do not inherit
-permissions from earlier SR830/temperature experiments.
+Software implementation and offline tests are complete when the development-stage
+validation passes. This is not a claim that the physical experiment is commissioned.
+Power-meter/PEM integration is a separate existing work package; no watts or responsivity
+are inferred here. Delta/current reversal is not automatically enabled because it changes
+the measured observable and can cancel current-even signals.
 
-## Reuse and file ownership
+## Module ownership and reuse
 
-- `nkt_config.py`, `nkt_control.py`, `nkt_sdk.py`: existing NKT settings and safety;
-  this change exposes point barriers without duplicating vendor commands.
-- `photoresponse_config.py`: new strict mode/bias/sample contract.
-- `photoresponse.py`: independent records, simulation and coordinator.
-- `photoresponse_keithley.py`: conservative injected-resource query contracts.
-- `photoresponse_cli.py`, `photoresponse_analysis.py`: offline entry and read-only results.
-- `config/photoresponse_simulation.toml`: executable synthetic example. Station values
-  remain in ignored `hardware.local.toml`; no laboratory limits inferred from demo values.
-- Original acquisition/storage require six SR830 harmonic samples and retain their
-  existing semantics. A future versioned photoresponse SQLite extension must preserve
-  old readers, one accepted attempt per condition, raw-first writes and checkpoints.
-- Temperature uses actual `measurement_temperature_k`; field writes remain separately
-  uncommissioned. Three-SMU remains an active source-measure runner, not a voltmeter.
+- `nkt_config.py`, `nkt_control.py`, `nkt_sdk.py`: existing optical point sessions and
+  SDK; no second implementation of source/filter commands. Real LLTF remains blocked.
+- `photoresponse_config.py`, `photoresponse_hardware.py`: strict active-mode contracts,
+  explicit role/resource ownership and orchestration. Inactive device tables do not open devices.
+- `photoresponse_transport.py`: serialized SEND/ENTER relay on a shared host session,
+  exact-address VISA locks, raw response auditing, XON/XOFF parsing and timeout poisoning.
+- `photoresponse_keithley.py`: passive query contracts; FETCh remains stale diagnostic data.
+- `photoresponse_devices.py`: authorized writes/fresh reads, no reset/recall, bounded steps,
+  source preflight at zero/off, readback verification and independent cleanup attempts.
+- `photoresponse_cld.py`: TL4000 x64 API adapter, constant-current LD, stable-temperature TEC,
+  interlock/protection checks, emission gating and original TEC state restoration.
+- `photoresponse_environment.py`: existing attoDRY connection, vector path and stability
+  code; temperature feedback enabled before target, explicit overshoot/step limits,
+  source-off environment changes and actual temperature/field sampling.
+- `photoresponse.py`: three-window coordinator, raw timing and linear drift interpolation.
+- `photoresponse_storage.py`: separate photo_* tables; failed attempts retained; explicit
+  resume creates a new full attempt, never splices windows. Unique accepted condition/series.
+- `photoresponse_cli.py`, `photoresponse_analysis.py`, `notebooks/Photoresponse_Analysis.ipynb`:
+  CLI with stage-specific flags; read-only accepted results and CSV/selection manifest.
+- Existing SMU bounded-ramp semantics are reused; the historical three-gate configuration
+  and accepted-six-SR830-readings storage contract are not repurposed as detector control.
 
-## Physical items still needed
+## Verified and pending laboratory evidence
 
-1. Exact CLD1010LP diode model, pinout, wavelength, LD current/voltage limits, TEC
-   thermistor/temperature limits, interlock and optical route.
-2. Sample wiring and allowable V/I/power, measurement scale/impedance, grounding,
-   2/4-wire and source-off behavior for every selected mode.
-3. 6221/2182A/2400 interface, exact identity/firmware and actual available cabling.
-   Keep station addresses only in local config and ignored raw audit records.
-4. Dark switching: shutter or qualified emission cycling; settle/recovery duration,
-   sample heating and required time resolution.
-5. If A/W or V/W is needed: calibrated optical-power measurement plane and bandwidth
-   correction. NKT percentages/monitor percentages and diode current are not sample watts.
+User-authorized SSH discovery previously identified a 6221 and downstream 2182A via
+GPIB-to-RS-232 relay; station addresses and full identities remain in ignored local audit.
+The separately authorized empty-load plan is 0.1 V compliance, 4 pA to 10 nA in five
+linear points. The attempted test received an empty 6221 IDN and stopped before any
+source setting/output write. A later diagnostic timed out. The user confirmed an SR830
+experiment on the same GPIB bus, so all real bus operations stopped. This is a communication
+failure, not passed output commissioning; shared-bus activity is a possible, unproven cause.
 
-## Adapter manual audit
+2400 is attached to a sample and must not be opened today. CLD has no wiring yet and
+must not be opened today. Tomorrow's tests require the user-confirmed device wiring,
+limits and stage authorization. Existing permission to finish offline code does not authorize
+an unknown sample or diode output. No future test is scheduled automatically.
 
-- [6220/6221 reference manual Rev C](https://download.tek.com/manual/622x-901-01%20%28C%20-%20Oct%202008%29%28Ref%29.pdf):
-  `OUTP:STAT?`, source range/compliance queries and `STAT:MEAS:COND?` (bit 3 compliance).
-  `SOUR:CURR?` follows the documented general query syntax; verify this exact query
-  during real read-only commissioning. The returned value is a setting, not measured I.
-- [2182/2182A manual Rev B](https://download.tek.com/manual/2182A-900-01_May_2017.pdf):
-  settings queries and `FETCh?`; `READ?` performs ABORt/INITiate/FETCh and is not
-  included. Existing fetched values are never accepted as new formal samples.
-  The finite overload sentinel `+9.9E37` must be rejected. Full exact IDN is operator
-  supplied; do not infer that MODEL 2182 and MODEL 2182A identify the same instrument.
+## Manufacturer contracts
+
+- [6220/6221 reference manual](https://download.tek.com/manual/622x-901-01%20%28C%20-%20Oct%202008%29%28Ref%29.pdf)
+  and [Rev B reference](https://download.tek.com/manual/622x-901-01(B-Jun2005)(Ref).pdf):
+  explicit DC source, waveform/sweep abort, serial SEND/ENTER and status conditions.
+  Measurement bit 1 means interlock asserted (output permitted), bit 3 is compliance.
+  Minimum compliance is 0.1 V. Settings readbacks are not actual delivered current.
+- [2182A manual](https://download.tek.com/manual/2182A-900-01_May_2017.pdf):
+  channel 1 DC voltage, bounded fixed range/NPLC, processing disabled and fresh READ
+  acquisition. Overload sentinels and malformed/partial responses reject the attempt.
 - [2400 manual](https://download.tek.com/manual/2400S-900-01_K-Sep2011_User.pdf):
-  measure-only operation has source/output/compliance/range requirements; its generic
-  gate cleanup must not be imported as a detector shutdown procedure.
-- [CLD1010LP](https://www.thorlabs.com/thorproduct.cfm?partnumber=CLD1010LP):
-  laser diode/temperature controller. SDK binding and mounted diode contract pending.
+  section 3 measure-only, section 18 reading format/status, source/measurement and
+  HIMP output-off configuration. The 24-bit reading status includes separate real
+  compliance and range compliance; both reject formal data.
+- [Thorlabs official examples](https://github.com/Thorlabs/Current_And_Temperature_Controller_Examples):
+  CLD1010 ctypes example and TL4000 XML reference supply API names/semantics. Binding
+  follows 64-bit VISA types with init idQuery=true, reset=false. Fake ABI tests cannot
+  replace matching the installed DLL/header and actual CLD firmware during commissioning.
 
-DC acquisition is the first goal. Delta/current reversal is not enabled automatically;
-it changes the measured observable and can cancel current-even voltage components.
+## Delivery and next hardware steps
 
-## Development and synchronization
-
-Current implementation stays on the user-selected `module/NKT-photonics`. Preserve
-pre-existing PM100D/PEM notes and figures outside this feature's commit. Shared files
-have one writer; parallel agents perform read-only review. Update development stages
-and current handoff after each completed feature. Push this branch only; do not merge
-main or deploy to `LK_setup` implicitly. No remote environment was changed here.
+Use [运行指南](../PHOTORESPONSE_GUIDE.md) and the tracked placeholder templates. Preserve
+local hardware addresses/data and pre-existing PM100D/PEM notes outside this feature's commit.
+The current branch is synchronized without merging main. Remote offline validation uses a
+fresh temporary folder and the existing `lyr` environment, not an overwrite of the active lab checkout.
+After the SR830 bus is released: diagnose identities/settings, perform the authorized unloaded
+6221 test, then separately commission 2182A fresh readings, optical dark/light control, 2400,
+CLD and the joint environment experiment. Unknown physical parameters remain hard gates.

@@ -1,56 +1,130 @@
-# 光响应离线运行指南
+# 光电压 / 光电流运行指南
 
-当前阶段：仅仿真与 fake-resource 测试。没有实机连接或输出命令入口。
-开发计划、物理待确认项和厂商资料见 [工作包](modules/PHOTORESPONSE.md)。
+本分支已完成可离线验证的软件实现：NKT/CLD 光源、6221 DC、2182A 新鲜读数、
+2400 电压/电流测量、可选温磁场扫描、SQLite 审计与新尝试恢复。**硬件联合验收尚未完成。**
+程序不会扫描总线、复位仪器或自动接管已开启的输出。工作边界见 [工作包](modules/PHOTORESPONSE.md)。
 
-## 运行
+## 已知实验状态（2026-10-12）
 
-在项目安装环境运行，或在 PowerShell 中先设置本 checkout 的源码路径：
+- 此前通过 `PC → GPIB → 6221 → RS-232 → 2182A` 成功获得两台仪器身份。
+  2182A 串口返回的 XON/XOFF 字节保留在原始审计，解析时剔除。
+- 用户授权的空载 6221 测试为 0.1 V 限幅、4 pA 至 10 nA 共 5 个线性点。
+  实际尝试停在身份查询的空响应；后续诊断超时。**未发送输出设置，五点测试未通过。**
+- 用户正在同一 GPIB 总线上测试 SR830，因此已停止实机访问。总线共享可能造成竞争，
+  现有证据不足以断定超时原因。待用户确认 SR830 测试结束，再恢复已授权空载测试。
+- 2400 已接样品，今日禁止实机访问；CLD 尚未接线，今日也不访问。
+  明日实机测试前仍需确认实际接线与样品/二极管限值。
+- 实验地址、完整身份及原始通信审计仅保存在被 Git 忽略的本地文件中。
+
+## 离线运行
 
 ```powershell
 $env:PYTHONPATH = 'src'
-python -c "import attodry_control; print(attodry_control.__file__)"
 python -m attodry_control.photoresponse_cli describe
 python -m attodry_control.photoresponse_cli validate-config --config config/photoresponse_simulation.toml
 python -m attodry_control.photoresponse_cli simulate --config config/photoresponse_simulation.toml
+python -m attodry_control.photoresponse_cli simulate --config config/photoresponse_cld_simulation.toml
 ```
 
-成功输出 `SIMULATION completed: <完整JSON路径>`。命令在完成清理与文件写入后退出，
-返回码为0；运行失败为1，配置或文件错误为2。没有后台进程或自动恢复。
-`run_data/photoresponse_simulation/` 保存本次 JSON 和逐事件 flush 的 JSONL，均被 Git 忽略。
-JSON 名称包含 UTC 时间、run_name、随机后缀和 outcome，不覆盖历史尝试。
+成功输出 `SIMULATION completed: <JSON路径>`，退出码 0；采集失败为 1，配置/文件错误为 2。
+没有后台进程。`simulate` 拒绝真实 backend，不会偷偷替换硬件配置。
+示例限值只是合成数据参数，不能作为样品或激光二极管的安全参数。
+控制电脑须使用 `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`，不能用裸系统 Python。
+本地 Anaconda 若存在用户目录 NumPy/Matplotlib 冲突，可设置 `PYTHONNOUSERSITE=1` 并用 `python -s`。
 
-默认不传 `--config` 时读取 `config/hardware.local.toml`。可将所需 NKT 与
-`[photoresponse]` 表放在这个统一文件中进行离线运行；不要覆盖已有的站点配置。
-当前流程遇到 `backend = "nkt_sdk"` 会拒绝，**不会把真实配置偷偷改成仿真**。
-示例中的数值仅用于合成信号，不是样品安全上限。
+## 三种测量模式
 
-## 三种模式
-
-| mode | detector | 必需偏置字段 | 结果 |
+| mode | detector | 偏置字段 | 结果与电路含义 |
 |---|---|---|---|
-| `open_circuit_voltage` | `keithley2182a` 或 `keithley2400` | 禁止两个偏置数组 | `delta_voltage_v` |
-| `dc_current_voltage` | `keithley2182a` 或 `keithley2400` | `bias_current_points_a` | `delta_voltage_v` |
-| `voltage_bias_current` | `keithley2400` | `bias_voltage_points_v` | `delta_current_a` |
+| `open_circuit_voltage` | `keithley2182a` / `keithley2400` | 两个偏置数组都必须省略 | 光电压；外部激励路径须物理隔离 |
+| `dc_current_voltage` | `keithley2182a` / `keithley2400` | `bias_current_points_a` | 6221 恒流下的光致电压变化 |
+| `voltage_bias_current` | `keithley2400` | `bias_voltage_points_v` | 指定电压下的光电流；0 V 点用于短路光电流 |
 
-当前各 detector 名称只是仿真角色，不代表对应实机已经可运行。none 不构造电流源，
-源设置为 null；恒流0 A仍记录为有源连接。2182A电压和6221电流设定不能推导实际电流。
+`none` 不创建 6221 电流源控制器、不发送其输出设置。若 2182A 经 6221 转发，
+仍需连接并查询 6221 的身份、关闭状态和 Delta/Pulse Delta/DCON 是否处于 armed 状态。
+`none` 不等于 DC 0 A。6221 的电流设置不是实际样品电流，2182A 电压也不能当作电流。
 
-扫描顺序是 NKT光学点 -> 偏置点 -> repeat -> dark_before/light/dark_after。
-每个 condition 保存各维索引。`samples_per_window` 指每个明暗窗口的读数数量；
-`repeats` 重复整组三窗口。`settle_s` 是每次切光后的等待，`sample_interval_s` 是
-每次正式读数前的等待。硬件时间分辨率未验收，不能把该间隔视为可承诺的采样率。
+2400 作电压表时采用厂商所述的 0 A 电流源模式、最低源电流量程、固定电压测量量程，
+且测量期间必须开启其 OUTPUT。这与 2182A 的被动电压输入不同，需单独确认负载影响。
+2400 电压 compliance 须高于预期电压；电流模式则配置电流 compliance。两种模式均记录
+V/I 与读数状态、禁用电阻测量/处理功能，结束后回零、关闭并确认 HIMP 关闭模式。
 
-`nkt_run.dwell_s` 必须为0，避免与光响应窗口的等待重复定义。光学点、百分比上限和
-run_name/note/output_directory继续使用同一份NKT配置，`output_directory` 相对TOML解析。
-NKT光源输出和滤光片的设置及状态会在电学采样前后复查，开光前也重新核对设置。
+扫描顺序：环境点（可选）→ 光学点 → 偏置点 → repeat → dark_before/light/dark_after。
+每个窗口采集 `samples_per_window` 个新读数。`settle_s` 是每次切光后的等待；
+`sample_interval_s` 是读数前的等待，不代表保证的采样周期。串口转发与状态检查有额外开销。
+硬件样本时间取主机发送 READ? 到得到响应的区间，不包含周围的配置核对时间；不是仪器内部时间戳。
 
-## 数据解释
+## 配置模板
 
-- 每条样本包含UTC时间、从run起点起算的高分辨率单调时间、电压/电流原始值、前后状态。
-- 光功率和环境在当前版本没有测量，因此为 null；仿真不调用温控或磁场模块。
-- 合成电压亮暗差为5 µV、合成电流亮暗差为2 nA，仅用于测试，不是器件模型或功率标定。
-- 每个窗口使用样本的平均值和采样中点的平均时间。暗基线按实际时间线性插值：
+默认本地文件是被忽略的 `config/hardware.local.toml`。合并需要的表，保留已有站点配置。
+也可把临时配置放在被忽略的 `run_data/` 下。所有相对输出/数据库路径相对该 TOML 文件解析。
+
+| 模板 | 用途 |
+|---|---|
+| `config/photoresponse_hardware.example.toml` | NKT + 6221 + 串口转发 2182A |
+| `config/photoresponse_cld_hardware.example.toml` | CLD1010LP + 2400 光电流 |
+| `config/photoresponse_6221_test.example.toml` | 用户授权的独立空载 6221 五点测试；不连接探测器/光源 |
+| `config/photoresponse_environment_simulation.toml` | 可附加到仿真配置的温磁场扫描表 |
+
+真实模板故意含 `CHANGE_ME`，不能直接运行。未知身份、限值、接线、DLL、步长或不匹配的模式
+在连接前拒绝。切换电压表/电流表时必须重新检查单位、量程和 compliance。
+`photoresponse.light_source` 选择 `nkt` 或 `cld1010lp`，不同时连接两个光源。
+
+2182A 直接连接时用 `detector_transport="visa"` 并填写 `[photoresponse_2182].address`；
+经 6221 时用 `via_6221`，省略该 address，只填 `[photoresponse_6221].address`。
+无激励而使用转发时，6221 表只保留 `address` 与 `expected_idn`，不应含输出参数。
+2400 只支持直接 VISA，使用 `[photoresponse_2400]`。未选中的仪器不会被打开。
+
+NKT 复用现有 EXTREME/VARIA SDK 模块；LLTF 的真实 SDK 仍不可用。`nkt_run.emit=true`，
+`dwell_s=0`，由光响应窗口控制明暗和等待。NKT 百分比不代表样品瓦特。
+CLD 使用 TL4000 x64 DLL，初始化不 reset；先检查互锁、LD auto-on、TEC 模式与保护，
+关闭激光配置电流，TEC 稳定后才允许发光。CLD 的 760 nm 是二极管标称值，不能扫描波长。
+其 DLL/固件返回格式仍需实机验收；二极管型号、电流/电压、TEC 电流/温度、保护窗口、
+pinout 和光路未知时，不允许启用。结束关闭 LD，并恢复 TEC 原来的开启/关闭状态。
+
+## 实机命令（只有对应阶段已获授权且总线空闲时运行）
+
+```powershell
+# 只查电学身份与现有设置；不 READ、不 reset、不消费错误队列，不打开光源。
+python -m attodry_control.photoresponse_cli diagnose --config config/hardware.local.toml --authorize-connect
+
+# 仅 6221 空载测试。使用独立五点测试表；不会打开 2182A、2400 或光源。
+python -m attodry_control.photoresponse_cli test-6221 --config config/hardware.local.toml --authorize-connect --authorize-writes
+
+# 完整光响应；真实量测、源/激光设置及错误队列读取均属写授权范围。
+python -m attodry_control.photoresponse_cli run --config config/hardware.local.toml --authorize-connect --authorize-writes --confirm-route
+```
+
+VISA 使用显式地址和资源独占锁，但这不能防止其他程序使用同一控制器的其他地址。
+实际测试前仍须协调共享 GPIB 总线。通信超时后不盲目重试可能滞留的响应；本会话只尝试安全关闭，
+不把关闭命令当作关闭确认。6221 空载进入 compliance 会停止，不将限幅点算作正常测量。
+
+## 可选温度/磁场扫描
+
+使用现有 `[cryostat]`、`[magnet]`、`[temperature_stability]`，另加
+`[photoresponse_environment]` 的明确温度/Bx/Bz 点、最大温度步长、最大超调及磁场步长。
+真实 run 还必须加 `--authorize-environment`。不配置该表就不创建 attoDRY 驱动。
+
+变温/变场前关闭光与电学源；温控沿用先启用反馈、后写温度目标的验收顺序。
+等温磁场稳定后再准备电学采集。保留 `sqrt(Bx²+Bz²) <= 3 T` 的路径与读回检查。
+样本保存实际 `measurement_temperature_k` 和实际 Bx/Bz，不能用目标温度替代实测温度。
+正常结束按 hold/zero 配置，失败先尝试关光及电学清理，再请求磁场归零。通信失败时保留
+最后确认的非零磁场，`state_current=false`，要求人工核实；不能推断零场。
+
+## 数据、恢复和分析
+
+JSONL 逐事件 flush；配置 `[photoresponse_storage].database_path` 后另存 SQLite WAL/FULL 审计。
+采用独立 `photo_runs/photo_events/photo_conditions` 表，不改历史 SR830 数据表。
+最终 JSON 保存原始窗口、命令/响应日志位置、配置、环境、错误、清理及软件版本。
+每次 run 全部条件与清理通过后才接受；失败/中断的原始尝试永久保留，默认分析排除。
+源码不同或计划不同的重试应作为新系列，不能强行与旧计划拼接。
+
+失败后显式指定 `--resume-run <原run_id>` 创建同一系列的新 attempt，重新 preflight 并重测
+整次计划；不拼接不完整的暗亮窗口，不自动重新开启输出。计划 hash 必须一致，成功系列禁止重复接受。
+若上次进程崩溃，查询数据库中的 `photo_runs` 获得 run_id；旧 running 尝试会标记 interrupted。
+输出目录/数据库进程锁阻止重复任务同时运行；不同输出目录不能代替实验台资源协调。
+
+暗背景按三个窗口实际采样中点进行线性插值：
 
 ```text
 w = (t_light - t_dark_before) / (t_dark_after - t_dark_before)
@@ -58,36 +132,24 @@ dark_at_light = dark_before + (dark_after - dark_before) * w
 delta = light - dark_at_light
 ```
 
-该算法修正线性暗漂移，不声称消除非线性漂移。保留插值权重、暗漂移和公式版本。
-有电压数据时只计算电压差，不自动生成光电流、光响应度或阻值。
-
-## 失败、清理与分析
-
-正常、异常和Ctrl+C均执行关光读回及仿真电学清理，并释放资源。未知preflight不接管。
-一次run只要任何采样或清理失败，全部condition均不accepted；先前已完成的原始值和
-诊断差分仍保留。JSONL早期sample事件的accepted保持false，只有最终JSON确认有效性。
-
-通信失败保存最后确认读回及state_current=false，不把关闭命令当成成功读回。
-光源清理失败仍尝试电学清理。若磁场今后加入，需先实现独立的归零及最终确认。
-实机版尚不存在；不得照此仿真命令推断前面板或接线已经安全。
+保留暗漂移、权重和公式版本；不声称消除非线性漂移。缺少功率计时没有 A/W、V/W，
+光源百分比/LD 电流不是测得的样品光功率。仿真标记明确，未配置环境时环境为 null。
 
 ```powershell
-python -m attodry_control.photoresponse_cli analyze --record 'run_data/photoresponse_simulation/实际文件名_completed.json'
+python -m attodry_control.photoresponse_cli analyze --record 'run_data/实际文件_completed.json'
+python -m attodry_control.photoresponse_cli export --record 'run_data/实际文件_completed.json' --output 'analysis_output/新结果.csv'
 ```
 
-分析默认仅返回completed/accepted且cleanup确认的结果；带有cleanup错误的记录即使
-误留accepted标志也不会进入默认分析。需要审计时可显式调用
-`photoresponse_analysis.load_results(path, include_rejected=True)`；结果仍标记accepted=false。
-分析不改原文件。当前只有只读CLI/loader；Notebook、SQLite断点恢复和自动重试待开发。
+[分析 Notebook](../notebooks/Photoresponse_Analysis.ipynb) 只读原始 JSON，不导入仪器驱动。
+导出 CSV 与选择 manifest，保存输入 SHA-256，不覆盖既有文件。需要诊断失败尝试时可显式调用
+`load_results(path, include_rejected=True)`，这些结果仍标记 accepted=false。
 
-## 验证
+## 离线验证
 
 ```powershell
-python -m unittest discover -s tests -p 'test_photoresponse*.py' -v
-python -m unittest discover -s tests -p 'test_nkt.py' -v
-python -m unittest discover -s tests -v
+python -s -m unittest discover -s tests -p 'test_photoresponse*.py' -q
+python -s -m unittest discover -s tests -q
 ```
 
-所有这些测试使用fake/simulated instruments；不加载真实仪器DLL或打开VISA。
-Windows受限运行环境若拒绝Python临时目录，可在获准的普通离线开发环境重跑，
-不要因此放松仪器权限检查。
+测试只使用 fake/simulated resources；通过离线测试不表示实机接线、固件、测量噪声、
+光功率或样品允许值已经验收。当前验证总数和目标机验证见 [开发阶段](DEVELOPMENT_STAGES.md)。

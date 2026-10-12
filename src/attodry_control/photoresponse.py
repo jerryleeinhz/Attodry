@@ -1,4 +1,4 @@
-"""Offline dark/light/dark coordinator. No VISA/DLL imports or hardware entry point."""
+"""Dark/light/dark coordinator using injected, explicitly authorized controllers."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -6,6 +6,7 @@ from dataclasses import asdict
 import math
 from statistics import fmean
 import time
+from itertools import product
 
 from .nkt_config import NktError, number
 from .nkt_control import NktController, utc_now
@@ -117,11 +118,22 @@ class SimulatedElectrical:
 
 class PhotoresponseRunner:
     def __init__(self, config, laser: NktController, electrical, *, clock=time.perf_counter,
-                 sleep=time.sleep, on_event=None):
+                 sleep=time.sleep, on_event=None, authorize_writes=False,
+                 confirm_manual_route=False, environment=None, attempt_index=1):
         config.validate()
-        # No factory or resource open exists here. Reject injected hardware too.
-        if laser.backend.is_hardware or electrical.is_hardware:
-            raise NktError("PhotoresponseRunner is offline-only; real hardware is not commissioned")
+        hardware = config.nkt.backend != "simulation"
+        if bool(laser.backend.is_hardware) != hardware or bool(electrical.is_hardware) != hardware:
+            raise NktError("Mixed simulation/hardware controllers are forbidden")
+        if hardware:
+            if not authorize_writes or not confirm_manual_route:
+                raise NktError("Hardware run requires writes and optical route authorization")
+            config.hardware.require_run(config)
+        self.authorize_writes, self.confirm_manual_route = authorize_writes, confirm_manual_route
+        if (config.environment is None) != (environment is None):
+            raise NktError("Environment configuration/controller mismatch")
+        if environment is not None and environment.config != config.environment:
+            raise NktError("Environment controller configuration differs from the run")
+        self.environment, self.attempt_index = environment, attempt_index
         if laser.config != config.nkt or electrical.config != config:
             raise NktError("Controller configurations must match the run")
         self.config, self.laser, self.electrical = config, laser, electrical
@@ -129,7 +141,7 @@ class PhotoresponseRunner:
         self._used = False
         self._epoch = None
         self.record = {"schema_version": 1, "measurement_type": "dc_photoresponse",
-                       "simulated": True, "captured_at_utc": utc_now(), "completed": False,
+                       "simulated": not hardware, "captured_at_utc": utc_now(), "completed": False,
                        "outcome": "rejected", "measurement_config": config.snapshot(),
                        "conditions": [], "events": [], "error": None,
                        "cleanup": {"errors": [], "laser_off_confirmed": False,
@@ -159,7 +171,8 @@ class PhotoresponseRunner:
             raise NktError("Electrical error or compliance trip")
         if state["excitation"] != self.config.excitation:
             raise NktError("Excitation mode changed")
-        if state["detector"] != "SIMULATED " + self.config.detector:
+        expected_detector = ("SIMULATED " if self.record["simulated"] else "") + self.config.detector
+        if state["detector"] != expected_detector:
             raise NktError("Detector identity changed")
         source = state["source"]
         if self.config.excitation == "none":
@@ -170,8 +183,13 @@ class PhotoresponseRunner:
         elif inactive:
             if source["output_enabled"] or source["setpoint"] != 0:
                 raise NktError("Preflight/cleanup requires confirmed zero and disabled source")
-        elif not source["output_enabled"] or source["setpoint"] != bias:
-            raise NktError("Source output or setpoint changed")
+        else:
+            tolerance = 0
+            if self.config.hardware:
+                tolerance = (self.config.hardware.source["tolerance_a"] if self.config.excitation == "dc_current"
+                             else self.config.hardware.detector["tolerance_v"])
+            if not source["output_enabled"] or not math.isclose(source["setpoint"], bias, abs_tol=tolerance, rel_tol=1e-7):
+                raise NktError("Source output or setpoint changed")
 
     def _window(self, condition, phase, bias):
         illuminated = phase == "light"
@@ -183,18 +201,23 @@ class PhotoresponseRunner:
             # The interval also keeps one-sample windows strictly ordered with fake clocks.
             self.sleep(self.config.sample_interval_s)
             optical_before = self.laser.verify_point(emitting=illuminated, phase=phase + "_before")
+            environment_before = self.environment.verify() if self.environment else None
             before = self._state()
             self._check_state(before, bias)
             sample = {"valid": False, "accepted": False, "captured_at_utc": utc_now(),
                       "started_s": self.clock() - self._epoch, "finished_s": None,
                       "voltage_v": None, "current_a": None,
-                      "optical_before": optical_before, "electrical_before": before}
+                      "optical_before": optical_before, "electrical_before": before,
+                      "environment_before": environment_before}
             window["samples"].append(sample)
             self.record["electrical_state_current"] = False
             try:
                 reading = self.electrical.read(illuminated=illuminated)
                 sample["finished_s"] = self.clock() - self._epoch
                 sample["raw_reading"] = deepcopy(reading)
+                if self.electrical.is_hardware:
+                    sample["started_s"] = reading["acquisition_started_monotonic_s"] - self._epoch
+                    sample["finished_s"] = reading["acquisition_finished_monotonic_s"] - self._epoch
                 sample.update(voltage_v=reading["voltage_v"], current_a=reading["current_a"])
                 self._retain_state(reading["state"])
                 self._check_state(reading["state"], bias)
@@ -207,9 +230,13 @@ class PhotoresponseRunner:
                 sample["optical_after"] = self.laser.verify_point(emitting=illuminated, phase=phase + "_after")
                 sample["electrical_after"] = self._state()
                 self._check_state(sample["electrical_after"], bias)
+                sample["environment_after"] = self.environment.verify() if self.environment else None
                 sample["valid"] = True
             except (Exception, KeyboardInterrupt) as exc:
                 sample["error"] = f"{type(exc).__name__}: {exc}"
+                detector = getattr(self.electrical, "detector", None)
+                sample["detector_partial_raw"] = deepcopy(getattr(detector, "partial_raw", {}))
+                sample["detector_last_raw_reading"] = getattr(detector, "last_raw_reading", None)
                 raise
             finally:
                 try:
@@ -228,36 +255,61 @@ class PhotoresponseRunner:
         electrical_owned = False
         try:
             self._event("run_start", measurement_config=self.config.snapshot())
-            self.laser.begin()
-            self._check_state(self._state(), None, inactive=True)
-            electrical_owned = True
-            for optical_index, point in enumerate(self.config.nkt.points):
-                for bias_index, bias in enumerate(self.config.bias_points):
-                    for repeat in range(self.config.repeats):
-                        row = {"condition_id": f"photo-{len(self.record['conditions']):06d}",
-                               "attempt_index": 1, "accepted": False, "optical_index": optical_index,
-                               "bias_index": bias_index, "repeat_index": repeat,
-                               "requested_optical": asdict(point), "excitation": self.config.excitation,
-                               "requested_current_a": bias if self.config.excitation == "dc_current" else None,
-                               "requested_voltage_v": bias if self.config.excitation == "dc_voltage" else None,
-                               "windows": [], "result": None}
-                        self.record["conditions"].append(row)
-                        self.laser.prepare_point(point)
-                        self.electrical.prepare(bias)
-                        self._check_state(self._state(), bias)
-                        for phase in WINDOWS:
-                            self._window(row, phase, bias)
-                        row["result"] = differential(row["windows"], self.config.quantity)
-                        self._event("condition_complete", condition=row)
+            if self.electrical.is_hardware:
+                self.electrical.preflight()
+            else:
+                self._check_state(self._state(), None, inactive=True)
+            self.laser.begin(authorize_writes=self.authorize_writes,
+                             confirm_manual_route=self.confirm_manual_route)
+            if self.environment:
+                self.environment.begin()
+                self.environment.prepare(self.config.environment.points[0])
+            if self.electrical.is_hardware:
+                electrical_owned = True
+                self.electrical.begin()
+            else:
+                electrical_owned = True
+            environment_points = self.config.environment.points if self.environment else (None,)
+            last_environment_index = 0 if self.environment else None
+            for (environment_index, environment_point), (optical_index, point), (bias_index, bias), repeat in product(
+                    enumerate(environment_points), enumerate(self.config.nkt.points),
+                    enumerate(self.config.bias_points), range(self.config.repeats)):
+                if self.environment and last_environment_index != environment_index:
+                    if last_environment_index is not None:
+                        self.laser.set_emission(False)
+                        self._check_state(self.electrical.cleanup(), None, inactive=True)
+                    self.environment.prepare(environment_point)
+                    if last_environment_index is not None and self.electrical.is_hardware:
+                        self.electrical.begin()
+                    last_environment_index = environment_index
+                row = {"condition_id": f"photo-{len(self.record['conditions']):06d}",
+                       "attempt_index": self.attempt_index, "accepted": False, "optical_index": optical_index,
+                       "bias_index": bias_index, "repeat_index": repeat,
+                       "environment_index": environment_index, "requested_environment": environment_point,
+                       "requested_optical": asdict(point), "excitation": self.config.excitation,
+                       "requested_current_a": bias if self.config.excitation == "dc_current" else None,
+                       "requested_voltage_v": bias if self.config.excitation == "dc_voltage" else None,
+                       "windows": [], "result": None}
+                self.record["conditions"].append(row)
+                self.laser.prepare_point(point)
+                self.electrical.prepare(bias)
+                self._check_state(self._state(), bias)
+                for phase in WINDOWS:
+                    self._window(row, phase, bias)
+                row["result"] = differential(row["windows"], self.config.quantity)
+                self._event("condition_complete", condition=row)
             self.record["outcome"] = "completed"
         except (Exception, KeyboardInterrupt) as exc:
             self.record["error"] = f"{type(exc).__name__}: {exc}"
             self.record["outcome"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected"
         finally:
             cleanup = self.record["cleanup"]
-            optical_cleanup = self.laser.finish()
-            cleanup["laser_off_confirmed"] = optical_cleanup["off_confirmed"]
-            cleanup["errors"].extend("laser: " + e for e in optical_cleanup["errors"])
+            try:
+                optical_cleanup = self.laser.finish()
+                cleanup["laser_off_confirmed"] = optical_cleanup["off_confirmed"]
+                cleanup["errors"].extend("laser: " + e for e in optical_cleanup["errors"])
+            except (Exception, KeyboardInterrupt) as exc:
+                cleanup["errors"].append(f"laser: {type(exc).__name__}: {exc}")
             if electrical_owned:
                 self.record["electrical_state_current"] = False
                 try:
@@ -271,13 +323,21 @@ class PhotoresponseRunner:
                 self.electrical.close()
             except (Exception, KeyboardInterrupt) as exc:
                 cleanup["errors"].append(f"electrical close: {type(exc).__name__}: {exc}")
+            self.record["electrical_cleanup_audit"] = deepcopy(getattr(self.electrical, "cleanup_details", []))
+            if self.environment:
+                try:
+                    result = self.environment.finish(failed=self.record["outcome"] != "completed" or bool(cleanup["errors"]))
+                    self.record["environment"] = result
+                    cleanup["errors"].extend("environment: " + e for e in result["errors"])
+                except (Exception, KeyboardInterrupt) as exc:
+                    cleanup["errors"].append("environment: " + str(exc))
             if cleanup["errors"] or not (cleanup["laser_off_confirmed"] and cleanup["electrical_safe_confirmed"]):
                 self.record["outcome"] = "rejected"
             # Standalone scan outcome/points do not describe this point session.
             self.record["laser_audit"] = {
                 key: deepcopy(value) for key, value in self.laser.record.items()
                 if key not in {"completed", "outcome", "error", "points"}}
-            self.record["laser_audit"]["record_type"] = "nkt_point_session"
+            self.record["laser_audit"]["record_type"] = "cld_point_session" if hasattr(self.config.nkt, "diode_model") else "nkt_point_session"
             self.record["completed"] = self.record["outcome"] == "completed"
             for row in self.record["conditions"]:
                 row["accepted"] = self.record["completed"]

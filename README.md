@@ -4,10 +4,11 @@
 新光响应流程使用 SuperK 或 CLD1010LP 光源、6221 直流激励或无激励，以及 2182A／2400
 电学探测。CLD1010LP 配套二极管约 760 nm，确切型号尚待确认。
 
-**光响应当前仅可离线运行。** 已实现严格配置、三种电学模式的暗—亮—暗仿真、NKT
-逐点屏障、原始 JSON/JSONL 审计、漂移插值和 accepted-only 分析。6221/2182 查询适配器
-仅通过 fake-resource 契约测试；真实触发、输出控制、CLD1010LP 驱动及温磁场联合测量
-仍待分阶段开发/验收。此流程不构造 SR830，也不要求配置无关仪器。
+**光响应软件已完成离线实现，硬件联合验收尚未完成。** 已接入 NKT、CLD1010LP、
+6221 DC/无激励、2182A 新鲜读数、2400 光电流/电压表及可选 attoDRY 温磁场扫描。
+三种模式共用暗—亮—暗采集、限幅/故障保护、JSON/JSONL/SQLite 审计、新尝试恢复、
+只读 Notebook 和 CSV 导出。真实运行需要完整的本地物理配置和明确授权。
+当前共享 GPIB 总线正在做 SR830 测试，已停止实机访问；2400、CLD 今日不连接。
 
 ```powershell
 python -m attodry_control.photoresponse_cli describe
@@ -16,7 +17,7 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 ```
 
 开发计划及当前边界见 [光响应工作包](docs/modules/PHOTORESPONSE.md)，运行和数据说明见
-[光响应离线指南](docs/PHOTORESPONSE_GUIDE.md)。下面的历史验收状态属于原有输运模块，
+[光响应运行指南](docs/PHOTORESPONSE_GUIDE.md)。下面的历史验收状态属于原有输运模块，
 不表示新的光响应硬件组合已经通过验收。
 
 当前仓库已完成阶段 1–2、阶段 3–7 可在无硬件条件下完成的离线实现、Three-SMU QCoDeS S0 离线模块、双 SR830 集成 1/2/3 次谐波器件验收，以及 Temperature module 的操作者验收。温控验收确认先开启控制再写 setpoint 可以产生升温，并要求测量保存实际 `sample_temperature_k`；commissioned `max_overshoot_k` 为 0.2 K。项目包括严格配置、完整仿真、平台记录、安全扫描与清理、SQLite/WAL 审计与恢复、双 SR830 驱动、fake-DLL attoDRY 驱动、Three-SMU CLI/Notebook 共用 generator、accepted-only 分析和实验室 commissioning 清单。日常温控和独立 Three-SMU 命令均读取统一的 `hardware.local.toml`；真实 SMU 连接/写入、Three-SMU 主 acquisition 集成、其它 attoDRY 设置写入和端到端硬件路径仍需分阶段显式授权。

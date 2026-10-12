@@ -17,6 +17,8 @@ OTHER_TABLES = {
     "project", "cryostat", "magnet", "temperature_stability", "temperature_run",
     "temperature_scan", "cleanup", "visa", "lockin_xx", "lockin_xy",
     "lockin_sweep", "gate_top", "gate_bottom", "smu_bias", "three_smu_run", "photoresponse",
+    "photoresponse_hardware", "photoresponse_6221", "photoresponse_2182", "photoresponse_2400",
+    "photoresponse_environment", "photoresponse_storage", "photoresponse_6221_test", "cld1010",
 }
 
 

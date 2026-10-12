@@ -1,0 +1,40 @@
+# Synthetic diode, NOT an installed diode specification. No hardware is opened.
+[photoresponse]
+light_source = "cld1010lp"
+mode = "voltage_bias_current"
+detector = "keithley2400"
+bias_voltage_points_v = [-0.001, 0.0, 0.001]
+samples_per_window = 2
+repeats = 1
+sample_interval_s = 0.01
+settle_s = 0.01
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.000001
+
+[cld1010]
+backend = "simulation"
+dll_path = ""
+address = ""
+expected_serial = "SIMULATED"
+diode_model = "SIMULATED ONLY"
+diode_wiring_confirmed = false
+wavelength_nm = 760.0 # Nominal; no wavelength tuning or wavelength readback.
+current_points_a = [0.01, 0.02]
+max_current_a = 0.03
+max_voltage_v = 3.0
+max_tec_current_a = 0.1
+temperature_min_c = 20.0
+temperature_max_c = 30.0
+temperature_c = 25.0
+temperature_tolerance_c = 0.1
+stable_dwell_s = 0.1
+current_tolerance_a = 0.00001
+manual_route = "SIMULATED optical path"
+timeout_s = 5.0
+poll_interval_s = 0.05
+output_directory = "../run_data/photoresponse_cld_simulation"
+run_name = "cld_offline"
+note = "Synthetic photodiode current; no calibrated sample power."
+
+[photoresponse_storage]
+database_path = "../run_data/photoresponse_cld_simulation/audit.sqlite"

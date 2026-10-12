@@ -1,0 +1,16 @@
+# EMPTY-LOAD bench fixture requested on 2026-10-12. NOT sample-safe defaults.
+# Copy to ignored config/hardware.local.toml or a file under run_data/.
+# Run only after the shared GPIB bus is available and this test is authorized.
+[photoresponse_6221]
+address = "CHANGE_ME"
+expected_idn = "CHANGE_ME_FULL_6221_IDN"
+compliance_v = 0.1 # 100 mV, the 6221 minimum; 0.1 mV is not supported.
+max_step_a = 2.5e-9
+settle_s = 0.2
+tolerance_a = 1e-13
+
+[photoresponse_6221_test]
+current_points_a = [4e-12, 2.503e-9, 5.002e-9, 7.501e-9, 1e-8]
+max_abs_current_a = 1e-8
+timeout_ms = 10000
+output_directory = "../run_data/6221_commissioning"
