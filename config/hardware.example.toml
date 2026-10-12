@@ -353,3 +353,21 @@ nd_pct = "CHANGE_ME" # VARIA only, 0-100%, 0.1% steps.
 # LLTF points: source_level_pct + wavelength_nm only (1000-2300 nm).
 # Broadband points: source_level_pct only. Repeat [[nkt_run.points]] for a scan.
 # Every completed/interrupted write run attempts emission OFF, then verifies it.
+
+# DC photoresponse: this release exposes SIMULATION ONLY, no hardware acquisition.
+# See config/photoresponse_simulation.toml for a runnable synthetic example.
+# The NKT tables above remain the single optical/run metadata source.
+# Other independent module loaders ignore this table; no sample limits are inferred.
+[photoresponse]
+mode = "open_circuit_voltage" # open_circuit_voltage | dc_current_voltage | voltage_bias_current
+detector = "keithley2182a" # keithley2182a | keithley2400; current requires 2400
+samples_per_window = "CHANGE_ME"
+repeats = "CHANGE_ME"
+sample_interval_s = "CHANGE_ME" # Waiting before each read, not a promised hardware sampling rate.
+settle_s = "CHANGE_ME" # Waiting after optical transition; nkt_run.dwell_s must be 0.
+max_abs_voltage_v = "CHANGE_ME" # Independent sample safety value, not a vendor rating.
+max_abs_current_a = "CHANGE_ME" # Independent sample safety value, not a vendor rating.
+# No excitation: omit BOTH bias arrays. None is not 0 A.
+# dc_current_voltage: bias_current_points_a = [operator-confirmed values]
+# voltage_bias_current: bias_voltage_points_v = [operator-confirmed values]
+# Current source setpoint readback is not measured sample current.

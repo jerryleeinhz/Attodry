@@ -1,8 +1,34 @@
 # Project handoff
 
-Last updated: 2026-09-22
+Last updated: 2026-10-12
 
 ## Current stage
+
+DC photoresponse offline foundation (2026-10-12):
+
+- User approved staged photovoltage and photocurrent development on the current
+  `module/NKT-photonics` branch. Source choices are SuperK and CLD1010LP with an
+  approximately 760 nm diode (exact model unknown); electrical roles are 6221
+  DC/none and 2182A/2400 voltage or 2400 current measurement.
+- Implemented strict mode configuration, three-mode dark/light/dark simulation,
+  NKT public point-session barriers, drift interpolation, raw JSON/JSONL and
+  accepted-only analysis. None never constructs a current source; DC 0 A remains
+  explicitly distinct. Unknown hardware configuration fails before driver creation.
+- Added conservative injected-resource 6221/2182 query contracts, fake-tested only.
+  No real open/write/trigger interface exists in the photoresponse CLI. Physical P0
+  limits/wiring, full write/trigger adapters, target validation and real commissioning
+  remain pending. CLD1010LP and environment integration are not implemented.
+- NKT emission now rechecks prepared settings immediately before giving light;
+  a changed point or faulted session cannot continue. Real NKT commissioning remains
+  separate from this offline completion. PM100D/PEM can reuse the new point barriers.
+- 29 new tests, 30 NKT tests and the full 444-test offline suite passed. Full suite
+  used Python 3.12.7 with PYTHONPATH=src and PYTHONNOUSERSITE=1 (`python -s`) to avoid
+  a pre-existing user-site NumPy/Matplotlib ABI conflict; no package changes.
+- See [work package](modules/PHOTORESPONSE.md) and [offline guide](PHOTORESPONSE_GUIDE.md).
+  Next: close physical contract, implement separately tested 2182 fresh acquisition
+  and 6221 bounded DC control, then target-offline and staged real commissioning.
+  No instruments or LK_setup were accessed. Earlier local PM100D/PEM documents and
+  figures are preserved separately from this feature's commit.
 
 NKT Photonics offline implementation update (2026-09-22):
 

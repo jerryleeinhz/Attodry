@@ -102,6 +102,12 @@ class NktController:
         self.config, self.backend = config, backend
         self.power_meter, self.measurement_plane = power_meter, measurement_plane
         self.clock, self.sleep, self.on_event = clock, sleep, on_event
+        self._owned = False
+        self._closed = False
+        self._faulted = False
+        self._started = False
+        self._prepared_point = None
+        self._expected_emitting = False
         self.record = {"schema_version": 1, "captured_at_utc": utc_now(),
                        "simulated": not backend.is_hardware,
                        "measurement_config": config.snapshot(), "completed": False,
@@ -190,47 +196,136 @@ class NktController:
         self._wait(phase, lambda s, f: self._emission_matches(s, False),
                    source_only=True, healthy=False)
 
-    def run(self, *, authorize_writes=False, confirm_manual_route=False):
+    def _check_access(self, authorize_writes, confirm_manual_route):
         self.config.validate()
         if self.backend.is_hardware:
             self.config.require_hardware(writes=True)
             if not authorize_writes or not confirm_manual_route:
                 raise NktError("Writes and the selected manual optical route require explicit authorization")
-        owned = False
-        try:
-            source, filt = self.capture("preflight")
+
+    def begin(self, *, authorize_writes=False, confirm_manual_route=False):
+        """Acquire a confirmed-off source; no writes or implicit resource open.
+
+        A coordinator must call finish() in finally after entering this session.
+        Every public setting operation requires this successful preflight.
+        """
+        self._check_access(authorize_writes, confirm_manual_route)
+        if self._started or self._closed:
+            raise NktError("Controller sessions are single-use")
+        self._started = True
+        self._faulted = True
+        source, filt = self.capture("preflight")
+        self._healthy(source, filt)
+        if not self._emission_matches(source, False):
+            raise NktError("Preflight requires confirmed emission off; no automatic takeover")
+        self._owned = True
+        self._faulted = False
+
+    def _require_session(self, *, prepared=False):
+        if not self._owned or self._closed or self._faulted:
+            raise NktError("A successful authorized begin() is required")
+        if prepared and self._prepared_point is None:
+            raise NktError("prepare_point() must complete before emission or sampling")
+
+    def prepare_point(self, point: NktPoint):
+        """Configure one approved point with emission off, then verify settling."""
+        self._require_session()
+        self._faulted = True
+        point.validate(self.config.mode, self.config.max_level_pct, self.config.allowed_pp_ratios)
+        if point not in self.config.points:
+            raise NktError("Point is outside the configured scan")
+        self._prepared_point = None
+        self._off("before_configure")
+        self._event("configure_request", requested=asdict(point))
+        self.backend.configure(point)
+        source, filt = self._wait("filter_settle", lambda s, f: self._emission_matches(s, False)
+                                  and self._matches(point, s, f))
+        self._prepared_point = point
+        self._expected_emitting = False
+        self._faulted = False
+        return {"source": source, "filter": filt}
+
+    def set_emission(self, enabled: bool):
+        """Set and verify the optical state without releasing point ownership."""
+        self._require_session(prepared=True)
+        self._faulted = True
+        if type(enabled) is not bool or (enabled and not self.config.emit):
+            raise NktError("Emission requires a boolean and emit=true in the approved config")
+        if enabled:
+            # Integration may spend time preparing other instruments. Recheck the
+            # actual point before giving light, not only after the emission write.
+            source, filt = self.capture("before_emission")
             self._healthy(source, filt)
-            if not self._emission_matches(source, False):
-                raise NktError("Preflight requires confirmed emission off; no automatic takeover")
-            if source["control"] != self.config.source_control:
-                raise NktError("Source control mode differs; mode switching is not automatic")
-            owned = True
+            if not self._matches(self._prepared_point, source, filt):
+                raise NktError("Prepared settings changed before emission")
+            if not self._emission_matches(source, self._expected_emitting):
+                raise NktError("Unexpected emission state before emission request")
+            if self._expected_emitting:
+                self._faulted = False
+                return {"source": source, "filter": filt}
+        self.record["state_current"] = False
+        self.record["source_state_current"] = False
+        self.backend.set_emission(enabled)
+        source, filt = self._wait("emission_settle", lambda s, f: self._emission_matches(s, enabled)
+                                  and self._matches(self._prepared_point, s, f))
+        self._expected_emitting = enabled
+        self._faulted = False
+        return {"source": source, "filter": filt}
+
+    def verify_point(self, *, emitting: bool, phase="formal"):
+        """Fresh readback barrier before/after an external detector acquisition."""
+        self._require_session(prepared=True)
+        self._faulted = True
+        if type(emitting) is not bool:
+            raise NktError("emitting must be a boolean")
+        source, filt = self.capture(phase)
+        self._healthy(source, filt)
+        if not self._matches(self._prepared_point, source, filt):
+            raise NktError("Formal readback differs from requested settings")
+        if not self._emission_matches(source, emitting):
+            raise NktError("Formal emission state mismatch")
+        self._faulted = False
+        return {"source": source, "filter": filt}
+
+    def finish(self):
+        """Best-effort off/readback/close. Never take over a failed preflight."""
+        if self._closed:
+            return self.record["cleanup"]
+        try:
+            if self._owned:
+                try:
+                    self._off("cleanup")
+                    self.record["cleanup"]["off_confirmed"] = True
+                except (Exception, KeyboardInterrupt) as exc:
+                    self.record["state_current"] = False
+                    self.record["source_state_current"] = False
+                    self.record["cleanup"]["errors"].append(f"{type(exc).__name__}: {exc}")
+        finally:
+            try:
+                self.backend.close()
+            except (Exception, KeyboardInterrupt) as exc:
+                self.record["cleanup"]["errors"].append(f"close: {exc}")
+            self._closed = True
+            self._owned = False
+        return self.record["cleanup"]
+
+    def run(self, *, authorize_writes=False, confirm_manual_route=False):
+        # Authorization failure retains the original zero-I/O run contract.
+        self._check_access(authorize_writes, confirm_manual_route)
+        try:
+            self.begin(authorize_writes=authorize_writes, confirm_manual_route=confirm_manual_route)
             for i, point in enumerate(self.config.points):
                 row = {"condition_id": f"nkt-{i:06d}", "attempt_index": 1,
                        "requested": asdict(point), "accepted": False,
                        "readback": None, "measured_power_w": None,
                        "measurement_plane": self.measurement_plane}
                 self.record["points"].append(row)
-                self._off("before_configure")
-                self._event("configure_request", requested=asdict(point))
-                self.backend.configure(point)
-                self._wait("filter_settle", lambda s, f: self._emission_matches(s, False)
-                           and self._matches(point, s, f))
+                self.prepare_point(point)
                 if self.config.emit:
-                    self.record["state_current"] = False
-                    self.record["source_state_current"] = False
-                    self.backend.set_emission(True)
-                    self._wait("emission_settle", lambda s, f: self._emission_matches(s, True)
-                               and self._matches(point, s, f))
+                    self.set_emission(True)
                 until = self.clock() + self.config.dwell_s
                 while True:
-                    source, filt = self.capture("formal")
-                    self._healthy(source, filt)
-                    if source["control"] != self.config.source_control or not self._matches(point, source, filt):
-                        raise NktError("Formal readback differs from requested settings")
-                    if not self._emission_matches(source, self.config.emit):
-                        raise NktError("Formal emission state mismatch")
-                    row["readback"] = {"source": source, "filter": filt}
+                    row["readback"] = self.verify_point(emitting=self.config.emit)
                     if self.clock() >= until:
                         break
                     self.sleep(min(self.config.poll_interval_s, until - self.clock()))
@@ -240,10 +335,7 @@ class NktController:
                         raise NktError("Power meter returned invalid watts")
                     row["measured_power_w"] = value
                     # Meter acquisition may take time; verify the state again.
-                    source, filt = self.capture("after_power_measurement")
-                    self._healthy(source, filt)
-                    if not self._matches(point, source, filt) or not self._emission_matches(source, self.config.emit):
-                        raise NktError("Settings changed during power measurement")
+                    self.verify_point(emitting=self.config.emit, phase="after_power_measurement")
                     row["measured_power_captured_at_utc"] = utc_now()
                 self._event("point_complete", point=row.copy())
             self.record["outcome"] = "completed"
@@ -251,18 +343,7 @@ class NktController:
             self.record["error"] = f"{type(exc).__name__}: {exc}"
             self.record["outcome"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected"
         finally:
-            if owned:
-                try:
-                    self._off("cleanup")
-                    self.record["cleanup"]["off_confirmed"] = True
-                except (Exception, KeyboardInterrupt) as exc:
-                    self.record["state_current"] = False
-                    self.record["source_state_current"] = False
-                    self.record["cleanup"]["errors"].append(f"{type(exc).__name__}: {exc}")
-            try:
-                self.backend.close()
-            except (Exception, KeyboardInterrupt) as exc:
-                self.record["cleanup"]["errors"].append(f"close: {exc}")
+            self.finish()
             if self.record["cleanup"]["errors"]:
                 self.record["outcome"] = "rejected"
             self.record["completed"] = self.record["outcome"] == "completed"

@@ -103,6 +103,35 @@ Signed resistance is `Vxx_X / I_rms`. The software never infers `I_rms` from the
 SR830 amplitude unless the operator explicitly supplies the complete excitation
 path resistance, including series components and termination/loading effects.
 
+## DC photoresponse profile (offline implementation, 2026-10-12)
+
+The photoresponse profile is independent of the historical dual-SR830 path.
+Its public CLI accepts simulation only and rejects hardware configuration before
+constructing any backend. It has no hardware connect, trigger or output command.
+
+- `open_circuit_voltage`: no excitation source object or source commands; the real
+  wiring must later confirm an unloaded voltage measurement. 0 A is not a disconnect.
+- `dc_current_voltage`: 6221 current bias plus 2182A/2400 voltage sensing; source
+  setpoint readback is not measured current, including at 0 A.
+- `voltage_bias_current`: 2400 voltage bias and current sensing; never implicitly
+  enable a 6221 simultaneously in the same device loop.
+- A 2400 voltmeter needs a separately verified measure-only configuration and
+  output-off/loading contract; do not reuse gate zero-disable logic blindly.
+- Laser emission requires a verified route, interlocks and exact diode/source
+  limits. CLD1010LP is a controller; approximately 760 nm does not identify the
+  diode, pinout, permitted current or TEC limits.
+- Future integrated cleanup attempts laser off, mode-specific electrical cleanup,
+  then the existing monitored field-zero policy. Failure of one action must not
+  prevent the others. Only final readback can establish off/zero; retain unknown
+  state and require manual inspection when communication fails.
+- Temperature/field are not connected in the current simulation. Their values are
+  null rather than invented zero/stable readings. Future control keeps the 3 T
+  vector invariant and records actual sample temperature.
+
+Query contracts in `photoresponse_keithley.py` do not reset instruments or consume
+error queues. `FETCh?` is explicitly stale/diagnostic; `READ?` changes the trigger
+state and is not a read-only diagnostic. Real acquisition remains unimplemented.
+
 ## Vendor files
 
 Whether the vendor DLL binary is tracked is a repository packaging decision, not

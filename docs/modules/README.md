@@ -20,6 +20,8 @@ Three-SMU ─────┘
   波长/带宽和 LLTF SWIR 窄带控制；三模式模拟及 EXTREME/VARIA DLL 适配已离线验证，
   LLTF 厂商 SDK 适配与所有实机验收仍待完成。
 - [`INTEGRATION.md`](INTEGRATION.md)：只在四个设备模块分别验收后进行组合。
+- [`PHOTORESPONSE.md`](PHOTORESPONSE.md)：SuperK／CLD1010LP、6221、2182A／2400 的
+  直流光电压与光电流；独立配置、暗—亮—暗仿真和审计已离线完成，实机采集仍待开发/验收。
 
 原有 Integration 的四设备验收范围保持不变；NKT 后续加入时需单独扩展集成契约。
 各设备模块可以独立审核和测试。Integration 不重新发明各模块的安全逻辑，

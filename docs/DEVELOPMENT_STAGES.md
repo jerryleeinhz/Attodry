@@ -2,6 +2,39 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - offline foundation
+
+Status: offline foundation complete (2026-10-12); physical P0 closure, hardware
+write/trigger adapters, target validation and all photoresponse commissioning pending.
+
+- User confirmed photovoltage and photocurrent in stages, SuperK or CLD1010LP
+  (approximately 760 nm; diode model unknown), 6221 DC/none and 2182A/2400 sensing.
+  Development continues on the existing `module/NKT-photonics` branch.
+- Added strict independent photoresponse config, three simulated electrical modes,
+  optical/bias/repeat grids and dark-before/light/dark-after raw acquisition.
+  `none` has null current and no source commands; DC 0 A remains a separate mode.
+- Exposed NKT single-use point sessions with authorization/preflight, off-state
+  preparation, fresh settings checks before emission, formal readback barriers,
+  faulted-session refusal and confirmed-off cleanup. Existing standalone run reuses them.
+- Added time-based linear dark interpolation, per-sample before/after state, JSON/JSONL,
+  conservative whole-run accepted promotion, partial/error retention and read-only analysis.
+  No calibrated watts, environment or measured current is inferred from settings.
+- Added fake-tested 6221/2182 query adapters without resource open, settings writes,
+  trigger or error-queue consumption. 2182 FETCh is explicitly stale; 6221 settings
+  do not establish safe DC takeover. Exact query/identity still needs real validation.
+- Added CLI, simulation/example configuration, [work package](modules/PHOTORESPONSE.md)
+  and [offline guide](PHOTORESPONSE_GUIDE.md). Hardware mode fails before construction.
+- Validation: 29 new photoresponse/query tests and 30 existing NKT tests passed;
+  complete suite 444/444 passed with Python 3.12.7, `PYTHONPATH=src`,
+  `PYTHONNOUSERSITE=1`, `python -s -m unittest discover -s tests -q`.
+  The initial ordinary run had an existing user-site NumPy 2 / Anaconda Matplotlib
+  ABI conflict; excluding user-site packages resolved it without installing anything.
+  Normal temporary-directory access was required outside the restricted sandbox.
+  Source/test compilation and CLI simulation -> accepted-results analysis also passed.
+- No real instrument was connected or written, no LK_setup operation was performed,
+  and no hardware authorization was implied. SQLite/resume, real electrical control,
+  CLD1010LP and joint environment/power acquisition remain planned.
+
 ## NKT Photonics module - standalone offline implementation
 
 Status: N1 and EXTREME/VARIA N2 `offline complete` (2026-09-22). LLTF real SDK

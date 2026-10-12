@@ -1,0 +1,46 @@
+# OFFLINE ONLY. These synthetic values are not sample limits or hardware permission.
+# Copy the relevant tables into ignored hardware.local.toml for one-file offline use.
+[photoresponse]
+mode = "open_circuit_voltage" # open_circuit_voltage | dc_current_voltage | voltage_bias_current
+detector = "keithley2182a" # keithley2182a | keithley2400; current requires 2400
+samples_per_window = 3
+repeats = 1
+sample_interval_s = 0.01
+settle_s = 0.01
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.00001
+# dc_current_voltage requires bias_current_points_a = [-0.000001, 0.0, 0.000001]
+# voltage_bias_current requires bias_voltage_points_v = [-0.001, 0.0, 0.001]
+# open_circuit_voltage forbids BOTH bias arrays; none is distinct from DC 0 A.
+
+[nkt_source]
+control = "current"
+max_level_pct = 10.0
+allowed_pp_ratios = []
+
+[nkt_varia]
+monitor_present = false
+
+[nkt_run]
+backend = "simulation" # Other backends fail before any driver construction.
+mode = "varia_bandpass"
+manual_route = "SIMULATED VARIA route"
+emit = true # Only simulated emission.
+timeout_s = 5.0
+poll_interval_s = 0.1
+dwell_s = 0.0 # Photoresponse settling is controlled by photoresponse.settle_s.
+output_directory = "../run_data/photoresponse_simulation"
+run_name = "photoresponse_offline"
+note = "Synthetic response; no instruments, field, temperature or calibrated optical power."
+
+[[nkt_run.points]]
+source_level_pct = 5.0
+wavelength_nm = 750.0
+bandwidth_nm = 20.0
+nd_pct = 10.0
+
+[[nkt_run.points]]
+source_level_pct = 5.0
+wavelength_nm = 760.0
+bandwidth_nm = 20.0
+nd_pct = 10.0
