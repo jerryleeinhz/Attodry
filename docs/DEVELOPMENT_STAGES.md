@@ -29,6 +29,12 @@ CLD illuminated power feedback remains protected/blocked, not accepted.
   LD OFF; unresolved mount protection still blocks automatic output.
 - **648/648 full local tests** passed; NKT 16 and CLD 8 actual CLI simulated
   combinations plus CSV checks passed. No real SMU/environment output was commanded.
+- LK_setup `lyr` passed **307/307** isolated offline tests. Its active NKT checkout
+  fast-forwarded to `f609d2c`, preserving nine original local files by SHA-256.
+  Six new reference-backed 05-10 profiles and their read-only validator pass.
+- Post-deployment passive 6221/2182A snapshots passed with zero/OFF and unarmed
+  modes. MEAS was 0 at this later check; no fresh READ or output change was made.
+  CLD output qualification and illuminated P8 remain unfinished.
 
 ## DC photoresponse - complete optical/electrical combination goal
 

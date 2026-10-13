@@ -43,8 +43,25 @@ DC photoresponse - reference reuse, Three-SMU and control-only acceptance (2026-
   Cause remains unresolved, and automatic LD enable is still blocked; no bypass,
   installer, driver update, hardware SMU or environment write was performed.
 - Local full regression **648/648** passed. Actual CLI/CSV simulations passed:
-  NKT 16 conditions and CLD 8 conditions with selected SMU roles. Target validation
-  and final deployment follow after this source commit; private addresses/data stay ignored.
+  NKT 16 conditions and CLD 8 conditions with selected SMU roles. LK_setup `lyr`
+  passed **307/307** isolated offline tests: photoresponse 152, pinned SMU 54,
+  PM100D 24, NKT 33 and legacy SMU 44. Source `f609d2c` was fast-forwarded to its
+  active NKT checkout, with nine original local files unchanged by SHA-256.
+- Prepared six new ignored 05-10 combination profiles, a read-only validator and
+  a Chinese guide under the target photoresponse_trial directory. All profiles
+  validate: NKT/PM 6, CLD/PM 6, NKT/gate/PM 66, CLD/6221/PM 30,
+  environment/gate/PM future 66 and channel-current future 6 conditions.
+  Unknown top/bias SMU roles stay OFF; channel-current wiring stays unconfirmed.
+- Configuration migration is explicit: Cartesian targets become an ordered axis;
+  initial current resets to the optical row per condition rather than `previous`
+  warm start. Reference field readback tolerance maps to field_tolerance_t; the
+  legacy setpoint acknowledgement field is not exposed. Future environment points
+  and step limits are editable plans, not confirmed present temperature/field.
+- A post-deployment passive electrical snapshot passed, opening only the 6221
+  host and querying 2182A. It confirmed zero/OFF and unarmed modes; MEAS was now
+  0, so this is communication evidence, not a fresh reproduction of OFF-COMP=8.
+  No additional READ, output write or status clear was issued. Private addresses,
+  local configuration and all real audit records stay ignored.
 
 DC photoresponse - full-goal correction and power/combination integration (2026-10-13):
 

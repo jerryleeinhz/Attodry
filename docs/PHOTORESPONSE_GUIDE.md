@@ -9,6 +9,18 @@ PM100D 反馈稳定实际光功率，并在正式窗口保存电学读数和各�
 
 ## 已知实验状态（2026-10-13）
 
+- 最新验收范围：P0/P1 接线隔离及参考配置复用已确认；P2/P3 按无样品控制流程验收，
+  P6/P7/P9 与 SMU 联合扫描按复用源码和离线测试验收。SuperK 不再追加实测。
+- 当前完整本地回归 **648/648**；LK_setup `lyr` 隔离验证 **307/307**。
+  `f609d2c` 已同步到目标 NKT 分支，九份原配置/说明经 SHA-256 核对未修改。
+- P2 配置、触发、新鲜读数及清理流程通过，过载保留为拒绝数据；P3 五个关闭输出状态下
+  的电流设定/读回通过，开启输出的空载保护停止与最终零/关闭已验证。
+  这不表示五点实际供流通过。部署后只读快照确认零/关闭、未 armed，未重触发 READ。
+- PM100D 身份/探头匹配参考配置，波长校正及平均设置已验证；暗噪声含正负值，
+  严格亮态测量规则拒绝负读数，尚未取得有光稳定反馈验收。
+- CLD 本轮检查发现保存限流被设为 140 mA，已在 LD 关闭时恢复批准的 30 mA；
+  未改 TEC 目标/开启状态。面板无 ERROR 与 CONN/MEAS bit13 冲突仍未解释，
+  保留自动出光阻塞。以下早期测试条目是历史证据，不代替本轮状态。
 - 2182A 输入由用户确认悬空；保留通信/配置通过及过载拒绝结果，暂不重复有效电压验收。
 - 2400 实际连接底栅极（SiO2/Si）与 source，属于 `gate_bottom` 偏置/漏电角色。
   先前 0 V / 10 nA 尝试仍被拒绝，已确认回零、关闭、HIMP；该路径不能作为沟道光电流探测器。
@@ -58,7 +70,7 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 控制电脑须使用 `C:/Users/LK_Setup/anaconda3/envs/lyr/python.exe`，不能用裸系统 Python。
 本地 Anaconda 若存在用户目录 NumPy/Matplotlib 冲突，可设置 `PYTHONNOUSERSITE=1` 并用 `python -s`。
 
-## 三种测量模式
+## 测量模式
 
 | mode | detector | 偏置字段 | 结果与电路含义 |
 |---|---|---|---|
@@ -141,6 +153,24 @@ CSV 输出功率及组合坐标。源设定百分比、电流与实际 W 始终�
 不会自动推算样品的 A/W 或 V/W。
 
 ## 配置模板
+
+LK_setup 的 `NKT/config/photoresponse_trial/` 已新增六份独立本机配置，原文件保留：
+
+| 前缀 | 组合 | 条件数 |
+|---|---|---|
+| 05 | NKT + PM + 2182A，无激励 | 6 |
+| 06 | CLD + PM + 2182A，无激励 | 6 |
+| 07 | NKT + PM + 底栅 + 2182A | 66 |
+| 08 | CLD + PM + 6221 五点激励 + 2182A | 30 |
+| 09 | NKT + PM + 底栅 + 温磁场未来模板 | 66 |
+| 10 | CLD + PM + 2400 通道光电流未来模板 | 6 |
+
+同目录的 `validate_reused_profiles.py` 只校验配置，不连接仪器；
+`README_组合复用配置.md` 说明可修改字段。光路/PM/栅极参数来自参考有效配置。
+目标功率的 Cartesian 关系映射为组合轴；每条件从光学行指定的初始电流开始，
+不沿用参考配置的 `previous` 热启动。参考磁场 readback tolerance 映射为
+`field_tolerance_t`，原 setpoint ack 字段不在本项目配置接口中。
+09 的温度/磁场点和步长是可修改计划示例，不是现场读回。10 仍保留未确认接线。
 
 Three-SMU 联合配置增加 `[photoresponse_smu]`，设 `enabled=true`，复用原
 `[three_smu_run]` 与活动角色的 `[smu_bias] / [gate_top] / [gate_bottom]` 表。

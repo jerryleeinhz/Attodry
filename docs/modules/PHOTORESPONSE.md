@@ -26,7 +26,7 @@ electrical window retains fresh detector readings, optical power evidence and
 6221 settings/status when that instrument is selected. The 6221 may supply DC
 excitation or serve only as the 2182A communication relay.
 
-Combinations select optical points, target powers, bias points, repeats and optional
+Combinations select optical points, target powers, bias/SMU points, repeats and optional
 temperature/field points. Every leaf condition records its requested coordinates
 and actual readings; omitted hardware is not opened. Failed formal windows remain
 raw audit and are not assembled into an accepted condition. Acquisition is
@@ -42,27 +42,28 @@ historical NKT acceptance does not commission CLD or this experiment's optical p
 
 Photovoltage and photocurrent share a dark-before/light/dark-after coordinator.
 Optical roles: SuperK EXTREME/VARIA through existing NKT SDK, or CLD1010LP through
-USB/VISA SCPI or TL4000. Electrical roles: no external excitation, 6221 DC current, or 2400 voltage
+USB/VISA SCPI or TL4000. Electrical roles: no external excitation, 6221 DC current, selected SMU source, or 2400 voltage
 bias; fresh voltage from 2182A/2400 and current from 2400. Existing SR830 workflows
 remain independent. This implementation does not use lock-ins in the photoresponse path.
 
 | Stage | Software status | Physical acceptance still required |
 |---|---|---|
 | P0 physical contract | Operator-confirmed wiring/isolation and Integration configuration reuse | Runtime protection/readback still must pass; unspecified diode model remains allowed |
-| P1 simulation/transport | Three modes, NKT/CLD simulations, audited VISA and RS-232 relay, fault tests | Stable shared-bus operation and actual response formats |
+| P1 simulation/transport | Five modes, NKT/CLD simulations, audited VISA/RS-232 relay and fault tests; closed by revised reuse/control criterion | No further SuperK validation required |
 | P2 photovoltage | No-sample control lifecycle passed: configuration, fresh READ and cleanup | Floating-input overload is retained, not accepted as scientific data |
 | P3 current bias | Five output-off current settings/readbacks passed; output protection stop and zero/off confirmed | Actual five-point current-delivery sweep was not passed; outside the revised control-only criterion |
 | P4 photocurrent | 2400 V-source/I-measure and 0 A/fixed-range voltmeter, 24-bit status checks | Station 2400 is gate-bottom/source; channel detector wiring and acceptance pending |
 | P5 CLD | USB/VISA SCPI or TL4000 and shared TEC/interlock/current controller | Passive 26 C TEC stability verified; connection diagnostic qualification still blocks automatic LD acceptance |
 | P6 environment | Existing attoDRY driver/config reuse, explicit T/Bx/Bz points, stability, 3 T and cleanup | Offline acceptance is sufficient under the revised operator scope |
 | P7 data | JSON/JSONL, SQLite WAL/FULL audit, new-attempt retry, accepted-only Notebook/CSV | Target offline validation recorded in development stages; scientific noise/settling validation remains experimental |
-| P8 measured-power feedback | Offline complete: reused PM100D, PowerWindow, NKT strategies and bounded CLD current actuator | PM identity/sensor, current measurement plane, range/calibration and new optical-path acceptance |
+| P8 measured-power feedback | Offline complete; real PM console/sensor identity, calibration/average settings and fresh-read communication exercised | CLD protected output and illuminated stable-power feedback remain pending; dark noise is not a pass |
 | P9 combination entry point | Ordered optical/power/bias/environment/SMU/repeat coordinates, full leaf records and reused Three-SMU | Offline acceptance is sufficient; no hardware synchronization inferred |
 
 P8/P9 now extend the earlier scoped implementation with PM100D feedback and
 combination integration, bounded CLD current feedback and formal-window drift rejection.
-Validation: 568/568 full local tests, including 129 photoresponse and 24 PM100D tests;
-actual CLI simulation and accepted CSV checks passed for NKT 8 and CLD 6 conditions.
+Validation: 648/648 full local tests, including 152 photoresponse and 24 PM100D tests;
+actual CLI simulation and accepted CSV checks passed for NKT 16 and CLD 8 SMU conditions.
+LK_setup passed 307/307 isolated offline tests and runs source commit `f609d2c`.
 Physical experiment commissioning remains separate. No watts or responsivity
 are inferred from source settings. Delta/current reversal is not automatically enabled because it changes
 the measured observable and can cancel current-even signals.
@@ -79,6 +80,7 @@ the measured observable and can cancel current-even signals.
 | 6221 relay only | No excitation/output setting | Query-only host settings/status alongside 2182A readings; no source-output controller |
 | Optional 2400 channel detector | Source-drain voltage bias and current compliance | Measured V/I and status; gate-source wiring cannot be labelled channel photocurrent |
 | Optional attoDRY | Temperature and <=3 T vector targets | Actual temperature/Bx/Bz before/after readings and stability/protection |
+| Optional Three-SMU | Selected bias/top-gate/bottom-gate points from reused generator | Separate source V/I, measured V/I, gate leakage, status and confirmed zero-disable cleanup |
 
 An optical target in W is independent of the actuator setting. Feedback must not
 infer a universal linear power/current calibration, increase light when the meter
