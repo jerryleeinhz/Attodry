@@ -2,10 +2,36 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - CLD temperature window and diagnostic correction
+
+Status: software correction and passive thermal verification complete (2026-10-13).
+Automatic LD emission remains pending; manual output is operator-reported evidence.
+
+- Manufacturer window is a full span. Validate target +/- span/2 against the
+  configured temperature bounds and constrain stabilization tolerance to span/2.
+- Added the CLD-supported LD temperature-trip query to both hardware backends and
+  simulation. LD-off TEC settling may have a temperature-window trip; preparing
+  or enabling LD and formal emission verification require it clear.
+- Removed the CLD-inapplicable generic TEC cable API mapping. Preserve raw LD/TEC
+  CONN and MEAS conditions with unqualified semantics. Asserted, malformed or
+  unavailable diagnostics still fail closed for automatic LD emission. Qualified
+  sensor/overtemperature/compliance/interlock protections retain their guards.
+- Operator changed target to 26 C and reported normal manual light output. Passive
+  production-driver checks confirmed five seconds of stable TEC operation near
+  26 C, with temperature trip clear, LD off and 30 mA setpoint/limit. No setting
+  or output writes were made; the operator's TEC remained on. CONN=1/MEAS bit13
+  persisted without SCPI errors, so the earlier proven physical-fault conclusion
+  was withdrawn. Firmware-specific diagnostic qualification remains open.
+- **511/511 local offline tests** and **96/96 target photoresponse tests** passed.
+  Regressions cover full-span boundaries, stability tolerance, expected thermal
+  trips, pre-enable and in-emission trips, unresolved diagnostics and cleanup.
+  No remote LD enable or accepted optical/electrical photoresponse is claimed.
+
 ## DC photoresponse - CLD USB/VISA and station-role clarification
 
 Status: production VISA backend, cleanup/protection fixes and documentation
-complete (2026-10-13); physical TEC/laser acceptance blocked on connection protection.
+complete (2026-10-13); the initial protection diagnosis is superseded by
+the follow-up above. Historical rejected trials remain retained.
 
 - Added USB/VISA CLD backend and CLI selection, retaining native TL4000. The
   optional DLL field is required only for TL4000; exact instrument model/serial,

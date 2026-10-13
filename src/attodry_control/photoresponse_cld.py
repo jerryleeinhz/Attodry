@@ -111,13 +111,30 @@ def load_cld_config(doc, path):
     return result
 
 
+def require_connection_diagnostics(diagnostics):
+    """Unresolved CLD connection indications block LD, not TEC preparation."""
+    if not isinstance(diagnostics, dict) or diagnostics.get("qualification") != "unqualified":
+        raise NktError("CLD connection diagnostic unresolved: missing qualification")
+    for name in ("ld_connection_raw", "tec_connection_raw"):
+        value = diagnostics.get(name)
+        if type(value) is not int or value not in (0, 1):
+            raise NktError("CLD connection diagnostic unresolved: invalid " + name)
+    condition = diagnostics.get("measurement_condition_raw")
+    if type(condition) is not int or not 0 <= condition <= 65535:
+        raise NktError("CLD connection diagnostic unresolved: invalid measurement condition")
+    if (diagnostics["ld_connection_raw"] or diagnostics["tec_connection_raw"]
+            or condition & (1 << 13)):
+        raise NktError("CLD connection diagnostic unresolved; LD enable is blocked")
+
+
 class TL4000:
     is_hardware = True
     SHORT_GETTERS = {"getLdOperatingMode", "getTecOperatingMode", "getTempUnit", "getTempProtMode"}
     BOOL_GETTERS = {"getLdOutputState", "getTecOutputState", "getLdOutpAutoOnState",
-                    "isTrippedLdOutputProtInterlock", "isTrippedTecOutputProtTransducer",
+                    "isTrippedLdOutputProtInterlock", "isTrippedLdOutputProtTemperature",
+                    "isTrippedTecOutputProtTransducer",
                     "isTrippedTecOutputProtOvertemp", "isTrippedTecOutputProtVoltage"}
-    DOUBLE_GETTERS = {"measTemp", "measLdCurr", "measLdVolt"}
+    DOUBLE_GETTERS = {"measTemp", "measLdCurr", "measLdVolt", "measTecCurr"}
     SETTING_GETTERS = {"getLdCurrLimit", "getLdCurrSetpoint", "getTempSetpoint", "getTecCurrLimit", "getTempProtWindow"}
 
     def __init__(self, config, *, authorize_connection=False, authorize_writes=False, dll=None, on_event=None):
@@ -207,6 +224,8 @@ class TL4000:
         result = {"identity": [manufacturer, model, serial, firmware]}
         for name in sorted(self.SHORT_GETTERS | self.BOOL_GETTERS | self.DOUBLE_GETTERS | self.SETTING_GETTERS):
             result[name] = self.get(name)
+        result["diagnostics"] = {"qualification": "unavailable",
+            "reason": "CLD connection/cable diagnostics are not available through the supported TL4000 getters"}
         return result
 
     def close(self):
@@ -231,7 +250,7 @@ class VisaCld:
         "getTecOutputState": "OUTP2:STAT?",
         "getLdOutpAutoOnState": "OUTP1:PON:STAT?",
         "isTrippedLdOutputProtInterlock": "OUTP1:PROT:INTL:TRIP?",
-        "isTrippedTecOutputProtCable": "OUTP2:PROT:CONN:TRIP?",
+        "isTrippedLdOutputProtTemperature": "OUTP1:PROT:TEMP:TRIP?",
         "isTrippedTecOutputProtTransducer": "OUTP2:PROT:TRAN:TRIP?",
         "isTrippedTecOutputProtOvertemp": "OUTP2:PROT:OTEM:TRIP?",
         "isTrippedTecOutputProtVoltage": "OUTP2:PROT:COMP:TRIP?",
@@ -243,6 +262,7 @@ class VisaCld:
         "measTemp": "SENS2:TEMP:DATA?",
         "measLdCurr": "SENS3:CURR:DC:DATA?",
         "measLdVolt": "SENS4:VOLT:DC:DATA?",
+        "measTecCurr": "SOUR2:CURR:DATA?",
     }
     ENUMS = {
         "getLdOperatingMode": {"CURR": 0, "CURRENT": 0, "POW": 1, "POWER": 1},
@@ -296,7 +316,7 @@ class VisaCld:
             if raw.upper() not in self.ENUMS[name]:
                 raise NktError("Unknown CLD enum for " + name + ": " + raw)
             return self.ENUMS[name][raw.upper()]
-        if name in TL4000.BOOL_GETTERS or name == "isTrippedTecOutputProtCable":
+        if name in TL4000.BOOL_GETTERS:
             if raw.upper() not in ("0", "+0", "OFF", "1", "+1", "ON"):
                 raise NktError("Unknown CLD boolean for " + name + ": " + raw)
             return raw.upper() in ("1", "+1", "ON")
@@ -355,6 +375,9 @@ class VisaCld:
             number(self.get("getLdCurrSetpoint"), "LD current setpoint", 0., limit)
             if self.get("getLdOperatingMode") != 0:
                 raise NktError("CLD LD output requires constant-current mode")
+            if self.get("getTempProtMode") != 2 or self.get("isTrippedLdOutputProtTemperature"):
+                raise NktError("CLD LD temperature protection prevents emission")
+            require_connection_diagnostics(self._diagnostics())
         elif name == "switchTecOutput":
             number(self.get("getTecCurrLimit"), "TEC current limit", .001, self.config.max_tec_current_a)
             if self.get("getTecOperatingMode") != 1:
@@ -367,8 +390,26 @@ class VisaCld:
         if not self._same(actual, value) or (name == "setLdCurrLimit" and actual > self.config.max_current_a):
             raise NktError("CLD settings readback mismatch for " + name)
 
+    def _diagnostics(self):
+        commands = {"ld_connection_raw": "OUTP1:PROT:CONN:TRIP?",
+                    "tec_connection_raw": "OUTP2:PROT:CONN:TRIP?",
+                    "measurement_condition_raw": "STAT:MEAS:COND?"}
+        raw = {name: self.transport.query(command) for name, command in commands.items()}
+        values = {}
+        for name, response in raw.items():
+            try: value = int(response)
+            except ValueError as exc:
+                raise NktError("Invalid CLD raw diagnostic: " + name) from exc
+            if not 0 <= value <= (65535 if name == "measurement_condition_raw" else 1):
+                raise NktError("Invalid CLD raw diagnostic: " + name)
+            values[name] = value
+        return {**values, "raw_responses": raw, "qualification": "unqualified",
+            "reason": "CLD1010LP connection indications and bit 13 have uncommissioned semantics; "
+                      "they establish neither a cable fault nor a connected state"}
+
     def snapshot(self):
-        return {"identity": self._identity(), **{name: self.get(name) for name in self.QUERIES}}
+        return {"identity": self._identity(), **{name: self.get(name) for name in self.QUERIES},
+                "diagnostics": self._diagnostics()}
 
     def close(self):
         if self.opened:
@@ -384,12 +425,13 @@ class SimulatedCld:
             "getLdOperatingMode": 0, "getTecOperatingMode": 1, "getTempUnit": 0,
             "getTempProtMode": 2, "getLdOutputState": False, "getTecOutputState": False,
             "getLdOutpAutoOnState": False, "isTrippedLdOutputProtInterlock": False,
-            "isTrippedTecOutputProtCable": False, "isTrippedTecOutputProtTransducer": False,
+            "isTrippedLdOutputProtTemperature": False, "isTrippedTecOutputProtTransducer": False,
             "isTrippedTecOutputProtOvertemp": False, "isTrippedTecOutputProtVoltage": False,
             "getLdCurrLimit": config.max_current_a, "getLdCurrSetpoint": 0.,
             "getTempSetpoint": config.temperature_c, "getTecCurrLimit": config.max_tec_current_a,
-            "getTempProtWindow": config.temperature_tolerance_c, "measTemp": config.temperature_c,
-            "measLdCurr": 0., "measLdVolt": 0.}
+            "getTempProtWindow": 2*config.temperature_tolerance_c, "measTemp": config.temperature_c,
+            "measLdCurr": 0., "measLdVolt": 0., "measTecCurr": 0.,
+            "diagnostics": {"qualification": "simulated", "reason": "No physical connection diagnostic"}}
     def snapshot(self): return deepcopy(self.state)
     def set(self, name, value):
         keys = {"setLdCurrLimit":"getLdCurrLimit", "setLdCurrSetpoint":"getLdCurrSetpoint",
@@ -420,17 +462,12 @@ class CldController:
         if self.on_event: self.on_event(event)
         return state
 
-    def healthy(self, state):
+    def healthy(self, state, *, require_ld_ready=False):
         c = self.config
         if state["isTrippedLdOutputProtInterlock"] or state["getLdOutpAutoOnState"]:
             raise NktError("CLD interlock/auto-on prevents operation")
         faults = ("isTrippedTecOutputProtTransducer", "isTrippedTecOutputProtOvertemp",
                   "isTrippedTecOutputProtVoltage")
-        # The CLD SCPI connection query is documented; firmware behavior remains
-        # under commissioning. Keep an asserted flag fail-closed. The
-        # TL4000 cable getter is documented only for TED/ITC, not CLD devices.
-        if "isTrippedTecOutputProtCable" in state:
-            faults += ("isTrippedTecOutputProtCable",)
         for name in faults:
             if type(state[name]) is not bool or state[name]:
                 raise NktError("CLD TEC protection prevents operation: " + name)
@@ -440,8 +477,20 @@ class CldController:
         number(state["measTemp"], "diode temperature", c.temperature_min_c, c.temperature_max_c)
         number(state["measLdVolt"], "diode voltage", 0, c.max_voltage_v)
         number(state["measLdCurr"], "diode current", 0, c.max_current_a)
-        number(state["getTempProtWindow"], "temperature protection", .001,
-               min(c.temperature_c-c.temperature_min_c, c.temperature_max_c-c.temperature_c))
+        window = number(state["getTempProtWindow"], "temperature protection span", .001,
+                        2*(c.temperature_max_c-c.temperature_min_c))
+        half_window = window / 2
+        if not c.temperature_min_c <= c.temperature_c-half_window <= c.temperature_c+half_window <= c.temperature_max_c:
+            raise NktError("CLD temperature protection window exceeds diode limits")
+        if c.temperature_tolerance_c > half_window:
+            raise NktError("CLD stable temperature tolerance exceeds half of protection span")
+        trip = state["isTrippedLdOutputProtTemperature"]
+        if type(trip) is not bool:
+            raise NktError("Invalid CLD LD temperature protection state")
+        if require_ld_ready or state["getLdOutputState"]:
+            if trip: raise NktError("CLD LD temperature protection prevents emission")
+            if self.backend.is_hardware and c.backend == "visa":
+                require_connection_diagnostics(state.get("diagnostics"))
 
     def stable(self, state):
         return state["getTecOutputState"] and abs(state["measTemp"]-self.config.temperature_c) <= self.config.temperature_tolerance_c
@@ -483,7 +532,9 @@ class CldController:
             raise NktError("CLD point/session invalid")
         self.failed = True
         self.backend.set("switchLdOutput", False)
-        if self.capture("cld_before_configure")["getLdOutputState"]: raise NktError("CLD off not confirmed")
+        state = self.capture("cld_before_configure")
+        if state["getLdOutputState"]: raise NktError("CLD off not confirmed")
+        self.healthy(state, require_ld_ready=True)
         self.backend.set("setLdCurrSetpoint", point.current_a)
         self.point = point
         self.failed = False
@@ -493,7 +544,7 @@ class CldController:
         if not self.owned or self.closed or self.failed or self.point is None: raise NktError("CLD point not prepared")
         self.failed = True
         state = self.capture(phase)
-        self.healthy(state)
+        self.healthy(state, require_ld_ready=True)
         if state["getLdOutputState"] != emitting or not self.stable(state): raise NktError("CLD optical/thermal state changed")
         if state["getLdOperatingMode"] != 0 or state["getLdCurrLimit"] > self.config.max_current_a:
             raise NktError("CLD current control/limit changed")

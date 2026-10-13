@@ -128,8 +128,14 @@ its source. Neither operation opens a laser or unused detector.
   Record the diode model truthfully; the operator may explicitly elect an unspecified
   model for staged testing. Approximate wavelength and measurement range do not
   establish a diode voltage rating. USB/VISA and native TL4000 paths never reset.
-  Asserted TEC connection/sensor/overtemperature/compliance protection blocks output
-  before settings/enable writes; ENAB does not substitute for PROT.
+  Qualified TEC sensor/overtemperature/compliance faults block preparation.
+  A temperature trip may be expected during LD-off TEC settling, but blocks LD
+  preparation/enable and formal emission. The protection window is a full span;
+  both target +/- span/2 and software tolerance must fit their approved bounds.
+  Generic TL4000 cable faults do not apply to CLD. Raw CLD CONN/MEAS diagnostics
+  retain unqualified firmware semantics; asserted or unreadable values block LD
+  enable without being mislabelled as a proven cable failure. ENAB does not
+  substitute for PROT; no reset/clear or polarity inversion bypasses protection.
 - Environment changes occur with light and electrical sources off. Reuse the
   commissioned feedback-before-temperature sequence, bounded overshoot, existing field
   path validation and `sqrt(Bx^2+Bz^2) <= 3 T`. Record actual temperature/field.
@@ -146,9 +152,11 @@ its source. Neither operation opens a laser or unused detector.
 
 Real access resumed on 2026-10-13. 6221 unloaded commissioning and the initial
 2400 gate-path trial stopped on compliance with verified zero/off cleanup. The
-2182A input is confirmed floating. CLD read-only USB/VISA queries are verified,
-but socket connection protection currently blocks thermal/emission acceptance.
-Keep all outputs off until the physical fault is resolved; preserve raw attempts.
+2182A input is confirmed floating. CLD passive USB/VISA verification now confirms
+stable operator-controlled TEC operation at 26 C with LD off and temperature trip
+clear. CONN/MEAS indicators remain inconsistent with normal operation; preserve
+raw values and keep automatic LD enable blocked until their semantics and the
+software voltage bound are confirmed. Do not take over the operator's active TEC.
 See [photoresponse guide](PHOTORESPONSE_GUIDE.md) for current role/wiring evidence.
 
 ## Vendor files

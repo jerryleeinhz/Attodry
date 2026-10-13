@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from attodry_control.nkt_config import NktError
-from attodry_control.photoresponse_cld import CldController, VisaCld, load_cld_config
+from attodry_control.photoresponse_cld import CldController, SimulatedCld, TL4000, VisaCld, load_cld_config
 from attodry_control.photoresponse_cli import _run
 from attodry_control.photoresponse_config import load_photoresponse_config
 
@@ -37,12 +37,14 @@ class Resource:
             "UNIT:TEMP?": "CEL", "OUTP1:PROT:TEMP:MODE?": "PROT",
             "OUTP1:STAT?": "0", "OUTP2:STAT?": "0", "OUTP1:PON:STAT?": "0",
             "OUTP1:PROT:INTL:TRIP?": "0", "SOUR1:CURR:LIM:AMPL?": "+3.000000E-02",
+            "OUTP1:PROT:TEMP:TRIP?": "0", "OUTP1:PROT:CONN:TRIP?": "0",
             "OUTP2:PROT:CONN:TRIP?": "0", "OUTP2:PROT:TRAN:TRIP?": "0",
             "OUTP2:PROT:OTEM:TRIP?": "0", "OUTP2:PROT:COMP:TRIP?": "0",
             "SOUR1:CURR:LEV:IMM:AMPL?": "+0.000000E+00",
             "SOUR2:TEMP:SPO?": "+2.500000E+01", "SOUR2:CURR:LIM:AMPL?": "+1.000000E-01",
-            "SENS2:TEMP:PROT:WIND:AMPL?": "+1.000000E-01", "SENS2:TEMP:DATA?": "+2.500000E+01",
+            "SENS2:TEMP:PROT:WIND:AMPL?": "+2.000000E-01", "SENS2:TEMP:DATA?": "+2.500000E+01",
             "SENS3:CURR:DC:DATA?": "+0.000000E+00", "SENS4:VOLT:DC:DATA?": "+0.000000E+00",
+            "SOUR2:CURR:DATA?": "+0.000000E+00", "STAT:MEAS:COND?": "0",
             "SYST:ERR?": '+0,"No error"',
         }
 
@@ -171,7 +173,7 @@ class VisaCldTests(unittest.TestCase):
         controller.finish()
 
     def test_tec_protection_trip_prevents_all_output_enable_writes(self):
-        for command in ("OUTP2:PROT:CONN:TRIP?", "OUTP2:PROT:TRAN:TRIP?",
+        for command in ("OUTP2:PROT:TRAN:TRIP?",
                         "OUTP2:PROT:OTEM:TRIP?", "OUTP2:PROT:COMP:TRIP?"):
             with self.subTest(command=command):
                 driver, resource, _ = backend()
@@ -183,6 +185,127 @@ class VisaCldTests(unittest.TestCase):
                 self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
                 self.assertIsNotNone(controller.record["last_confirmed_state"])
                 controller.finish()
+
+    def test_real_connected_tec_snapshot_retains_unqualified_connection_bits(self):
+        driver, resource, _ = backend(configuration(temperature_c=26., temperature_min_c=15.,
+                                                   temperature_max_c=50., max_tec_current_a=.85))
+        resource.values.update({"OUTP1:PROT:CONN:TRIP?": "1", "OUTP2:PROT:CONN:TRIP?": "1",
+            "STAT:MEAS:COND?": "8192", "OUTP2:STAT?": "1", "SOUR2:TEMP:SPO?": "26",
+            "SENS2:TEMP:DATA?": "26.00024", "SOUR2:CURR:DATA?": ".1578135",
+            "SOUR2:CURR:LIM:AMPL?": ".85", "SENS2:TEMP:PROT:WIND:AMPL?": "1"})
+        state = driver.snapshot()
+        self.assertNotIn("isTrippedTecOutputProtCable", state)
+        self.assertEqual(state["diagnostics"]["ld_connection_raw"], 1)
+        self.assertEqual(state["diagnostics"]["tec_connection_raw"], 1)
+        self.assertEqual(state["diagnostics"]["measurement_condition_raw"], 8192)
+        self.assertEqual(state["diagnostics"]["qualification"], "unqualified")
+        self.assertTrue(state["diagnostics"]["reason"])
+        self.assertAlmostEqual(state["measTecCurr"], .1578135)
+        self.assertFalse(state["isTrippedLdOutputProtTemperature"])
+        clock = Clock()
+        controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+        controller.begin(authorize_writes=True, confirm_manual_route=True)
+        with self.assertRaisesRegex(NktError, "connection diagnostic unresolved"):
+            controller.prepare_point(driver.config.points[0])
+        with self.assertRaisesRegex(NktError, "connection diagnostic unresolved"):
+            driver.set("switchLdOutput", True)
+        self.assertFalse(any(kind == "write" and command in ("OUTP1:STAT 1", "OUTP2:STAT 1")
+                             for kind, command in resource.calls))
+        self.assertEqual(controller.record["last_confirmed_state"]["diagnostics"], state["diagnostics"])
+        self.assertTrue(controller.finish()["off_confirmed"])
+
+    def test_temperature_window_is_full_span_with_inclusive_limits(self):
+        driver, resource, _ = backend()
+        controller = CldController(driver.config, driver)
+        resource.values["SENS2:TEMP:PROT:WIND:AMPL?"] = "10"  # 25 +/-5, exactly 20..30 C.
+        controller.healthy(driver.snapshot())
+        resource.values["SENS2:TEMP:PROT:WIND:AMPL?"] = "10.00001"
+        with self.assertRaises(NktError): controller.healthy(driver.snapshot())
+        resource.values["SENS2:TEMP:PROT:WIND:AMPL?"] = ".2"  # tolerance .1 equals half-span.
+        controller.healthy(driver.snapshot())
+        resource.values["SENS2:TEMP:PROT:WIND:AMPL?"] = ".19999"
+        with self.assertRaisesRegex(NktError, "tolerance"):
+            controller.healthy(driver.snapshot())
+        driver.close()
+
+    def test_ld_temperature_trip_allows_warmup_but_blocks_enable(self):
+        driver, resource, _ = backend()
+        resource.values["OUTP1:PROT:TEMP:TRIP?"] = "1"
+        clock = Clock()
+        controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+        controller.begin(authorize_writes=True, confirm_manual_route=True)
+        self.assertIn(("write", "OUTP2:STAT 1"), resource.calls)
+        with self.assertRaisesRegex(NktError, "temperature protection"):
+            controller.prepare_point(driver.config.points[0])
+        with self.assertRaisesRegex(NktError, "temperature protection"):
+            driver.set("switchLdOutput", True)
+        self.assertNotIn(("write", "OUTP1:STAT 1"), resource.calls)
+        self.assertTrue(controller.finish()["off_confirmed"])
+
+    def test_ld_temperature_trip_during_emission_faults_controller(self):
+        driver, resource, _ = backend()
+        clock = Clock()
+        controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+        controller.begin(authorize_writes=True, confirm_manual_route=True)
+        controller.prepare_point(driver.config.points[0]); controller.set_emission(True)
+        resource.values["OUTP1:PROT:TEMP:TRIP?"] = "1"
+        with self.assertRaisesRegex(NktError, "temperature protection"):
+            controller.verify_point(emitting=True)
+        self.assertTrue(controller.failed)
+        self.assertTrue(controller.finish()["off_confirmed"])
+
+    def test_native_and_simulated_ld_temperature_contract(self):
+        self.assertIn("isTrippedLdOutputProtTemperature", TL4000.BOOL_GETTERS)
+        config = configuration(backend="simulation")
+        synthetic = SimulatedCld(config)
+        self.assertFalse(synthetic.snapshot()["isTrippedLdOutputProtTemperature"])
+        self.assertEqual(synthetic.snapshot()["getTempProtWindow"], 2*config.temperature_tolerance_c)
+        clock = Clock()
+        controller = CldController(config, synthetic, clock=clock, sleep=clock.sleep)
+        synthetic.state["isTrippedLdOutputProtTemperature"] = True
+        controller.begin()
+        with self.assertRaisesRegex(NktError, "temperature protection"):
+            controller.prepare_point(config.points[0])
+        controller.finish()
+
+    def test_native_ld_temperature_getter_has_boolean_abi(self):
+        class Dll:
+            def __getattr__(self, name):
+                def call(*args):
+                    if name == "TL4000_init": args[3]._obj.value = 42
+                    if name == "TL4000_isTrippedLdOutputProtTemperature":
+                        args[1]._obj.value = 1
+                    return 0
+                return call
+        config = configuration(backend="tl4000", dll_path="fake.dll")
+        driver = TL4000(config, authorize_connection=True, dll=Dll())
+        self.assertIs(driver.get("isTrippedLdOutputProtTemperature"), True)
+        driver.close()
+
+    def test_asserted_or_missing_connection_diagnostics_block_formal_stage(self):
+        driver, _, _ = backend()
+        controller = CldController(driver.config, driver)
+        state = driver.snapshot()
+        for changes in ({"ld_connection_raw": 1}, {"tec_connection_raw": 1},
+                        {"measurement_condition_raw": 8192}, {"qualification": None},
+                        {"measurement_condition_raw": None}, {"ld_connection_raw": False}):
+            with self.subTest(changes=changes):
+                state["diagnostics"] = {**driver._diagnostics(), **changes}
+                controller.healthy(state)  # TEC-only preparation remains allowed.
+                with self.assertRaisesRegex(NktError, "connection diagnostic unresolved"):
+                    controller.healthy(state, require_ld_ready=True)
+        del state["diagnostics"]
+        with self.assertRaisesRegex(NktError, "connection diagnostic unresolved"):
+            controller.healthy(state, require_ld_ready=True)
+        driver.close()
+
+    def test_malformed_raw_diagnostics_still_fail_closed(self):
+        for command, response in (("OUTP1:PROT:CONN:TRIP?", "2"),
+                                  ("STAT:MEAS:COND?", "nan"), ("STAT:MEAS:COND?", "65536")):
+            driver, resource, _ = backend()
+            resource.values[command] = response
+            with self.assertRaises(NktError): driver.snapshot()
+            driver.close()
 
     def test_invalid_requests_send_no_instrument_commands(self):
         for name, value in (("setLdCurrSetpoint", .031), ("setLdCurrLimit", float("nan")),
@@ -224,7 +347,7 @@ class VisaCldTests(unittest.TestCase):
         self.assertIn("OUTP2:STAT 1", writes)
         self.assertIn("OUTP1:STAT 1", writes)
         on_index = resource.calls.index(("write", "OUTP1:STAT 1"))
-        self.assertIn(("query", "SOUR1:CURR:LIM:AMPL?"), resource.calls[on_index-5:on_index])
+        self.assertIn(("query", "SOUR1:CURR:LIM:AMPL?"), resource.calls[on_index-10:on_index])
         result = controller.finish()
         self.assertTrue(result["off_confirmed"])
         self.assertEqual(result["errors"], [])

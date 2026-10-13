@@ -4,7 +4,7 @@ Last updated: 2026-10-13
 
 ## Current stage
 
-DC photoresponse - CLD VISA and confirmed station roles (2026-10-13):
+DC photoresponse - CLD thermal recovery and diagnostic correction (2026-10-13):
 
 - The operator confirmed 2182A input is floating. Retain successful identity/
   configuration communication and the rejected overload; do not repeat voltage
@@ -21,8 +21,10 @@ DC photoresponse - CLD VISA and confirmed station roles (2026-10-13):
   readback/error state, current limits are checked before LD enable, and individual
   USB transactions are capped at 10 s independently of the thermal timeout.
 - CLD cleanup independently attempts LD-off, current-zero, owned TEC-off and final
-  confirmation even after an earlier failure. TEC sensor/temperature/voltage and
-  documented connection protection states block output before ownership/writes.
+  confirmation even after an earlier failure. Qualified TEC sensor/overtemperature/
+  compliance protections block all preparation. LD temperature trips and unresolved
+  connection diagnostics block point preparation and emission, while TEC may settle
+  with LD off. Unknown communication/readback still fails closed.
 - The operator confirmed a suitable beam collector, 30 mA maximum LD current,
   explicitly unspecified diode model, and permission to inspect cached TEC values.
   The reported 8.5 V MAX response is a measurement capability, **not a cached
@@ -31,17 +33,30 @@ DC photoresponse - CLD VISA and confirmed station roles (2026-10-13):
   mode to PROT, narrowed the protection window and enabled TEC briefly. Its first
   diagnostic sample reported connection protection; the attempt was rejected and
   **LD zero/off and TEC off were confirmed**. No LD output-on was issued.
-- Passive status correlation corroborated the connection flag: MEAS condition
-  bits 13 (socket connection), 9 (temperature window) and 8 (temperature protection)
-  are asserted; both LD/TEC connection queries report a trip. The photo's PROTECT/
-  T-WINDOW indicators explain the temperature state but do not clear the connection
-  alarm. Require physical module seating/connection verification before retrying;
-  do not reset/clear the device or bypass the fault to obtain a passing preflight.
+- The operator subsequently reported normal manual laser operation and changed
+  the temperature target to 26 C. Passive reads confirm TEC on, about 26.000 C,
+  0.158 A TEC current, LD off and 30 mA stored current/limit; temperature protection
+  is clear. A five-second passive thermal dwell passed without output/settings writes.
+  Preserve these operator settings; do not restore the obsolete 17 C target.
+- Both CONN queries still return 1 and MEAS condition remains 8192 with no SCPI
+  errors while TEC works. Withdraw the earlier claim of a proven physical cable/
+  socket fault. The native generic cable API excludes CLD; raw SCPI diagnostics
+  remain semantically unresolved on this firmware, not inverted into connection-ok.
+  Asserted/unreadable diagnostics still block automatic LD enable; never bypass
+  them or reset/clear them merely to obtain a pass.
+- Corrected temperature protection as a full span: the approved interval must
+  contain target +/- span/2, and stability tolerance cannot exceed span/2. LD
+  temperature protection is explicitly queried and must be clear before emission.
 - Validation: **503/503 local offline tests**, including **88 photoresponse tests**;
   **88/88** also passed in LK_setup's `lyr` in a fresh temporary directory. The new
   backend's real read-only snapshot and output-blocking check passed. Target RAM
   exhaustion was traced to an orphaned read-only PowerShell; with explicit user
   approval only that process was stopped. Python recovered; other jobs were retained.
+- Follow-up validation: **511/511 local offline tests**;
+  **96/96 photoresponse tests** on LK_setup. The updated
+  production backend passed passive thermal verification. No remote LD enable
+  has been issued; the software voltage bound and connection diagnostic qualification
+  remain pending for automatic emission.
 - 6221 empty-load five-point sweep, valid voltage/current input fixtures, full
   optical dark/light/dark and attoDRY integration remain pending. Raw attempts,
   station addresses, identities, protection states and runtime diagnostics stay ignored.

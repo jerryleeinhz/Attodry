@@ -17,7 +17,7 @@ remain independent. This implementation does not use lock-ins in the photorespon
 | P2 photovoltage | Fresh 2182A READ acquisition; no-excitation mode; direct or 6221 relay | Complete dark/light/dark voltage with real optics |
 | P3 current bias | Bounded DC ramps, readback, compliance stop and zero/off cleanup | Authorized unloaded five-point 6221 test still not completed |
 | P4 photocurrent | 2400 V-source/I-measure and 0 A/fixed-range voltmeter, 24-bit status checks | Station 2400 is gate-bottom/source; channel detector wiring and acceptance pending |
-| P5 CLD | USB/VISA SCPI or TL4000 and shared TEC/interlock/current controller | Real read-only VISA verified; socket connection protection blocks thermal/optical tests |
+| P5 CLD | USB/VISA SCPI or TL4000 and shared TEC/interlock/current controller | Passive 26 C TEC stability verified; voltage bound and diagnostic qualification block automatic LD acceptance |
 | P6 environment | Existing attoDRY driver, explicit T/Bx/Bz points, stability, 3 T and cleanup | New joint experiment commissioning; optional gate scans remain separate Three-SMU work |
 | P7 data | JSON/JSONL, SQLite WAL/FULL audit, new-attempt retry, accepted-only Notebook/CSV | Target offline validation recorded in development stages; scientific noise/settling validation remains experimental |
 
@@ -65,16 +65,21 @@ detector profile until source-drain detector wiring is independently confirmed.
 
 CLD USB/VISA is now a production backend using the existing controller/transport.
 No native driver DLL is needed for this choice. Read-only real snapshots were
-verified after 88 target offline tests. Current limit is 30 mA and stored current
-is zero. The operator confirmed a beam collector and explicitly unspecified diode
+verified after 96 target offline tests. Current limit and operator-set stored
+current are 30 mA; passive reads confirmed LD off. The operator confirmed a beam collector and explicitly unspecified diode
 model; model metadata is retained truthfully. Voltage measurement capability is
 not a cached diode voltage rating; a write profile still needs an explicit bound.
 
-The TEC-only attempt briefly enabled TEC, then stopped on connection protection
-without enabling LD. Both outputs were confirmed off. Passive status correlation
-also asserted socket-connection, temperature-window and protection bits, requiring
-physical installation/connection checks before retry. Do not clear/reset or
-reinterpret an asserted trip as success. All raw trials and host-memory recovery
+The initial TEC-only attempt briefly enabled TEC and stopped on raw connection
+indications, without enabling LD; both outputs were confirmed off. The operator
+subsequently reported normal manual emission and selected a 26 C target. Updated
+passive checks passed a five-second thermal dwell with TEC on and temperature
+trip clear. CONN=1/MEAS bit13 persisted without SCPI errors. Withdraw the prior
+proven physical cable/socket-fault claim, retain raw diagnostics as unqualified,
+and continue to block automatic LD enable while they remain asserted/unreadable.
+The CLD-inapplicable generic native cable API is no longer used to label them.
+Temperature windows are validated as full spans and explicit LD temperature trips
+are checked before and during emission. Do not clear/reset or invert diagnostics. All raw trials and host-memory recovery
 records remain ignored. No future hardware test is scheduled automatically.
 
 ## Manufacturer contracts
@@ -103,5 +108,5 @@ local hardware addresses/data and pre-existing PM100D/PEM notes outside this fea
 The current branch is synchronized without merging main. Remote offline validation uses a
 fresh temporary folder and the existing `lyr` environment, not an overwrite of the active lab checkout.
 Next: confirm the 2182A input and 2400 sample wiring, provide a suitable 6221 test load,
-resolve the CLD connection protection and explicit voltage bound, then commission valid electrical readings and
+qualify CLD connection diagnostic semantics and the explicit software voltage bound, then commission valid electrical readings and
 optical dark/light control. Unknown physical parameters remain hard gates.
