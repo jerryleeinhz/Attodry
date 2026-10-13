@@ -40,7 +40,16 @@ DC photoresponse - full-goal correction and power/combination integration (2026-
   are recorded query-only; setpoints remain settings, not delivered-current readings.
 - Full local regression **568/568**, including **129 photoresponse** and **24 PM100D**,
   passed. Independent real CLI simulation and CSV checks passed for NKT 8 and CLD
-  6 conditions. Target validation/synchronization remains pending for this revision.
+  6 conditions. LK_setup `lyr` (Python 3.12.13) passed **153/153** photoresponse/PM
+  tests in a separate temporary directory. Its NKT checkout was fast-forwarded to
+  source commit `5b6194b` on the same branch, with seven local profile/guide files
+  verified unchanged by SHA-256. No instrument was opened.
+- The operator's 02 no-excitation profile has timeout_ms=1000 and NPLC=1, below
+  the existing 1080 ms minimum. Preserved that file and prepared a separate ignored
+  `02_cld_2182_no_excitation_timeout_fixed.local.toml` with timeout_ms=2000 and
+  omitted unused max_abs_current_a; its actual schema validation passed. Other
+  previously prepared profiles remain unchanged. Real PM identities/power limits
+  and optical/electrical joint commissioning are still required for hardware runs.
 - Older PM100D/PEM planned handoff notes are historical to this checkout. Later completed
   code exists in the branches above; do not use those old notes to justify rebuilding
   the driver or to claim it was never implemented.

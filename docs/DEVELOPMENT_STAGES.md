@@ -27,8 +27,14 @@ Status: scope corrected; PM100D feedback and combination integration offline com
 - **568/568 local full tests**, including **129 photoresponse** and **24 PM100D**,
   passed. Actual CLI simulation and accepted CSV validation passed for NKT
   **8 conditions** (2 wavelengths x 2 powers x 2 biases) and CLD **6 conditions**.
+- LK_setup's existing `lyr` passed **153/153** photoresponse/PM tests from a separate
+  temporary directory. The NKT checkout was fast-forwarded to source `5b6194b`
+  on the same branch; existing local profiles/guide files were hash-verified unchanged.
+- Prepared a separate ignored 02 no-excitation compatibility copy with 2000 ms
+  timeout and omitted unused current bound. The operator's original 1000 ms / NPLC=1
+  file remains unchanged and fails the existing 1080 ms integration-time guard.
 - No hardware I/O occurred. Existing physical commissioning limitations remain;
-  new target validation/synchronization is pending, with no acceptance implied.
+  new meter identities/measurement plane/power limits and joint acceptance are pending.
 
 ## DC photoresponse - editable LK_setup trial configurations
 
