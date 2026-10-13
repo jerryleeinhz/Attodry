@@ -2,6 +2,33 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - CLD USB/VISA and station-role clarification
+
+Status: production VISA backend, cleanup/protection fixes and documentation
+complete (2026-10-13); physical TEC/laser acceptance blocked on connection protection.
+
+- Added USB/VISA CLD backend and CLI selection, retaining native TL4000. The
+  optional DLL field is required only for TL4000; exact instrument model/serial,
+  current/temperature bounds, wiring, authorization and optical route remain gates.
+  USB I/O timeout is at most 10 s, separate from thermal stabilization timeout.
+- Preserved correct temperature-protection enums (ENAB=1, PROT=2), audited minimum
+  writes/readbacks and pre-enable current-limit checks. Added TEC protection checks
+  before output writes; CLD shutdown independently attempts every cleanup action.
+- User confirmed floating 2182A input and bottom-gate/source 2400 wiring. Preserve
+  rejected raw trials; the latter is gate leakage, not channel photocurrent. No
+  new 2182A reading or 2400 output was requested after this clarification.
+- CLD beam collector and 30 mA current maximum were confirmed. Operator explicitly
+  left diode model unspecified. Voltage MAX query is measurement capability, not
+  a cached diode rating; no unconfirmed voltage rating is promoted into a write profile.
+- TEC-only commissioning was rejected on connection protection. Passive MEAS bits
+  corroborate socket connection plus temperature-window/protection indications.
+  LD stayed zero/off, TEC was returned off, and no LD output-on was sent. Physical
+  connection verification is required before a further thermal/emission attempt.
+- **503/503 local tests passed**, including **88 photoresponse tests**; **88/88**
+  passed offline on LK_setup. The new driver's real read-only snapshot confirmed
+  all outputs off and correctly blocked the reported protection fault. Host memory
+  was recovered by stopping one user-authorized orphaned read-only process.
+
 ## DC photoresponse - real commissioning fixes
 
 Status: software corrections verified locally and on LK_setup (2026-10-13).

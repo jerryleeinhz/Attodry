@@ -1,6 +1,10 @@
 # Incomplete physical contract: must reject before DLL/VISA creation.
-# User's CLD diode is approximately 760 nm; its model and limits are UNKNOWN.
+# Nominal wavelength is approximately 760 nm. Fill operator-confirmed limits;
+# record an unspecified diode model only when the operator explicitly permits it.
 # 2400 remains connected to a sample: this template does not authorize access.
+# This photocurrent profile requires the 2400 across source/drain. A connection
+# between bottom gate (SiO2/Si) and source measures gate leakage; use its own
+# confirmed gate-bias configuration and do not label that current photocurrent.
 [photoresponse]
 light_source = "cld1010lp"
 mode = "voltage_bias_current"
@@ -31,11 +35,11 @@ settle_s = "CHANGE_ME"
 tolerance_v = "CHANGE_ME"
 
 [cld1010]
-backend = "tl4000"
-dll_path = "CHANGE_ME_TL4000_64_DLL"
+backend = "visa" # USB/VISA SCPI; alternatively "tl4000" with its explicit DLL path.
+# dll_path = "CHANGE_ME_TL4000_64_DLL" # Required only for backend = "tl4000".
 address = "CHANGE_ME_EXPLICIT_VISA_RESOURCE"
 expected_serial = "CHANGE_ME_SERIAL"
-diode_model = "CHANGE_ME_EXACT_DIODE_MODEL"
+diode_model = "CHANGE_ME_MODEL_OR_OPERATOR_UNSPECIFIED_LABEL"
 diode_wiring_confirmed = false
 wavelength_nm = 760.0 # Nominal only. Replace with the diode's confirmed wavelength.
 current_points_a = ["CHANGE_ME"]

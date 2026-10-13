@@ -103,7 +103,7 @@ Signed resistance is `Vxx_X / I_rms`. The software never infers `I_rms` from the
 SR830 amplitude unless the operator explicitly supplies the complete excitation
 path resistance, including series components and termination/loading effects.
 
-## DC photoresponse profile (2026-10-12)
+## DC photoresponse profile (2026-10-13)
 
 This independent profile has offline-tested acquisition adapters and explicit hardware
 entry points. It does not construct SR830 or open unselected instruments. Loading and
@@ -121,9 +121,15 @@ its source. Neither operation opens a laser or unused detector.
 - 2400 voltmeter uses its documented 0 A/fixed-range, OUTPUT-on configuration.
   Confirm loading/compliance before use. Current mode sources voltage. Both return
   to zero and confirmed HIMP/off; an already active sample is not taken over.
+  The photocurrent detector must use the source-drain path. Bottom-gate/source
+  wiring is a semantic gate-bottom leakage role, not a channel-current detector.
 - Laser emission checks source identity, settings and interlocks. CLD additionally
-  requires the exact diode model/pinout, current/voltage limits and TEC range/protection.
-  An approximate 760 nm wavelength does not establish those limits. TL4000 init never resets.
+  requires confirmed current/voltage limits, wiring and TEC range/protection.
+  Record the diode model truthfully; the operator may explicitly elect an unspecified
+  model for staged testing. Approximate wavelength and measurement range do not
+  establish a diode voltage rating. USB/VISA and native TL4000 paths never reset.
+  Asserted TEC connection/sensor/overtemperature/compliance protection blocks output
+  before settings/enable writes; ENAB does not substitute for PROT.
 - Environment changes occur with light and electrical sources off. Reuse the
   commissioned feedback-before-temperature sequence, bounded overshoot, existing field
   path validation and `sqrt(Bx^2+Bz^2) <= 3 T`. Record actual temperature/field.
@@ -138,12 +144,12 @@ its source. Neither operation opens a laser or unused detector.
 - All failed/rejected raw data remain in local audit; default analysis accepts only
   wholly completed runs with verified cleanup. Resume creates a fresh whole attempt.
 
-The user authorized an unloaded 6221 five-point test at 0.1 V compliance, but its
-attempt stopped at IDN before any setting/output write. Subsequent communication timed
-out. All real access is now stopped while the user runs SR830 on the shared bus.
-Do not open the sample-connected 2400 or unwired CLD today. New combined hardware
-commissioning and diode/sample limits remain outstanding; offline completion is not
-hardware acceptance. See [photoresponse guide](PHOTORESPONSE_GUIDE.md).
+Real access resumed on 2026-10-13. 6221 unloaded commissioning and the initial
+2400 gate-path trial stopped on compliance with verified zero/off cleanup. The
+2182A input is confirmed floating. CLD read-only USB/VISA queries are verified,
+but socket connection protection currently blocks thermal/emission acceptance.
+Keep all outputs off until the physical fault is resolved; preserve raw attempts.
+See [photoresponse guide](PHOTORESPONSE_GUIDE.md) for current role/wiring evidence.
 
 ## Vendor files
 

@@ -8,7 +8,8 @@
 6221 DC/无激励、2182A 新鲜读数、2400 光电流/电压表及可选 attoDRY 温磁场扫描。
 三种模式共用暗—亮—暗采集、限幅/故障保护、JSON/JSONL/SQLite 审计、新尝试恢复、
 只读 Notebook 和 CSV 导出。真实运行需要完整的本地物理配置和明确授权。
-当前共享 GPIB 总线正在做 SR830 测试，已停止实机访问；2400、CLD 今日不连接。
+CLD 已增加 USB/VISA 后端；当前连接保护阻止温控/出光。2182A 输入悬空，
+2400 实际为底栅偏置/漏电角色，沟道光电流接线和联合验收仍待完成。
 
 ```powershell
 python -m attodry_control.photoresponse_cli describe

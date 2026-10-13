@@ -58,7 +58,7 @@ def _reject(record, message):
 
 def _run(config, args, event, attempt_index):
     from contextlib import ExitStack
-    from .photoresponse_cld import CldConfig, CldController, SimulatedCld, TL4000
+    from .photoresponse_cld import CldConfig, CldController, SimulatedCld, TL4000, VisaCld
     from .photoresponse_environment import open_environment
     from .photoresponse_hardware import HardwareElectrical
     from .photoresponse_transport import visa_resources
@@ -67,8 +67,10 @@ def _run(config, args, event, attempt_index):
     try:
         with ExitStack() as stack:
             if isinstance(config.nkt, CldConfig):
-                backend = (TL4000(config.nkt, authorize_connection=True, authorize_writes=True, on_event=event)
-                           if hardware else SimulatedCld(config.nkt))
+                if hardware:
+                    factory = VisaCld if config.nkt.backend == "visa" else TL4000
+                    backend = factory(config.nkt, authorize_connection=True, authorize_writes=True, on_event=event)
+                else: backend = SimulatedCld(config.nkt)
                 stack.callback(backend.close)
                 laser = CldController(config.nkt, backend, on_event=event)
             else:
@@ -144,7 +146,7 @@ def main(argv=None):
         if args.command == "describe":
             print(json.dumps({"stage":"offline-tested drivers; real commissioning is device-specific",
                 "modes":["open_circuit_voltage","dc_current_voltage","voltage_bias_current"],
-                "lasers":["NKT SDK EXTREME/VARIA","CLD1010LP TL4000"],
+                "lasers":["NKT SDK EXTREME/VARIA","CLD1010LP USB/VISA SCPI or TL4000"],
                 "detectors":["2182A direct VISA or 6221 serial relay","2400"],
                 "storage":"JSON/JSONL, optional SQLite with explicit new-attempt retry",
                 "environment":"optional attoDRY temperature/vector-field points", "power_w":"not measured"},indent=2))

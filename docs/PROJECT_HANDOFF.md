@@ -4,41 +4,48 @@ Last updated: 2026-10-13
 
 ## Current stage
 
-DC photoresponse real commissioning (2026-10-13):
+DC photoresponse - CLD VISA and confirmed station roles (2026-10-13):
 
-- User resumed real testing and supplied sample limits of **1 V / 10 nA**, a
-  2400 address, CLD wiring confirmation and **30 mA** LD maximum. Stored CLD TEC
-  settings may be inspected as requested; this does not establish an optical route.
-- Fixed real 6221 relay framing: ENTER responses end in two LF bytes. GPIB reads
-  now consume the entire EOI-delimited message, retaining raw bytes. Consecutive
-  2182A identity/settings queries passed. No interface clear/reset was used.
-- Fixed 2182A initialization order: disable inherited internal scanning before
-  filter configuration. Channel 1 / 1 V / 1 NPLC configuration succeeded; fresh
-  READ returned the overload sentinel **+9.9E37**, retained and rejected. Input
-  wiring/shorted-input verification is pending; this is not valid photovoltage.
-- The approved empty-load 6221 test used **0.1 V** compliance. Enabling output at
-  **0 A** asserted compliance before the first 4 pA setting; no five-point sweep
-  completed. Cleanup readbacks confirmed **0 A and output off**.
-- Fixed 2400 nominal versus full-scale range readbacks (2 V -> 2.10 V, 1 uA ->
-  1.05 uA) without relaxing compliance checks. HIMP off mode is established before
-  other configuration so partial failures can close safely. Real 0 V / 10 nA
-  commissioning reached current compliance after output-on and stopped before a
-  fresh accepted reading. Cleanup confirmed **0 V, output off, HIMP**. Check sample
-  wiring and other connected sources before retrying; do not raise the sample limit.
-- CLD USB SCPI identity/saved-setting queries passed. Saved LD settings exceeded
-  the user limit; setpoint was changed to **0 A**, limit to **30 mA**, and both LD
-  and TEC outputs confirmed off. No laser emission or TEC output was enabled.
-  TL4000 DLL was not found in standard driver locations; production TL4000 ABI,
-  thermal/optical commissioning and the complete diode/route contract remain open.
-- Regression: **488/488 local tests passed**, including **73 photoresponse tests**;
-  the same **73/73** passed offline in LK_setup's existing `lyr` environment using
-  a fresh temporary staging directory. No active checkout/package installation changed.
-- Hardware attempts, exact identities, addresses, transcripts and cached settings
-  remain under ignored local audit. Rejected data are not normal measurement passes.
-  NKT emission, attoDRY writes and full dark/light/dark commissioning remain pending.
-- The delivered DC software, data audit/analysis and NKT reuse are described in
-  [work package](modules/PHOTORESPONSE.md) and [run guide](PHOTORESPONSE_GUIDE.md).
-  Preserve pre-existing PM100D/PEM notes and figures outside this change.
+- The operator confirmed 2182A input is floating. Retain successful identity/
+  configuration communication and the rejected overload; do not repeat voltage
+  acceptance until an appropriate input fixture is connected.
+- The station 2400 is connected between bottom gate (SiO2/Si) and device source.
+  It is a **gate-bottom bias/leakage role**, not the source-drain photocurrent
+  detector. The earlier 0 V / 10 nA attempt remains rejected and zero/off/HIMP
+  was confirmed. No gate-current data are to be labelled channel photocurrent.
+  The existing station TOML has no active photoresponse profile; a detector profile
+  must keep wiring unconfirmed until a separate channel connection is established.
+- Added production **CLD USB/VISA SCPI** backend using the existing VisaTransport
+  and CldController; no TL4000 DLL is required for this backend. Native TL4000
+  remains selectable. Strict enums map OFF/ENAB/PROT to 0/1/2, each write checks
+  readback/error state, current limits are checked before LD enable, and individual
+  USB transactions are capped at 10 s independently of the thermal timeout.
+- CLD cleanup independently attempts LD-off, current-zero, owned TEC-off and final
+  confirmation even after an earlier failure. TEC sensor/temperature/voltage and
+  documented connection protection states block output before ownership/writes.
+- The operator confirmed a suitable beam collector, 30 mA maximum LD current,
+  explicitly unspecified diode model, and permission to inspect cached TEC values.
+  The reported 8.5 V MAX response is a measurement capability, **not a cached
+  diode voltage rating**. Keep the configurable software LD voltage bound explicit.
+- TEC-only attempt used the saved 17 C / 0.85 A settings, changed LD temperature
+  mode to PROT, narrowed the protection window and enabled TEC briefly. Its first
+  diagnostic sample reported connection protection; the attempt was rejected and
+  **LD zero/off and TEC off were confirmed**. No LD output-on was issued.
+- Passive status correlation corroborated the connection flag: MEAS condition
+  bits 13 (socket connection), 9 (temperature window) and 8 (temperature protection)
+  are asserted; both LD/TEC connection queries report a trip. The photo's PROTECT/
+  T-WINDOW indicators explain the temperature state but do not clear the connection
+  alarm. Require physical module seating/connection verification before retrying;
+  do not reset/clear the device or bypass the fault to obtain a passing preflight.
+- Validation: **503/503 local offline tests**, including **88 photoresponse tests**;
+  **88/88** also passed in LK_setup's `lyr` in a fresh temporary directory. The new
+  backend's real read-only snapshot and output-blocking check passed. Target RAM
+  exhaustion was traced to an orphaned read-only PowerShell; with explicit user
+  approval only that process was stopped. Python recovered; other jobs were retained.
+- 6221 empty-load five-point sweep, valid voltage/current input fixtures, full
+  optical dark/light/dark and attoDRY integration remain pending. Raw attempts,
+  station addresses, identities, protection states and runtime diagnostics stay ignored.
+  Preserve pre-existing PM100D/PEM notes and figures separately.
 
 NKT Photonics offline implementation update (2026-09-22):
 

@@ -71,7 +71,7 @@ class VisaTransport:
         return self._io(command)
 
     def emergency_off(self, command):
-        if not self.authorize_writes or command not in ("OUTP:STAT 0", "OUTP 0", "OUTP1:STAT 0"):
+        if not self.authorize_writes or command not in ("OUTP:STAT 0", "OUTP 0", "OUTP1:STAT 0", "OUTP2:STAT 0"):
             raise NktError("Invalid emergency shutdown")
         # A failed bus can still accept an off write. It does NOT confirm off.
         return self._io(command)
