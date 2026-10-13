@@ -2,6 +2,36 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - real commissioning fixes
+
+Status: software corrections verified locally and on LK_setup (2026-10-13).
+Hardware identity/configuration and safe-stop paths were exercised; no valid
+photovoltage/photocurrent or full optical measurement has passed yet.
+
+- GPIB uses EOI framing to consume both trailing newlines of 6221 serial replies.
+  A reproducing regression fails with the former newline termination; corrected
+  consecutive 2182A identity/settings queries passed on hardware.
+- 2182A leaves inherited internal scan mode before configuring filters. The old
+  order produced -221 settings conflict; the corrected real configuration passed.
+  Fresh channel-1 READ returned +9.9E37 overload and was rejected with raw audit.
+- 2400 range validation recognizes nominal and 105% full-scale readbacks only
+  for source/sense range commands. Compliance limits still require exact agreement.
+  HIMP is set at the start of owned configuration; partial failure cleanup is tested.
+- User-authorized 6221 empty-load test: 0.1 V compliance, intended five points
+  from 4 pA to 10 nA. Compliance asserted at 0 A immediately after output-on,
+  before the first point was applied. Confirmed final zero/off; sweep not passed.
+- User-authorized 2400 sample test: limits 1 V / 10 nA, initial bias 0 V. Current
+  compliance asserted after output-on; stopped without accepted readings. Confirmed
+  final zero/off/HIMP. Physical wiring and other sample connections need checking.
+- CLD saved parameters were read via documented USB SCPI. Stored LD current/limit
+  exceeded the user's 30 mA maximum; setpoint was zeroed and limit reduced to 30 mA,
+  with LD and TEC verified off. No emission/TEC enable. TL4000 was not found in the
+  standard target driver locations; production backend and optical/thermal tests remain pending.
+- Validation: **488/488 local offline tests**, including **73 photoresponse tests**;
+  **73/73** also passed offline in the target `lyr` environment. No target package
+  install or active checkout update. Station addresses/identities and raw/cached
+  hardware data remain ignored. No NKT or attoDRY output commands were issued.
+
 ## DC photoresponse - acquisition software and offline validation
 
 Status: P1-P7 acquisition software in the scoped work package is offline complete
@@ -25,7 +55,7 @@ Status: P1-P7 acquisition software in the scoped work package is offline complet
   run/test-6221/analyze/export. No discovery/reset or implicit source takeover.
 - Validation: **483/483 local offline tests passed**, including **68 photoresponse
   tests**, using Python 3.12.7, PYTHONPATH=src, PYTHONNOUSERSITE=1 and python -s.
-  The **67/68 photoresponse tests also passed in LK_setup's existing lyr environment**
+  The **68/68 photoresponse tests also passed in LK_setup's existing lyr environment**
   in a fresh temporary staging directory. No packages or active lab checkout changed,
   and that validation opened no instruments. NKT+environment CLI produced four accepted
   synthetic conditions; CLD CLI/SQLite/export passed. Notebook cells executed and the
@@ -35,9 +65,9 @@ Status: P1-P7 acquisition software in the scoped work package is offline complet
   The user approved an empty-load 6221 plan at 0.1 V compliance, 4 pA to 10 nA, five
   linear points. Its attempted run stopped at empty IDN, before any source settings;
   later queries timed out. No output test passed. The user then confirmed SR830 work
-  on the same GPIB bus: all real bus access is stopped until that test is finished.
+  on the same GPIB bus: real access was paused until the renewed authorization above.
 - User explicitly deferred real 2400 (connected to sample) and CLD (unwired) tests.
-  Today neither is opened. No optical, temperature or magnetic-field write occurred.
+  Neither was opened on 2026-10-12. No optical, temperature or magnetic-field write occurred.
   Station identities/addresses and raw diagnostics remain ignored, outside the commit.
 - [Work package](modules/PHOTORESPONSE.md), [run guide](PHOTORESPONSE_GUIDE.md) and
   current handoff are synchronized. Calibrated power/PEM and optional gate sweeps

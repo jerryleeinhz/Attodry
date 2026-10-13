@@ -1,39 +1,44 @@
 # Project handoff
 
-Last updated: 2026-10-12
+Last updated: 2026-10-13
 
 ## Current stage
 
-DC photoresponse software delivery (2026-10-12):
+DC photoresponse real commissioning (2026-10-13):
 
-- User requested complete development on `module/NKT-photonics`: SuperK/CLD1010LP,
-  6221 DC/none, 2182A/2400 voltage, 2400 photocurrent. The approximate 760 nm CLD
-  diode model/limits are still unknown. Full physical configuration gates hardware.
-- Implemented authorized VISA/6221 serial relay, bounded DC control, fresh detector
-  reads, 2400 voltmeter/current modes, CLD TL4000 and thermal/interlock checks,
-  existing-driver attoDRY environment scan, JSON/JSONL/SQLite audit, new-attempt retry,
-  accepted-only CSV and read-only Notebook. Existing NKT barriers and SMU ramp logic
-  are reused. No SR830 is constructed by the new path; LLTF real SDK remains blocked.
-- Local full regression **483/483 passed**, photoresponse **68/68 passed**. The same
-  68 tests passed offline in LK_setup's `lyr` environment in a fresh temporary folder.
-  No active checkout/environment packages or instrument state changed in that target
-  test. CLI NKT+environment and CLD+SQLite/export passed; Notebook cells/render verified.
-- Earlier authorized queries successfully identified 6221 and the RS-232-connected
-  2182A. Local ignored audit retains full identities, addresses and raw XON/XOFF bytes.
-- User approved 6221 EMPTY-LOAD output testing at **0.1 V** compliance, current points
-  **4 pA, 2.503 nA, 5.002 nA, 7.501 nA, 10 nA**. The attempted test stopped at an
-  empty IDN; subsequent communication timed out. **No output/configuration write was
-  executed, and the five-point hardware test remains incomplete.**
-- The user is testing SR830 on the same GPIB bus. Do not query/open real bus devices
-  again until the user confirms that work is finished. Bus contention is possible,
-  not a proven diagnosis. Do not reset/clear the shared interface to recover it.
-- **Do not access the 2400 today: it is connected to a sample. Do not access the CLD
-  today: it is unwired.** User plans physical tests tomorrow; no automation was created.
-  NKT emission, attoDRY writes and complete photoresponse hardware commissioning are
-  still pending; offline delivery is not physical acceptance.
-- See [work package](modules/PHOTORESPONSE.md), [run guide](PHOTORESPONSE_GUIDE.md)
-  and tracked placeholder templates. Preserve pre-existing local PM100D/PEM notes
-  and figures separately; keep hardware.local.toml, addresses and raw run data ignored.
+- User resumed real testing and supplied sample limits of **1 V / 10 nA**, a
+  2400 address, CLD wiring confirmation and **30 mA** LD maximum. Stored CLD TEC
+  settings may be inspected as requested; this does not establish an optical route.
+- Fixed real 6221 relay framing: ENTER responses end in two LF bytes. GPIB reads
+  now consume the entire EOI-delimited message, retaining raw bytes. Consecutive
+  2182A identity/settings queries passed. No interface clear/reset was used.
+- Fixed 2182A initialization order: disable inherited internal scanning before
+  filter configuration. Channel 1 / 1 V / 1 NPLC configuration succeeded; fresh
+  READ returned the overload sentinel **+9.9E37**, retained and rejected. Input
+  wiring/shorted-input verification is pending; this is not valid photovoltage.
+- The approved empty-load 6221 test used **0.1 V** compliance. Enabling output at
+  **0 A** asserted compliance before the first 4 pA setting; no five-point sweep
+  completed. Cleanup readbacks confirmed **0 A and output off**.
+- Fixed 2400 nominal versus full-scale range readbacks (2 V -> 2.10 V, 1 uA ->
+  1.05 uA) without relaxing compliance checks. HIMP off mode is established before
+  other configuration so partial failures can close safely. Real 0 V / 10 nA
+  commissioning reached current compliance after output-on and stopped before a
+  fresh accepted reading. Cleanup confirmed **0 V, output off, HIMP**. Check sample
+  wiring and other connected sources before retrying; do not raise the sample limit.
+- CLD USB SCPI identity/saved-setting queries passed. Saved LD settings exceeded
+  the user limit; setpoint was changed to **0 A**, limit to **30 mA**, and both LD
+  and TEC outputs confirmed off. No laser emission or TEC output was enabled.
+  TL4000 DLL was not found in standard driver locations; production TL4000 ABI,
+  thermal/optical commissioning and the complete diode/route contract remain open.
+- Regression: **488/488 local tests passed**, including **73 photoresponse tests**;
+  the same **73/73** passed offline in LK_setup's existing `lyr` environment using
+  a fresh temporary staging directory. No active checkout/package installation changed.
+- Hardware attempts, exact identities, addresses, transcripts and cached settings
+  remain under ignored local audit. Rejected data are not normal measurement passes.
+  NKT emission, attoDRY writes and full dark/light/dark commissioning remain pending.
+- The delivered DC software, data audit/analysis and NKT reuse are described in
+  [work package](modules/PHOTORESPONSE.md) and [run guide](PHOTORESPONSE_GUIDE.md).
+  Preserve pre-existing PM100D/PEM notes and figures outside this change.
 
 NKT Photonics offline implementation update (2026-09-22):
 

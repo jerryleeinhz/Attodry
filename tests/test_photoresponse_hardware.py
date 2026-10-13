@@ -158,6 +158,20 @@ class CurrentSourceTests(unittest.TestCase):
 
 
 class DetectorTests(unittest.TestCase):
+    def test_2182_disables_inherited_scan_before_filter_configuration(self):
+        class ScanningResource(Resource):
+            def write(self, command):
+                if command == "SENS:VOLT:CHAN1:DFIL 0" and self.values["ROUT:SCAN:LSEL"] != "NONE":
+                    raise NktError("Instrument error: -221, Settings conflict")
+                return super().write(command)
+        r = ScanningResource("2182A")
+        r.values.update({"ROUT:SCAN:LSEL":"INT", "SENS:VOLT:CHAN1:DFIL":"1"})
+        meter = Voltmeter2182(VisaTransport(r, role="2182", authorize_writes=True),
+            expected_idn=r.values["*IDN"], voltage_range_v=1, nplc=1, max_voltage_v=1)
+        meter.begin()
+        self.assertLess(r.commands.index("ROUT:SCAN:LSEL NONE"), r.commands.index("SENS:VOLT:CHAN1:DFIL 0"))
+        self.assertTrue(meter.read_voltage()["fresh"])
+
     def test_2182_fresh_read_and_processing_checks(self):
         r = Resource("2182A")
         t = VisaTransport(r, role="2182", authorize_writes=True)
@@ -189,6 +203,44 @@ class DetectorTests(unittest.TestCase):
             if not current_mode:
                 self.assertEqual(r.values["SOUR:CURR:RANG"], "1e-06")
                 self.assertEqual(r.query("SENS:VOLT:RANG:AUTO?"), "0")
+
+    def test_2400_full_scale_range_readbacks_do_not_relax_compliance(self):
+        class FullScaleResource(Resource):
+            def query(self, command):
+                raw = super().query(command)
+                if command in ("SOUR:VOLT:RANG?", "SOUR:CURR:RANG?", "SENS:VOLT:RANG?", "SENS:CURR:RANG?"):
+                    return str(float(raw) * 1.05)
+                return raw
+        for current_mode in (False, True):
+            r = FullScaleResource("2400")
+            t = VisaTransport(r, role="2400", authorize_writes=True)
+            meter = Meter2400(t, expected_idn=r.values["*IDN"], current_mode=current_mode,
+                voltage_range_v=.2, current_range_a=1e-6, compliance=1e-8 if current_mode else .2,
+                nplc=1, max_voltage_v=.1, max_current_a=1e-8, max_step_v=.01, settle_s=0,
+                tolerance_v=1e-6, sleep=lambda _:None)
+            meter.begin()
+            self.assertTrue(meter.read_values()["fresh"])
+            if current_mode:
+                r.values["SENS:CURR:PROT"] = "1.05e-8"
+                with self.assertRaises(NktError): meter.verify()
+            else:
+                r.values["SENS:VOLT:RANG"] = "2"
+                with self.assertRaises(NktError): meter.verify()
+            self.assertTrue(meter.cleanup()["safe"])
+
+    def test_2400_partial_configuration_failure_has_high_impedance_cleanup(self):
+        r = Resource("2400")
+        r.values["OUTP:SMOD"] = "ZERO"
+        meter = Meter2400(VisaTransport(r, role="2400", authorize_writes=True),
+            expected_idn=r.values["*IDN"], current_mode=True, voltage_range_v=.2,
+            current_range_a=1e-6, compliance=1e-8, nplc=1, max_voltage_v=.1,
+            max_current_a=1e-8, max_step_v=.01, settle_s=0, tolerance_v=1e-6)
+        original = r.query
+        r.query = lambda command: "9" if command == "SOUR:VOLT:RANG?" else original(command)
+        with self.assertRaises(NktError): meter.begin()
+        self.assertNotIn("OUTP 1", r.commands)
+        self.assertTrue(meter.cleanup()["safe"])
+        self.assertEqual(r.values["OUTP:SMOD"], "HIMP")
 
 
 if __name__ == "__main__":

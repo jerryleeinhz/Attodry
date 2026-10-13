@@ -54,15 +54,17 @@ def no_error(transport):
         raise NktError("Instrument error: " + raw)
 
 
-def ensure(transport, command, value, *, tolerance=0):
+def ensure(transport, command, value, *, tolerance=0, matches=None):
+    if matches is None:
+        matches = lambda actual: same(actual, value, tolerance=tolerance)
     before = transport.query(command + "?")
-    if not same(before, value, tolerance=tolerance):
+    if not matches(before):
         argument = str(int(value)) if isinstance(value, bool) else str(value)
         if command == "SENS:FUNC":
             argument = '"' + argument + '"'
         transport.write(command + " " + argument)
         no_error(transport)
-        if not same(transport.query(command + "?"), value, tolerance=tolerance):
+        if not matches(transport.query(command + "?")):
             raise NktError("Setting readback mismatch: " + command)
 
 
@@ -194,13 +196,16 @@ class Voltmeter2182(Keithley2182Queries):
 
     @property
     def settings(self):
-        return {"SENS:CHAN": 1, "SENS:FUNC": "VOLT", "INIT:CONT": False,
+        # An inherited internal scan can reject filter changes with -221.
+        # Leave scanning/derived modes before configuring single-channel DCV.
+        return {"INIT:CONT": False, "ROUT:SCAN:LSEL": "NONE",
+                "SENS:VOLT:RAT": False, "SENS:VOLT:DELT": False,
+                "SENS:CHAN": 1, "SENS:FUNC": "VOLT",
                 "TRIG:SOUR": "IMM", "TRIG:COUN": 1, "TRIG:DEL": 0,
                 "SENS:VOLT:DC:RANG:AUTO": False, "SENS:VOLT:DC:RANG": self.range,
                 "SENS:VOLT:DC:NPLC": self.nplc, "SENS:VOLT:CHAN1:DFIL": False,
                 "SENS:VOLT:CHAN1:LPAS": False, "SENS:VOLT:CHAN1:REF:STAT": False,
                 "CALC:STAT": False, "SENS:HOLD:STAT": False, "SYST:AZER": True,
-                "SENS:VOLT:RAT": False, "SENS:VOLT:DELT": False, "ROUT:SCAN:LSEL": "NONE",
                 "SYST:FAZ": True, "SYST:LSYN": True, "FORM:DATA": "ASC",
                 "FORM:ELEM": "READ"}
 
@@ -318,6 +323,10 @@ class Meter2400:
     def _matches(self, command, response, expected):
         if command == "SENS:FUNC":
             return set(response.replace('"', '').split(",")) == {"VOLT:DC", "CURR:DC"}
+        if command in ("SOUR:VOLT:RANG", "SOUR:CURR:RANG", "SENS:VOLT:RANG", "SENS:CURR:RANG"):
+            # 2400 firmware reports the full scale (e.g. 2.10 V / 1.05 uA),
+            # while configuration uses nominal ranges (2 V / 1 uA).
+            return same(response, expected) or same(response, expected * 1.05)
         return same(response, expected)
 
     @acquisition_operation
@@ -327,6 +336,8 @@ class Meter2400:
             raise NktError("2400 preflight requires zero/off; active sample is never taken over")
         no_error(self.resource)
         self.owned = True
+        # Establish safe off behavior before any later configuration can fail.
+        ensure(self.resource, "OUTP:SMOD", "HIMP")
         self.resource.write("ABOR")
         no_error(self.resource)
         # Both stored source levels must be zero BEFORE changing function.
@@ -341,7 +352,8 @@ class Meter2400:
                     self.resource.write('SENS:FUNC "VOLT:DC","CURR:DC"')
                     no_error(self.resource)
             else:
-                ensure(self.resource, command, expected)
+                ensure(self.resource, command, expected,
+                       matches=lambda actual: self._matches(command, actual, expected))
         self.verify(output=False)
         ensure(self.resource, "OUTP", True)
         self.ready = True

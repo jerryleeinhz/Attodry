@@ -193,6 +193,41 @@ class HardwareIntegrationTests(unittest.TestCase):
             with visa_resources({"test":"FAKE::INSTR"},timeout_ms=1000,manager_factory=factory): pass
         factory.assert_not_called()
 
+    def test_gpib_relay_reads_through_eoi_without_leaving_second_newline(self):
+        class FramedResource(Resource):
+            # The real 6221 returns two LFs at the end of an ENTER response.
+            pending_bytes = ""
+            def query(self, command):
+                response = super().query(command)
+                self.pending_bytes += response + ("\n\n" if command == "SYST:COMM:SER:ENT?" else "\n")
+                if self.read_termination:
+                    answer, _, self.pending_bytes = self.pending_bytes.partition(self.read_termination)
+                else:
+                    answer, self.pending_bytes = self.pending_bytes, ""
+                return answer
+            def lock_excl(self, **kwargs): pass
+            def close(self): pass
+        r = FramedResource()
+        r.downstream = Resource("2182A")
+        r.downstream.values["SENS:FUNC"] = '"VOLT:DC"'
+        manager = Mock()
+        manager.open_resource.return_value = r
+        with visa_resources({"host":"GPIB0::1::INSTR"}, timeout_ms=1000,
+                authorize_connection=True, manager_factory=lambda:manager) as resources:
+            relay = Serial2182Transport(resources["host"], sleep=lambda _:None)
+            self.assertEqual(relay.query("*IDN?"), r.downstream.values["*IDN"])
+            self.assertEqual(r.pending_bytes, "")
+            self.assertEqual(relay.query("SENS:FUNC?"), "VOLT:DC")
+            self.assertEqual(resources["host"].query("OUTP:STAT?"), "0")
+            self.assertTrue(resources["host"].transcript[1]["response"].endswith("\n\n"))
+        manager.close.assert_called_once()
+
+    def test_non_gpib_resources_keep_newline_termination(self):
+        manager = Mock()
+        with visa_resources({"meter":"TCPIP0::example.invalid::INSTR"}, timeout_ms=1000,
+                authorize_connection=True, manager_factory=lambda:manager):
+            self.assertEqual(manager.open_resource.return_value.read_termination, "\n")
+
 
 class CldTests(unittest.TestCase):
     def make(self):

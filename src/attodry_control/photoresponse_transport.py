@@ -144,7 +144,10 @@ def visa_resources(addresses, *, timeout_ms, authorize_connection=False,
             resource = manager.open_resource(address, open_timeout=timeout_ms)
             opened.append(resource)
             resource.timeout = timeout_ms
-            resource.read_termination = "\n"
+            # Read the entire GPIB message through EOI. The 6221 serial relay
+            # returns two trailing LFs; stopping at the first leaves a stale LF
+            # that can be mistaken for the next query's response.
+            resource.read_termination = None if address.upper().startswith("GPIB") else "\n"
             resource.write_termination = "\n"
             resource.lock_excl(timeout=timeout_ms)
             transports[role] = VisaTransport(resource, role=role,

@@ -1,6 +1,6 @@
 # DC photoresponse work package
 
-Updated: 2026-10-12. User-selected branch: `module/NKT-photonics`.
+Updated: 2026-10-13. User-selected branch: `module/NKT-photonics`.
 
 ## Scope and delivered software
 
@@ -16,7 +16,7 @@ remain independent. This implementation does not use lock-ins in the photorespon
 | P1 simulation/transport | Three modes, NKT/CLD simulations, audited VISA and RS-232 relay, fault tests | Stable shared-bus operation and actual response formats |
 | P2 photovoltage | Fresh 2182A READ acquisition; no-excitation mode; direct or 6221 relay | Complete dark/light/dark voltage with real optics |
 | P3 current bias | Bounded DC ramps, readback, compliance stop and zero/off cleanup | Authorized unloaded five-point 6221 test still not completed |
-| P4 photocurrent | 2400 V-source/I-measure and 0 A/fixed-range voltmeter, 24-bit status checks | 2400 is on a sample; no real access authorized today |
+| P4 photocurrent | 2400 V-source/I-measure and 0 A/fixed-range voltmeter, 24-bit status checks | 0 V / 10 nA test stopped on compliance; zero/off/HIMP confirmed |
 | P5 CLD | TL4000 binding and point controller with TEC/interlock/current checks | Installed DLL ABI/firmware, exact diode and wiring, optical commissioning |
 | P6 environment | Existing attoDRY driver, explicit T/Bx/Bz points, stability, 3 T and cleanup | New joint experiment commissioning; optional gate scans remain separate Three-SMU work |
 | P7 data | JSON/JSONL, SQLite WAL/FULL audit, new-attempt retry, accepted-only Notebook/CSV | Target offline validation recorded in development stages; scientific noise/settling validation remains experimental |
@@ -53,18 +53,28 @@ the measured observable and can cancel current-even signals.
 
 ## Verified and pending laboratory evidence
 
-User-authorized SSH discovery previously identified a 6221 and downstream 2182A via
-GPIB-to-RS-232 relay; station addresses and full identities remain in ignored local audit.
-The separately authorized empty-load plan is 0.1 V compliance, 4 pA to 10 nA in five
-linear points. The attempted test received an empty 6221 IDN and stopped before any
-source setting/output write. A later diagnostic timed out. The user confirmed an SR830
-experiment on the same GPIB bus, so all real bus operations stopped. This is a communication
-failure, not passed output commissioning; shared-bus activity is a possible, unproven cause.
+Real tests resumed on 2026-10-13. GPIB EOI framing fixed repeated 6221-to-2182A
+queries; disabling inherited 2182A scanning before filter setup resolved -221.
+Fresh channel-1 acquisition then returned overload +9.9E37, retained and rejected.
+The input fixture must be checked before valid-voltage acceptance.
 
-2400 is attached to a sample and must not be opened today. CLD has no wiring yet and
-must not be opened today. Tomorrow's tests require the user-confirmed device wiring,
-limits and stage authorization. Existing permission to finish offline code does not authorize
-an unknown sample or diode output. No future test is scheduled automatically.
+The authorized empty-load 6221 test used 0.1 V compliance. Compliance was detected
+at 0 A after enabling output, before applying the first 4 pA point. The intended
+five-point sweep did not complete; final zero/off was confirmed.
+
+The user supplied sample limits of 1 V / 10 nA and a 2400 address. Corrected range
+validation accepts the instrument's 105% full-scale range responses, and HIMP is
+set before other configuration. The real 0 V / 10 nA trial entered compliance
+after output-on and stopped without accepted readings; zero/off/HIMP was confirmed.
+Other connected sources and sample wiring must be checked before repeating it.
+
+CLD USB identity/cached-setting queries passed using documented SCPI commands.
+Stored LD settings exceeded the user-confirmed 30 mA maximum; setpoint was zeroed,
+limit reduced to 30 mA, and LD/TEC both confirmed off. No TEC or emission enable was
+issued. The standard driver locations did not contain TL4000; its production ABI,
+diode/optical-route contract and thermal/optical commissioning are still pending.
+Full identities, addresses, saved settings and raw attempts remain in ignored local
+audit. No future test is scheduled automatically. See the run guide for current status.
 
 ## Manufacturer contracts
 
@@ -91,6 +101,6 @@ Use [运行指南](../PHOTORESPONSE_GUIDE.md) and the tracked placeholder templa
 local hardware addresses/data and pre-existing PM100D/PEM notes outside this feature's commit.
 The current branch is synchronized without merging main. Remote offline validation uses a
 fresh temporary folder and the existing `lyr` environment, not an overwrite of the active lab checkout.
-After the SR830 bus is released: diagnose identities/settings, perform the authorized unloaded
-6221 test, then separately commission 2182A fresh readings, optical dark/light control, 2400,
-CLD and the joint environment experiment. Unknown physical parameters remain hard gates.
+Next: confirm the 2182A input and 2400 sample wiring, provide a suitable 6221 test load,
+resolve the CLD driver/diode/route contract, then commission valid electrical readings and
+optical dark/light control. Unknown physical parameters remain hard gates.
