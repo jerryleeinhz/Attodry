@@ -480,7 +480,8 @@ class VisaCldTests(unittest.TestCase):
 
     def test_cli_chooses_visa_and_keeps_resource_closure(self):
         config = load_photoresponse_config(ROOT / "config/photoresponse_cld_simulation.toml")
-        config = replace(config, nkt=configuration(), hardware=SimpleNamespace(addresses=lambda: {}, timeout_ms=1000))
+        config = replace(config, nkt=configuration(), hardware=SimpleNamespace(
+            addresses=lambda: {}, timeout_ms=1000, detector_transport="direct", validate=lambda config: None))
         fake_backend = Mock()
         with patch("attodry_control.photoresponse_cld.VisaCld", return_value=fake_backend) as visa, \
              patch("attodry_control.photoresponse_cld.TL4000") as dll, \

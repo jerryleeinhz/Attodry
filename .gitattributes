@@ -1,0 +1,4 @@
+# Pinned vendor-independent source copies must retain their canonical Git bytes.
+src/attodry_control/photonic_smu/three_smu.py text eol=lf
+src/attodry_control/photonic_smu/three_smu_config.py text eol=lf
+src/attodry_control/photonic_smu/keithley2400.py text eol=lf

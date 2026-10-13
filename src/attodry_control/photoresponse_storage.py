@@ -98,7 +98,9 @@ class PhotoStore:
         clean = (record.get("completed") is True and record.get("outcome") == "completed"
                  and record["cleanup"].get("laser_off_confirmed") is True
                  and record["cleanup"].get("electrical_safe_confirmed") is True
-                 and not record["cleanup"].get("errors"))
+                 and not record["cleanup"].get("errors")
+                 and (not record.get("measurement_config", {}).get("smu")
+                      or record["cleanup"].get("smu_safe_confirmed") is True))
         if record.get("completed") and not clean: raise NktError("Unsafe accepted promotion")
         with self.db:
             for row in record.get("conditions", []):

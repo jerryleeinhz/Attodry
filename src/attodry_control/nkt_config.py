@@ -19,7 +19,7 @@ OTHER_TABLES = {
     "lockin_sweep", "gate_top", "gate_bottom", "smu_bias", "three_smu_run", "photoresponse",
     "photoresponse_hardware", "photoresponse_6221", "photoresponse_2182", "photoresponse_2400",
     "photoresponse_environment", "photoresponse_storage", "photoresponse_6221_test", "cld1010",
-    "pm100d", "power_feedback", "photoresponse_combination",
+    "pm100d", "power_feedback", "photoresponse_combination", "photoresponse_smu",
 }
 
 
@@ -78,7 +78,8 @@ class NktPoint:
         if mode == "varia_bandpass":
             number(self.wavelength_nm, "wavelength_nm", 400, 840)
             number(self.bandwidth_nm, "bandwidth_nm", 10, 100)
-            tenths(number(self.nd_pct, "nd_pct", 0, 100))
+            if self.nd_pct is not None:
+                tenths(number(self.nd_pct, "nd_pct", 0, 100))
             for edge in self.edges_nm:
                 tenths(number(edge, "VARIA edge_nm", 400, 840))
         elif mode == "lltf_swir":

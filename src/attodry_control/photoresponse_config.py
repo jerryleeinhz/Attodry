@@ -8,7 +8,8 @@ import tomllib
 from .nkt_config import NktConfig, NktError, integer, keys, load_nkt_config, number
 
 
-MODES = ("open_circuit_voltage", "dc_current_voltage", "voltage_bias_current")
+MODES = ("open_circuit_voltage", "dc_current_voltage", "voltage_bias_current",
+         "smu_current_voltage", "smu_voltage_voltage")
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class PhotoresponseConfig:
     database_path: Path | None = None
     power: object | None = None
     combination_order: tuple[str, ...] | None = None
+    smu: object | None = None
 
     @property
     def quantity(self):
@@ -36,7 +38,8 @@ class PhotoresponseConfig:
     @property
     def excitation(self):
         return {"open_circuit_voltage": "none", "dc_current_voltage": "dc_current",
-                "voltage_bias_current": "dc_voltage"}[self.mode]
+                "voltage_bias_current": "dc_voltage", "smu_current_voltage": "smu_current",
+                "smu_voltage_voltage": "smu_voltage"}[self.mode]
 
     def validate(self):
         self.nkt.validate()
@@ -65,9 +68,9 @@ class PhotoresponseConfig:
             number(self.max_abs_current_a, "max_abs_current_a", 1e-15, 1e6)
         if not self.bias_points or len(self.bias_points) > 10000:
             raise NktError("Provide 1 to 10000 bias points")
-        if self.mode == "open_circuit_voltage":
+        if self.mode in ("open_circuit_voltage", "smu_current_voltage", "smu_voltage_voltage"):
             if self.bias_points != (None,):
-                raise NktError("No excitation uses null, never a 0 A source setting")
+                raise NktError("This mode has no independent electrical bias axis; SMU excitation uses only the SMU plan")
         else:
             limit = self.max_abs_current_a if self.excitation == "dc_current" else self.max_abs_voltage_v
             for value in self.bias_points:
@@ -80,10 +83,17 @@ class PhotoresponseConfig:
                     resources.append(self.nkt.address)
                 if self.power.meter.resource.upper() in [r.upper() for r in resources]:
                     raise NktError("PM100D cannot share a VISA address with a selected device")
+        from .photoresponse_smu import validate_selected_resources
+        validate_selected_resources(self)
+        if self.smu:
+            self.smu.validate(self)
+        elif self.mode in ("smu_current_voltage", "smu_voltage_voltage"):
+            raise NktError("SMU excitation requires an enabled photoresponse_smu plan")
         from .photoresponse_combination import PhotoresponseCombinationPlan
         PhotoresponseCombinationPlan(self)
         count = len(self.nkt.points) * len(self.bias_points) * self.repeats * (len(self.environment.points) if self.environment else 1)
         count *= len(self.power.targets) if self.power else 1
+        count *= len(self.smu.points) if self.smu else 1
         if count > 10000:
             raise NktError("Photoresponse plan exceeds 10000 conditions")
         if self.hardware is not None:
@@ -95,6 +105,7 @@ class PhotoresponseConfig:
         result = asdict(self)
         result["nkt"] = self.nkt.snapshot()
         result["environment"] = self.environment.snapshot() if self.environment else None
+        result["smu"] = self.smu.snapshot() if self.smu else None
         result["database_path"] = str(self.database_path) if self.database_path else None
         result.update(excitation=self.excitation, quantity=self.quantity)
         from .photoresponse_combination import PhotoresponseCombinationPlan
@@ -123,7 +134,8 @@ def load_photoresponse_config(path: str | Path) -> PhotoresponseConfig:
     if mode not in MODES:
         raise NktError(f"Unsupported photoresponse mode: {mode}")
     field = {"open_circuit_voltage": None, "dc_current_voltage": "bias_current_points_a",
-             "voltage_bias_current": "bias_voltage_points_v"}[mode]
+             "voltage_bias_current": "bias_voltage_points_v", "smu_current_voltage": None,
+             "smu_voltage_voltage": None}[mode]
     for candidate in ("bias_current_points_a", "bias_voltage_points_v"):
         if candidate in table and candidate != field:
             raise NktError(f"{candidate} is not allowed in {mode}")
@@ -135,6 +147,8 @@ def load_photoresponse_config(path: str | Path) -> PhotoresponseConfig:
     from dataclasses import replace
     from .power_config import load_photoresponse_power
     config = replace(config, power=load_photoresponse_power(doc))
+    from .photoresponse_smu import load_photoresponse_smu
+    config = replace(config, smu=load_photoresponse_smu(doc, path))
     if "photoresponse_combination" in doc:
         combination = doc["photoresponse_combination"]
         keys(combination, "photoresponse_combination", {"order"})

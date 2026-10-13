@@ -249,5 +249,5 @@ class NktSdk:
             for reg, target, actual in edges:
                 if target != actual:
                     self._write(a, reg, tenths(target))
-            if point.nd_pct != filt["nd_pct"]:
+            if point.nd_pct is not None and point.nd_pct != filt["nd_pct"]:
                 self._write(a, 0x32, tenths(point.nd_pct))

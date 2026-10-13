@@ -44,6 +44,34 @@ def setup(kind="nkt", config=None):
 
 
 class CombinationConfigTests(unittest.TestCase):
+    def test_source_feedback_preserves_omitted_nd_pp_and_rejects_drift(self):
+        config = config_for()
+        config = replace(config, nkt=replace(config.nkt, points=tuple(
+            replace(point, nd_pct=None, pulse_picker_ratio=None) for point in config.nkt.points)))
+        runner, backend, _, _, _ = setup(config=config)
+        backend.filter["nd_pct"], backend.source["pulse_picker_ratio"] = 27.5, 3
+        record = runner.run()
+        self.assertTrue(record["completed"], record["error"] or record["cleanup"])
+        self.assertTrue(any(row["power"]["adjustments"] for row in record["conditions"]))
+        self.assertEqual(backend.filter["nd_pct"], 27.5)
+        self.assertEqual(backend.source["pulse_picker_ratio"], 3)
+        self.assertTrue(all(command[1]["nd_pct"] is None and command[1]["pulse_picker_ratio"] is None
+                            for command in backend.commands if command[0] == "configure"))
+        for changed in ("nd", "pp"):
+            runner, backend, electrical, _, _ = setup(config=config)
+            original = electrical.read
+            def drift(**kw):
+                result = original(**kw)
+                if kw["illuminated"]:
+                    if changed == "nd": backend.filter["nd_pct"] += .1
+                    else: backend.source["pulse_picker_ratio"] += 1
+                return result
+            electrical.read = drift
+            rejected = runner.run()
+            self.assertFalse(rejected["completed"])
+            self.assertTrue(rejected["cleanup"]["laser_off_confirmed"])
+            self.assertFalse(any(row["accepted"] for row in rejected["conditions"]))
+
     def test_examples_cover_nkt_wave_power_bias_and_fixed_cld_power(self):
         for kind, expected in (("nkt", 8), ("cld", 6)):
             c = config_for(kind)

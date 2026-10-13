@@ -1,0 +1,339 @@
+# Reused reference regression tests; only import namespace changed.
+from dataclasses import replace
+import unittest
+
+from attodry_control.photonic_smu.keithley2400 import (
+    KEITHLEY_2400_TIMEOUT_MS,
+    QcodesKeithley2400,
+    VisaKeithley2400Monitor,
+    open_keithley2400_monitor,
+)
+from attodry_control.photonic_smu.three_smu_config import SmuHardwareConfig, SourceMode
+
+
+def config() -> SmuHardwareConfig:
+    return SmuHardwareConfig(
+        role="smu_bias",
+        model="Keithley2400",
+        address="FAKE::1",
+        source_mode=SourceMode.VOLTAGE,
+        max_abs_voltage_v=10.0,
+        max_abs_current_a=1e-3,
+        nplc=1.0,
+        source_auto_range=True,
+        measure_auto_range=True,
+        four_wire=True,
+    )
+
+
+class Parameter:
+    def __init__(self, instrument, name):
+        self.instrument = instrument
+        self.name = name
+
+    def __call__(self, value=None):
+        if value is None:
+            return self.instrument.values.get(self.name)
+        self.instrument.values[self.name] = value
+        self.instrument.calls.append((self.name, value))
+
+
+class FakeQcodesInstrument:
+    def __init__(self):
+        self.calls = []
+        self.values = {"volt": 0.0, "curr": 0.0, "output": "off"}
+        for name in (
+            "timeout", "mode", "compliancei", "compliancev",
+            "nplci", "nplcv", "volt", "curr", "output",
+        ):
+            setattr(self, name, Parameter(self, name))
+        self.responses = {
+            "*IDN?": "KEITHLEY,MODEL 2400,1234,1.0",
+            ":SOUR:FUNC?": "VOLT",
+            ":SOUR:VOLT?": "0.0",
+            ":SOUR:CURR?": "0.0",
+            ":OUTP?": "0",
+            ":READ?": "0.125,0.0005",
+            ":SENS:CURR:PROT?": "0.001",
+            ":SOUR:VOLT:RANG?": "1.0",
+            ":SENS:CURR:RANG?": "0.001",
+            ":SENS:CURR:PROT:RSYN?": "0",
+            ":SENS:VOLT:PROT:RSYN?": "0",
+            ":SOUR:VOLT:RANG:AUTO?": "1",
+            ":SOUR:CURR:RANG:AUTO?": "1",
+            ":SENS:CURR:RANG:AUTO?": "1",
+            ":SENS:VOLT:RANG:AUTO?": "1",
+            ":SENS:VOLT:PROT?": "10.0",
+            ":SOUR:CURR:RANG?": "0.001",
+            ":SENS:VOLT:RANG?": "10.0",
+            ":SYST:RSEN?": "0",
+            "SENS:CURR:PROT:TRIP?": "0",
+            ":SYST:ERR?": "0,No error",
+            ":SENS:FUNC:CONC?": "1",
+            ":SENS:FUNC?": '"VOLT:DC","CURR:DC"',
+            ":FORM:ELEM?": "VOLT,CURR",
+        }
+        self.closed = False
+        self.fail_write = None
+
+    def ask(self, command):
+        self.calls.append(("ask", command))
+        return self.responses[command]
+
+    def write(self, command):
+        self.calls.append(("write", command))
+        if command == self.fail_write:
+            raise OSError("injected write failure")
+
+    def close(self):
+        self.closed = True
+
+
+class FakeVisaResource:
+    """Minimal query-only VISA double: it intentionally has no write method."""
+
+    def __init__(self, *, identity="KEITHLEY,MODEL 2400,4321,1.0"):
+        self.identity = identity
+        self.timeout = None
+        self.closed = False
+        self.queries = []
+        self.responses = {
+            "*IDN?": identity,
+            ":SOUR:FUNC?": "VOLT",
+            ":SOUR:VOLT?": "0.125",
+            ":OUTP?": "0",
+            ":READ?": "0.125,0.0000005,250000",
+            ":SENS:CURR:PROT?": "0.001",
+            ":SOUR:VOLT:RANG?": "1.0",
+            ":SENS:CURR:RANG?": "0.001",
+            ":SYST:RSEN?": "0",
+            "SENS:CURR:PROT:TRIP?": "0",
+            ":SYST:ERR?": "0,No error",
+        }
+
+    def query(self, command):
+        self.queries.append(command)
+        return self.responses[command]
+
+    def close(self):
+        self.closed = True
+
+
+class FakeVisaManager:
+    def __init__(self, resource):
+        self.resource = resource
+        self.opened = []
+        self.closed = False
+
+    def open_resource(self, address):
+        self.opened.append(address)
+        return self.resource
+
+    def close(self):
+        self.closed = True
+
+
+class Keithley2400AdapterTests(unittest.TestCase):
+    def test_both_source_modes_enable_and_verify_actual_vi_measurement(self):
+        for mode in SourceMode:
+            with self.subTest(mode=mode):
+                instrument = FakeQcodesInstrument()
+                adapter = QcodesKeithley2400("smu_bias", instrument)
+                adapter.authorize_status_consumption()
+                state = adapter.configure(replace(config(), source_mode=mode))
+                self.assertIn(("write", ":SENS:FUNC:CONC ON"), instrument.calls)
+                self.assertIn(("write", ':SENS:FUNC "VOLT","CURR"'), instrument.calls)
+                self.assertIn(("write", ":FORM:ELEM VOLT,CURR"), instrument.calls)
+                self.assertEqual(state.measurement_functions, ("VOLT", "CURR"))
+                self.assertTrue(state.concurrent_measurement)
+                self.assertEqual(state.read_elements, ("VOLT", "CURR"))
+                self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
+    def test_measurement_configuration_mismatch_fails_before_output_enable(self):
+        for command, response in ((":SENS:FUNC:CONC?", "0"),
+                                  (":SENS:FUNC?", '"CURR:DC"'),
+                                  (":FORM:ELEM?", "CURR,VOLT")):
+            with self.subTest(command=command):
+                instrument = FakeQcodesInstrument()
+                instrument.responses[command] = response
+                adapter = QcodesKeithley2400("smu_bias", instrument)
+                with self.assertRaisesRegex(Exception, "V/I measurement"):
+                    adapter.authorize_status_consumption()
+                    adapter.configure(config())
+                self.assertNotIn(("output", "on"), instrument.calls)
+
+    def test_read_rechecks_measurement_functions_before_consuming_values(self):
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
+        adapter.configure(config())
+        instrument.responses[":OUTP?"] = "1"
+        instrument.responses[":SENS:FUNC?"] = '"CURR:DC"'
+        instrument.calls.clear()
+        with self.assertRaisesRegex(Exception, "V/I measurement"):
+            adapter.read()
+        self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
+    def test_configured_read_never_triggers_when_output_is_off(self):
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
+        adapter.configure(config())
+        instrument.responses[":OUTP?"] = "0"
+        instrument.calls.clear()
+        with self.assertRaisesRegex(Exception, "output OFF"):
+            adapter.read()
+        self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
+    def test_read_rejects_unexpected_extra_elements(self):
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
+        adapter.configure(config())
+        instrument.responses[":OUTP?"] = "1"
+        instrument.responses[":READ?"] = "0.125,0.0005,250"
+        with self.assertRaisesRegex(Exception, "VOLT,CURR format"):
+            adapter.read()
+
+    def test_fixed_timeout_is_five_seconds(self) -> None:
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.set_timeout(KEITHLEY_2400_TIMEOUT_MS)
+        self.assertEqual(KEITHLEY_2400_TIMEOUT_MS, 5000)
+        self.assertIn(("timeout", 5.0), instrument.calls)
+
+    def test_preflight_is_query_only(self) -> None:
+        instrument = FakeQcodesInstrument()
+        instrument.responses[":OUTP?"] = "1"
+        instrument.responses[":SOUR:VOLT?"] = "0.125"
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        state = adapter.preflight()
+        self.assertTrue(state.output_enabled)
+        self.assertEqual(state.source_setpoint, 0.125)
+        self.assertEqual(state.compliance_limit, 0.001)
+        self.assertFalse(state.four_wire)
+        self.assertFalse(any(call[0] == "write" for call in instrument.calls))
+        self.assertFalse(any(call[0] in {"volt", "curr", "output"} for call in instrument.calls))
+
+    def test_preflight_skips_read_when_output_is_off(self) -> None:
+        instrument = FakeQcodesInstrument()
+        instrument.responses[":OUTP?"] = "0"
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        state = adapter.preflight()
+        self.assertFalse(state.output_enabled)
+        self.assertIsNone(state.voltage_v)
+        self.assertIsNone(state.current_a)
+        self.assertNotIn(("ask", ":READ?"), instrument.calls)
+
+    def test_configuration_preserves_range_nplc_and_four_wire_settings(self) -> None:
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
+        adapter.configure(config())
+        self.assertIn(("mode", "VOLT"), instrument.calls)
+        self.assertIn(("write", f":SENS:CURR:PROT {1e-3:.17e}"), instrument.calls)
+        self.assertIn(("nplci", 1.0), instrument.calls)
+        self.assertIn(("nplcv", 1.0), instrument.calls)
+        self.assertIn(("write", ":SOUR:VOLT:RANG:AUTO ON"), instrument.calls)
+        self.assertIn(("write", ":SENS:CURR:RANG:AUTO ON"), instrument.calls)
+        self.assertIn(("write", ":SYST:RSEN ON"), instrument.calls)
+
+    def test_command_error_is_not_swallowed(self) -> None:
+        instrument = FakeQcodesInstrument()
+        instrument.fail_write = ":SENS:CURR:RANG:AUTO ON"
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        with self.assertRaises(OSError):
+            adapter.authorize_status_consumption()
+            adapter.configure(config())
+
+    def test_bias_current_source_uses_voltage_compliance_and_matching_ranges(self) -> None:
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
+        adapter.configure(replace(config(), source_mode=SourceMode.CURRENT))
+        self.assertIn(("mode", "CURR"), instrument.calls)
+        self.assertIn(("write", f":SENS:VOLT:PROT {10.0:.17e}"), instrument.calls)
+        self.assertIn(("write", ":SOUR:CURR:RANG:AUTO ON"), instrument.calls)
+        self.assertIn(("write", ":SENS:VOLT:RANG:AUTO ON"), instrument.calls)
+
+    def test_read_includes_trip_output_source_and_status(self) -> None:
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
+        adapter.configure(config())
+        instrument.responses[":OUTP?"] = "1"
+        adapter.authorize_status_consumption()
+        reading = adapter.read()
+        self.assertEqual(reading.voltage_v, 0.125)
+        self.assertEqual(reading.current_a, 0.0005)
+        self.assertTrue(reading.output_enabled)
+        self.assertFalse(reading.compliance_trip)
+        self.assertEqual(reading.resistance_ohm, 250.0)
+        self.assertTrue(reading.status_query_consumed)
+
+    def test_configuration_rejects_compliance_readback_above_max_abs_limit(self) -> None:
+        instrument = FakeQcodesInstrument()
+        instrument.responses[":SENS:CURR:PROT?"] = "0.002"
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        with self.assertRaisesRegex(Exception, "compliance readback"):
+            adapter.authorize_status_consumption()
+            adapter.configure(config())
+
+    def test_set_source_checks_absolute_limit_before_driver_write(self) -> None:
+        instrument = FakeQcodesInstrument()
+        adapter = QcodesKeithley2400("smu_bias", instrument)
+        adapter.authorize_status_consumption()
+        adapter.configure(config())
+        before = list(instrument.calls)
+        with self.assertRaisesRegex(Exception, "max_abs"):
+            adapter.set_source(11.0)
+        self.assertEqual(instrument.calls, before)
+
+    def test_live_monitor_queries_state_without_consuming_error_queue_by_default(self) -> None:
+        resource = FakeVisaResource()
+        reading = VisaKeithley2400Monitor("smu_bias", resource).read_monitor()
+        self.assertEqual(reading.identity, "KEITHLEY,MODEL 2400,4321,1.0")
+        self.assertIsNone(reading.voltage_v)
+        self.assertIsNone(reading.current_a)
+        self.assertIsNone(reading.resistance_ohm)
+        self.assertIsNone(reading.compliance_trip)
+        self.assertFalse(reading.output_enabled)
+        self.assertNotIn(":READ?", resource.queries)
+        self.assertNotIn("SENS:CURR:PROT:TRIP?", resource.queries)
+        self.assertFalse(reading.status_queue_consumed)
+        self.assertNotIn(":SYST:ERR?", resource.queries)
+        self.assertFalse(hasattr(resource, "write"))
+
+    def test_live_monitor_reads_measurement_only_when_output_is_on(self) -> None:
+        resource = FakeVisaResource()
+        resource.responses[":OUTP?"] = "1"
+        reading = VisaKeithley2400Monitor("smu_bias", resource).read_monitor()
+        self.assertEqual(reading.voltage_v, 0.125)
+        self.assertEqual(reading.current_a, 0.0000005)
+        self.assertEqual(reading.resistance_ohm, 250000.0)
+        self.assertFalse(reading.compliance_trip)
+        self.assertIn(":READ?", resource.queries)
+        self.assertIn("SENS:CURR:PROT:TRIP?", resource.queries)
+
+    def test_live_monitor_status_queue_consumption_is_explicit(self) -> None:
+        resource = FakeVisaResource()
+        reading = VisaKeithley2400Monitor("smu_bias", resource).read_monitor(
+            consume_status_queue=True
+        )
+        self.assertTrue(reading.status_queue_consumed)
+        self.assertEqual(reading.status, "0,No error")
+        self.assertIn(":SYST:ERR?", resource.queries)
+
+    def test_open_live_monitor_sets_only_local_timeout_and_closes_resource(self) -> None:
+        resource = FakeVisaResource()
+        manager = FakeVisaManager(resource)
+        monitor = open_keithley2400_monitor("smu_bias", config(), manager)
+        self.assertEqual(manager.opened, ["FAKE::1"])
+        self.assertEqual(resource.timeout, 5000)
+        self.assertEqual(resource.queries, [])
+        monitor.close()
+        self.assertTrue(resource.closed)
+
+
+if __name__ == "__main__":
+    unittest.main()

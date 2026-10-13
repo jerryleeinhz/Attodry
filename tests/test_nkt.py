@@ -451,5 +451,47 @@ class CliTests(unittest.TestCase):
                 loader.assert_not_called()
 
 
+class PreservedSettingTests(unittest.TestCase):
+    def test_omitted_nd_and_pp_are_not_written_by_sdk(self):
+        api = FakeApi()
+        c = hardware_config(points=(NktPoint(5., 630., 10.),))
+        backend = NktSdk(c, api=api, authorize_writes=True).open(authorize_connection=True)
+        try:
+            backend.configure(c.points[0])
+            writes = [call for call in api.calls if call[0] == "write"]
+            self.assertFalse(any(call[1:3] in ((2, 0x32), (1, 0x34)) for call in writes))
+            self.assertEqual(backend.read_filter()["nd_pct"], 10.)
+            self.assertEqual(backend.read_source()["pulse_picker_ratio"], 1)
+        finally: backend.close()
+
+    def test_omitted_controls_are_pinned_for_the_prepared_point(self):
+        c = replace(example(), points=(NktPoint(5., 630., 10.),))
+        backend, clock = SimulatedNkt(c), Clock()
+        backend.filter["nd_pct"], backend.source["pulse_picker_ratio"] = 27.5, 3
+        controller = NktController(c, backend, clock=clock, sleep=clock.sleep)
+        controller.begin()
+        controller.prepare_point(c.points[0])
+        self.assertEqual(backend.filter["nd_pct"], 27.5)
+        self.assertEqual(backend.source["pulse_picker_ratio"], 3)
+        self.assertIsNone(c.points[0].nd_pct)
+        backend.filter["nd_pct"] = 27.6
+        with self.assertRaisesRegex(NktError, "differs"):
+            controller.verify_point(emitting=False)
+        self.assertTrue(controller.finish()["off_confirmed"])
+
+    def test_omitted_controls_cannot_be_re_pinned_after_external_change(self):
+        for changed in ("nd", "pp"):
+            c = replace(example(), points=(NktPoint(5., 630., 10.),))
+            backend, clock = SimulatedNkt(c), Clock()
+            controller = NktController(c, backend, clock=clock, sleep=clock.sleep)
+            controller.begin()
+            if changed == "nd": backend.filter["nd_pct"] += .1
+            else: backend.source["pulse_picker_ratio"] += 1
+            with self.assertRaisesRegex(NktError, "Unselected"):
+                controller.prepare_point(c.points[0])
+            self.assertFalse(any(command[0] == "configure" for command in backend.commands))
+            controller.finish()
+
+
 if __name__ == "__main__":
     unittest.main()

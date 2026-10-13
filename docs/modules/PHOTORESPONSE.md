@@ -2,6 +2,19 @@
 
 Updated: 2026-10-13. User-selected branch: `module/NKT-photonics`.
 
+## Updated operator acceptance contract (2026-10-13)
+
+- P0/P1 reuse the station and optical configuration in LK_setup's
+  `Integration-photonics`; the operator explicitly confirmed wiring and isolation.
+  SuperK code/configuration reuse does not require another real validation.
+- P2/P3 require instrument control without a sample, not a valid scientific
+  photovoltage/current dataset. Fresh overload replies and empty-load compliance
+  remain rejected raw measurements; their correct handling can pass control tests.
+- P6/P7/P9 and Three-SMU joint scanning require reference-source reuse and offline
+  acceptance only. No extra real SMU, temperature or magnetic operation is needed.
+- P5/P8 real CLD/PM control is authorized. Authorization does not turn asserted or
+  unresolved protection into a passing measurement; current limits stay 30 mA.
+
 ## Scope and delivered software
 
 The complete user goal, reconfirmed on 2026-10-13, is **combination-based optical
@@ -35,16 +48,16 @@ remain independent. This implementation does not use lock-ins in the photorespon
 
 | Stage | Software status | Physical acceptance still required |
 |---|---|---|
-| P0 physical contract | Strict mode, exact identity, wiring/limit and permission checks | Sample wiring/limits; exact CLD diode/TEC/pinout; optical route |
+| P0 physical contract | Operator-confirmed wiring/isolation and Integration configuration reuse | Runtime protection/readback still must pass; unspecified diode model remains allowed |
 | P1 simulation/transport | Three modes, NKT/CLD simulations, audited VISA and RS-232 relay, fault tests | Stable shared-bus operation and actual response formats |
-| P2 photovoltage | Fresh 2182A READ acquisition; no-excitation mode; direct or 6221 relay | Complete dark/light/dark voltage with real optics |
-| P3 current bias | Bounded DC ramps, readback, compliance stop and zero/off cleanup | Authorized unloaded five-point 6221 test still not completed |
+| P2 photovoltage | No-sample control lifecycle passed: configuration, fresh READ and cleanup | Floating-input overload is retained, not accepted as scientific data |
+| P3 current bias | Five output-off current settings/readbacks passed; output protection stop and zero/off confirmed | Actual five-point current-delivery sweep was not passed; outside the revised control-only criterion |
 | P4 photocurrent | 2400 V-source/I-measure and 0 A/fixed-range voltmeter, 24-bit status checks | Station 2400 is gate-bottom/source; channel detector wiring and acceptance pending |
 | P5 CLD | USB/VISA SCPI or TL4000 and shared TEC/interlock/current controller | Passive 26 C TEC stability verified; connection diagnostic qualification still blocks automatic LD acceptance |
-| P6 environment | Existing attoDRY driver, explicit T/Bx/Bz points, stability, 3 T and cleanup | New joint experiment commissioning; optional gate scans remain separate Three-SMU work |
+| P6 environment | Existing attoDRY driver/config reuse, explicit T/Bx/Bz points, stability, 3 T and cleanup | Offline acceptance is sufficient under the revised operator scope |
 | P7 data | JSON/JSONL, SQLite WAL/FULL audit, new-attempt retry, accepted-only Notebook/CSV | Target offline validation recorded in development stages; scientific noise/settling validation remains experimental |
 | P8 measured-power feedback | Offline complete: reused PM100D, PowerWindow, NKT strategies and bounded CLD current actuator | PM identity/sensor, current measurement plane, range/calibration and new optical-path acceptance |
-| P9 combination entry point | Offline complete: ordered optical/power/electrical/environment coordinates and complete leaf records | Selected-module joint experiment acceptance; no hardware synchronization inferred |
+| P9 combination entry point | Ordered optical/power/bias/environment/SMU/repeat coordinates, full leaf records and reused Three-SMU | Offline acceptance is sufficient; no hardware synchronization inferred |
 
 P8/P9 now extend the earlier scoped implementation with PM100D feedback and
 combination integration, bounded CLD current feedback and formal-window drift rejection.
@@ -97,6 +110,10 @@ dark measurements do not cause automatic search for light.
   strategies, strict power/actuator domains and independent PM authorization/ownership.
 - `photoresponse_power.py`: off-state wavelength correction, bounded tuning before
   the formal light window, fresh power brackets, drift rejection and raw PM audit.
+- `photonic_smu/`: three unchanged reference source files pinned to `016d741`,
+  with SHA-256 provenance and reference tests; legacy independent SMU APIs remain.
+- `photoresponse_smu.py`: thin point-session adapter, active-role selection,
+  exact identity/resource conflict checks, per-leaf source/readback/leakage and cleanup.
 - `photoresponse_storage.py`: separate photo_* tables; failed attempts retained; explicit
   resume creates a new full attempt, never splices windows. Unique accepted condition/series.
 - `photoresponse_cli.py`, `photoresponse_analysis.py`, `notebooks/Photoresponse_Analysis.ipynb`:
@@ -163,6 +180,7 @@ Use [运行指南](../PHOTORESPONSE_GUIDE.md) and the tracked placeholder templa
 local hardware addresses/data and pre-existing PM100D/PEM notes outside this feature's commit.
 The current branch is synchronized without merging main. Remote offline validation uses a
 fresh temporary folder and the existing `lyr` environment, not an overwrite of the active lab checkout.
-Next: confirm the 2182A input and 2400 sample wiring, provide a suitable 6221 test load,
-qualify CLD connection diagnostic semantics, then commission valid electrical readings and
-optical dark/light control. Unknown physical parameters remain hard gates.
+The revised scope does not require a sample/load or new environment/SMU commissioning.
+Current real blocker is CLD protection-readback qualification before automatic LD
+enable and illuminated PM feedback. Sample scientific acceptance remains a future
+experiment rather than a software-completion requirement.

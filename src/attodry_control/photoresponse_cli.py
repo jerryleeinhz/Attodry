@@ -33,8 +33,8 @@ def provenance():
     root = Path(__file__).resolve().parents[2]
     result = {"python": sys.executable, "module": __file__, "git_commit": None, "git_dirty": None}
     digest = hashlib.sha256()
-    for path in sorted(Path(__file__).parent.glob("*.py")):
-        digest.update(path.name.encode("utf-8"))
+    for path in sorted(Path(__file__).parent.rglob("*.py")):
+        digest.update(path.relative_to(Path(__file__).parent).as_posix().encode("utf-8"))
         digest.update(path.read_bytes())
     result["source_sha256"] = digest.hexdigest()
     try:
@@ -57,16 +57,25 @@ def _reject(record, message):
 
 
 def _run(config, args, event, attempt_index):
+    config.validate()  # All source/domain/resource conflicts precede every factory.
     from contextlib import ExitStack
     from .photoresponse_cld import CldConfig, CldController, SimulatedCld, TL4000, VisaCld
     from .photoresponse_environment import open_environment
     from .photoresponse_hardware import HardwareElectrical
     from .photoresponse_transport import visa_resources
     from .photoresponse_power import open_photoresponse_power
+    from .photoresponse_smu import PhotoresponseSmu
     hardware = config.nkt.backend != "simulation"
     record = None
     try:
+        if hardware and config.smu:
+            config.smu.require_hardware()
+            if not getattr(args, "authorize_smu", False):
+                raise NktError("Selected SMU hardware requires --authorize-smu")
         with ExitStack() as stack:
+            smu = (PhotoresponseSmu(config, simulated=not hardware, on_event=event,
+                    authorize_writes=getattr(args, "authorize_smu", False)) if config.smu else None)
+            if smu: stack.callback(smu.close)
             if isinstance(config.nkt, CldConfig):
                 if hardware:
                     factory = VisaCld if config.nkt.backend == "visa" else TL4000
@@ -98,7 +107,7 @@ def _run(config, args, event, attempt_index):
             if power: stack.callback(power.close)
             runner = PhotoresponseRunner(config, laser, electrical, on_event=event,
                 authorize_writes=hardware, confirm_manual_route=args.confirm_route,
-                environment=environment, attempt_index=attempt_index, power=power)
+                environment=environment, attempt_index=attempt_index, power=power, smu=smu)
             record = runner.run()
     except (Exception, KeyboardInterrupt) as exc:
         if record is None:
@@ -147,16 +156,18 @@ def main(argv=None):
     parser.add_argument("--authorize-writes", action="store_true", help="Includes source/laser/measurement settings, triggers and error-queue reads")
     parser.add_argument("--confirm-route", action="store_true")
     parser.add_argument("--authorize-environment", action="store_true")
+    parser.add_argument("--authorize-smu", action="store_true", help="Explicitly authorize selected SMU connections, settings, fresh READs and consuming status queries")
     args = parser.parse_args(argv)
     try:
         if args.command == "describe":
             print(json.dumps({"stage":"offline-tested drivers; real commissioning is device-specific",
-                "modes":["open_circuit_voltage","dc_current_voltage","voltage_bias_current"],
+                "modes":["open_circuit_voltage","dc_current_voltage","voltage_bias_current", "smu_current_voltage", "smu_voltage_voltage"],
                 "lasers":["NKT SDK EXTREME/VARIA","CLD1010LP USB/VISA SCPI or TL4000"],
                 "detectors":["2182A direct VISA or 6221 serial relay","2400"],
                 "storage":"JSON/JSONL, optional SQLite with explicit new-attempt retry",
                 "environment":"optional paired attoDRY temperature/vector-field points",
-                "combination":"ordered optical / target_power_w / bias / environment / repeat axes",
+                "combination":"ordered optical / target_power_w / bias / smu / environment / repeat axes",
+                "smu":"opt-in pinned Three-SMU point engine; gate leakage separate from detector; one sample source",
                 "power_w":"optional PM100D bounded feedback; actual W at configured measurement_plane"},indent=2))
             return 0
         if args.command in ("analyze","export"):
@@ -193,6 +204,10 @@ def main(argv=None):
                 config.nkt.require_hardware(writes=True)
                 if config.power:
                     config.power.meter.require_hardware(writes=True)
+                if config.smu:
+                    config.smu.require_hardware()
+                    if not args.authorize_smu:
+                        raise NktError("Selected SMU hardware requires --authorize-smu")
             if args.command == "diagnose" and not args.authorize_connect:
                 raise NktError("diagnose requires --authorize-connect")
             if args.resume_run and (not config.database_path or args.command not in ("simulate","run")):

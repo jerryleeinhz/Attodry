@@ -126,7 +126,11 @@ class CurrentSource6221(Keithley6221Queries):
 
     @acquisition_operation
     def check(self, state, *, check_compliance=True):
-        if state["unsafe_condition"] or (check_compliance and state["compliance_tripped"]):
+        # The condition bit can remain asserted after an open-load output has
+        # been disabled. Preserve it in the raw snapshot; it blocks supply only
+        # while the actual output is on. OFF/current/compliance readback checks
+        # below remain mandatory and no status clear is used to pass them.
+        if state["unsafe_condition"] or (check_compliance and state["output_enabled"] and state["compliance_tripped"]):
             raise NktError("6221 compliance or unsafe condition")
         if state["output_enabled"] != self.expected_output:
             raise NktError("6221 output changed externally")
@@ -146,6 +150,7 @@ class CurrentSource6221(Keithley6221Queries):
         if not self.expected_output:
             ensure(self.resource, "OUTP:STAT", True)
             self.expected_output = True
+            self.check(self.snapshot())  # Includes a zero-current request with no ramp steps.
         for value in ramp_values(self.expected_current, target, self.max_step_a):
             self.check(self.snapshot())
             ensure(self.resource, "SOUR:CURR", value, tolerance=self.tolerance_a)

@@ -145,6 +145,34 @@ class CurrentSourceTests(unittest.TestCase):
         self.assertTrue(device.cleanup()["safe"])
         self.assertNotIn("SOUR:CURR 1e-08", r.commands)
 
+    def test_off_compliance_is_retained_but_on_still_blocks_even_zero_request(self):
+        for target in (0., 1e-8):
+            device, r, _ = source()
+            r.values["STAT:MEAS:COND"] = "8"
+            device.begin()
+            state = device.snapshot()
+            device.check(state)
+            self.assertTrue(state["compliance_tripped"])
+            self.assertFalse(state["output_enabled"])
+            self.assertFalse(device.faulted)
+            with self.assertRaisesRegex(NktError, "compliance"):
+                device.set_bias(target)
+            self.assertIn("OUTP:STAT 1", r.commands)
+            self.assertFalse(any(c.startswith("SOUR:CURR ") for c in r.commands))
+            self.assertTrue(device.cleanup()["safe"])
+            self.assertEqual(r.values["STAT:MEAS:COND"], "8")
+            self.assertNotIn("*CLS", r.commands)
+            self.assertNotIn("*RST", r.commands)
+
+    def test_off_compliance_does_not_mask_unsafe_condition_or_wrong_output(self):
+        for condition in (9, 12):
+            device, r, _ = source()
+            device.begin()
+            r.values["STAT:MEAS:COND"] = str(condition)
+            with self.assertRaisesRegex(NktError, "unsafe"):
+                device.check(device.snapshot())
+            device.cleanup()
+
     def test_bus_failure_does_not_claim_cleanup_or_zero(self):
         device, r, _ = source()
         device.begin()

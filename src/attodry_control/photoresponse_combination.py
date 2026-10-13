@@ -10,7 +10,7 @@ from itertools import product
 from .nkt_config import NktError
 
 
-AXES = ("environment", "optical", "target_power_w", "bias", "repeat")
+AXES = ("environment", "optical", "target_power_w", "bias", "smu", "repeat")
 
 
 class PhotoresponseCombinationPlan:
@@ -19,7 +19,8 @@ class PhotoresponseCombinationPlan:
             "environment": config.environment.points if config.environment else (None,),
             "optical": config.nkt.points,
             "target_power_w": config.power.targets if config.power else (None,),
-            "bias": config.bias_points, "repeat": tuple(range(config.repeats))}
+            "bias": config.bias_points, "smu": config.smu.points if config.smu else (None,),
+            "repeat": tuple(range(config.repeats))}
         order = config.combination_order
         if order is None:
             order = AXES  # Preserve the previous open-loop traversal by default.
@@ -46,6 +47,8 @@ class PhotoresponseCombinationPlan:
             self.modules.append("pm100d")
         if config.environment:
             self.modules.append("environment")
+        if config.smu:
+            self.modules.extend(config.smu.roles)
 
     def conditions(self):
         for entries in product(*(enumerate(self.values[axis]) for axis in self.order)):

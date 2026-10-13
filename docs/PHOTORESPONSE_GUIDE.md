@@ -65,6 +65,8 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 | `open_circuit_voltage` | `keithley2182a` / `keithley2400` | 两个偏置数组都必须省略 | 光电压；外部激励路径须物理隔离 |
 | `dc_current_voltage` | `keithley2182a` / `keithley2400` | `bias_current_points_a` | 6221 恒流下的光致电压变化 |
 | `voltage_bias_current` | `keithley2400` | `bias_voltage_points_v` | source–drain 沟道电压偏置下的光电流；0 V 点用于短路光电流 |
+| `smu_current_voltage` | `keithley2182a` | 偏置数组省略，使用 `three_smu_run.smu_bias` | 独立 SMU 恒流激励下测电压 |
+| `smu_voltage_voltage` | `keithley2182a` | 偏置数组省略，使用 `three_smu_run.smu_bias` | 独立 SMU 电压激励下测电压 |
 
 2400 的电流探测接线须为沟道 source–drain 路径；底栅–source 电流是栅漏电流。
 当前站点 2400 属于底栅角色，不能勾选该光电流探测配置的接线确认。
@@ -98,7 +100,7 @@ V/I 与读数状态、禁用电阻测量/处理功能，结束后回零、关闭
 order = ["optical", "target_power_w", "bias", "repeat"]
 ```
 
-允许的轴为 `optical`、`target_power_w`、`bias`、`environment` 和 `repeat`。
+允许的轴为 `optical`、`target_power_w`、`bias`、`environment`、`smu` 和 `repeat`。
 所有多点轴都必须列出；单点轴可省略，但固定模块仍参与叶节点的读回和保护。
 光学行内的波长／带宽／初始调节量成组，环境行内的温度／Bx／Bz 成组；
 模块由光源、测量模式、探测器和可选 PM／环境表选择。未选硬件不连接。
@@ -139,6 +141,23 @@ CSV 输出功率及组合坐标。源设定百分比、电流与实际 W 始终�
 不会自动推算样品的 A/W 或 V/W。
 
 ## 配置模板
+
+Three-SMU 联合配置增加 `[photoresponse_smu]`，设 `enabled=true`，复用原
+`[three_smu_run]` 与活动角色的 `[smu_bias] / [gate_top] / [gate_bottom]` 表。
+`order` 中加入 `smu`；其点由原 Three-SMU generator 生成。`fixed` 角色每个叶节点
+仍读取，`off` 角色不打开。栅极电流导出为 leakage，不能当作样品光电流。
+SMU 替代激励使用新增两种 mode，并且省略 photoresponse 的偏置数组。
+`open_circuit_voltage` 只允许栅极角色，活动 `smu_bias` 必须有明确激励 mode。
+真实联合运行另外需要 `--authorize-smu`、活动角色的精确身份和接线确认；
+本轮按操作者要求只做 SMU／温磁场离线验收。
+
+```powershell
+python -m attodry_control.photoresponse_cli simulate --config config/photoresponse_smu_nkt_simulation.toml
+python -m attodry_control.photoresponse_cli simulate --config config/photoresponse_smu_cld_simulation.toml
+```
+
+新版 NKT 配置可省略 `nd_pct` 和未选择的 pulse picker：程序保持实际值，
+不写这些寄存器，并在每次正式核对中检测外部改动。
 
 默认本地文件是被忽略的 `config/hardware.local.toml`。合并需要的表，保留已有站点配置。
 也可把临时配置放在被忽略的 `run_data/` 下。所有相对输出/数据库路径相对该 TOML 文件解析。

@@ -1,0 +1,142 @@
+# Synthetic diode, NOT an installed diode specification. No hardware is opened.
+[photoresponse]
+light_source = "cld1010lp"
+mode = "smu_current_voltage"
+detector = "keithley2182a"
+samples_per_window = 2
+repeats = 1
+sample_interval_s = 0.01
+settle_s = 0.01
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.000001
+
+[cld1010]
+backend = "simulation"
+dll_path = ""
+address = ""
+expected_serial = "SIMULATED"
+diode_model = "SIMULATED ONLY"
+diode_wiring_confirmed = false
+wavelength_nm = 760.0 # Nominal; no wavelength tuning or wavelength readback.
+current_points_a = [0.01]
+max_current_a = 0.03
+max_voltage_v = 3.0
+max_tec_current_a = 0.1
+temperature_min_c = 20.0
+temperature_max_c = 30.0
+temperature_c = 25.0
+temperature_tolerance_c = 0.1
+stable_dwell_s = 0.1
+current_tolerance_a = 0.00001
+manual_route = "SIMULATED optical path"
+timeout_s = 5.0
+poll_interval_s = 0.05
+output_directory = "../run_data/photoresponse_smu_cld_simulation"
+run_name = "photoresponse_smu_cld_offline"
+note = "Synthetic photovoltage with separate SMU excitation; no calibrated sample power."
+
+[photoresponse_storage]
+database_path = "../run_data/photoresponse_smu_cld_simulation/audit.sqlite"
+
+[photoresponse_combination]
+# Outer to inner; optical is one complete wavelength/bandwidth/initial-actuator row.
+order = ["optical", "target_power_w", "smu", "repeat"]
+
+[pm100d]
+backend = "simulation"
+io_timeout_s = 1.0
+wavelength_tolerance_nm = 0.1
+average_count = 1
+auto_range = true
+max_power_w = 0.003
+measurement_plane = "SIMULATED reference monitor; not sample calibration"
+
+[power_feedback]
+actuator = "cld_current"
+target_powers_w = [0.0008, 0.0012]
+target_tolerance_w = 0.000001
+max_power_w = 0.0025
+minimum_signal_power_w = 0.00001
+timeout_s = 3.0
+hold_s = 0.01
+current_min_a = 0.002
+current_max_a = 0.028
+current_step_a = 0.002
+
+[power_feedback.window]
+duration_s = 0.02
+min_samples = 3
+sample_interval_s = 0.01
+max_peak_to_peak_w = 0.000001
+
+# Explicit opt-in. All SMU resources below are synthetic; wiring is not commissioned.
+[photoresponse_smu]
+enabled = true
+wiring_confirmed = false
+
+[three_smu_run]
+mode = "multi_smu_map"
+samples_per_point = 1
+delay_s = 0.01
+serpentine = false
+finish_action = "zero_disable"
+point_count = 1
+pulse_high_s = 0.0
+pulse_period_s = 0.0
+output_directory = "../run_data/unused_independent_smu"
+run_name = "photoresponse_point_session"
+note = "Point generation and SMU control reused from pinned photonics implementation."
+
+[three_smu_run.gate_top]
+role = "fixed"
+bidirectional = false
+fixed = 0.0
+zero_readback_tolerance_v = 0.0001
+
+[three_smu_run.gate_bottom]
+role = "sweep"
+bidirectional = false
+points = [-0.001, 0.001]
+[three_smu_run.gate_bottom.ramp]
+max_step_v = 0.001
+step_interval_s = 0.001
+timeout_s = 2.0
+readback_tolerance_v = 0.0001
+
+[three_smu_run.smu_bias]
+role = "sweep"
+bidirectional = false
+points = [-0.000000001, 0.000000001]
+
+[smu_bias]
+model = "Keithley2400"
+address = "FAKE::SMU_BIAS::INSTR"
+source_mode = "current"
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.000001
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_top]
+model = "Keithley2400"
+address = "FAKE::GATE_TOP::INSTR"
+source_mode = "voltage"
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.000001
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[gate_bottom]
+model = "Keithley2400"
+address = "FAKE::GATE_BOTTOM::INSTR"
+source_mode = "voltage"
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.000001
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false

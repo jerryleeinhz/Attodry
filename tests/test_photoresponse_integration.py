@@ -69,6 +69,56 @@ def hardware_setup(mode="dc_current_voltage", detector="keithley2182a", relay=Tr
 
 
 class HardwareIntegrationTests(unittest.TestCase):
+    def test_off_relay_compliance_keeps_raw_status_and_allows_fresh_2182_read(self):
+        runner, host, meter, electrical, _ = hardware_setup("open_circuit_voltage", "keithley2182a", True)
+        host.values["STAT:MEAS:COND"] = "8"
+        self.assertFalse(electrical._host_guard()["unsafe_condition"])
+        before = electrical.relay_host.snapshot(authorize_queries=True)
+        self.assertFalse(before["output_enabled"])
+        self.assertTrue(before["compliance_tripped"])
+        record = runner.run()
+        self.assertTrue(record["completed"], record["error"] or record["cleanup"])
+        light = record["conditions"][0]["windows"][1]["samples"][0]
+        relay = light["electrical_after"]["relay_host_readback"]
+        self.assertFalse(light["electrical_after"]["compliance_tripped"])
+        self.assertEqual(relay["measurement_condition"], 8)
+        self.assertEqual(relay["questionable_condition"], 0)
+        self.assertFalse(relay["armed"])
+        self.assertFalse(relay["unsafe_condition"])
+        self.assertIn("READ?", meter.commands)
+        self.assertIsNone(electrical.source)
+        host_commands = [c for c in host.commands if not c.startswith("SYST:COMM:SER:")]
+        self.assertTrue(all(c.endswith("?") for c in host_commands))
+        self.assertEqual(host.values["OUTP:STAT"], "0")
+        self.assertEqual(host.values["STAT:MEAS:COND"], "8")
+
+    def test_off_comp_relay_still_rejects_active_armed_unsafe_or_wrong_identity(self):
+        for command, value in (("OUTP:STAT", "1"), ("SOUR:DELT:ARM", "1"),
+                ("SOUR:PDEL:ARM", "1"), ("SOUR:DCON:ARM", "1"),
+                ("STAT:QUES:COND", "1"), ("STAT:MEAS:COND", "9"),
+                ("*IDN", "WRONG")):
+            runner, host, meter, _, _ = hardware_setup("open_circuit_voltage", "keithley2182a", True)
+            host.values["STAT:MEAS:COND"] = "8"
+            host.values[command] = value
+            record = runner.run()
+            self.assertFalse(record["completed"])
+            self.assertNotIn("READ?", meter.commands)
+            self.assertNotIn("OUTP:STAT 1", host.commands)
+
+    def test_dc_source_off_compliance_remains_raw_not_active_fault(self):
+        _, host, _, electrical, _ = hardware_setup()
+        host.values["STAT:MEAS:COND"] = "8"
+        try:
+            electrical.begin()
+            snapshot = electrical.snapshot()
+            self.assertFalse(snapshot["source"]["output_enabled"])
+            self.assertTrue(snapshot["source"]["readback"]["compliance_tripped"])
+            self.assertFalse(snapshot["compliance_tripped"])
+            self.assertNotIn("OUTP:STAT 1", host.commands)
+        finally:
+            electrical.cleanup()
+            electrical.close()
+
     def test_complete_relay_direct_and_2400_modes(self):
         for mode, detector, relay in [("dc_current_voltage","keithley2182a",True),
                 ("open_circuit_voltage","keithley2182a",True),

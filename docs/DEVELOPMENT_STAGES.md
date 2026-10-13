@@ -2,6 +2,34 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - reference Three-SMU and revised control acceptance
+
+Status: software/offline complete and electrical control paths exercised (2026-10-13).
+CLD illuminated power feedback remains protected/blocked, not accepted.
+
+- Operator confirms P0/P1 wiring/isolation and Integration configuration reuse;
+  no further SuperK real validation. P6/P7/P9/SMU use offline acceptance, and P2/P3
+  require no-sample instrument control rather than scientific sample measurements.
+- Three-SMU config/driver/session are unchanged source copies from `016d741`, with
+  provenance hashes/tests and a thin active-role point adapter. Added gate joint
+  scans, explicit SMU current/voltage excitation modes, role-separated measurements,
+  pre-open resource/single-source checks and independent zero-disable cleanup.
+- Cleanup failures remain sticky across environment transitions and repeated finish;
+  SQLite and analysis require the same successful SMU safety confirmation.
+- Source-current NKT profiles support omitted ND/PP without writing them; actual
+  settings are pinned and later drift rejects. Existing legacy SMU APIs and 3 T
+  temperature/field behavior are preserved.
+- Real P2 configured/triggered/read/cleaned up; floating-input overload is retained.
+  P3 five output-off settings passed. Output-on empty-load compliance was rejected,
+  with final zero/off confirmed. No sample voltage/current dataset was accepted.
+- Inactive 6221 COMP readback is retained without blocking isolated relay access;
+  armed/unsafe/QUES/output checks stay strict, and active compliance still stops.
+- PM identity/settings/fresh-read communication passed; dark signed noise is not
+  an illuminated feedback measurement. CLD saved limit was restored to 30 mA with
+  LD OFF; unresolved mount protection still blocks automatic output.
+- **648/648 full local tests** passed; NKT 16 and CLD 8 actual CLI simulated
+  combinations plus CSV checks passed. No real SMU/environment output was commanded.
+
 ## DC photoresponse - complete optical/electrical combination goal
 
 Status: scope corrected; PM100D feedback and combination integration offline complete

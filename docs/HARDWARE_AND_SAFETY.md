@@ -116,6 +116,11 @@ its source. Neither operation opens a laser or unused detector.
   A relay-host 6221 may still be queried, but no output controller is constructed.
 - 6221 starts at zero/off, disarms waveform/sweep before DC setup, verifies each
   bounded step and rejects compliance. Minimum voltage compliance is 0.1 V.
+  Inactive COMP may remain asserted after an empty-load stop. Preserve that raw
+  bit; it does not indicate active current delivery when output is positively OFF.
+  Relay-only operation still verifies identity, physical isolation, unarmed modes,
+  OFF, MEAS unsafe bits and QUES clear. Check compliance immediately after every
+  output enable, including 0 A. Do not clear/reset status to manufacture a pass.
 - 2182A READ changes trigger state and requires write authorization; stale FETCh
   readings are never accepted as new samples. The error queue also needs write permission.
 - 2400 voltmeter uses its documented 0 A/fixed-range, OUTPUT-on configuration.
@@ -154,6 +159,13 @@ its source. Neither operation opens a laser or unused detector.
 - Environment changes occur with light and electrical sources off. Reuse the
   commissioned feedback-before-temperature sequence, bounded overshoot, existing field
   path validation and `sqrt(Bx^2+Bz^2) <= 3 T`. Record actual temperature/field.
+- Optional Three-SMU photoresponse control reuses the pinned point-session driver.
+  Select roles explicitly and reject repeated VISA ownership or two sample sources
+  before opening resources. Gate V/I is gate bias/leakage, distinct from detector
+  voltage/current. Omitted roles remain unopened. Environment movement requires
+  confirmed source/SMU zero-disable; failed confirmation remains sticky and unknown.
+  Cleanup failures cannot be overwritten by a later no-op finish or promoted by
+  SQLite/default analysis. Real SMU control requires its explicit stage authorization.
 - Cleanup independently attempts optical off, electrical zero/off, then field zero
   on failure (hold/zero on normal completion). A failed action does not skip later
   attempts. Communication failure leaves state unknown and preserves last-confirmed

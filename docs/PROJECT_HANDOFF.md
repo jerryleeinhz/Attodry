@@ -4,6 +4,48 @@ Last updated: 2026-10-13
 
 ## Current stage
 
+DC photoresponse - reference reuse, Three-SMU and control-only acceptance (2026-10-13):
+
+- Operator now confirms wiring/isolation and selects Integration-photonics local
+  configuration reuse for P0/P1. SuperK code/configuration is reused without more
+  real verification. P6/P7/P9 and SMU joint scanning require offline acceptance only.
+  P2/P3 are no-sample control tests; scientific data acceptance is not required.
+- Reused three original Three-SMU files byte-for-byte from source `016d741` in
+  `photonic_smu/`, isolating newer point-session APIs from the legacy independent
+  module. Added the thin selected-role adapter, smu combination axis, complete
+  V/I/leakage evidence, zero-disable cleanup and consistent SQLite/analysis acceptance.
+- New `smu_current_voltage` / `smu_voltage_voltage` select an independent SMU source
+  and 2182A voltage detector; 6221/2400 simultaneous sample sources and duplicate
+  resource ownership reject before opening hardware. OFF roles remain unopened.
+- NKT source-current profiles may omit ND/PP as in the reference configuration:
+  no unselected register write occurs, actual settings are pinned and drift rejects.
+  Temperature/field remain paired points with the existing <=3 T invariant.
+- Reference hardware.local.toml contains duplicate keys. Extracted valid station
+  tables into a separate ignored profile; the valid photonics.local.toml supplies
+  PM/source/gate configuration. No original reference or local file was overwritten.
+- P2 real configuration, fresh READ and cleanup completed. Input still returns
+  +9.9E37; this is rejected raw voltage, not an accepted sample measurement.
+- P3 verified all five approved current settings with output OFF, then zero/OFF.
+  The authorized output attempt again hit empty-load compliance and safely stopped;
+  five-point current delivery is not passed, while its control/protection path is tested.
+- Real 6221 OFF still reports COMP=8. Fixed only the inactive interpretation:
+  preserve the bit, check OFF/identity/unarmed/unsafe/QUES, and do not treat it as
+  active supply compliance. Every output enable, including 0 A, checks compliance
+  immediately. No status clear/reset was introduced.
+- PM console/sensor match the reused configuration. Wavelength correction and
+  averaging writes/readbacks passed; fresh READ produced positive/negative dark
+  noise. No illuminated closed-loop power measurement is accepted.
+- CLD LD was OFF, TEC near 26 C. Lowered saved LD limit from 140 mA back to the
+  approved 30 mA without changing TEC. KEYL/OTEM/INTL/TEMP/TEC protections are clear
+  and TEC compliance mode is PROT; mount70 is reported, while CONN=1/1 and MEAS=8192
+  persist. Operator reports no front-panel error. Official SDK defines CLD mount/
+  socket bit13 separately from TED/ITC cable bit12 and provides no LP70/FW exception.
+  Cause remains unresolved, and automatic LD enable is still blocked; no bypass,
+  installer, driver update, hardware SMU or environment write was performed.
+- Local full regression **648/648** passed. Actual CLI/CSV simulations passed:
+  NKT 16 conditions and CLD 8 conditions with selected SMU roles. Target validation
+  and final deployment follow after this source commit; private addresses/data stay ignored.
+
 DC photoresponse - full-goal correction and power/combination integration (2026-10-13):
 
 - The user's complete goal is NKT wavelength/power combinations or fixed-wavelength

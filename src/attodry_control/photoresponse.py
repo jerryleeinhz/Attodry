@@ -66,7 +66,7 @@ class SimulatedElectrical:
         self.state = {"detector": "SIMULATED " + config.detector,
                       "excitation": config.excitation, "source": None,
                       "compliance_tripped": False, "error": None}
-        if config.excitation != "none":
+        if config.excitation in ("dc_current", "dc_voltage"):
             self.state["source"] = {"model": "SIMULATED " + (
                 "6221" if config.excitation == "dc_current" else "2400"),
                 "output_enabled": False, "setpoint": 0.0}
@@ -81,7 +81,7 @@ class SimulatedElectrical:
     def prepare(self, bias):
         if self.closed:
             raise NktError("Electrical session is closed")
-        if self.config.excitation == "none":
+        if self.config.excitation not in ("dc_current", "dc_voltage"):
             if bias is not None:
                 raise NktError("No excitation cannot have a bias setting")
             return
@@ -118,7 +118,7 @@ class SimulatedElectrical:
 class PhotoresponseRunner:
     def __init__(self, config, laser: NktController, electrical, *, clock=time.perf_counter,
                  sleep=time.sleep, on_event=None, authorize_writes=False,
-                 confirm_manual_route=False, environment=None, attempt_index=1, power=None):
+                 confirm_manual_route=False, environment=None, attempt_index=1, power=None, smu=None):
         config.validate()
         hardware = config.nkt.backend != "simulation"
         if bool(laser.backend.is_hardware) != hardware or bool(electrical.is_hardware) != hardware:
@@ -137,6 +137,10 @@ class PhotoresponseRunner:
                 power.config != config.power or power.laser is not laser)):
             raise NktError("Power configuration/controller mismatch")
         self.power = power
+        if (config.smu is None) != (smu is None) or (smu is not None and (
+                smu.config != config.smu or smu.is_hardware != hardware)):
+            raise NktError("SMU configuration/controller mismatch")
+        self.smu = smu
         from .photoresponse_combination import PhotoresponseCombinationPlan
         self.plan = PhotoresponseCombinationPlan(config)
         if laser.config != config.nkt or electrical.config != config:
@@ -181,9 +185,9 @@ class PhotoresponseRunner:
         if state["detector"] != expected_detector:
             raise NktError("Detector identity changed")
         source = state["source"]
-        if self.config.excitation == "none":
+        if self.config.excitation not in ("dc_current", "dc_voltage"):
             if source is not None:
-                raise NktError("No excitation requires an absent source")
+                raise NktError("This electrical detector session must not own a sample source")
         elif source is None or type(source["output_enabled"]) is not bool:
             raise NktError("Unknown source state")
         elif inactive:
@@ -201,11 +205,14 @@ class PhotoresponseRunner:
         illuminated = phase == "light"
         window = {"phase": phase, "samples": []}
         condition["windows"].append(window)
+        if self.smu:
+            self.smu.verify()
         self.laser.set_emission(illuminated)
         def guard():
             state = self._state()
             self._check_state(state, bias)
             return {"electrical": state,
+                    "smu": self.smu.verify() if self.smu else None,
                     "environment": self.environment.verify() if self.environment else None}
         if self.power and illuminated:
             self.power.qualify(guard)
@@ -227,6 +234,8 @@ class PhotoresponseRunner:
             window["samples"].append(sample)
             self.record["electrical_state_current"] = False
             try:
+                if self.smu:
+                    sample["smu_before"] = self.smu.verify()
                 if self.power:
                     sample["power_before"] = self.power.formal_sample(phase + "_before", illuminated=illuminated, guard=guard)
                 sample["started_s"] = self.clock() - self._epoch
@@ -239,6 +248,8 @@ class PhotoresponseRunner:
                 sample.update(voltage_v=reading["voltage_v"], current_a=reading["current_a"])
                 self._retain_state(reading["state"])
                 self._check_state(reading["state"], bias)
+                if self.smu:
+                    sample["smu_after"] = self.smu.verify()
                 for quantity, limit in (("voltage_v", self.config.max_abs_voltage_v),
                                         ("current_a", self.config.max_abs_current_a)):
                     value = sample[quantity]
@@ -260,6 +271,8 @@ class PhotoresponseRunner:
                 detector = getattr(self.electrical, "detector", None)
                 sample["detector_partial_raw"] = deepcopy(getattr(detector, "partial_raw", {}))
                 sample["detector_last_raw_reading"] = getattr(detector, "last_raw_reading", None)
+                if self.smu:
+                    sample["smu_last_readback"] = deepcopy(self.smu.audit["last_confirmed"])
                 raise
             finally:
                 try:
@@ -310,6 +323,17 @@ class PhotoresponseRunner:
             rows.append({"module": "environment", "actual": sample["environment_after"],
                          "measurements": sample["environment_after"],
                          "status": {"before": sample["environment_before"], "after": sample["environment_after"]}})
+        if self.smu:
+            for role in self.config.smu.roles:
+                timed = sample["smu_after"]["readings"][role]
+                reading = timed["reading"]
+                rows.append({"module": role,
+                    "actual": {"source_mode": self.config.smu.hardware.require_role(role).source_mode.value,
+                               "source_setpoint": reading["source_setpoint"], "output_enabled": reading["output_enabled"]},
+                    "measurements": {"voltage_v": reading["voltage_v"],
+                                     "leakage_current_a" if role.startswith("gate_") else "current_a": reading["current_a"]},
+                    "status": {"before": sample["smu_before"]["readings"][role], "after": timed,
+                               "role": "gate" if role.startswith("gate_") else "sample_excitation"}})
         if {r["module"] for r in rows} != set(self.plan.modules):
             raise NktError("Selected combination module readback is missing")
         return deepcopy(rows)
@@ -336,25 +360,33 @@ class PhotoresponseRunner:
                 self.electrical.begin()
             else:
                 electrical_owned = True
+            if self.smu:
+                self.smu.begin()
             last_environment_index = 0 if self.environment else None
             for coordinates in self.plan.conditions():
                 environment_index, environment_point = coordinates["environment"].values()
                 optical_index, point = coordinates["optical"].values()
                 bias_index, bias = coordinates["bias"].values()
                 power_index, target_power = coordinates["target_power_w"].values()
+                smu_index, smu_point = coordinates["smu"].values()
                 repeat = coordinates["repeat"]["value"]
                 if self.environment and last_environment_index != environment_index:
                     if last_environment_index is not None:
                         self.laser.set_emission(False)
                         self._check_state(self.electrical.cleanup(), None, inactive=True)
+                        if self.smu:
+                            self.smu.suspend()
                     self.environment.prepare(environment_point)
                     if last_environment_index is not None and self.electrical.is_hardware:
                         self.electrical.begin()
+                    if self.smu:
+                        self.smu.begin()
                     last_environment_index = environment_index
                 row = {"condition_id": f"photo-{len(self.record['conditions']):06d}",
                        "attempt_index": self.attempt_index, "accepted": False, "optical_index": optical_index,
                        "bias_index": bias_index, "repeat_index": repeat,
                        "power_index": power_index, "target_power_w": target_power,
+                       "smu_index": smu_index, "requested_smu": asdict(smu_point) if smu_point else None,
                        "axis_indices": {name: v["index"] for name, v in coordinates.items()},
                        "combination_order": list(self.plan.order),
                        "environment_index": environment_index, "requested_environment": environment_point,
@@ -363,11 +395,19 @@ class PhotoresponseRunner:
                        "requested_voltage_v": bias if self.config.excitation == "dc_voltage" else None,
                        "windows": [], "result": None}
                 self.record["conditions"].append(row)
+                if smu_point and self.config.excitation in ("smu_current", "smu_voltage"):
+                    row["requested_current_a" if self.config.excitation == "smu_current" else "requested_voltage_v"] = smu_point.coordinates["smu_bias"]
                 self.laser.prepare_point(point)
                 if self.power:
                     self.power.prepare(row, point)
                 self.electrical.prepare(bias)
                 self._check_state(self._state(), bias)
+                if self.smu:
+                    def transition_guard():
+                        self.laser.verify_point(emitting=False, phase="smu_transition")
+                        self._check_state(self._state(), bias)
+                        if self.environment: self.environment.verify()
+                    row["smu_prepared"] = self.smu.prepare(smu_point, transition_guard)
                 for phase in WINDOWS:
                     self._window(row, phase, bias)
                 row["result"] = differential(row["windows"], self.config.quantity)
@@ -403,6 +443,14 @@ class PhotoresponseRunner:
             except (Exception, KeyboardInterrupt) as exc:
                 cleanup["errors"].append(f"electrical close: {type(exc).__name__}: {exc}")
             self.record["electrical_cleanup_audit"] = deepcopy(getattr(self.electrical, "cleanup_details", []))
+            if self.smu:
+                cleanup["smu_safe_confirmed"] = False
+                try:
+                    self.smu.finish(failed=self.record["outcome"] != "completed")
+                    cleanup["smu_safe_confirmed"] = True
+                except (Exception, KeyboardInterrupt) as exc:
+                    cleanup["errors"].append(f"SMU: {type(exc).__name__}: {exc}")
+                self.record["smu_audit"] = deepcopy(self.smu.audit)
             if self.power:
                 try:
                     self.power.close()

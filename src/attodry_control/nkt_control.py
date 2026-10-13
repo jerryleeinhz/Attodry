@@ -84,7 +84,9 @@ class SimulatedNkt:
             self.source["pulse_picker_ratio"] = point.pulse_picker_ratio
         if self.config.mode == "varia_bandpass":
             low, high = point.edges_nm
-            self.filter.update(lower_edge_nm=low, upper_edge_nm=high, nd_pct=point.nd_pct)
+            self.filter.update(lower_edge_nm=low, upper_edge_nm=high)
+            if point.nd_pct is not None:
+                self.filter["nd_pct"] = point.nd_pct
         elif self.config.mode == "lltf_swir":
             self.filter["wavelength_nm"] = point.wavelength_nm
 
@@ -167,9 +169,10 @@ class NktController:
             return False
         if filt["kind"] == "varia":
             low, high = point.edges_nm
-            return all(math.isclose(a, b, abs_tol=0.051, rel_tol=0) for a, b in (
-                (low, filt["lower_edge_nm"]), (high, filt["upper_edge_nm"]),
-                (point.nd_pct, filt["nd_pct"])))
+            settings = [(low, filt["lower_edge_nm"]), (high, filt["upper_edge_nm"])]
+            if point.nd_pct is not None:
+                settings.append((point.nd_pct, filt["nd_pct"]))
+            return all(math.isclose(a, b, abs_tol=0.051, rel_tol=0) for a, b in settings)
         return math.isclose(point.wavelength_nm, filt["wavelength_nm"], abs_tol=0.05, rel_tol=0)
 
     def _wait(self, phase, predicate, *, source_only=False, healthy=True):
@@ -218,6 +221,8 @@ class NktController:
         self._healthy(source, filt)
         if not self._emission_matches(source, False):
             raise NktError("Preflight requires confirmed emission off; no automatic takeover")
+        self._passive_settings = {"pulse_picker_ratio": source["pulse_picker_ratio"],
+                                  "nd_pct": filt["nd_pct"] if filt and filt["kind"] == "varia" else None}
         self._owned = True
         self._faulted = False
 
@@ -240,11 +245,26 @@ class NktController:
     def _prepare_validated_point(self, point):
         self._prepared_point = None
         self._off("before_configure")
+        source, filt = self.capture("preserve_settings")
+        self._healthy(source, filt)
+        # Omitted controls remain uncommanded. Pin the actual preflight/previous
+        # approved readback so feedback cannot silently accept external changes.
+        if point.pulse_picker_ratio is None and source["pulse_picker_ratio"] != self._passive_settings["pulse_picker_ratio"]:
+            raise NktError("Unselected pulse-picker setting changed")
+        if point.nd_pct is None and filt and filt["kind"] == "varia" and not math.isclose(
+                filt["nd_pct"], self._passive_settings["nd_pct"], abs_tol=.051, rel_tol=0):
+            raise NktError("Unselected ND setting changed")
+        expected = replace(point,
+            pulse_picker_ratio=point.pulse_picker_ratio if point.pulse_picker_ratio is not None else self._passive_settings["pulse_picker_ratio"],
+            nd_pct=point.nd_pct if point.nd_pct is not None else self._passive_settings["nd_pct"])
         self._event("configure_request", requested=asdict(point))
         self.backend.configure(point)
         source, filt = self._wait("filter_settle", lambda s, f: self._emission_matches(s, False)
-                                  and self._matches(point, s, f))
-        self._prepared_point = point
+                                  and self._matches(expected, s, f))
+        self._prepared_point = expected
+        self._passive_settings = {"pulse_picker_ratio": source["pulse_picker_ratio"],
+                                  "nd_pct": filt["nd_pct"] if filt and filt["kind"] == "varia" else None}
+        self._event("preserved_settings_confirmed", requested=asdict(point), actual=dict(self._passive_settings))
         self._expected_emitting = False
         self._faulted = False
         return {"source": source, "filter": filt}

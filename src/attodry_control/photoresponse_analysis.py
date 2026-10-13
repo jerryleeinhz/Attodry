@@ -14,7 +14,8 @@ def load_results(path: str | Path, *, include_rejected=False) -> list[dict]:
     cleanup = record.get("cleanup", {})
     clean = (record.get("completed") is True and record.get("outcome") == "completed"
              and cleanup.get("laser_off_confirmed") is True
-             and cleanup.get("electrical_safe_confirmed") is True and not cleanup.get("errors"))
+             and cleanup.get("electrical_safe_confirmed") is True and not cleanup.get("errors")
+             and (not record.get("measurement_config", {}).get("smu") or cleanup.get("smu_safe_confirmed") is True))
     rows = []
     for condition in record["conditions"]:
         accepted = clean and condition.get("accepted") is True
@@ -28,11 +29,22 @@ def load_results(path: str | Path, *, include_rejected=False) -> list[dict]:
                   "measurement_bx_t": fmean(s["field"]["bx_t"] for s in environment),
                   "measurement_bz_t": fmean(s["field"]["bz_t"] for s in environment)} if environment else {
                       "measurement_temperature_k": None, "measurement_bx_t": None, "measurement_bz_t": None}
+        smu_values = {}
+        for role in ("smu_bias", "gate_top", "gate_bottom"):
+            readings = [s["smu_after"]["readings"][role]["reading"]
+                        for w in condition["windows"] if w["phase"] == "light" for s in w["samples"]
+                        if role in s.get("smu_after", {}).get("readings", {})]
+            if readings:
+                smu_values[role + "_voltage_v"] = fmean(r["voltage_v"] for r in readings)
+                smu_values[role + ("_leakage_current_a" if role.startswith("gate_") else "_current_a")] = fmean(r["current_a"] for r in readings)
+                smu_values[role + "_source_setpoint"] = fmean(r["source_setpoint"] for r in readings)
         rows.append({"condition_id": condition["condition_id"], "attempt_index": condition["attempt_index"],
                      "accepted": accepted, "simulated": record["simulated"],
                      "requested_optical": condition["requested_optical"],
                      "requested_current_a": condition["requested_current_a"],
                      "requested_voltage_v": condition["requested_voltage_v"],
+                     "requested_smu": condition.get("requested_smu"),
+                     "smu_index": condition.get("smu_index"),
                      "environment_index": condition.get("environment_index", 0),
                      "requested_environment": condition.get("requested_environment"),
                      "target_power_w": condition.get("target_power_w"),
@@ -40,7 +52,7 @@ def load_results(path: str | Path, *, include_rejected=False) -> list[dict]:
                      "measurement_plane": condition.get("power", {}).get("measurement_plane"),
                      "combination_order": condition.get("combination_order"),
                      "axis_indices": condition.get("axis_indices", {}),
-                     "excitation": condition["excitation"], **actual, **condition["result"]})
+                     "excitation": condition["excitation"], **actual, **smu_values, **condition["result"]})
     return rows
 
 
@@ -57,6 +69,8 @@ def export_results(record_path, output_path):
         values.update({"requested_optical_"+k:v for k,v in row["requested_optical"].items()})
         values.update({"mean_"+k:v for k,v in row["window_means"].items()})
         values.update({"axis_index_"+k:v for k,v in row["axis_indices"].items()})
+        if row["requested_smu"]:
+            values.update({"requested_"+k:v for k,v in row["requested_smu"]["coordinates"].items()})
         flat.append(values)
     fields = sorted({key for row in flat for key in row})
     with output.open("x",newline="",encoding="utf-8-sig") as stream:

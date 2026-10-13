@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from .nkt_config import NktError, integer, keys, number, text
 from .photoresponse_devices import CurrentSource6221, Voltmeter2182, Meter2400
-from .photoresponse_keithley import _flag, Keithley6221Queries
+from .photoresponse_keithley import _flag, _word, Keithley6221Queries
 from .photoresponse_transport import Serial2182Transport
 
 
@@ -167,13 +167,28 @@ class HardwareElectrical:
         if self.config.hardware.detector_transport != "via_6221":
             return
         host = self.transports["6221"]
-        if host.query("*IDN?") != self.config.hardware.source["expected_idn"]:
+        raw = {}
+        def query(command):
+            raw[command] = host.query(command)
+            return raw[command]
+        if query("*IDN?") != self.config.hardware.source["expected_idn"]:
             raise NktError("6221 serial host identity mismatch")
         for mode in ("DELT", "PDEL", "DCON"):
-            if _flag(host.query(f"SOUR:{mode}:ARM?")):
+            if _flag(query(f"SOUR:{mode}:ARM?")):
                 raise NktError("6221 coupled acquisition is armed; serial forwarding is unavailable")
-        if self.source is None and _flag(host.query("OUTP:STAT?")):
-            raise NktError("No-excitation serial host has active output")
+        state = {"armed": False, "raw_responses": raw}
+        if self.source is None:
+            if self.config.excitation == "none" and not self.config.hardware.no_excitation_isolated:
+                raise NktError("No-excitation serial host requires confirmed excitation-path isolation")
+            if _flag(query("OUTP:STAT?")):
+                raise NktError("No-excitation serial host has active output")
+            measurement = _word(query("STAT:MEAS:COND?"))
+            questionable = _word(query("STAT:QUES:COND?"))
+            unsafe = bool(measurement & 5) or bool(questionable)
+            state.update(questionable_condition=questionable, unsafe_condition=unsafe)
+            if unsafe:
+                raise NktError("No-excitation serial host reports an unsafe condition")
+        return state
 
     def preflight(self):
         """Passive ownership check, also required before any environment motion."""
@@ -198,10 +213,16 @@ class HardwareElectrical:
             self.source.begin()
 
     def snapshot(self):
-        self._host_guard()
+        host_state = self._host_guard()
         relay = self.relay_host.snapshot(authorize_queries=True) if self.relay_host else None
-        if relay and (relay["output_enabled"] or relay["compliance_tripped"]):
-            raise NktError("No-excitation relay host changed output/status")
+        if relay:
+            if relay["output_enabled"] or relay["measurement_condition"] & 5:
+                raise NktError("No-excitation relay host changed output/status")
+            # Keep COMP=8 visible without treating a confirmed-OFF transport
+            # host as an active current source. The other guards remain strict.
+            relay.update(armed=host_state["armed"], questionable_condition=host_state["questionable_condition"],
+                         unsafe_condition=host_state["unsafe_condition"],
+                         host_guard_raw_responses=deepcopy(host_state["raw_responses"]))
         source = None
         if self.source:
             readback = self.source.snapshot()
@@ -220,7 +241,7 @@ class HardwareElectrical:
                       "setpoint": meter["setpoint"], "readback": meter}
         return {"detector": self.config.detector, "excitation": self.config.excitation,
                 "source": source, "detector_readback": meter, "relay_host_readback": relay,
-                "compliance_tripped": bool(source and source["readback"].get("compliance_tripped")),
+                "compliance_tripped": bool(source and source["output_enabled"] and source["readback"].get("compliance_tripped")),
                 "error": None}
 
     def prepare(self, bias):
