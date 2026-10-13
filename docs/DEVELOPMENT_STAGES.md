@@ -2,6 +2,34 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - complete optical/electrical combination goal
+
+Status: scope corrected; PM100D feedback and combination integration offline complete
+(2026-10-13). No new hardware acceptance is claimed.
+
+- Complete target: NKT wavelength/power or CLD fixed-wavelength power control,
+  PM100D measured-W feedback, selected 2182A voltage/6221 DC excitation and source
+  readback, optional 2400 channel current and temperature/field combinations.
+- Source audit at `d801dc4` found the core power-feedback requirement absent from
+  photoresponse. Earlier P1-P7 completion applies only to the narrower open-loop
+  acquisition scope and cannot be used as full-project completion.
+- Reuse the existing committed PM100D driver and feedback windows from
+  `codex/pem-module` and the existing combination design. Preserve controller
+  boundaries, no-excitation isolation, <=3 T, rejected raw data and cleanup.
+- Delivered strict power/combination configuration, NKT and CLD bounded feedback,
+  stable-before-measurement and formal target/peak-to-peak drift rejection, complete
+  selected-module readings, power/axis CSV fields and four executable/template profiles.
+- Reused the PM100D driver and PowerWindow/NKT strategies rather than duplicating
+  device commands. Added a thin power coordinator and a narrow combination plan;
+  temperature/field remain paired rows, and 2182A/2400 are alternative detectors.
+- 6221 relay-only mode now retains query-only host snapshots; no-excitation 2182A
+  may omit max_abs_current_a. Source setpoints remain distinct from measured current.
+- **568/568 local full tests**, including **129 photoresponse** and **24 PM100D**,
+  passed. Actual CLI simulation and accepted CSV validation passed for NKT
+  **8 conditions** (2 wavelengths x 2 powers x 2 biases) and CLD **6 conditions**.
+- No hardware I/O occurred. Existing physical commissioning limitations remain;
+  new target validation/synchronization is pending, with no acceptance implied.
+
 ## DC photoresponse - editable LK_setup trial configurations
 
 Status: target-local configuration preparation complete (2026-10-13).

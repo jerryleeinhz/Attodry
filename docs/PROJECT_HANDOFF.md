@@ -4,6 +4,47 @@ Last updated: 2026-10-13
 
 ## Current stage
 
+DC photoresponse - full-goal correction and power/combination integration (2026-10-13):
+
+- The user's complete goal is NKT wavelength/power combinations or fixed-wavelength
+  CLD power control, PM100D feedback to stabilize measured W, and electrical
+  windows retaining 2182A voltage plus selected 6221 settings/status/excitation.
+  Optional 2400 channel current and paired temperature/field points use the same
+  selected-module approach. Existing Three-SMU roles remain independent reusable
+  modules; this correction does not claim their photoresponse integration.
+  Setpoints never become fabricated measurements.
+- Audit of source commit `d801dc4` found no PM100D connection in PhotoresponseRunner
+  or its CLI and no power-target axis. NKT's optional standalone PowerMeter injection
+  was not used by the photoresponse path. CLD controlled LD current without optical
+  power feedback. The fixed Cartesian dark/light/dark loop was not the complete
+  combination entry point requested by the user.
+- Withdraw the broad interpretation of earlier "P1-P7 software complete". That
+  statement described the narrower open-loop work package, not the complete user
+  goal. PM100D feedback is a core requirement of this experiment; it must not be
+  postponed merely because PEM was developed in a separate work package.
+- Reuse the committed PM100D driver and PowerWindow/feedback strategy from
+  `codex/pem-module` (`a8d991a`) and the combination semantics in
+  `integration-photonics-nonlinear-hall` (`016d741`). Their historical optical
+  acceptance is separate evidence, not acceptance of the current CLD/sample path.
+  Do not wholesale merge incompatible SR865A or >3 T active paths.
+- Integration is offline complete. Preserve current controller/cleanup protections,
+  explicit wavelength calibration and PM measurement-plane metadata. Real-time
+  records are sequentially acquired with timestamps; no simultaneous trigger claim.
+  No additional hardware connection or output is part of this offline correction.
+- Delivered optional PM100D feedback, bounded source%/ND/CLD-current tuning, stable
+  qualification and frozen formal light windows, target/spread drift rejection,
+  independent meter cleanup, ordered optical/power/bias/environment/repeat axes,
+  complete selected-module evidence and power/axis CSV fields. Dark phases query
+  meter status without READ or feedback search; actual W is measured during light.
+- No-excitation 2182A may omit its unused current bound. Relay-only 6221 snapshots
+  are recorded query-only; setpoints remain settings, not delivered-current readings.
+- Full local regression **568/568**, including **129 photoresponse** and **24 PM100D**,
+  passed. Independent real CLI simulation and CSV checks passed for NKT 8 and CLD
+  6 conditions. Target validation/synchronization remains pending for this revision.
+- Older PM100D/PEM planned handoff notes are historical to this checkout. Later completed
+  code exists in the branches above; do not use those old notes to justify rebuilding
+  the driver or to claim it was never implemented.
+
 DC photoresponse - editable trial configuration deployment (2026-10-13):
 
 - The operator confirmed 2182A input is floating. Retain successful identity/

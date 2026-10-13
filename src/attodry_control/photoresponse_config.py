@@ -21,11 +21,13 @@ class PhotoresponseConfig:
     sample_interval_s: float
     settle_s: float
     max_abs_voltage_v: float
-    max_abs_current_a: float
+    max_abs_current_a: float | None
     bias_points: tuple[float | None, ...]
     hardware: object | None = None
     environment: object | None = None
     database_path: Path | None = None
+    power: object | None = None
+    combination_order: tuple[str, ...] | None = None
 
     @property
     def quantity(self):
@@ -58,7 +60,9 @@ class PhotoresponseConfig:
         number(self.settle_s, "settle_s", 0, 3600)
         # These are operator values, not vendor or sample ratings.
         number(self.max_abs_voltage_v, "max_abs_voltage_v", 1e-15, 1e6)
-        number(self.max_abs_current_a, "max_abs_current_a", 1e-15, 1e6)
+        if self.max_abs_current_a is not None or not (
+                self.excitation == "none" and self.detector == "keithley2182a"):
+            number(self.max_abs_current_a, "max_abs_current_a", 1e-15, 1e6)
         if not self.bias_points or len(self.bias_points) > 10000:
             raise NktError("Provide 1 to 10000 bias points")
         if self.mode == "open_circuit_voltage":
@@ -68,7 +72,18 @@ class PhotoresponseConfig:
             limit = self.max_abs_current_a if self.excitation == "dc_current" else self.max_abs_voltage_v
             for value in self.bias_points:
                 number(value, "bias point", -limit, limit)
+        if self.power:
+            self.power.validate(self.nkt)
+            if self.hardware:
+                resources = list(self.hardware.addresses().values())
+                if hasattr(self.nkt, "address"):
+                    resources.append(self.nkt.address)
+                if self.power.meter.resource.upper() in [r.upper() for r in resources]:
+                    raise NktError("PM100D cannot share a VISA address with a selected device")
+        from .photoresponse_combination import PhotoresponseCombinationPlan
+        PhotoresponseCombinationPlan(self)
         count = len(self.nkt.points) * len(self.bias_points) * self.repeats * (len(self.environment.points) if self.environment else 1)
+        count *= len(self.power.targets) if self.power else 1
         if count > 10000:
             raise NktError("Photoresponse plan exceeds 10000 conditions")
         if self.hardware is not None:
@@ -82,6 +97,8 @@ class PhotoresponseConfig:
         result["environment"] = self.environment.snapshot() if self.environment else None
         result["database_path"] = str(self.database_path) if self.database_path else None
         result.update(excitation=self.excitation, quantity=self.quantity)
+        from .photoresponse_combination import PhotoresponseCombinationPlan
+        result["combination"] = PhotoresponseCombinationPlan(self).snapshot()
         return result
 
 
@@ -90,8 +107,8 @@ def load_photoresponse_config(path: str | Path) -> PhotoresponseConfig:
         doc = tomllib.load(stream)
         table = doc.get("photoresponse", {})
     required = {"mode", "detector", "samples_per_window", "repeats", "sample_interval_s",
-                "settle_s", "max_abs_voltage_v", "max_abs_current_a"}
-    keys(table, "photoresponse", required, {"bias_current_points_a", "bias_voltage_points_v", "light_source"})
+                "settle_s", "max_abs_voltage_v"}
+    keys(table, "photoresponse", required, {"bias_current_points_a", "bias_voltage_points_v", "light_source", "max_abs_current_a"})
     light_source = table.get("light_source", "nkt")
     if light_source == "nkt":
         nkt = load_nkt_config(path)
@@ -113,9 +130,17 @@ def load_photoresponse_config(path: str | Path) -> PhotoresponseConfig:
     values = table.get(field) if field else [None]
     if not isinstance(values, list):
         raise NktError(f"{field} must be an explicit array")
-    config = PhotoresponseConfig(nkt=nkt, bias_points=tuple(values),
+    config = PhotoresponseConfig(nkt=nkt, bias_points=tuple(values), max_abs_current_a=table.get("max_abs_current_a"),
                                  **{key: table[key] for key in required})
     from dataclasses import replace
+    from .power_config import load_photoresponse_power
+    config = replace(config, power=load_photoresponse_power(doc))
+    if "photoresponse_combination" in doc:
+        combination = doc["photoresponse_combination"]
+        keys(combination, "photoresponse_combination", {"order"})
+        if type(combination["order"]) is not list:
+            raise NktError("Combination order must be an explicit array")
+        config = replace(config, combination_order=tuple(combination["order"]))
     if "photoresponse_storage" in doc:
         storage = doc["photoresponse_storage"]
         keys(storage, "photoresponse_storage", {"database_path"})

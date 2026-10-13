@@ -1,7 +1,10 @@
 # 光电压 / 光电流运行指南
 
-本分支已完成可离线验证的软件实现：NKT/CLD 光源、6221 DC、2182A 新鲜读数、
-2400 电压/电流测量、可选温磁场扫描、SQLite 审计与新尝试恢复。**硬件联合验收尚未完成。**
+本项目完整目标为 combination 组合测量：NKT 扫波长和光功率，CLD 固定波长调功率，
+PM100D 反馈稳定实际光功率，并在正式窗口保存电学读数和各仪器状态。
+此前实现为开环 NKT/CLD 光源、6221 DC、2182A 新鲜读数、
+2400 电压/电流测量、可选温磁场扫描、SQLite 审计与新尝试恢复。
+**PM100D 闭环与组合入口已完成离线集成；此前完成声明仅适用于开环流程，硬件联合验收尚未完成。**
 程序不会扫描总线、复位仪器或自动接管已开启的输出。工作边界见 [工作包](modules/PHOTORESPONSE.md)。
 
 ## 已知实验状态（2026-10-13）
@@ -30,6 +33,9 @@
 - 当前完整离线回归 519/519、光响应 104/104 通过；目标机 `lyr` 中 104/104 通过。
   目标机内存故障经用户授权停止一个遗留只读 PowerShell 后恢复；未停止其他实验进程。
   地址、完整身份、缓存、原始通信和内存诊断均保存在被 Git 忽略的本地审计中。
+- 本次功率／组合集成的完整本地回归为 **568/568**，其中光响应 **129/129**、
+  PM100D **24/24**。实际 CLI 仿真与 CSV 核对通过：NKT 8 条件、CLD 6 条件。
+  本次没有连接功率计或开启任何真实输出；目标机新增代码的离线验证另行记录。
 
 ## 离线运行
 
@@ -61,16 +67,71 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 `none` 不创建 6221 电流源控制器、不发送其输出设置。若 2182A 经 6221 转发，
 仍需连接并查询 6221 的身份、关闭状态和 Delta/Pulse Delta/DCON 是否处于 armed 状态。
 `none` 不等于 DC 0 A。6221 的电流设置不是实际样品电流，2182A 电压也不能当作电流。
+`open_circuit_voltage` 且探测器为 2182A 时可省略 `max_abs_current_a`，归档值为 null。
+6221 DC 激励和所有 2400 模式仍需要明确的样品电流边界；旧配置填写的值继续有效。
 
 2400 作电压表时采用厂商所述的 0 A 电流源模式、最低源电流量程、固定电压测量量程，
 且测量期间必须开启其 OUTPUT。这与 2182A 的被动电压输入不同，需单独确认负载影响。
 2400 电压 compliance 须高于预期电压；电流模式则配置电流 compliance。两种模式均记录
 V/I 与读数状态、禁用电阻测量/处理功能，结束后回零、关闭并确认 HIMP 关闭模式。
 
-扫描顺序：环境点（可选）→ 光学点 → 偏置点 → repeat → dark_before/light/dark_after。
+旧配置的默认扫描顺序：环境点（可选）→ 光学点 → 偏置点 → repeat → dark_before/light/dark_after。
 每个窗口采集 `samples_per_window` 个新读数。`settle_s` 是每次切光后的等待；
 `sample_interval_s` 是读数前的等待，不代表保证的采样周期。串口转发与状态检查有额外开销。
 硬件样本时间取主机发送 READ? 到得到响应的区间，不包含周围的配置核对时间；不是仪器内部时间戳。
+
+## PM100D 稳功率与 combination
+
+闭环配置同时包含 `[pm100d]` 和 `[power_feedback]`。NKT 的每个光学点与
+`target_powers_w` 做笛卡尔组合；CLD 保持二极管标称波长，只组合目标功率和电学条件。
+光学点中的百分比／电流是反馈起点，目标 W 是独立坐标，不表示预先知道功率与电流的关系。
+
+`[photoresponse_combination].order` 按外层到内层列出扫描轴，例如：
+
+```toml
+[photoresponse_combination]
+order = ["optical", "target_power_w", "bias", "repeat"]
+```
+
+允许的轴为 `optical`、`target_power_w`、`bias`、`environment` 和 `repeat`。
+所有多点轴都必须列出；单点轴可省略，但固定模块仍参与叶节点的读回和保护。
+光学行内的波长／带宽／初始调节量成组，环境行内的温度／Bx／Bz 成组；
+模块由光源、测量模式、探测器和可选 PM／环境表选择。未选硬件不连接。
+这是一条复用 combination 语义的光响应入口；旧输运／Three-SMU 独立模块仍保留。
+
+| 配置项 | 含义 |
+|---|---|
+| `pm100d.measurement_plane` | 探头所在测量面；只有实际置于样品面且标定后才能解释为样品入射功率 |
+| `pm100d.resource / expected_serial / expected_sensor_serial` | 当前功率计和探头身份，真实设置前必须填写 |
+| `pm100d.max_power_w` | 当前光路与探头批准的上限，不能复制仿真数值当安全限值 |
+| `power_feedback.target_powers_w` | 每个光学点需要稳定到的目标 W 数组 |
+| `target_tolerance_w` 或 `target_tolerance_fraction` | 二选一的目标容差 |
+| `power_feedback.window` | 稳定持续时间、最少样本数、采样间隔和峰峰值上限 |
+| `actuator="source_current"` | NKT 源电流百分比反馈；设置百分比范围、单步和最小可信信号 |
+| `actuator="varia_nd"` | NKT ND 反馈；需已确认调光方向、范围和单步，真实路径须另行验收 |
+| `actuator="cld_current"` | CLD 电流反馈；`current_min_a / current_max_a / current_step_a` 受 LD 上限约束 |
+
+准备波长和 PM 校正时保持关光。亮态功率达到目标并通过稳定窗口与 hold 后，
+才开始正式电学窗口；每次有界调节都先关光，再重建稳定证据。
+正式亮窗中功率越出目标容差或峰峰值上限时，拒绝整次暗—亮—暗尝试；
+不在已有正式窗口中边调边拼接数据。功率计无可信信号、饱和或通信不确定时停止。
+读数按顺序采集并记录各自时间，不宣称功率与电压硬件同步或连续监测。
+暗窗只核对 PM 的设置／状态和波长，记录 `measurement_performed=false`、`power_w=null`；
+暗噪声不参与调节，也不触发自动加流寻光。正式亮窗使用新鲜 `READ?`。
+
+闭环例子：
+
+```powershell
+python -m attodry_control.photoresponse_cli simulate --config config/photoresponse_power_nkt_simulation.toml
+python -m attodry_control.photoresponse_cli simulate --config config/photoresponse_power_cld_simulation.toml
+```
+
+对应的 `photoresponse_power_nkt_hardware.example.toml` 和
+`photoresponse_power_cld_hardware.example.toml` 用于填写实机参数。
+旧配置不含 PM／反馈表时仍按开环运行，实测光功率为 null。
+每个闭环条件保存目标与实际 W、测量面、PM 原始读数、调节历史和稳定证据；
+CSV 输出功率及组合坐标。源设定百分比、电流与实际 W 始终分列，
+不会自动推算样品的 A/W 或 V/W。
 
 ## 配置模板
 

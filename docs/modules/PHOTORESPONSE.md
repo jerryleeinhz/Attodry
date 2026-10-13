@@ -4,6 +4,29 @@ Updated: 2026-10-13. User-selected branch: `module/NKT-photonics`.
 
 ## Scope and delivered software
 
+The complete user goal, reconfirmed on 2026-10-13, is **combination-based optical
+and electrical acquisition with measured-power feedback**. NKT varies wavelength
+and optical power; CLD holds its diode wavelength and varies optical power through
+LD current. PM100D measures W at its explicitly named measurement plane and feeds
+bounded source adjustments until the selected power target is stable. Each formal
+electrical window retains fresh detector readings, optical power evidence and
+6221 settings/status when that instrument is selected. The 6221 may supply DC
+excitation or serve only as the 2182A communication relay.
+
+Combinations select optical points, target powers, bias points, repeats and optional
+temperature/field points. Every leaf condition records its requested coordinates
+and actual readings; omitted hardware is not opened. Failed formal windows remain
+raw audit and are not assembled into an accepted condition. Acquisition is
+sequential with measured timestamps, not hardware-triggered simultaneous sampling.
+
+**Scope correction:** the earlier P1-P7 completion claim covered the open-loop
+dark/light/dark implementation only. PM100D feedback and the complete combination
+entry point were omitted from that scope, which did not satisfy the user goal.
+They are core requirements, not a deferred PEM work package. Integration is
+offline complete using the already implemented PM100D and power-window strategies from
+`codex/pem-module`, plus the existing combination design. The separate branch's
+historical NKT acceptance does not commission CLD or this experiment's optical path.
+
 Photovoltage and photocurrent share a dark-before/light/dark-after coordinator.
 Optical roles: SuperK EXTREME/VARIA through existing NKT SDK, or CLD1010LP through
 USB/VISA SCPI or TL4000. Electrical roles: no external excitation, 6221 DC current, or 2400 voltage
@@ -20,12 +43,36 @@ remain independent. This implementation does not use lock-ins in the photorespon
 | P5 CLD | USB/VISA SCPI or TL4000 and shared TEC/interlock/current controller | Passive 26 C TEC stability verified; connection diagnostic qualification still blocks automatic LD acceptance |
 | P6 environment | Existing attoDRY driver, explicit T/Bx/Bz points, stability, 3 T and cleanup | New joint experiment commissioning; optional gate scans remain separate Three-SMU work |
 | P7 data | JSON/JSONL, SQLite WAL/FULL audit, new-attempt retry, accepted-only Notebook/CSV | Target offline validation recorded in development stages; scientific noise/settling validation remains experimental |
+| P8 measured-power feedback | Offline complete: reused PM100D, PowerWindow, NKT strategies and bounded CLD current actuator | PM identity/sensor, current measurement plane, range/calibration and new optical-path acceptance |
+| P9 combination entry point | Offline complete: ordered optical/power/electrical/environment coordinates and complete leaf records | Selected-module joint experiment acceptance; no hardware synchronization inferred |
 
-Software implementation and offline tests are complete when the development-stage
-validation passes. This is not a claim that the physical experiment is commissioned.
-Power-meter/PEM integration is a separate existing work package; no watts or responsivity
-are inferred here. Delta/current reversal is not automatically enabled because it changes
+P8/P9 now extend the earlier scoped implementation with PM100D feedback and
+combination integration, bounded CLD current feedback and formal-window drift rejection.
+Validation: 568/568 full local tests, including 129 photoresponse and 24 PM100D tests;
+actual CLI simulation and accepted CSV checks passed for NKT 8 and CLD 6 conditions.
+Physical experiment commissioning remains separate. No watts or responsivity
+are inferred from source settings. Delta/current reversal is not automatically enabled because it changes
 the measured observable and can cancel current-even signals.
+
+## Required measurement contract
+
+| Selected role | Commanded coordinate | Actual evidence retained |
+|---|---|---|
+| NKT | Wavelength/filter bandwidth plus source level or ND actuator | Filter/source readback, emission/protection, PM100D W before/after electrical read |
+| CLD1010LP | LD current actuator; diode nominal wavelength is fixed | LD I/V, TEC actual temperature/status, emission/protection, PM100D W |
+| PM100D | Wavelength correction and permitted range/averaging | Fresh READ sample, acquisition times, sensor/console identity, measurement plane, stability evidence |
+| 2182A | Channel/range/NPLC configuration | Fresh measured voltage, status and acquisition time; current remains null |
+| 6221 DC | Approved current points and voltage compliance | Programmed current/range, compliance/output/status; measured current remains null |
+| 6221 relay only | No excitation/output setting | Query-only host settings/status alongside 2182A readings; no source-output controller |
+| Optional 2400 channel detector | Source-drain voltage bias and current compliance | Measured V/I and status; gate-source wiring cannot be labelled channel photocurrent |
+| Optional attoDRY | Temperature and <=3 T vector targets | Actual temperature/Bx/Bz before/after readings and stability/protection |
+
+An optical target in W is independent of the actuator setting. Feedback must not
+infer a universal linear power/current calibration, increase light when the meter
+cannot establish a valid signal, or accept saturated/uncertain meter samples.
+Changing wavelength requires updating and verifying PM wavelength correction with
+emission off. Formal acquisition uses a new stable window after any adjustment;
+dark measurements do not cause automatic search for light.
 
 ## Module ownership and reuse
 
@@ -44,6 +91,12 @@ the measured observable and can cancel current-even signals.
   code; temperature feedback enabled before target, explicit overshoot/step limits,
   source-off environment changes and actual temperature/field sampling.
 - `photoresponse.py`: three-window coordinator, raw timing and linear drift interpolation.
+- `photoresponse_combination.py`: selected modules, ordered Cartesian axes, duplicate
+  point indices and preflight environment-wrap checks; paired optical/environment rows.
+- `pm100d.py`, `power_feedback.py`, `power_config.py`: reused PM driver and stability
+  strategies, strict power/actuator domains and independent PM authorization/ownership.
+- `photoresponse_power.py`: off-state wavelength correction, bounded tuning before
+  the formal light window, fresh power brackets, drift rejection and raw PM audit.
 - `photoresponse_storage.py`: separate photo_* tables; failed attempts retained; explicit
   resume creates a new full attempt, never splices windows. Unique accepted condition/series.
 - `photoresponse_cli.py`, `photoresponse_analysis.py`, `notebooks/Photoresponse_Analysis.ipynb`:

@@ -62,6 +62,7 @@ def _run(config, args, event, attempt_index):
     from .photoresponse_environment import open_environment
     from .photoresponse_hardware import HardwareElectrical
     from .photoresponse_transport import visa_resources
+    from .photoresponse_power import open_photoresponse_power
     hardware = config.nkt.backend != "simulation"
     record = None
     try:
@@ -79,7 +80,9 @@ def _run(config, args, event, attempt_index):
                     backend = NktSdk(config.nkt, authorize_writes=True)
                     stack.callback(backend.close)
                     backend.open(authorize_connection=True)
-                else: backend = SimulatedNkt(config.nkt)
+                else:
+                    backend = SimulatedNkt(config.nkt)
+                    stack.callback(backend.close)
                 laser = NktController(config.nkt, backend, on_event=event)
             if hardware:
                 transports = stack.enter_context(visa_resources(config.hardware.addresses(),
@@ -90,9 +93,12 @@ def _run(config, args, event, attempt_index):
             environment = (open_environment(config.environment, authorize_connection=True,
                 authorize_writes=args.authorize_environment, on_event=event) if config.environment else None)
             if environment: stack.callback(environment.driver.close)
+            power = open_photoresponse_power(config.power, laser, on_event=event,
+                authorize_connection=hardware, authorize_writes=hardware) if config.power else None
+            if power: stack.callback(power.close)
             runner = PhotoresponseRunner(config, laser, electrical, on_event=event,
                 authorize_writes=hardware, confirm_manual_route=args.confirm_route,
-                environment=environment, attempt_index=attempt_index)
+                environment=environment, attempt_index=attempt_index, power=power)
             record = runner.run()
     except (Exception, KeyboardInterrupt) as exc:
         if record is None:
@@ -149,7 +155,9 @@ def main(argv=None):
                 "lasers":["NKT SDK EXTREME/VARIA","CLD1010LP USB/VISA SCPI or TL4000"],
                 "detectors":["2182A direct VISA or 6221 serial relay","2400"],
                 "storage":"JSON/JSONL, optional SQLite with explicit new-attempt retry",
-                "environment":"optional attoDRY temperature/vector-field points", "power_w":"not measured"},indent=2))
+                "environment":"optional paired attoDRY temperature/vector-field points",
+                "combination":"ordered optical / target_power_w / bias / environment / repeat axes",
+                "power_w":"optional PM100D bounded feedback; actual W at configured measurement_plane"},indent=2))
             return 0
         if args.command in ("analyze","export"):
             from .photoresponse_analysis import load_results, export_results
@@ -183,6 +191,8 @@ def main(argv=None):
                     raise NktError("Environment writes require --authorize-environment")
                 config.hardware.require_run(config)
                 config.nkt.require_hardware(writes=True)
+                if config.power:
+                    config.power.meter.require_hardware(writes=True)
             if args.command == "diagnose" and not args.authorize_connect:
                 raise NktError("diagnose requires --authorize-connect")
             if args.resume_run and (not config.database_path or args.command not in ("simulate","run")):

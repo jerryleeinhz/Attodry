@@ -1,7 +1,7 @@
 """Standalone NKT orchestration. No vendor imports or hardware on import."""
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 import math
 import time
@@ -234,6 +234,10 @@ class NktController:
         point.validate(self.config.mode, self.config.max_level_pct, self.config.allowed_pp_ratios)
         if point not in self.config.points:
             raise NktError("Point is outside the configured scan")
+        self._feedback_anchor = point
+        return self._prepare_validated_point(point)
+
+    def _prepare_validated_point(self, point):
         self._prepared_point = None
         self._off("before_configure")
         self._event("configure_request", requested=asdict(point))
@@ -244,6 +248,28 @@ class NktController:
         self._expected_emitting = False
         self._faulted = False
         return {"source": source, "filter": filt}
+
+    def adjust_power(self, value, policy):
+        """One approved actuator step, preserving the configured optical anchor."""
+        from .nkt_config import number
+        self._require_session(prepared=True)
+        policy.validate(self.config)
+        f = policy.feedback
+        if f.actuator == "source_current":
+            field, low, high, step = ("source_level_pct", f.source_current_min_pct,
+                                    f.source_current_max_pct, f.source_current_step_pct)
+        elif f.actuator == "varia_nd":
+            field, low, high, step = "nd_pct", f.nd_min_pct, f.nd_max_pct, f.nd_step_pct
+        else:
+            raise NktError("Unsupported NKT power actuator")
+        number(value, "power actuator", low, high)
+        if abs(value - getattr(self._prepared_point, field)) > step + 1e-10:
+            raise NktError("Power adjustment exceeds approved single step")
+        point = replace(self._feedback_anchor, **{field: value})
+        point.validate(self.config.mode, self.config.max_level_pct, self.config.allowed_pp_ratios)
+        self.verify_point(emitting=False, phase="before_power_adjustment")
+        self._faulted = True
+        return self._prepare_validated_point(point)
 
     def set_emission(self, enabled: bool):
         """Set and verify the optical state without releasing point ownership."""

@@ -35,6 +35,11 @@ def load_results(path: str | Path, *, include_rejected=False) -> list[dict]:
                      "requested_voltage_v": condition["requested_voltage_v"],
                      "environment_index": condition.get("environment_index", 0),
                      "requested_environment": condition.get("requested_environment"),
+                     "target_power_w": condition.get("target_power_w"),
+                     "measured_power_w": condition.get("power", {}).get("formal_mean_power_w"),
+                     "measurement_plane": condition.get("power", {}).get("measurement_plane"),
+                     "combination_order": condition.get("combination_order"),
+                     "axis_indices": condition.get("axis_indices", {}),
                      "excitation": condition["excitation"], **actual, **condition["result"]})
     return rows
 
@@ -51,6 +56,7 @@ def export_results(record_path, output_path):
         values = {k:v for k,v in row.items() if not isinstance(v, dict)}
         values.update({"requested_optical_"+k:v for k,v in row["requested_optical"].items()})
         values.update({"mean_"+k:v for k,v in row["window_means"].items()})
+        values.update({"axis_index_"+k:v for k,v in row["axis_indices"].items()})
         flat.append(values)
     fields = sorted({key for row in flat for key in row})
     with output.open("x",newline="",encoding="utf-8-sig") as stream:

@@ -6,7 +6,6 @@ from dataclasses import asdict
 import math
 from statistics import fmean
 import time
-from itertools import product
 
 from .nkt_config import NktError, number
 from .nkt_control import NktController, utc_now
@@ -119,7 +118,7 @@ class SimulatedElectrical:
 class PhotoresponseRunner:
     def __init__(self, config, laser: NktController, electrical, *, clock=time.perf_counter,
                  sleep=time.sleep, on_event=None, authorize_writes=False,
-                 confirm_manual_route=False, environment=None, attempt_index=1):
+                 confirm_manual_route=False, environment=None, attempt_index=1, power=None):
         config.validate()
         hardware = config.nkt.backend != "simulation"
         if bool(laser.backend.is_hardware) != hardware or bool(electrical.is_hardware) != hardware:
@@ -134,6 +133,12 @@ class PhotoresponseRunner:
         if environment is not None and environment.config != config.environment:
             raise NktError("Environment controller configuration differs from the run")
         self.environment, self.attempt_index = environment, attempt_index
+        if (config.power is None) != (power is None) or (power is not None and (
+                power.config != config.power or power.laser is not laser)):
+            raise NktError("Power configuration/controller mismatch")
+        self.power = power
+        from .photoresponse_combination import PhotoresponseCombinationPlan
+        self.plan = PhotoresponseCombinationPlan(config)
         if laser.config != config.nkt or electrical.config != config:
             raise NktError("Controller configurations must match the run")
         self.config, self.laser, self.electrical = config, laser, electrical
@@ -147,7 +152,8 @@ class PhotoresponseRunner:
                        "cleanup": {"errors": [], "laser_off_confirmed": False,
                                    "electrical_safe_confirmed": False},
                        "last_confirmed_electrical_state": None, "electrical_state_current": False,
-                       "environment": None, "measured_power_w": None}
+                       "environment": None, "measured_power_w": None,
+                       "combination": self.plan.snapshot()}
 
     def _event(self, phase, **values):
         event = {"phase": phase, "captured_at_utc": utc_now(), **deepcopy(values)}
@@ -196,6 +202,13 @@ class PhotoresponseRunner:
         window = {"phase": phase, "samples": []}
         condition["windows"].append(window)
         self.laser.set_emission(illuminated)
+        def guard():
+            state = self._state()
+            self._check_state(state, bias)
+            return {"electrical": state,
+                    "environment": self.environment.verify() if self.environment else None}
+        if self.power and illuminated:
+            self.power.qualify(guard)
         self.sleep(self.config.settle_s)
         for _ in range(self.config.samples_per_window):
             # The interval also keeps one-sample windows strictly ordered with fake clocks.
@@ -208,10 +221,15 @@ class PhotoresponseRunner:
                       "started_s": self.clock() - self._epoch, "finished_s": None,
                       "voltage_v": None, "current_a": None,
                       "optical_before": optical_before, "electrical_before": before,
-                      "environment_before": environment_before}
+                      "environment_before": environment_before,
+                      "axis_indices": deepcopy(condition["axis_indices"]),
+                      "combination_order": list(self.plan.order)}
             window["samples"].append(sample)
             self.record["electrical_state_current"] = False
             try:
+                if self.power:
+                    sample["power_before"] = self.power.formal_sample(phase + "_before", illuminated=illuminated, guard=guard)
+                sample["started_s"] = self.clock() - self._epoch
                 reading = self.electrical.read(illuminated=illuminated)
                 sample["finished_s"] = self.clock() - self._epoch
                 sample["raw_reading"] = deepcopy(reading)
@@ -225,12 +243,17 @@ class PhotoresponseRunner:
                                         ("current_a", self.config.max_abs_current_a)):
                     value = sample[quantity]
                     if value is not None:
+                        if limit is None:
+                            raise NktError("Unexpected measured current without an approved current limit")
                         number(value, quantity, -limit, limit)
                 number(sample[self.config.quantity], self.config.quantity, -math.inf, math.inf)
+                if self.power:
+                    sample["power_after"] = self.power.formal_sample(phase + "_after", illuminated=illuminated, guard=guard)
                 sample["optical_after"] = self.laser.verify_point(emitting=illuminated, phase=phase + "_after")
                 sample["electrical_after"] = self._state()
                 self._check_state(sample["electrical_after"], bias)
                 sample["environment_after"] = self.environment.verify() if self.environment else None
+                sample["module_readings"] = self._module_readings(sample)
                 sample["valid"] = True
             except (Exception, KeyboardInterrupt) as exc:
                 sample["error"] = f"{type(exc).__name__}: {exc}"
@@ -246,6 +269,50 @@ class PhotoresponseRunner:
                     sample["audit_error"] = f"{type(exc).__name__}: {exc}"
                     if "error" not in sample:
                         raise
+
+    def _module_readings(self, sample):
+        """Every selected module's actual settings, measurements and guard status."""
+        optical, electrical = sample["optical_after"], sample["electrical_after"]
+        source = optical["source"]
+        filt = optical["filter"]
+        if hasattr(self.config.nkt, "diode_model"):
+            actual = {"current_setpoint_a": source["getLdCurrSetpoint"],
+                      "nominal_wavelength_nm": optical["nominal_wavelength_nm"]}
+            optical_measurements = {"ld_current_a": source["measLdCurr"],
+                                    "ld_voltage_v": source["measLdVolt"]}
+            role = "cld1010lp"
+        else:
+            actual = {"source_level_pct": source["level_pct"], "pulse_picker_ratio": source["pulse_picker_ratio"]}
+            if filt and filt.get("kind") == "varia":
+                actual.update(wavelength_nm=(filt["lower_edge_nm"] + filt["upper_edge_nm"]) / 2,
+                              bandwidth_nm=filt["upper_edge_nm"] - filt["lower_edge_nm"], nd_pct=filt["nd_pct"])
+            optical_measurements, role = {}, "nkt"
+        rows = [{"module": role, "actual": actual, "measurements": optical_measurements,
+                 "status": {"before": sample["optical_before"], "after": optical}},
+                {"module": self.config.detector, "actual": electrical.get("detector_readback"),
+                 "measurements": {"voltage_v": sample["voltage_v"], "current_a": sample["current_a"]},
+                 "status": {"before": sample["electrical_before"], "after": electrical}}]
+        if self.config.excitation == "dc_current":
+            rows.append({"module": "keithley6221_source", "actual": electrical["source"],
+                         "measurements": {"current_a": None, "voltage_v": None},
+                         "status": {"before": sample["electrical_before"], "after": electrical}})
+        elif electrical.get("relay_host_readback") is not None:
+            rows.append({"module": "keithley6221_relay_host", "actual": electrical["relay_host_readback"],
+                         "measurements": {"current_a": None, "voltage_v": None},
+                         "status": {"role": "query_only_transport_host", "output_control_created": False}})
+        if self.power:
+            rows.append({"module": "pm100d", "actual": {"wavelength_nm": self.power.wavelength},
+                         "measurements": {"power_w": (fmean(sample[k]["power_w"] for k in ("power_before", "power_after"))
+                                                        if sample["power_before"]["power_w"] is not None else None)},
+                         "status": {"before": sample["power_before"], "after": sample["power_after"],
+                                    "measurement_plane": self.power.config.meter.measurement_plane}})
+        if self.environment:
+            rows.append({"module": "environment", "actual": sample["environment_after"],
+                         "measurements": sample["environment_after"],
+                         "status": {"before": sample["environment_before"], "after": sample["environment_after"]}})
+        if {r["module"] for r in rows} != set(self.plan.modules):
+            raise NktError("Selected combination module readback is missing")
+        return deepcopy(rows)
 
     def run(self):
         if self._used:
@@ -269,11 +336,13 @@ class PhotoresponseRunner:
                 self.electrical.begin()
             else:
                 electrical_owned = True
-            environment_points = self.config.environment.points if self.environment else (None,)
             last_environment_index = 0 if self.environment else None
-            for (environment_index, environment_point), (optical_index, point), (bias_index, bias), repeat in product(
-                    enumerate(environment_points), enumerate(self.config.nkt.points),
-                    enumerate(self.config.bias_points), range(self.config.repeats)):
+            for coordinates in self.plan.conditions():
+                environment_index, environment_point = coordinates["environment"].values()
+                optical_index, point = coordinates["optical"].values()
+                bias_index, bias = coordinates["bias"].values()
+                power_index, target_power = coordinates["target_power_w"].values()
+                repeat = coordinates["repeat"]["value"]
                 if self.environment and last_environment_index != environment_index:
                     if last_environment_index is not None:
                         self.laser.set_emission(False)
@@ -285,6 +354,9 @@ class PhotoresponseRunner:
                 row = {"condition_id": f"photo-{len(self.record['conditions']):06d}",
                        "attempt_index": self.attempt_index, "accepted": False, "optical_index": optical_index,
                        "bias_index": bias_index, "repeat_index": repeat,
+                       "power_index": power_index, "target_power_w": target_power,
+                       "axis_indices": {name: v["index"] for name, v in coordinates.items()},
+                       "combination_order": list(self.plan.order),
                        "environment_index": environment_index, "requested_environment": environment_point,
                        "requested_optical": asdict(point), "excitation": self.config.excitation,
                        "requested_current_a": bias if self.config.excitation == "dc_current" else None,
@@ -292,11 +364,18 @@ class PhotoresponseRunner:
                        "windows": [], "result": None}
                 self.record["conditions"].append(row)
                 self.laser.prepare_point(point)
+                if self.power:
+                    self.power.prepare(row, point)
                 self.electrical.prepare(bias)
                 self._check_state(self._state(), bias)
                 for phase in WINDOWS:
                     self._window(row, phase, bias)
                 row["result"] = differential(row["windows"], self.config.quantity)
+                row["actual"] = row["windows"][1]["samples"][-1]["module_readings"]
+                if self.power:
+                    row["result"].update(target_power_w=target_power,
+                        measured_power_w=self.power.row["formal_mean_power_w"],
+                        measurement_plane=self.power.config.meter.measurement_plane)
                 self._event("condition_complete", condition=row)
             self.record["outcome"] = "completed"
         except (Exception, KeyboardInterrupt) as exc:
@@ -324,6 +403,12 @@ class PhotoresponseRunner:
             except (Exception, KeyboardInterrupt) as exc:
                 cleanup["errors"].append(f"electrical close: {type(exc).__name__}: {exc}")
             self.record["electrical_cleanup_audit"] = deepcopy(getattr(self.electrical, "cleanup_details", []))
+            if self.power:
+                try:
+                    self.power.close()
+                except (Exception, KeyboardInterrupt) as exc:
+                    cleanup["errors"].append(f"PM100D close: {type(exc).__name__}: {exc}")
+                self.record["power_audit"] = deepcopy(getattr(self.power, "audit", {}))
             if self.environment:
                 try:
                     result = self.environment.finish(failed=self.record["outcome"] != "completed" or bool(cleanup["errors"]))

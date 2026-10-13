@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from .nkt_config import NktError, integer, keys, number, text
 from .photoresponse_devices import CurrentSource6221, Voltmeter2182, Meter2400
-from .photoresponse_keithley import _flag
+from .photoresponse_keithley import _flag, Keithley6221Queries
 from .photoresponse_transport import Serial2182Transport
 
 
@@ -141,6 +141,7 @@ class HardwareElectrical:
         h = config.hardware
         h.require_run(config)
         self.source = None
+        self.relay_host = None
         options = {} if sleep is None else {"sleep": sleep}
         if config.excitation == "dc_current":
             self.source = CurrentSource6221(transports["6221"],
@@ -148,6 +149,8 @@ class HardwareElectrical:
                 max_current_a=config.max_abs_current_a, **options)
         detector_transport = transports.get("detector")
         if h.detector_transport == "via_6221":
+            if self.source is None:
+                self.relay_host = Keithley6221Queries(transports["6221"], expected_idn=h.source["expected_idn"])
             detector_transport = Serial2182Transport(transports["6221"], timeout_s=h.timeout_ms / 1000,
                 **options)
         values = {k: v for k, v in h.detector.items() if k != "address"}
@@ -196,6 +199,9 @@ class HardwareElectrical:
 
     def snapshot(self):
         self._host_guard()
+        relay = self.relay_host.snapshot(authorize_queries=True) if self.relay_host else None
+        if relay and (relay["output_enabled"] or relay["compliance_tripped"]):
+            raise NktError("No-excitation relay host changed output/status")
         source = None
         if self.source:
             readback = self.source.snapshot()
@@ -213,7 +219,7 @@ class HardwareElectrical:
             source = {"model": "2400", "output_enabled": meter["output_enabled"],
                       "setpoint": meter["setpoint"], "readback": meter}
         return {"detector": self.config.detector, "excitation": self.config.excitation,
-                "source": source, "detector_readback": meter,
+                "source": source, "detector_readback": meter, "relay_host_readback": relay,
                 "compliance_tripped": bool(source and source["readback"].get("compliance_tripped")),
                 "error": None}
 

@@ -140,6 +140,17 @@ its source. Neither operation opens a laser or unused detector.
   retain unqualified firmware semantics; asserted or unreadable values block LD
   enable without being mislabelled as a proven cable failure. ENAB does not
   substitute for PROT; no reset/clear or polarity inversion bypasses protection.
+- Optional PM100D feedback requires an explicit meter/sensor identity, wavelength
+  correction, measurement plane, power bounds and bounded actuator domain before
+  connecting the selected hardware. Source settings do not establish measured W.
+  Feedback adjustments occur with emission off and restart stability proof; low or
+  zero signal never permits increasing output to search for a beam. The formal
+  bright window freezes the actuator and rejects target/spread drift. Dark windows
+  verify meter settings/status without using dark noise for feedback. Meter failure
+  or saturation rejects the complete attempt; raw replies remain in audit.
+  PM ownership is independent of laser ownership, and meter-close failure must
+  not skip optical/electrical/environment cleanup. Power/electrical samples are
+  sequential guarded reads with timestamps, not continuous or simultaneous sensing.
 - Environment changes occur with light and electrical sources off. Reuse the
   commissioned feedback-before-temperature sequence, bounded overshoot, existing field
   path validation and `sqrt(Bx^2+Bz^2) <= 3 T`. Record actual temperature/field.

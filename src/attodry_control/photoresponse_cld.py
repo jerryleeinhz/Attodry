@@ -6,7 +6,7 @@ reference XML. Fake-tested; installed DLL/diode/firmware require commissioning.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import ctypes as ct
 import math
 from pathlib import Path
@@ -539,6 +539,10 @@ class CldController:
     def prepare_point(self, point):
         if not self.owned or self.closed or self.failed or point not in self.config.points:
             raise NktError("CLD point/session invalid")
+        self._feedback_anchor = point
+        return self._prepare_validated_point(point)
+
+    def _prepare_validated_point(self, point):
         self.failed = True
         self.backend.set("switchLdOutput", False)
         state = self.capture("cld_before_configure")
@@ -548,6 +552,16 @@ class CldController:
         self.point = point
         self.failed = False
         return self.verify_point(emitting=False)
+
+    def adjust_power(self, value, policy):
+        """One bounded current step with LD off; TEC/connection guards unchanged."""
+        policy.validate(self.config)
+        f = policy.feedback
+        number(value, "feedback LD current", f.current_min_a, f.current_max_a)
+        if self.point is None or abs(value - self.point.current_a) > f.current_step_a + 1e-12:
+            raise NktError("Power adjustment exceeds approved single step")
+        self.verify_point(emitting=False, phase="cld_before_power_adjustment")
+        return self._prepare_validated_point(replace(self._feedback_anchor, current_a=value))
 
     def verify_point(self, *, emitting, phase="cld_formal"):
         if not self.owned or self.closed or self.failed or self.point is None: raise NktError("CLD point not prepared")
