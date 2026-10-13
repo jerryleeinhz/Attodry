@@ -143,6 +143,96 @@ class VisaCldTests(unittest.TestCase):
         manager.open_resource.assert_called_once_with("USB0::FAKE::INSTR", open_timeout=10000)
         driver.close()
 
+    def test_omitted_voltage_threshold_loads_as_none_and_hardware_ready(self):
+        document = tomllib.loads((ROOT / "config/photoresponse_cld_simulation.toml").read_text(encoding="utf-8"))
+        table = document["cld1010"]
+        del table["max_voltage_v"]
+        table.update(backend="visa", address="USB0::FAKE::INSTR", expected_serial="TEST_SERIAL",
+                     diode_model="FAKE DIODE", diode_wiring_confirmed=True)
+        config = load_cld_config(document, ROOT / "config/any.local.toml")
+        config.require_hardware(writes=True)
+        self.assertIsNone(config.max_voltage_v)
+        self.assertIsNone(config.snapshot()["max_voltage_v"])
+
+    def test_no_voltage_threshold_allows_normal_ld_and_cleanup(self):
+        driver, resource, _ = backend(configuration(max_voltage_v=None))
+        clock = Clock()
+        controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+        controller.begin(authorize_writes=True, confirm_manual_route=True)
+        controller.prepare_point(driver.config.points[0]); controller.set_emission(True)
+        self.assertEqual(controller.record["last_confirmed_state"]["measLdVolt"], 1.2)
+        self.assertIsNone(controller.config.snapshot()["max_voltage_v"])
+        self.assertTrue(controller.finish()["off_confirmed"])
+        self.assertEqual(resource.values["OUTP1:STAT?"], "0")
+
+    def test_explicit_voltage_threshold_still_rejects_excess_voltage(self):
+        driver, _, _ = backend(configuration(max_voltage_v=.6))
+        clock = Clock()
+        controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+        controller.begin(authorize_writes=True, confirm_manual_route=True)
+        controller.prepare_point(driver.config.points[0])
+        with self.assertRaisesRegex(NktError, "diode voltage"):
+            controller.set_emission(True)
+        self.assertTrue(controller.failed)
+        self.assertTrue(controller.finish()["off_confirmed"])
+
+    def test_invalid_optional_voltage_threshold_stops_before_io(self):
+        for value in (float("nan"), float("inf"), -1., 0., "3.0", True):
+            with self.subTest(value=value):
+                factory = Mock()
+                with self.assertRaises(NktError):
+                    VisaCld(configuration(max_voltage_v=value), authorize_connection=True,
+                            authorize_writes=True, manager_factory=factory)
+                factory.assert_not_called()
+
+    def test_invalid_voltage_response_still_rejected_without_threshold(self):
+        for value in ("NaN", "Inf", "-Inf", "invalid", "-0.01", "+9.9E37", "-9.9E37", "+9.91E37"):
+            with self.subTest(value=value):
+                driver, resource, _ = backend(configuration(max_voltage_v=None))
+                resource.values["SENS4:VOLT:DC:DATA?"] = value
+                controller = CldController(driver.config, driver)
+                with self.assertRaises(NktError):
+                    controller.begin(authorize_writes=True, confirm_manual_route=True)
+                self.assertFalse(controller.owned)
+                self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
+                controller.finish()
+
+    def test_no_voltage_threshold_preserves_current_tec_and_connection_guards(self):
+        for command, value in (("SENS3:CURR:DC:DATA?", ".031"), ("OUTP2:PROT:TRAN:TRIP?", "1"),
+                               ("OUTP1:PROT:INTL:TRIP?", "1"), ("OUTP2:PROT:CONN:TRIP?", "1")):
+            with self.subTest(command=command):
+                driver, resource, _ = backend(configuration(max_voltage_v=None))
+                resource.values[command] = value
+                clock = Clock()
+                controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+                with self.assertRaises(NktError):
+                    controller.begin(authorize_writes=True, confirm_manual_route=True)
+                    controller.prepare_point(driver.config.points[0])
+                self.assertNotIn(("write", "OUTP1:STAT 1"), resource.calls)
+                controller.finish()
+
+    def test_simulation_voltage_is_not_derived_from_optional_threshold(self):
+        states = []
+        for limit in (None, .5, 3.):
+            config = configuration(backend="simulation", max_voltage_v=limit)
+            synthetic = SimulatedCld(config)
+            clock = Clock()
+            controller = CldController(config, synthetic, clock=clock, sleep=clock.sleep)
+            controller.begin(); controller.prepare_point(config.points[0]); controller.set_emission(True)
+            states.append(controller.record["last_confirmed_state"]["measLdVolt"])
+            self.assertTrue(controller.finish()["off_confirmed"])
+        self.assertEqual(states, [states[0]]*3)
+
+    def test_shared_voltage_validation_rejects_overload_without_threshold(self):
+        config = configuration(backend="simulation", max_voltage_v=None)
+        for value in (float("nan"), float("inf"), 9.9e37, -0.01):
+            synthetic = SimulatedCld(config)
+            synthetic.state["measLdVolt"] = value
+            controller = CldController(config, synthetic)
+            with self.assertRaises(NktError): controller.begin()
+            self.assertFalse(controller.owned)
+            controller.finish()
+
     def test_wrong_identity_prevents_any_setting_write(self):
         for identity in ("Thorlabs,CLD1011LP,TEST_SERIAL,2.3.0", "Thorlabs,CLD1010LP,WRONG,2.3.0",
                          "Other,CLD1010LP,TEST_SERIAL,2.3.0", "Thorlabs,CLD1010LP,TEST_SERIAL"):

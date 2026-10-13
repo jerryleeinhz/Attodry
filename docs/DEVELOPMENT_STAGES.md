@@ -2,6 +2,25 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - optional CLD voltage monitoring
+
+Status: constant-current configuration correction complete (2026-10-13).
+
+- The user correctly identified current as the laser control variable. Withdraw
+  the mandatory extra software voltage threshold introduced by this implementation.
+  Omitted `max_voltage_v` is represented as null in the configuration snapshot;
+  it does not substitute a guessed diode voltage or instrument measurement range.
+- Existing positive voltage thresholds remain enforced. Voltage readbacks remain
+  recorded; malformed, nonfinite, negative and overload values remain rejected.
+  Current limit, TEC stability/protection, interlock, wiring/route, authorization,
+  unresolved connection diagnostics and independent cleanup remain unchanged.
+- Hardware template documents this field as optional. Keithley sample-voltage
+  limits are unaffected; this change applies only to the CLD current-driven source.
+- **519/519 local offline tests** and **104/104 target photoresponse tests** passed,
+  including omitted-field/null audit, normal controlled output with no threshold,
+  optional-threshold rejection, invalid voltage/current/protection and cleanup.
+  This follow-up opened no instrument and sent no hardware command.
+
 ## DC photoresponse - CLD temperature window and diagnostic correction
 
 Status: software correction and passive thermal verification complete (2026-10-13).

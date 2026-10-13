@@ -4,7 +4,7 @@ Last updated: 2026-10-13
 
 ## Current stage
 
-DC photoresponse - CLD thermal recovery and diagnostic correction (2026-10-13):
+DC photoresponse - CLD constant-current operation and optional voltage monitor (2026-10-13):
 
 - The operator confirmed 2182A input is floating. Retain successful identity/
   configuration communication and the rejected overload; do not repeat voltage
@@ -28,7 +28,12 @@ DC photoresponse - CLD thermal recovery and diagnostic correction (2026-10-13):
 - The operator confirmed a suitable beam collector, 30 mA maximum LD current,
   explicitly unspecified diode model, and permission to inspect cached TEC values.
   The reported 8.5 V MAX response is a measurement capability, **not a cached
-  diode voltage rating**. Keep the configurable software LD voltage bound explicit.
+  diode voltage rating**. In constant-current mode, the extra software voltage
+  threshold is optional; do not require a guessed diode voltage to operate.
+  Omit `max_voltage_v` to disable only this extra threshold; snapshots record null.
+  Voltage readbacks remain recorded and invalid/overload values are rejected.
+  Configured positive thresholds still reject readings above them; current limits,
+  TEC/interlock/protection, wiring and authorization requirements are retained.
 - TEC-only attempt used the saved 17 C / 0.85 A settings, changed LD temperature
   mode to PROT, narrowed the protection window and enabled TEC briefly. Its first
   diagnostic sample reported connection protection; the attempt was rejected and
@@ -55,8 +60,11 @@ DC photoresponse - CLD thermal recovery and diagnostic correction (2026-10-13):
 - Follow-up validation: **511/511 local offline tests**;
   **96/96 photoresponse tests** on LK_setup. The updated
   production backend passed passive thermal verification. No remote LD enable
-  has been issued; the software voltage bound and connection diagnostic qualification
-  remain pending for automatic emission.
+  has been issued; connection diagnostic qualification remains pending for
+  automatic emission. The former mandatory voltage-bound requirement is withdrawn.
+- Optional voltage-monitor validation: **519/519 local tests** and
+  **104/104 target photoresponse tests** passed offline. No instrument
+  was opened in this follow-up; existing hardware state was not changed.
 - 6221 empty-load five-point sweep, valid voltage/current input fixtures, full
   optical dark/light/dark and attoDRY integration remain pending. Raw attempts,
   station addresses, identities, protection states and runtime diagnostics stay ignored.

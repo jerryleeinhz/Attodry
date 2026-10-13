@@ -124,7 +124,11 @@ its source. Neither operation opens a laser or unused detector.
   The photocurrent detector must use the source-drain path. Bottom-gate/source
   wiring is a semantic gate-bottom leakage role, not a channel-current detector.
 - Laser emission checks source identity, settings and interlocks. CLD additionally
-  requires confirmed current/voltage limits, wiring and TEC range/protection.
+  requires a confirmed current limit, wiring and TEC range/protection.
+  In constant-current mode an additional software voltage threshold is optional,
+  not a required voltage setpoint. Always record voltage and reject invalid/overload
+  readings; enforce the extra threshold when configured. Omission does not select
+  a guessed diode rating or use the instrument measurement range as that rating.
   Record the diode model truthfully; the operator may explicitly elect an unspecified
   model for staged testing. Approximate wavelength and measurement range do not
   establish a diode voltage rating. USB/VISA and native TL4000 paths never reset.
@@ -155,8 +159,8 @@ Real access resumed on 2026-10-13. 6221 unloaded commissioning and the initial
 2182A input is confirmed floating. CLD passive USB/VISA verification now confirms
 stable operator-controlled TEC operation at 26 C with LD off and temperature trip
 clear. CONN/MEAS indicators remain inconsistent with normal operation; preserve
-raw values and keep automatic LD enable blocked until their semantics and the
-software voltage bound are confirmed. Do not take over the operator's active TEC.
+raw values and keep automatic LD enable blocked until their semantics are
+confirmed. The extra software voltage threshold is optional in constant-current mode. Do not take over the operator's active TEC.
 See [photoresponse guide](PHOTORESPONSE_GUIDE.md) for current role/wiring evidence.
 
 ## Vendor files

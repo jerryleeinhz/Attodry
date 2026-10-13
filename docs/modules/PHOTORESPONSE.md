@@ -17,7 +17,7 @@ remain independent. This implementation does not use lock-ins in the photorespon
 | P2 photovoltage | Fresh 2182A READ acquisition; no-excitation mode; direct or 6221 relay | Complete dark/light/dark voltage with real optics |
 | P3 current bias | Bounded DC ramps, readback, compliance stop and zero/off cleanup | Authorized unloaded five-point 6221 test still not completed |
 | P4 photocurrent | 2400 V-source/I-measure and 0 A/fixed-range voltmeter, 24-bit status checks | Station 2400 is gate-bottom/source; channel detector wiring and acceptance pending |
-| P5 CLD | USB/VISA SCPI or TL4000 and shared TEC/interlock/current controller | Passive 26 C TEC stability verified; voltage bound and diagnostic qualification block automatic LD acceptance |
+| P5 CLD | USB/VISA SCPI or TL4000 and shared TEC/interlock/current controller | Passive 26 C TEC stability verified; connection diagnostic qualification still blocks automatic LD acceptance |
 | P6 environment | Existing attoDRY driver, explicit T/Bx/Bz points, stability, 3 T and cleanup | New joint experiment commissioning; optional gate scans remain separate Three-SMU work |
 | P7 data | JSON/JSONL, SQLite WAL/FULL audit, new-attempt retry, accepted-only Notebook/CSV | Target offline validation recorded in development stages; scientific noise/settling validation remains experimental |
 
@@ -68,7 +68,10 @@ No native driver DLL is needed for this choice. Read-only real snapshots were
 verified after 96 target offline tests. Current limit and operator-set stored
 current are 30 mA; passive reads confirmed LD off. The operator confirmed a beam collector and explicitly unspecified diode
 model; model metadata is retained truthfully. Voltage measurement capability is
-not a cached diode voltage rating; a write profile still needs an explicit bound.
+not a cached diode voltage rating. Constant-current operation needs no separate
+LD voltage setpoint; `max_voltage_v` is an optional extra software monitor. Omission
+records null and supplies no guessed bound. Invalid/overload readings still reject
+operation, and a configured positive threshold remains enforced.
 
 The initial TEC-only attempt briefly enabled TEC and stopped on raw connection
 indications, without enabling LD; both outputs were confirmed off. The operator
@@ -108,5 +111,5 @@ local hardware addresses/data and pre-existing PM100D/PEM notes outside this fea
 The current branch is synchronized without merging main. Remote offline validation uses a
 fresh temporary folder and the existing `lyr` environment, not an overwrite of the active lab checkout.
 Next: confirm the 2182A input and 2400 sample wiring, provide a suitable 6221 test load,
-qualify CLD connection diagnostic semantics and the explicit software voltage bound, then commission valid electrical readings and
+qualify CLD connection diagnostic semantics, then commission valid electrical readings and
 optical dark/light control. Unknown physical parameters remain hard gates.

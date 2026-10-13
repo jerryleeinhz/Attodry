@@ -32,7 +32,6 @@ class CldConfig:
     diode_model: str
     diode_wiring_confirmed: bool
     max_current_a: float
-    max_voltage_v: float
     max_tec_current_a: float
     temperature_min_c: float
     temperature_max_c: float
@@ -46,6 +45,7 @@ class CldConfig:
     output_directory: Path
     run_name: str
     note: str
+    max_voltage_v: float | None = None  # Optional extra software threshold, not a voltage-source setting.
     emit: bool = True
     dwell_s: float = 0.0
 
@@ -57,7 +57,8 @@ class CldConfig:
         if type(self.diode_wiring_confirmed) is not bool:
             raise NktError("diode_wiring_confirmed must be boolean")
         number(self.max_current_a, "diode max_current_a", 1e-9, 1.)
-        number(self.max_voltage_v, "diode max_voltage_v", .01, 10)
+        if self.max_voltage_v is not None:
+            number(self.max_voltage_v, "diode max_voltage_v", .01, 10)
         number(self.max_tec_current_a, "max_tec_current_a", .001, 3)
         number(self.temperature_min_c, "temperature_min_c", -20, 80)
         number(self.temperature_max_c, "temperature_max_c", self.temperature_min_c, 80)
@@ -97,8 +98,8 @@ class CldConfig:
 
 def load_cld_config(doc, path):
     table = dict(doc.get("cld1010", {}))
-    fields = set(CldConfig.__dataclass_fields__) - {"points", "emit", "dwell_s", "dll_path"}
-    keys(table, "cld1010", fields | {"current_points_a", "wavelength_nm"}, {"dll_path"})
+    fields = set(CldConfig.__dataclass_fields__) - {"points", "emit", "dwell_s", "dll_path", "max_voltage_v"}
+    keys(table, "cld1010", fields | {"current_points_a", "wavelength_nm"}, {"dll_path", "max_voltage_v"})
     table.setdefault("dll_path", "")
     points = table.pop("current_points_a")
     if not isinstance(points, list):
@@ -326,6 +327,8 @@ class VisaCld:
             raise NktError("Invalid CLD numeric response for " + name) from exc
         if not math.isfinite(value):
             raise NktError("Non-finite CLD response for " + name)
+        if abs(value) >= 9e37:
+            raise NktError("CLD overload/invalid response marker for " + name)
         return value
 
     def _no_error(self):
@@ -475,7 +478,13 @@ class CldController:
             raise NktError("CLD requires Celsius, constant-temperature TEC and LD temperature protection")
         number(state["getTecCurrLimit"], "TEC current limit", .001, c.max_tec_current_a)
         number(state["measTemp"], "diode temperature", c.temperature_min_c, c.temperature_max_c)
-        number(state["measLdVolt"], "diode voltage", 0, c.max_voltage_v)
+        voltage = number(state["measLdVolt"], "diode voltage", 0, math.inf)
+        # SCPI overflow/invalid markers remain measurement errors independently
+        # of whether an extra operator-supplied voltage threshold is selected.
+        if voltage >= 9e37:
+            raise NktError("CLD voltage overload/invalid response marker")
+        if c.max_voltage_v is not None:
+            number(voltage, "diode voltage", 0, c.max_voltage_v)
         number(state["measLdCurr"], "diode current", 0, c.max_current_a)
         window = number(state["getTempProtWindow"], "temperature protection span", .001,
                         2*(c.temperature_max_c-c.temperature_min_c))
