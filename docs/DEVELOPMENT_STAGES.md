@@ -2,6 +2,29 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## DC photoresponse - editable LK_setup trial configurations
+
+Status: target-local configuration preparation complete (2026-10-13).
+
+- Prepared four separate editable profiles: current-biased voltage via the 6221
+  relay, no-excitation voltage via that relay, future channel current with 2400,
+  and standalone 6221 five-point commissioning. Filled known identities/resources,
+  approved limits and initial timing/point values; no guessed physical identities.
+- Created the previously absent default `config/hardware.local.toml` from the
+  first profile. Installed a parameter/command guide and a pure configuration
+  validator. Paths point to separate ignored run-data directories/SQLite files.
+- Kept electrical wiring/isolation confirmations false and the 2400 channel role
+  future-only, matching present floating/gate-source wiring. The CLD optional
+  voltage threshold stays omitted; current/thermal/interlock/diagnostic checks
+  remain unchanged. SuperK/attoDRY physical setup is not inferred from CLD values.
+- Four profiles plus the default passed real configuration/schema checks in the
+  existing target `lyr` environment, source commit `08ad479`. Local preparation
+  also passed. No hardware was opened, no settings/output commands were sent,
+  and no measurement acceptance is implied. No production code changed.
+- Target profile files remain ignored, including their instrument identities;
+  existing untracked SDK folders and bundles were preserved. Earlier full code
+  regressions remain 519/519 locally and 104/104 target photoresponse tests.
+
 ## DC photoresponse - optional CLD voltage monitoring
 
 Status: constant-current configuration correction complete (2026-10-13).

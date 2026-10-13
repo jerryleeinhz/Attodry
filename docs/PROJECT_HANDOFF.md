@@ -4,7 +4,7 @@ Last updated: 2026-10-13
 
 ## Current stage
 
-DC photoresponse - CLD constant-current operation and optional voltage monitor (2026-10-13):
+DC photoresponse - editable trial configuration deployment (2026-10-13):
 
 - The operator confirmed 2182A input is floating. Retain successful identity/
   configuration communication and the rejected overload; do not repeat voltage
@@ -65,6 +65,24 @@ DC photoresponse - CLD constant-current operation and optional voltage monitor (
 - Optional voltage-monitor validation: **519/519 local tests** and
   **104/104 target photoresponse tests** passed offline. No instrument
   was opened in this follow-up; existing hardware state was not changed.
+- Prepared editable target-local trial profiles in `config/photoresponse_trial/`:
+  CLD + 6221/2182A voltage, CLD + relay 2182A without excitation, future
+  CLD + 2400 channel current, and an independent 6221 five-point test. Created
+  the absent default `config/hardware.local.toml` as the first profile's copy.
+  These are independent files; subsequent edits are not silently synchronized.
+- Target configuration fills confirmed identities/resources and approved limits,
+  with initial LD 10 mA / TEC 26 C and an omitted optional LD voltage threshold.
+  Electrical wiring/isolation confirmations remain false, consistent with the
+  floating 2182A and gate/source 2400. No protective diagnostic is bypassed.
+- All four profiles and the default copy passed actual schema/constraint checks
+  in the target's existing `lyr` environment using source commit `08ad479`.
+  The reusable validation script and parameter/command guide are installed beside
+  the profiles. No instrument connection, output/settings write or acquisition was
+  performed. Source code was already current and was not replaced.
+- New local profile files are Git-ignored through a scoped target-local exclude;
+  the default was already ignored. Existing SDK folders/bundles and other files
+  were preserved. SuperK physical parameters and optional attoDRY joint setup
+  remain separate confirmed profiles; they are not inferred from this CLD trial.
 - 6221 empty-load five-point sweep, valid voltage/current input fixtures, full
   optical dark/light/dark and attoDRY integration remain pending. Raw attempts,
   station addresses, identities, protection states and runtime diagnostics stay ignored.
