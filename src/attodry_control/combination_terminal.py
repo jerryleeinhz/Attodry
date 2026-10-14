@@ -189,6 +189,26 @@ def snapshot_text(snapshot, width=None):
     lines = [f"Status: {snapshot['status']} | Accepted: {snapshot.get('accepted_conditions', '?')}/"
              f"{snapshot.get('total_conditions', '?')} | Process liveness: {snapshot.get('process_liveness', 'unknown')}",
              "Run ID: " + snapshot.get("run_id", "?")]
+    executions = snapshot.get("executions") or []
+    current_id = snapshot.get("current_execution_id")
+    current = next((item for item in executions if item.get("execution_id") == current_id), None)
+    if current is not None:
+        plan = current.get("plan") or json.loads(current.get("plan_json") or "{}")
+        index = current.get("sequence_index", 0)
+        lines.append(f"Execution: {current_id} | Segment {index + 1}/{len(executions)}"
+                     f" | {current.get('kind', '?')} | {current.get('status', '?')}")
+        if plan.get("config_sha256"):
+            lines.append("Execution config SHA256: " + plan["config_sha256"])
+        if len(executions) > 1:
+            previous = sum(item.get("accepted_conditions", 0) for item in executions
+                           if item.get("execution_id") != current_id)
+            count = current.get("accepted_conditions")
+            lines.append(f"Recovery progress: reused {previous} accepted conditions"
+                         + (f" | current execution accepted {count}" if count is not None else ""))
+        for prior in executions:
+            if prior.get("execution_id") != current_id and prior.get("status") in {"failed", "interrupted"}:
+                lines.append(f"Retained history: {prior['execution_id']} | {prior['status']}"
+                             + (" | " + prior["error"] if prior.get("error") else ""))
     attempt = snapshot.get("current_attempt")
     if attempt:
         lines.append(f"Attempt: {attempt['condition_id']} / {attempt['attempt_index']} / {attempt['status']}")

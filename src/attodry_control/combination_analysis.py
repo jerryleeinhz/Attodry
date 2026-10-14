@@ -44,7 +44,8 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         connection.execute("BEGIN")
         where = "WHERE s.run_id=?" if run_id is not None else ""
         rows = connection.execute(f"""
-            SELECT r.schema_version, r.status AS run_status, r.cleanup_json,
+            SELECT r.schema_version, r.status AS run_status, r.error AS run_error,
+                   r.cleanup_json, r.plan_json,
                    c.context_json, a.status AS attempt_status, s.*
             FROM combination_samples s
             JOIN combination_runs r USING(run_id)
@@ -53,11 +54,27 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             {where}
             ORDER BY r.created_at_utc, c.sequence_index, s.attempt_index, s.sample_index
         """, () if run_id is None else (run_id,)).fetchall()
+        tables = {row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        executions, attempt_executions = {}, {}
+        execution_tables = {"combination_executions", "combination_attempt_executions"}
+        if tables & execution_tables and not execution_tables <= tables:
+            raise ValueError("Incomplete execution provenance schema")
+        if execution_tables <= tables:
+            clause = " WHERE run_id=?" if run_id is not None else ""
+            parameters = () if run_id is None else (run_id,)
+            for execution in connection.execute(
+                    "SELECT * FROM combination_executions" + clause, parameters):
+                executions.setdefault(execution["run_id"], {})[execution["execution_id"]] = dict(execution)
+            for mapping in connection.execute(
+                    "SELECT * FROM combination_attempt_executions" + clause, parameters):
+                key = mapping["run_id"], mapping["condition_id"], mapping["attempt_index"]
+                attempt_executions[key] = mapping["execution_id"]
     output = []
     cleanup_by_run = {}
     source_path = str(Path(path).resolve())
     for row in rows:
-        if row["schema_version"] != SCHEMA_VERSION:
+        if row["schema_version"] not in {1, SCHEMA_VERSION}:
             raise ValueError("Unsupported combination schema")
         sample = json.loads(row["payload_json"])
         if row["run_id"] not in cleanup_by_run:
@@ -68,16 +85,44 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         if not audit and not accepted:
             continue
         context = json.loads(row["context_json"])
+        run_executions = executions.get(row["run_id"], {})
+        if run_executions:
+            execution_id = attempt_executions.get(
+                (row["run_id"], row["condition_id"], row["attempt_index"]))
+            if execution_id not in run_executions:
+                raise ValueError("Formal sample lacks its archived execution/configuration")
+            execution = run_executions[execution_id]
+            execution_plan = json.loads(execution["plan_json"])
+            provenance = {
+                "execution_id": execution_id, "execution_index": execution["sequence_index"],
+                "execution_kind": execution["kind"], "execution_status": execution["status"],
+                "execution_error": execution["error"],
+                "execution_cleanup": json.loads(execution["cleanup_json"] or "{}"),
+            }
+        else:
+            # Schema-1 records remain readable without writing a migration. No
+            # historical execution identity is invented by this read-only path.
+            execution_plan = json.loads(row["plan_json"])
+            provenance = {"execution_id": None, "execution_index": 0,
+                "execution_kind": "legacy_unsegmented", "execution_status": row["run_status"],
+                "execution_error": row["run_error"], "execution_cleanup": cleanup}
+        plan_sha256 = hashlib.sha256(json.dumps(execution_plan, sort_keys=True,
+            ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        config_sha256 = execution_plan.get("config_sha256")
+        provenance.update(config_sha256=config_sha256, plan_sha256=plan_sha256,
+            configuration_revision=config_sha256 or plan_sha256,
+            source_sha256=execution_plan.get("source_sha256", {}))
         record = {
-            "schema_version": SCHEMA_VERSION, "source_path": source_path,
+            "schema_version": row["schema_version"], "source_path": source_path,
             "run_id": row["run_id"], "condition_id": row["condition_id"],
             "attempt_index": row["attempt_index"], "sample_index": row["sample_index"],
-            "accepted": accepted, "run_status": row["run_status"],
+            "accepted": accepted, "run_status": row["run_status"], "run_error": row["run_error"],
             "attempt_status": row["attempt_status"], "clean": sample["clean"],
             "sequence_index": context["sequence_index"], "repeat_index": context["repeat_index"],
             "loop_order": context["loop_order"],
             "started_at_utc": sample["started_at_utc"], "finished_at_utc": sample["finished_at_utc"],
             "simulated": sample["simulated"],
+            **provenance,
             **_flatten("axes", context["axes"]), **_flatten("requested", context["requested"]),
             **_flatten("actual", sample["actual"]), **_flatten("measured", sample["measurements"]),
         }
@@ -86,6 +131,22 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             record[f"status.{reading['module']}"] = reading.get("status")
         output.append(record)
     return tuple(output)
+
+
+def execution_provenance(rows: Sequence[Mapping]) -> tuple[dict, ...]:
+    """Compact archived segment provenance for exports; never use today's TOML."""
+    segments = {}
+    fields = ("source_path", "run_id", "execution_id", "execution_index", "execution_kind",
+              "execution_status", "execution_error", "execution_cleanup", "configuration_revision",
+              "config_sha256", "plan_sha256", "source_sha256")
+    for row in rows:
+        if "execution_kind" not in row:
+            continue
+        key = tuple(row.get(name) for name in
+                    ("source_path", "run_id", "execution_id", "configuration_revision"))
+        segment = segments.setdefault(key, {name: row.get(name) for name in fields})
+        segment["selected_row_count"] = segment.get("selected_row_count", 0) + 1
+    return tuple(segments.values())
 
 
 def load_legacy_three_smu(path: str | Path, *, audit: bool = False) -> tuple[dict, ...]:
@@ -200,7 +261,7 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
     requested = {key[10:] for row in selected for key in row if key.startswith("requested.")}
     x_coordinate = _coordinate_for_x(x, requested)
     covered = {key.split(".", 1)[-1] for key in (*group_by, *filters)}
-    protected = ["run_id", "simulated", "repeat_index", "sample_index", "role", "harmonic"]
+    protected = ["run_id", "configuration_revision", "simulated", "repeat_index", "sample_index", "role", "harmonic"]
     protected += sorted({key for row in selected for key in row if
                          key.startswith("axes.") and key.endswith((".segment", ".direction"))})
     protected += sorted("requested." + key for key in requested
@@ -289,15 +350,18 @@ def export_selection(directory: str | Path, series: Sequence[SelectedSeries], *,
     fingerprint = hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False,
                                            allow_nan=False).encode()).hexdigest()
     manifest = {
-        "analysis_contract": "combination-v1", "x": x, "y": y, "group_by": list(group_by),
+        "analysis_contract": "combination-v2-execution-provenance", "x": x, "y": y, "group_by": list(group_by),
         "filters": dict(filters or {}), "sort_x": sort_x, "audit": audit,
         "aggregation": "none", "missing": "omitted from scatter, never filled with zero",
         "source_paths": sorted({r["source_path"] for r in rows if "source_path" in r}),
         "selection_sha256": fingerprint, "selected_count": len(rows),
         "excluded_sample_ids": list(excluded_sample_ids),
+        "configuration_grouping": "different archived configuration revisions remain separate series",
+        "execution_segments": execution_provenance(rows),
         "analysis_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "series": [{"group": item.group, "sample_ids": [
             {k: row.get(k) for k in ("run_id", "condition_id", "attempt_index", "sample_index",
+                                    "execution_id", "configuration_revision", "config_sha256",
                                     "role", "harmonic")} for row in item.rows]} for item in series],
     }
     (target / "selection_manifest.json").write_text(

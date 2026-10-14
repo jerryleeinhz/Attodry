@@ -186,7 +186,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                         "temperature": "normal_hold_failure_disable",
                         "magnetic": (magnetic.cleanup.normal_end_field_policy.value if magnetic else "inactive"),
                         "magnetic_failure": "monitored_zero_or_manual_verification"},
-                    resume_supported=False)
+                    resume_supported=True,
+                    hardware_resume_contract="whole-condition-reviewed-executions-v1")
     # Include point engines and shared safety code, not just the Cartesian loop.
     snapshot["source_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in Path(__file__).parent.glob("*.py")}
@@ -223,7 +224,8 @@ class _Events:
 
 class HardwareCombinationStation:
     def __init__(self, config, *, smu_adapter_factory=None, manager_factory=None, sleep=None,
-                 dll=None, monotonic=None, authorize_hardware=False):
+                 dll=None, monotonic=None, authorize_hardware=False, recovery=None,
+                 recovery_owner_guard=None):
         self.config = config
         self.authorize_hardware = authorize_hardware is True
         self.smu_adapter_factory = smu_adapter_factory
@@ -234,6 +236,34 @@ class HardwareCombinationStation:
         self.open_completed = False
         self.cryo = None
         self.dll, self.monotonic = dll, monotonic
+        self.recovery = recovery
+        self.recovery_owner_guard = recovery_owner_guard
+        self.recovery_owner_guard_failed = None
+
+    def _guard_recovery_owner(self):
+        if self.recovery is not None:
+            # The CLI owns the process/lease inspection; it is deliberately not
+            # serialized into the measurement snapshot or accepted as a flag.
+            if not callable(self.recovery_owner_guard):
+                raise ValueError("Recovery requires an independent exclusive-owner guard")
+            if self.recovery_owner_guard_failed is not None:
+                raise ValueError("Recovery owner verification already failed; manual verification required")
+            try:
+                self.recovery_owner_guard()
+            except BaseException as exc:
+                self.recovery_owner_guard_failed = f"{type(exc).__name__}: {exc}"
+                try:
+                    self.events.event("recovery_owner_verification_failed", {
+                        "error": self.recovery_owner_guard_failed,
+                        "further_instrument_writes_blocked": True,
+                        "hardware_zero_or_off_confirmed": False})
+                except BaseException as audit_error:
+                    exc.add_note(f"Owner failure audit failed: {audit_error}")
+                raise
+
+    def _assert_recovery_io_allowed(self):
+        if self.recovery_owner_guard_failed is not None:
+            raise ValueError("Recovery owner verification failed; only connection close is allowed")
 
     def set_event_sink(self, sink):
         self.events = _Events(sink)
@@ -246,11 +276,17 @@ class HardwareCombinationStation:
                 and not self.authorize_hardware):
             raise ValueError("Mixed lock-in hardware requires explicit run authorization before any instrument I/O")
         preflight = {}
+        self._guard_recovery_owner()
         if self.config.cryostat is not None:
             self.cryo = CryostatPointSession(self.config.cryostat, self.config.temperature,
                 self.config.magnetic, self.events.event, dll=self.dll,
                 monotonic=self.monotonic, sleep=self.sleep)
+            if self.recovery is not None:
+                self.cryo.recovery_owner_guard = self._guard_recovery_owner
             preflight["cryostat"] = self.cryo.open()
+            if self.recovery is not None:
+                self._validate_recovery_environment()
+        self._guard_recovery_owner()
         if self.config.smu is not None:
             kwargs = {}
             if self.smu_adapter_factory is not None:
@@ -264,21 +300,107 @@ class HardwareCombinationStation:
                     "smu_preflight_role", {"role": role, "state": asdict(state)}), **kwargs)
             preflight["smu"] = {r: asdict(v) for r, v in self.smu.preflight.items()}
             self.events.event("smu_preflight", preflight["smu"])
+            if self.recovery is not None:
+                self.smu.recovery_owner_guard = self._guard_recovery_owner
+                self.smu.verify_recovery_zero_off(self.events)
+        self._guard_recovery_owner()
         if self.config.lockin is not None:
             self.lockin = LockinPointSession(
                 self.config.path, self.config.lockin, self.events.event,
                 manager_factory=self.manager_factory, mode=self.config.lockin_mode,
-                authorize_writes=self.authorize_hardware)
-            preflight["lockin"] = self.lockin.open()
+                authorize_writes=self.authorize_hardware,
+                recovery_owner_guard=(self._guard_recovery_owner if self.recovery is not None else None),
+                recovery_abort_guard=(self._assert_recovery_io_allowed if self.recovery is not None else None))
+            preflight["lockin"] = (self.lockin.open(recovery=True) if self.recovery is not None
+                                   else self.lockin.open())
         # All active preflights must succeed before any configuration writes.
+        self._guard_recovery_owner()
         if self.lockin is not None:
-            self.lockin.configure()
+            if self.recovery is not None:
+                self.lockin.configure(recovery=True,
+                    cleanup_only=bool(self.recovery.get("cleanup_only")))
+            else:
+                self.lockin.configure()
+        self._guard_recovery_owner()
         if self.smu is not None:
-            self.smu.begin_points(self.events)
+            if self.recovery and self.recovery.get("cleanup_only"):
+                self.smu.prepare_recovery_cleanup(self.events)
+            else:
+                self.smu.begin_points(self.events)
         self.open_completed = True
+        if self.recovery is not None:
+            self.events.event("recovery_preflight_verified", {
+                "identities_and_initial_state": preflight,
+                "cleanup_only": bool(self.recovery.get("cleanup_only")),
+                "fresh_queries_required": True,
+                "qualified_baselines_reused": False})
         return _json({"mode": "hardware", "identities_and_initial_state": preflight})
 
+    def _validate_recovery_environment(self):
+        """Validate present readbacks and the pending path before electrical writes."""
+        from .models import VectorField
+        state = self.cryo.driver.last_confirmed_state
+        if state is None:
+            raise ValueError("Recovery requires a complete current cryostat state")
+        self.events.event("recovery_environment_initial", {"state": asdict(state)})
+        # Recovery retains the operator's universal 3 T ceiling. Ordinary runs
+        # keep their existing complete-plan single-axis policy.
+        for field in (state.field, state.field_setpoint):
+            if field.magnitude_t > 3.0:
+                raise ValueError("Recovery actual field or setpoint exceeds 3 T")
+        conditions = self.config.plan.conditions()
+        pending = self.recovery.get("next_condition")
+        if pending is None and self.recovery.get("cleanup_only") and conditions:
+            pending = conditions[-1]
+        if pending is None:
+            raise ValueError("Recovery has no validated pending/last condition")
+        sequence = pending["sequence_index"]
+        if not 0 <= sequence < len(conditions) or pending != conditions[sequence]:
+            raise ValueError("Recovery condition differs from validated plan")
+        if self.config.temperature is not None:
+            request = self.config.temperature.temperature_run
+            target = pending["requested"]["temperature_k"]
+            if abs(target - state.sample_temperature_k) > request.max_delta_k:
+                raise ValueError("Recovery temperature movement exceeds max_delta_k")
+            ceiling = max(target, state.sample_temperature_k) + request.max_overshoot_k
+            if ceiling > self.config.cryostat.cryostat.temperature_max_k:
+                raise ValueError("Recovery temperature transition ceiling exceeds maximum")
+        if self.config.magnetic is not None:
+            targets = tuple(VectorField(c["requested"]["field_x_t"], c["requested"]["field_z_t"])
+                            for c in conditions[sequence:])
+            limits = self.config.cryostat.magnet.limits
+            limits = replace(limits, hardware_x_max_t=min(limits.hardware_x_max_t, 3.0),
+                             hardware_z_max_t=min(limits.hardware_z_max_t, 3.0),
+                             experiment_vector_max_t=min(limits.experiment_vector_max_t, 3.0))
+            # Check both actual and command-register starts. The driver repeats
+            # this planning against fresh reads immediately before a field write.
+            for initial in (state.field, state.field_setpoint):
+                plans = plan_ordered_field_transitions(initial, targets,
+                    self.config.magnetic.run.max_step_t,
+                    self.config.magnetic.run.transition_policy, limits)
+                self.events.event("recovery_magnetic_path_verified", {
+                    "start": asdict(initial), "target_count": len(targets),
+                    "transition_count": len(plans), "maximum_vector_t": 3.0})
+
+    def prepare_cleanup_recovery(self, last_condition):
+        """Re-establish the final accepted environment without formal sampling."""
+        if not self.recovery or not self.recovery.get("cleanup_only"):
+            raise ValueError("Cleanup recovery was not selected")
+        if last_condition != self.config.plan.conditions()[-1]:
+            raise ValueError("Cleanup recovery requires the last accepted condition")
+        self._guard_recovery_owner()
+        for axis in self.config.plan.axes:
+            if axis.module in {"temperature", "magnetic"}:
+                self.apply(axis.module, axis.points[last_condition["axes"][axis.module]["index"]])
+        if self.cryo is not None:
+            self.cryo.qualify()
+        self.events.event("recovery_cleanup_environment_verified", {
+            "condition_id": last_condition["condition_id"], "formal_samples_taken": 0})
+        return {"ready": True, "condition_id": last_condition["condition_id"],
+                "formal_samples_taken": 0}
+
     def apply(self, module, point):
+        self._guard_recovery_owner()
         if module in {"temperature", "magnetic"}:
             return self.cryo.apply(module, point)
         if module == "smu":
@@ -293,6 +415,7 @@ class HardwareCombinationStation:
             point.values["lockin_frequency_hz"], point_index=index)}
 
     def qualify(self, modules):
+        self._guard_recovery_owner()
         if self.lockin is not None:
             self.lockin.qualify()
         if self.cryo is not None:
@@ -300,14 +423,17 @@ class HardwareCombinationStation:
         return {"ready": True, "mode": "hardware", "active_modules": modules}
 
     def begin_sample(self):
+        self._guard_recovery_owner()
         if self.cryo is not None:
             self.cryo.begin_sample()
 
     def end_sample(self, reads):
+        self._guard_recovery_owner()
         if self.cryo is not None:
             self.cryo.end_sample(reads)
 
     def read(self, module):
+        self._guard_recovery_owner()
         if module in {"temperature", "magnetic"}:
             return self.cryo.read(module)
         if module == "lockin":
@@ -346,7 +472,34 @@ class HardwareCombinationStation:
         return expected
 
     def cleanup(self, module, failed):
+        if self.recovery is not None and self.recovery_owner_guard_failed is None:
+            try:
+                self._guard_recovery_owner()
+            except BaseException:
+                # Keep cleanup provenance even if no setting write is safe.
+                pass
         self.events.cleaning = True
+        if self.recovery_owner_guard_failed is not None:
+            # A new owner or changed executable/configuration makes further
+            # setting writes unsafe. Preserve evidence and close our handles;
+            # neither an old readback nor close proves physical zero/OFF.
+            last = None
+            if module == "lockin" and self.lockin is not None:
+                last = {"preflight": self.lockin.preflight,
+                        "point_record": self.lockin.point_record}
+            elif module == "smu" and self.smu is not None:
+                last = self.smu.last_confirmed
+                self.smu.abandon_points_for_owner_loss(self.events,
+                    reason=self.recovery_owner_guard_failed)
+            elif module in {"temperature", "magnetic"} and self.cryo is not None:
+                last = self.cryo.driver.last_confirmed_state if self.cryo.driver else None
+            return _json({"module": module, "clean": False,
+                "failure_requires_manual_review": True,
+                "result": {"attempted": False, "verified": False,
+                    "communication_uncertain": True, "manual_verification_required": True,
+                    "owner_guard_error": self.recovery_owner_guard_failed,
+                    "last_confirmed_state_not_current": last},
+                "startup_completed": self.open_completed, "audit_errors": list(self.events.errors)})
         if module == "lockin" and self.lockin is not None:
             result = self.lockin.cleanup()
             clean = result["verified"]
@@ -364,12 +517,19 @@ class HardwareCombinationStation:
                 clean = False
         else:
             result, clean = {"attempted": False, "reason": "not opened"}, True
+        if self.recovery_owner_guard_failed is not None:
+            # Ownership can also disappear between two cleanup operations.
+            # Retain the partial cleanup evidence but never certify the result.
+            result = {**result, "verified": False, "communication_uncertain": True,
+                "manual_verification_required": True,
+                "owner_guard_error": self.recovery_owner_guard_failed}
+            clean = False
         return _json({"module": module,
                       # VISA backends need not raise OSError. Never certify a
                       # failed hardware attempt just because later cleanup reads
                       # succeed; keep those readbacks but require operator review.
                       "clean": clean and self.open_completed and not self.events.errors and not failed,
-                      "failure_requires_manual_review": failed,
+                      "failure_requires_manual_review": failed or self.recovery_owner_guard_failed is not None,
                       "startup_completed": self.open_completed,
                       "result": result, "audit_errors": list(self.events.errors)})
 
@@ -389,23 +549,31 @@ def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
                                confirm_xy_sine_disconnected=False,
                                authorize_cryostat=False, dll=None, monotonic=None,
                                smu_adapter_factory=None, manager_factory=None, sleep=None,
-                               on_registered=None):
+                               on_registered=None, recovery=None, recovery_owner_guard=None):
     if not authorize_hardware:
         raise ValueError("Explicit combined connection/write/status-consumption authorization required")
     if config.lockin is not None and not confirm_xy_sine_disconnected:
         raise ValueError("Confirm physical disconnection of XY SINE OUT before opening hardware")
     if config.cryostat is not None and not authorize_cryostat:
         raise ValueError("Separate cryostat temperature/field write authorization required")
+    if recovery is not None and not callable(recovery_owner_guard):
+        raise ValueError("Recovery requires an independent exclusive-owner guard")
+    if recovery is not None:
+        review = recovery.get("review", {})
+        if review.get("ready") is not True or review.get("acknowledged_failure") is not True:
+            raise ValueError("Recovery requires the complete acknowledged configuration/cleanup review")
+        recovery_owner_guard()
     station = HardwareCombinationStation(config, smu_adapter_factory=smu_adapter_factory,
                                            manager_factory=manager_factory, sleep=sleep,
                                            dll=dll, monotonic=monotonic,
-                                           authorize_hardware=authorize_hardware)
+                                           authorize_hardware=authorize_hardware,
+                                           recovery=recovery, recovery_owner_guard=recovery_owner_guard)
     snapshot = {**config.snapshot, "authorization": {
         "combined_connection_writes_status_consumption": True,
         "xy_sine_disconnected": confirm_xy_sine_disconnected,
         "cryostat_connection_and_selected_axis_writes": authorize_cryostat}}
     return _run_combination(config.plan, store, run_id, station=station, snapshot=snapshot,
-                            on_registered=on_registered)
+                            on_registered=on_registered, recovery=recovery)
 
 
 # Compatibility for callers of the earlier electrical-only milestone.

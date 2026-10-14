@@ -1,5 +1,10 @@
 # attoDRY Transport Control
 
+组合扫描现在支持显式、整条件恢复：修改允许的稳定性/量程等配置后，先用
+`combination_cli resume --run-id ORIGINAL_RUN_ID --check` 只读审核，再明确恢复。
+原点列和失败数据保留，每次启动单独归档配置。详见
+[组合扫描恢复](docs/COMBINATION_RECOVERY.md)。
+
 用于 attoDRY2100XL、按 XX/XY 角色配置的锁相放大器和栅极 SMU 的低温输运测量项目。
 
 2026-10-07：新增 SR865A 作为 `lockin_xy` 接收机的适配，XX 仍由 SR830 提供

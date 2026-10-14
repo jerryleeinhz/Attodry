@@ -246,7 +246,7 @@ def run_simulated_combination(
 
 
 def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
-                     on_registered=None) -> dict:
+                     on_registered=None, recovery=None) -> dict:
     """Internal engine; backend entry points own pre-I/O validation."""
     from .lockin_overload import reading_allows_continuation
     conditions = plan.conditions()
@@ -272,7 +272,14 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 raise ValueError("Legacy combination axis limits cannot exceed 3 T")
     if not isinstance(run_id, str) or not run_id.strip():
         raise ValueError("run_id must be nonempty")
-    completed = store.begin_run(run_id, snapshot, conditions, resume=resume)
+    if recovery is not None and (snapshot.get("mode") != "hardware" or resume):
+        raise ValueError("Reviewed recovery belongs only to the hardware entry")
+    if snapshot.get("mode") == "hardware":
+        if resume:
+            raise ValueError("Hardware resume requires an explicit reviewed recovery")
+        completed = store.begin_hardware_execution(run_id, snapshot, conditions, recovery=recovery)
+    else:
+        completed = store.begin_run(run_id, snapshot, conditions, resume=resume)
     modules = tuple(a.module for a in plan.axes)
     current: dict | None = None
     attempt: int | None = None
@@ -292,8 +299,16 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             station.set_event_sink(emit)
         if on_registered is not None:
             emit("launch_registered", on_registered(store, run_id))
-        emit("run_started", {"resume": resume, "plan": snapshot})
+        emit("run_started", {"resume": resume or recovery is not None, "plan": snapshot,
+                             "cleanup_only": bool(recovery and recovery.get("cleanup_only"))})
         emit("preflight", station.open(modules))
+        if recovery is not None and recovery.get("cleanup_only"):
+            if not hasattr(station, "prepare_cleanup_recovery"):
+                raise ValueError("Station cannot qualify a cleanup-only recovery")
+            qualification = station.prepare_cleanup_recovery(conditions[-1])
+            emit("cleanup_recovery_prepared", qualification)
+            if qualification.get("ready") is not True:
+                raise ValueError("Cleanup recovery environment did not qualify")
         previous_indices: tuple | None = None
         for condition in conditions:
             if condition["condition_id"] in completed:
@@ -439,7 +454,9 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             station.close()
         except BaseException as exc:
             cleanup_errors.append(f"close: {exc}")
-    communication_uncertain = isinstance(primary, OSError)
+    communication_uncertain = isinstance(primary, OSError) or any(
+        action.get("result", {}).get("communication_uncertain") is True
+        for action in cleanup_actions)
     cleanup = {"clean": not cleanup_errors and not communication_uncertain,
                "actions": cleanup_actions, "errors": cleanup_errors,
                "communication_uncertain": communication_uncertain,
@@ -451,11 +468,22 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
     from .lockin_overload import overload_summary
     import json
     payloads = [json.loads(r[0]) for r in store.connection.execute(
-        "SELECT payload_json FROM combination_samples WHERE run_id=?", (run_id,))]
+        "SELECT s.payload_json FROM combination_samples s JOIN combination_attempts a "
+        "ON a.run_id=s.run_id AND a.condition_id=s.condition_id AND a.attempt_index=s.attempt_index "
+        "WHERE s.run_id=? AND a.status='accepted'", (run_id,))]
     summary = overload_summary([p["reads"] for p in payloads])
+    rejected = [json.loads(r[0]) for r in store.connection.execute(
+        "SELECT s.payload_json FROM combination_samples s JOIN combination_attempts a "
+        "ON a.run_id=s.run_id AND a.condition_id=s.condition_id AND a.attempt_index=s.attempt_index "
+        "WHERE s.run_id=? AND a.status!='accepted'", (run_id,))]
+    rejected_summary = overload_summary([p.get("reads", []) for p in rejected])
     completion_message = ("completed with overload points; inspect per-channel validity"
                           if status == "completed" and summary["data_quality"] == "overload_recorded"
                           else status)
-    emit("data_quality_summary", {**summary, "completion_message": completion_message})
+    emit("data_quality_summary", {**summary, "completion_message": completion_message,
+                                  "rejected_attempt_audit": rejected_summary})
     return {"run_id": run_id, "status": status, "cleanup": cleanup, "error": error,
-            "overload_summary": summary, "completion_message": completion_message}
+            "overload_summary": summary, "completion_message": completion_message,
+            "rejected_attempt_audit": rejected_summary,
+            **({"execution_id": store.current_execution_id}
+               if store.current_execution_id is not None else {})}

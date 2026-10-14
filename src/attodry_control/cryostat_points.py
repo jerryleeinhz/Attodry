@@ -24,6 +24,12 @@ from .temperature_telemetry import TemperatureTelemetryRecorder, TEMPERATURE_TEL
 
 
 class _AuditedDriver(AttoDryDriver):
+    def _require_write_authorized(self):
+        super()._require_write_authorized()
+        guard = getattr(self.owner, "recovery_owner_guard", None)
+        if guard is not None:
+            guard()
+
     def _field_readback_limits(self):
         return self.owner.field_readback_limits
 
@@ -31,6 +37,9 @@ class _AuditedDriver(AttoDryDriver):
         return self.owner.active_field_policy
 
     def read_state(self):
+        guard = getattr(self.owner, "recovery_owner_guard", None)
+        if guard is not None:
+            guard()
         state = super().read_state()
         # Persist even an unsafe complete readback before rejecting it.
         record = {

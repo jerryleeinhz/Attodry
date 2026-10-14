@@ -34,7 +34,7 @@ def _coordinate_label(key: str, column_label: Any) -> str:
 
 
 def _facet_keys(rows: Sequence[Mapping[str, Any]], value_key: Any) -> tuple[str, ...]:
-    keys = ["source_path", "run_id", "repeat_index", "simulated", "role", "harmonic",
+    keys = ["source_path", "run_id", "configuration_revision", "repeat_index", "simulated", "role", "harmonic",
             "segment", "direction", "scan_type", "source_kind"]
     keys += sorted({key for row in rows for key in row
                     if key.startswith("axes.") and key.endswith((".segment", ".direction"))})
@@ -57,6 +57,8 @@ def _facet_label(identity: tuple, column_label: Any) -> str:
             parts.append(f"repeat {int(value) + 1}")
         elif key == "simulated":
             parts.append("SIMULATED" if value is True else "measured" if value is False else "simulation status unknown")
+        elif key == "configuration_revision":
+            parts.append(f"config {str(value)[:12]}")
         else:
             parts.append(f"{column_label(key)}={value}")
     return textwrap.fill(" · ".join(parts), width=68)

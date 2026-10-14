@@ -766,7 +766,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
         plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in ("xx", "xy") for h in (1, 2)]
     group_keys = [spec["group_by"]] if spec.get("group_by") else []
     if mode != "xy_z":
-        group_keys += ["source_path", "run_id", "segment", "direction", "repeat_index", "role", "harmonic", "scan_type", "source_kind"]
+        group_keys += ["source_path", "run_id", "configuration_revision", "segment", "direction", "repeat_index", "role", "harmonic", "scan_type", "source_kind"]
     unresolved = _unresolved_dimensions(eligible, plot_keys=plot_keys, filter_keys=filters, group_keys=group_keys)
     if unresolved:
         raise ValueError("Unresolved varying conditions: " + ", ".join(column_label(k) for k, _ in unresolved) + ". Choose a grouping variable or fixed-condition filter.")
@@ -816,7 +816,15 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                 pad = abs(minimum)*.05 or 1
                 minimum, maximum = minimum-pad, maximum+pad
             norm = mpl.colors.TwoSlopeNorm(0, vmin=minimum, vmax=maximum) if minimum < 0 < maximum else mpl.colors.Normalize(minimum, maximum)
-            artist = axis.scatter([r[x] for r in valid], [r[y] for r in valid], c=[r[z] for r in valid], cmap="RdBu_r", norm=norm)
+            revisions = tuple(dict.fromkeys(r.get("configuration_revision") for r in valid))
+            for index, revision in enumerate(revisions):
+                group = [r for r in valid if r.get("configuration_revision") == revision]
+                artist = axis.scatter([r[x] for r in group], [r[y] for r in group],
+                    c=[r[z] for r in group], cmap="RdBu_r", norm=norm,
+                    marker=SERIES_MARKERS[index % len(SERIES_MARKERS)],
+                    label=f"config {str(revision)[:12]}" if len(revisions) > 1 else None)
+            if len(revisions) > 1 and spec.get("show_legend", True):
+                axis.legend(title="Archived configuration")
             figure.colorbar(artist, ax=axis).set_label(column_label(z))
             overlap = len(valid)-len({(r[x],r[y]) for r in valid})
             axis.set(xlabel=column_label(x), ylabel=column_label(y), title=(spec.get("title") or "Measured XY observations") + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
@@ -838,7 +846,7 @@ def _curve_groups(
     rows: Sequence[Mapping[str, Any]], group_by: str | None, *, separate_samples=True
 ) -> dict[tuple[tuple[str, Any], ...], list[Mapping[str, Any]]]:
     automatic_keys = [
-        "source_path", "simulated", "run_id", "segment", "direction", "repeat_index", "role",
+        "source_path", "simulated", "run_id", "configuration_revision", "segment", "direction", "repeat_index", "role",
         "harmonic", "scan_type", "source_kind",
     ]
     if separate_samples:
@@ -869,6 +877,8 @@ def _series_label(identity: tuple[tuple[str, Any], ...], show: bool) -> str:
             parts.append(f"h{value}")
         elif key == "role":
             parts.append(str(value).replace("lockin_", "").upper())
+        elif key == "configuration_revision":
+            parts.append(f"config {str(value)[:12]}")
         elif key in {"segment", "direction"}:
             parts.append(f"{column_label(key)}={value}")
         else:
@@ -935,6 +945,7 @@ def export_plot_bundle(
     digest = hashlib.sha256(
         json.dumps(_json_safe(csv_rows), sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
+    from .combination_analysis import execution_provenance
     manifest = {
         "schema": "unified-plot-export-v1",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -945,6 +956,8 @@ def export_plot_bundle(
         "selected_samples_sha256": digest,
         "aggregation": "per plot specification; plotted_statistics.csv records n, SD, SEM and sample identities",
         "interpolation": "none",
+        "configuration_grouping": "different archived configuration revisions remain separate curves/panels",
+        "execution_segments": execution_provenance(csv_rows),
         "plots": plot_manifest,
         "input_sources": sorted({
             source for plot in plot_manifest for source in plot["report"]["source_paths"]

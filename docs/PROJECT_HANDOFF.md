@@ -4,6 +4,32 @@ Last updated: 2026-10-12
 
 ## Current stage
 
+### Explicit combination recovery (2026-10-14; offline implementation)
+
+- Add whole-condition hardware recovery with reviewed configuration changes,
+  additive execution provenance and schema-1 compatibility, including the
+  operator's 6/342 failure. Retain original conditions, raw accepted/rejected
+  samples, old errors and cleanup; resume at condition-000006 with fresh dwell.
+- File-only `resume --check`, atomic DB claims, exclusive Windows resource/station
+  leases and ongoing owner/hash checks precede and protect real recovery.
+  Unknown owners/communication never imply zero/OFF; guard loss closes without
+  competing cleanup writes. SMU protection increases need explicit review.
+- Different configurations split analysis curves/heatmaps and remain traceable
+  in monitor/export. See docs/COMBINATION_RECOVERY.md for use and limitations.
+- Offline verification: 367 guarded combination/driver/analysis regressions
+  passed, plus 11 mocked Jupyter/ownership-runtime cases. A final 65-case
+  recovery/ownership gate also passed. Real DLL/VISA/serial imports remain
+  blocked; only preloaded Windows kernel32 mutex APIs are allowed.
+- The actual original six accepted samples, with addresses/paths removed,
+  passed local raw-evidence validation under their original hard bounds. The
+  77-file archived source set matches the explicitly supported CRLF legacy
+  fingerprint. Private local evidence: run_data/operator_recovery_offline_20261014.
+- Real hardware recovery has not been started. LK_setup was last readback at
+  HEAD79ed5b4 on 2026-10-14T14:13:48Z with analysis processes only. Subsequent
+  Git/kernel preflight requests could not complete reliably; target source sync
+  and target Python tests are deferred until a fresh complete preflight passes.
+
+
 ### Four-channel temperature telemetry (2026-10-12)
 
 - Daily temperature conditioning, stability scans, temperature/excitation and

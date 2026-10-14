@@ -117,6 +117,8 @@ class ThreeSmuSession:
         self._point_recorder = None
         self._point_started = 0.0
         self._points_cleaned = False
+        self._points_abandoned = False
+        self.recovery_owner_guard = None
 
     @classmethod
     def open(
@@ -339,7 +341,7 @@ class ThreeSmuSession:
         if self._closed:
             return
         errors: list[str] = []
-        if self._point_recorder is not None and not self._points_cleaned:
+        if self._point_recorder is not None and not self._points_cleaned and not self._points_abandoned:
             try:
                 result = self.cleanup_points(self._point_recorder, reason="point owner closing")
                 if result["manual_verification_required"]:
@@ -355,6 +357,34 @@ class ThreeSmuSession:
         if errors:
             raise ThreeSmuError("Could not close all SMUs: " + "; ".join(errors))
 
+    def abandon_points_for_owner_loss(self, recorder, *, reason):
+        """Close transport only after exclusive hardware ownership becomes unknown."""
+        self._points_abandoned = True
+        recorder.event("smu_owner_lost_no_cleanup_writes", {
+            "reason": reason, "manual_verification_required": True,
+            "zero_or_off_confirmed": False,
+            "last_confirmed_not_current": {
+                role: _timed_reading_dict(reading) for role, reading in self.last_confirmed.items()}})
+
+    def verify_recovery_zero_off(self, recorder) -> None:
+        """Require fresh preflight zero/OFF before taking over a failed run."""
+        for role, state in self.preflight.items():
+            problems = self._preflight_problems(role, state,
+                expected_output=False, expected_source=0.0)
+            recorder.event("smu_recovery_zero_off", {
+                "role": role, "state": _jsonable(asdict(state)), "problems": problems})
+            if problems:
+                raise ThreeSmuSafetyError("Recovery requires zero/OFF verification: " + "; ".join(problems))
+
+    def prepare_recovery_cleanup(self, recorder) -> None:
+        """Own only zero/disable cleanup, with no output enable or formal read."""
+        if self._closed or self._recorder is not None or self._point_recorder is not None:
+            raise ThreeSmuError("Session is closed or already used")
+        self.verify_recovery_zero_off(recorder)
+        self._point_recorder = recorder
+        self._point_started = self.monotonic()
+        self._configured.update(active_smu_roles(self.plan))
+
     def begin_points(self, recorder) -> None:
         """Configure once; the external owner must always call cleanup_points.
 
@@ -369,7 +399,7 @@ class ThreeSmuSession:
 
     def set_point(self, coordinates: dict[str, float], *, index: int = 0,
                   segment: str = "main") -> None:
-        if self._point_recorder is None or self._closed:
+        if self._point_recorder is None or self._closed or self._points_abandoned:
             raise ThreeSmuError("begin_points is required")
         if set(coordinates) != self._active_roles:
             raise ThreeSmuSafetyError("A point must specify exactly the active SMU roles")
@@ -381,7 +411,7 @@ class ThreeSmuSession:
 
     def sample_point(self, coordinates: dict[str, float], *, index: int = 0,
                      sample_index: int = 0, segment: str = "main") -> ThreeSmuSample:
-        if self._point_recorder is None or self._closed:
+        if self._point_recorder is None or self._closed or self._points_abandoned:
             raise ThreeSmuError("begin_points is required")
         if set(coordinates) != self._active_roles:
             raise ThreeSmuSafetyError("A sample must specify exactly the active SMU roles")
@@ -401,6 +431,7 @@ class ThreeSmuSession:
             adapter = self.adapters[role]
             config = self.hardware.require_role(role)
             self._configured.add(role)
+            self._guard_recovery_point_write()
             adapter.zero_residual(self.preflight[role].source_mode)
             zero_state = adapter.preflight()
             zero_problems = self._preflight_problems(
@@ -427,6 +458,7 @@ class ThreeSmuSession:
                 {"role": role, "state": _jsonable(asdict(zero_state))},
             )
             try:
+                self._guard_recovery_point_write()
                 configuration = adapter.configure(config)
             except BaseException as exc:
                 try:
@@ -437,6 +469,7 @@ class ThreeSmuSession:
                 except BaseException as audit_error:
                     exc.add_note(f"SMU configuration audit failed: {audit_error}")
                 raise
+            self._guard_recovery_point_write()
             adapter.set_source(0.0)
             self.last_commanded[role] = 0.0
             configured_state = adapter.preflight()
@@ -459,6 +492,7 @@ class ThreeSmuSession:
                 raise ThreeSmuSafetyError("; ".join(problems))
         for role in active_smu_roles(self.plan):
             adapter = self.adapters[role]
+            self._guard_recovery_point_write()
             adapter.set_output(True)
             self.output_enabled[role] = True
             reading = self._read_one(role)
@@ -478,12 +512,17 @@ class ThreeSmuSession:
             if problems:
                 raise ThreeSmuSafetyError("; ".join(problems))
 
+    def _guard_recovery_point_write(self):
+        if self.recovery_owner_guard is not None:
+            self.recovery_owner_guard()
+
     def _apply_point(self, point: ScanPoint, recorder: "_RunRecorder") -> None:
         for role in active_smu_roles(self.plan):
             if role not in point.coordinates:
                 continue
             target = point.coordinates[role]
             self._validate_source_target(role, target)
+            self._guard_recovery_point_write()
             self.adapters[role].set_source(target)
             self.last_commanded[role] = target
             recorder.event("source_set", {"role": role, "target": target})
@@ -656,6 +695,7 @@ class ThreeSmuSession:
                 continue
             zero_readback_recorded = False
             try:
+                self._guard_recovery_point_write()
                 self.adapters[role].set_source(0.0)
                 self.last_commanded[role] = 0.0
                 if self.output_enabled[role]:
@@ -701,6 +741,7 @@ class ThreeSmuSession:
             output_off_confirmed = False
             disabled_state: KeithleyPreflight | None = None
             try:
+                self._guard_recovery_point_write()
                 self.adapters[role].set_output(False)
                 self.output_enabled[role] = False
                 disabled_state = self.adapters[role].preflight()

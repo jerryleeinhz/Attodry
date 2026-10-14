@@ -1,5 +1,21 @@
 # Development stages
 
+## Explicit combination recovery (2026-10-14; offline)
+
+- Add a reviewed whole-condition hardware `resume` entry, independent files-only
+  preview, frozen ordered grid/groups/harmonics and supported setting changes.
+- Add execution/config/attempt provenance without replacing original raw records,
+  compatible with schema-1 failures; database and Windows ownership gates prevent
+  stale/duplicate recovery. Current 6/342 regression restarts condition seven.
+- Preserve failure/manual-review history, use fresh module preflights and dwell,
+  handle cleanup-only completion, and distinguish config segments in analysis.
+- Fake DLL/VISA and SQLite regressions exercise temperature drift, range changes,
+  compliance, magnetic bounds, partial conditions, concurrency and owner loss.
+  367 guarded regressions and 11 ownership-runtime cases passed; final recovery
+  gate: 65 passed. Actual original six samples also passed sanitized offline
+  evidence validation, including archived settings and hard bounds. No real
+  recovery scan is part of this feature. See COMBINATION_RECOVERY.md.
+
 ## Four-channel temperature telemetry (2026-10-12)
 
 - Add sample/VTI temperatures and heater powers to all four temperature paths,

@@ -28,18 +28,31 @@ class LockinGridPoint:
 class _AuditedInstrument:
     """Retain each complete role read, even if the companion read later fails."""
 
-    def __init__(self, instrument, event):
+    def __init__(self, instrument, event, write_guard=None, abort_guard=None):
         self.instrument = instrument
         self.event = event
+        self.write_guard = write_guard
+        self.abort_guard = abort_guard
 
     def __getattr__(self, name):
         method = getattr(self.instrument, name)
-        if name not in {"read_diagnostic", "read_harmonic_sample", "read_fixed_setting", "read_status_latches", "read_receiver_invariants"} and not name.startswith("set_"):
+        tracked = (name in {"read_diagnostic", "read_harmonic_sample", "read_fixed_setting",
+                           "read_status_latches", "read_receiver_invariants"}
+                   or name.startswith("set_"))
+        guarded = self.abort_guard is not None and (
+            name.startswith(("read_", "set_")) or name == "configure_receiver")
+        if not tracked and not guarded:
             return method
 
         def call(*args, **kwargs):
+            if self.abort_guard is not None:
+                self.abort_guard()
             role = "lockin_" + self.instrument.role.value
             write = name.startswith("set_")
+            if (write or name == "configure_receiver") and self.write_guard is not None:
+                self.write_guard()
+            if not tracked:
+                return method(*args, **kwargs)
             if write:
                 self.event("lockin_command_attempt", {"role": role, "method": name,
                                                       "arguments": args})
@@ -65,7 +78,8 @@ class _AuditedInstrument:
 
 class LockinPointSession:
     def __init__(self, config_path, config, event, *, manager_factory=None,
-                 mode="excitation", authorize_writes=False):
+                 mode="excitation", authorize_writes=False, recovery_owner_guard=None,
+                 recovery_abort_guard=None):
         self.config = config
         self.mode = mode
         self.args, self.settings, self.points, self.safety = (
@@ -74,6 +88,8 @@ class LockinPointSession:
         self.event = event
         self.settings["authorize_writes"] = authorize_writes is True
         self.manager_factory = manager_factory
+        self.recovery_owner_guard = recovery_owner_guard
+        self.recovery_abort_guard = recovery_abort_guard
         self.context = None
         self.pair = None
         self.preflight = None
@@ -110,27 +126,92 @@ class LockinPointSession:
             self.skipped_by_frequency[str(frequency.value)] = skipped
         self.point_harmonics = self.harmonics
 
-    def open(self):
+    def open(self, *, recovery=False):
         daily._require_mixed_write_authorization(self.settings)
         factory = self.manager_factory or daily._load_resource_manager_factory()
         self.context = daily._open_pair(self.settings, factory)
-        self.pair = tuple(_AuditedInstrument(i, self.event) for i in self.context.__enter__())
+        self.pair = tuple(_AuditedInstrument(i, self.event,
+            write_guard=self._guard_recovery_write if self.recovery_owner_guard is not None else None,
+            abort_guard=self.recovery_abort_guard)
+            for i in self.context.__enter__())
         xx, xy = self.pair
         self.preflight = daily._pair_controller(xx, xy).verify_existing_configuration(
             frequency_hz=self.config.lockin_xx.frequency_hz,
             check_frequency=False,
             ignore_output_overload=True,
         )
+        if recovery:
+            self._verify_recovery_baseline()
         return {role: asdict(d) for role, d in
                 zip(("lockin_xx", "lockin_xy"), self.preflight)}
 
-    def configure(self):
+    def _guard_recovery_write(self):
+        self.recovery_owner_guard()
+
+    def _verify_recovery_baseline(self):
+        """Require independently clear minimum/h1 before a new execution segment."""
+        from .lockin_apply import _status_problems
+        problems = []
+        for diagnostic in self.preflight:
+            role = "lockin_" + diagnostic.role.value
+            problems.extend(_status_problems(diagnostic))
+            if diagnostic.lia_status is not None and diagnostic.lia_status.output_overload:
+                problems.append(role + ": output overload at recovery baseline")
+            if diagnostic.harmonic != 1:
+                problems.append(role + ": recovery baseline must be h1")
+            if daily.model_name(diagnostic) == "SR830" and abs(
+                    diagnostic.sine_output_v - daily.MINIMUM_SINE_OUTPUT_V) > 1e-9:
+                problems.append(role + ": recovery baseline must be 4 mVrms")
+        self.event("lockin_recovery_baseline", {
+            "roles": {"lockin_" + d.role.value: asdict(d) for d in self.preflight},
+            "problems": problems})
+        if problems:
+            raise daily.Sr830Error("Recovery requires baseline repair: " + "; ".join(problems))
+        xx, xy = self.preflight
+        daily._verify_requested_sweep_frequency_readbacks(
+            self.config.lockin_xx.frequency_hz, xx.frequency_hz, xy.frequency_hz)
+        daily._verify_requested_sweep_frequency_readbacks(
+            self.config.lockin_xx.frequency_hz, xx.snapshot_frequency_hz, xy.snapshot_frequency_hz)
+
+    def _widen_recovery_baseline(self):
+        """Use existing physical range mapping before Reserve/filter changes."""
+        updated = []
+        changed = False
+        for instrument, before, target in zip(self.pair, self.preflight,
+                (self.config.lockin_xx, self.config.lockin_xy)):
+            code = daily.sensitivity_code_for(target, target.sensitivity_full_scale_v)
+            widening = daily.sensitivity_full_scale_for(target, code) > (
+                daily.sensitivity_full_scale_for(target, before.sensitivity))
+            if widening:
+                changed = True
+                self.event("lockin_recovery_widen_attempt", {
+                    "role": "lockin_" + target.role.value, "before_code": before.sensitivity,
+                    "target_code": code})
+                instrument.set_sensitivity(code)
+                readback = instrument.read_sensitivity()
+                self.event("lockin_recovery_widen_readback", {
+                    "role": "lockin_" + target.role.value, "actual_code": readback})
+                if readback != code:
+                    raise daily.Sr830Error("Recovery sensitivity widening was not confirmed")
+                before = replace(before, sensitivity=readback)
+            updated.append(before)
+        self.preflight = tuple(updated)
+        if changed:
+            daily.time.sleep(self.args.settle_s)
+            self.preflight = tuple(instrument.read_diagnostic(consume_status_latches=True)
+                                   for instrument in self.pair)
+            self._verify_recovery_baseline()
+
+    def configure(self, *, recovery=False, cleanup_only=False):
         if (daily.model_name(self.config.lockin_xy) == "SR865A"
                 and self.settings.get("authorize_writes") is not True):
             raise daily.AuthorizationRequired("Mixed lock-in setting writes were not authorized")
         xx, xy = self.pair
         before_xx, before_xy = self.preflight
         self.writes_started = True
+        if recovery:
+            self._widen_recovery_baseline()
+            before_xx, before_xy = self.preflight
         self.fixed_setup = {}
         daily._configure_sweep_fixed_settings(
             xx, xy, config=self.config, preflight_xx=before_xx,
@@ -154,14 +235,14 @@ class LockinPointSession:
             lockin_xx_config=self.config.lockin_xx, lockin_xy_config=self.config.lockin_xy,
             original_xx_sensitivity=before_xx.sensitivity,
             original_xy_sensitivity=before_xy.sensitivity,
-            initial_full_scale_overrides=daily._initial_sweep_range_overrides(
-                (self.grid[0].range_spec,)),
+            initial_full_scale_overrides=(None if cleanup_only else
+                daily._initial_sweep_range_overrides((self.grid[0].range_spec,))),
         )
         daily._configure_sweep_sensitivities(
             xx, xy, sensitivity_setup=self.sensitivity_setup, settle_s=self.args.settle_s)
-        self.harmonic_control = daily.HarmonicSensitivitySession.create(
+        self.harmonic_control = (None if cleanup_only else daily.HarmonicSensitivitySession.create(
             self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup, self.harmonics_by_role,
-            overload_policy=self.config.lockin_sweep.overload_policy)
+            overload_policy=self.config.lockin_sweep.overload_policy))
         if self.harmonic_control is not None:
             self.harmonic_control.enter(
                 xx, xy, harmonic=self.harmonic_control.initial_harmonics(self.config.lockin_xx.frequency_hz), settle_s=self.args.settle_s,

@@ -74,6 +74,18 @@ def run(argv: list[str] | None = None) -> int:
                               help="Legacy authorization flag; run already authorizes selected axes")
     hardware_run.add_argument("--confirm-xy-sine-disconnected", action="store_true")
     hardware_run.add_argument("--json", action="store_true", help="Full structured summary/result")
+    recovery = commands.add_parser("resume", help="Review and explicitly recover an existing hardware run")
+    recovery.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
+    recovery.add_argument("--database", type=Path, help="Original database; defaults to project.database_path")
+    recovery.add_argument("--run-id", required=True, help="Exact original run ID; never latest/auto")
+    recovery.add_argument("--check", action="store_true", help="Files-only review; no DB changes or instrument I/O")
+    recovery.add_argument("--json", action="store_true")
+    recovery.add_argument("--acknowledge-failure", action="store_true",
+                          help="Record that the original failure and cleanup have been reviewed")
+    recovery.add_argument("--confirm-manual-verification", action="store_true",
+                          help="Record physical verification after uncertain/unverified cleanup; fresh preflight still required")
+    recovery.add_argument("--approve-protection-changes", action="store_true",
+                          help="Explicitly approve displayed SMU compliance/software-limit increases within sample safety limits")
     monitor = commands.add_parser("monitor", help="Read SQLite; never query instruments")
     monitor.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
     monitor.add_argument("--database", type=Path, help="Override the latest registered database")
@@ -81,7 +93,7 @@ def run(argv: list[str] | None = None) -> int:
     monitor.add_argument("--json", action="store_true", help="Full structured snapshots")
     monitor.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
-    if args.command in {"describe-hardware", "run"}:
+    if args.command in {"describe-hardware", "run", "resume"}:
         from .combination_hardware import load_hardware_combination, run_hardware_combination
         config = load_hardware_combination(args.config)
         if args.command == "describe-hardware":
@@ -90,6 +102,36 @@ def run(argv: list[str] | None = None) -> int:
             return 0
         from .combination_launch import resolve_launch, check_run_destination, launch_summary
         database, run_id = resolve_launch(config, args.database, args.run_id)
+        if args.command == "resume":
+            from .combination_resume import build_recovery, recovery_text
+            if args.run_id == "auto":
+                raise ValueError("Recovery requires the exact original run ID")
+            reviewed = build_recovery(config, database, run_id,
+                acknowledge_failure=args.acknowledge_failure,
+                manual_verification=args.confirm_manual_verification,
+                approve_protection_changes=args.approve_protection_changes)
+            display = {key: value for key, value in reviewed.items()
+                       if key not in {"original_conditions", "last_condition"}}
+            print(json.dumps(display, ensure_ascii=False, indent=2) if args.json else
+                  recovery_text(reviewed, database, run_id), flush=True)
+            if args.check or not reviewed["review"]["ready"]:
+                return 0 if reviewed["review"]["ready"] else 2
+            from .combination_ownership import RecoveryOwner
+            from .combination_registry import register_run
+            from .combination_terminal import snapshot_text
+            owner = RecoveryOwner(config)
+            with owner.acquire():
+                reviewed["review"]["owner"] = owner.last_evidence
+                with CombinationStore(database) as store:
+                    result = run_hardware_combination(config, store, run_id,
+                        authorize_hardware=True, authorize_cryostat=config.cryostat is not None,
+                        confirm_xy_sine_disconnected=(config.lockin is not None
+                            and not config.lockin.lockin_xy.sine_output_connected),
+                        recovery=reviewed, recovery_owner_guard=owner.check,
+                        on_registered=lambda store, selected: register_run(config.path, store, selected))
+            print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else
+                  snapshot_text({**run_snapshot(database, run_id), **result}), flush=True)
+            return 0 if result["status"] == "completed" else 2
         check_run_destination(database, run_id)
         summary = launch_summary(config, database, run_id)
         from .combination_terminal import launch_text, snapshot_text
@@ -111,13 +153,16 @@ def run(argv: list[str] | None = None) -> int:
         config = replace(config, snapshot={**config.snapshot, "launch": {
             "summary": summary, "authorization_method": "explicit_flags" if explicit else "run_command"}})
         database.parent.mkdir(parents=True, exist_ok=True)
-        with CombinationStore(database) as store:
-            result = run_hardware_combination(
-                config, store, run_id, authorize_hardware=True,
-                confirm_xy_sine_disconnected=(config.lockin is not None
-                    and not config.lockin.lockin_xy.sine_output_connected),
-                authorize_cryostat=config.cryostat is not None,
-                on_registered=lambda store, selected: register_run(config.path, store, selected))
+        from .combination_ownership import RecoveryOwner
+        # Share the station lease with recovery, including across databases/run IDs.
+        with RecoveryOwner(config).acquire(verify=False):
+            with CombinationStore(database) as store:
+                result = run_hardware_combination(
+                    config, store, run_id, authorize_hardware=True,
+                    confirm_xy_sine_disconnected=(config.lockin is not None
+                        and not config.lockin.lockin_xy.sine_output_connected),
+                    authorize_cryostat=config.cryostat is not None,
+                    on_registered=lambda store, selected: register_run(config.path, store, selected))
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:

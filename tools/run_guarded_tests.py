@@ -20,6 +20,8 @@ if sys.platform == "win32":
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT), str(ROOT / "tests")]
+OWNERSHIP_KERNEL32 = (ctypes.WinDLL("kernel32", use_last_error=True)
+                      if sys.platform == "win32" else None)
 
 
 class HardwareBlocked(importlib.abc.MetaPathFinder):
@@ -30,6 +32,10 @@ class HardwareBlocked(importlib.abc.MetaPathFinder):
 
 
 def blocked_dll(*args, **kwargs):
+    # OS mutex/process APIs are exercised by ownership tests. This preloaded
+    # exact system library cannot open an instrument DLL or serial/VISA backend.
+    if args and args[0] == "kernel32" and OWNERSHIP_KERNEL32 is not None:
+        return OWNERSHIP_KERNEL32
     raise RuntimeError("Offline test attempted to load a real Windows DLL")
 
 
