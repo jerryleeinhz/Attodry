@@ -1,5 +1,27 @@
 # Photonics / nonlinear Hall combination scan
 
+## 从当前工作树启动（2026-10-15）
+
+LK_setup 的 `lyr` 默认 editable 安装解析到另一份 `Attodry_control` 目录。
+在本工作树使用以下入口，确保本次命令和它的子进程加载这里的 `src`；
+它不修改 conda 环境、全局安装或其他终端，原 CLI 参数和硬件授权检查保持。
+
+```powershell
+Set-Location 'C:\Users\LK_Setup\Yuanrong Li\Integration-photonics'
+python -s tools/run_combination.py describe-hardware --config config/photonics.local.toml
+```
+
+正式运行仍需光路/发光授权。以下命令供操作者确认后使用，部署阶段不执行：
+
+```powershell
+python -s tools/run_combination.py run --config config/photonics.local.toml --authorize-optical --confirm-optical-route
+python -s tools/run_combination.py monitor --config config/photonics.local.toml --once
+```
+
+只有已明确配置正确 `PYTHONPATH` 或安装来源时，原来的 `python -m
+attodry_control.combination_cli` 才能保证使用预期版本。若某个 Python 进程已经
+载入其他工作树的包，新入口会停止并要求新开进程，不混用两份源码。
+
 ## 组合扫描等待优化（2026-10-15）
 
 PEM 外参考点引擎按每路最后相关变化的单调时间，只补足
@@ -774,14 +796,14 @@ Vxx/Vxy 仍是顺序采样，共同 condition 不表示硬件同时采样；每�
 安全文件后，以下命令仅解析、检查边界和列出条件，不打开硬件：
 
 ```powershell
-python -m attodry_control.combination_cli describe-hardware --config config/hardware.local.toml
+python -s tools/run_combination.py describe-hardware --config config/hardware.local.toml
 ```
 
 若使用独立 `config/photonics.local.toml`，显式把 `--config` 换成该路径。
 真实运行要求当次明确授权、确认光路/样品电光边界及对应 commissioning；语法为：
 
 ```powershell
-python -m attodry_control.combination_cli run --config config/hardware.local.toml --authorize-optical --confirm-optical-route
+python -s tools/run_combination.py run --config config/hardware.local.toml --authorize-optical --confirm-optical-route
 ```
 
 `run` 命令本身授权配置中选择的模块，光学另外要求上述两个标志；本文没有执行
@@ -791,7 +813,7 @@ python -m attodry_control.combination_cli run --config config/hardware.local.tom
 监控仅读取登记的 SQLite/文件，不另开仪器连接：
 
 ```powershell
-python -m attodry_control.combination_cli monitor --config config/hardware.local.toml --once
+python -s tools/run_combination.py monitor --config config/hardware.local.toml --once
 ```
 
 本轮只读查询取得各模块身份、锁相耦合/量程/相位/源设置，及 NKT/VARIA 当前状态。

@@ -4,6 +4,24 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+### Authorized publication and checkout source selection (2026-10-15)
+
+- Timing feature `8d83f94` is pushed to origin. LK_setup's isolated candidate
+  passes 126 hardware-blocked tests using lyr Python 3.12.13; its current local
+  TOML previews six optical points x one lock-in point with the new policies.
+- Deployment preflight finds no recorded active photonics run and a free station
+  lease. The live Jupyter sessions belong to the separate Integration checkout.
+  Local photonics TOMLs and notebooks are fingerprinted for preservation.
+- The default lyr editable install resolves to a different Attodry_control
+  checkout. Adds `tools/run_combination.py` to select this checkout only for the
+  invoked process and its children, preserving all existing CLI authorization.
+  It rejects an already loaded foreign package rather than mixing versions.
+  Global conda installs, other terminals and running kernels remain unchanged.
+- Launcher/source-selection tests pass locally (13 including detector timing
+  regressions). Target launcher verification and guarded fast-forward deployment
+  are recorded in the ignored `speed-deployment-20261015T184033Z` receipts.
+  Real acquisition/A/B remains pending the operator's confirmation.
+
 ### Photonics settling and axis qualification optimization (2026-10-15)
 
 - Reuses `lockin_settling.py` from published four-module feature `accacb0`.

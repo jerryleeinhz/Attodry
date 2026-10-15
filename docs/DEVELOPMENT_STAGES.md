@@ -1,5 +1,19 @@
 # Development stages
 
+## Authorized publication and checkout source selection (2026-10-15)
+
+- Pushes timing implementation `8d83f94`; LK_setup isolated lyr verification
+  passes 126 cases plus the actual local TOML's file-only preview.
+- Detects a default editable install pointing at another checkout. A thin
+  `tools/run_combination.py` entrypoint selects this checkout's src for one
+  process/children and delegates unchanged commands and authorizations to the
+  existing CLI. It does not modify global installs or running instrument owners.
+- Local verification passes 13 launcher/timing cases, including foreign
+  PYTHONPATH precedence, unchanged arguments and rejecting cached foreign code.
+  Target verification/deployment receipts preserve original stdout/stderr,
+  snapshots, local config/notebook hashes and the initial PowerShell stderr
+  redirection failure. No real comparison is launched.
+
 ## Photonics settling and axis qualification optimization (2026-10-15)
 
 - Implements the operator-approved timing plan on

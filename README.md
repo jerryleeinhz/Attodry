@@ -2,6 +2,11 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
+多个工作树共用 Python 环境时，使用 `python -s tools/run_combination.py` 代替
+`python -m attodry_control.combination_cli`，确保单次命令加载当前工作树的源码。
+参数和硬件授权检查保持；不更改全局安装。光电示例见
+[当前工作树启动入口](docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
+
 2026-10-06：光电点流程新增 `optical_scan.target_deviation_policy = "record_continue"`。
 初始按容差和稳定窗口调功；之后仅功率偏离目标时记录实测值并继续，硬故障检查
 保持。分析使用 `measured.optical_power_w`，目标、功率读数和时间分别保存。
