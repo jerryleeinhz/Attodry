@@ -5,6 +5,9 @@
 原点列和失败数据保留，每次启动单独归档配置。详见
 [组合扫描恢复](docs/COMBINATION_RECOVERY.md)。
 
+项目开发中的设计取舍、实机失败与测试环境/回归失败复盘见
+[项目开发与测试失败经验](docs/PROJECT_DEVELOPMENT_AND_TEST_LESSONS.md)。
+
 用于 attoDRY2100XL、按 XX/XY 角色配置的锁相放大器和栅极 SMU 的低温输运测量项目。
 
 2026-10-07：新增 SR865A 作为 `lockin_xy` 接收机的适配，XX 仍由 SR830 提供
@@ -32,7 +35,8 @@ SMU 外层、激励内层的数据可按激励重组为 SMU I–V；每个组合
 共 32 点有效且清理确认。温度/磁场共用连接，监控仅读 SQLite；64 种模块子集/顺序
 全部经过假仪器测试，并非逐一实机验收。2026-09-30新增Lock-in frequency/f×e模式和
 `python -m attodry_control.combination_cli run`短命令，显示横向摘要后直接运行（命令本身授权，不再输入RUN）；
-新增扫频路径完成离线验证，实机验收待执行。硬件resume仍未支持。
+新增扫频路径完成离线验证，实机验收待执行。此处为2026-09-30历史检查点；
+硬件整条件恢复已于2026-10-14加入，当前用法见上方恢复说明。
 `python -m attodry_control.combination_cli monitor`自动跟踪最新已登记运行，
 仅读文件/SQLite；`--json`保留完整终端结构输出。配置和操作见
 [组合扫描说明](docs/COMBINATION_SCAN_GUIDE.md)。

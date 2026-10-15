@@ -1,6 +1,14 @@
 # Development stages
 
-## Current: recovery and Notebook publication (2026-10-15)
+## Current: development and test-failure retrospective (2026-10-15)
+
+- Added PROJECT_DEVELOPMENT_AND_TEST_LESSONS.md and README navigation.
+  Record observed failure causes, bounded fixes, synthetic regression coverage,
+  data-publication boundaries and the current removal of process supervision.
+- Documentation-only verification checks local links and git diff whitespace;
+  no new code, real I/O, scan restart or monitoring behavior is introduced.
+
+## Recovery and Notebook publication (2026-10-15)
 
 - Remove process inventories, PID/Jupyter/GUI checks and process mutex/station
   leases from ordinary hardware run/resume. Retain physical limits, fresh status

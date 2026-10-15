@@ -4,6 +4,15 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+### Development and test-failure retrospective (2026-10-15)
+
+- Added [development and test lessons](PROJECT_DEVELOPMENT_AND_TEST_LESSONS.md),
+  separating software regressions, test-environment errors, hardware failures
+  and historical supervision false positives, with fixes and regression sources.
+- Documentation-only delivery: no runtime/configuration change, instrument I/O,
+  monitoring or retry. Local links and whitespace are checked for this delivery;
+  the preceding 133/50/75 test results remain scoped to code release `14dcde8`.
+
 ### Recovery and analysis release (2026-10-15)
 
 - Active hardware combination run/resume no longer enumerates OS processes,
