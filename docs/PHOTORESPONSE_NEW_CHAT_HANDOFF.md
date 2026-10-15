@@ -12,7 +12,7 @@
 
 - NKT 扫波长／光功率，CLD 控制固定波长二极管的光功率；PM100D 实测 W 用于反馈。源电流和百分比只是调节量，不是实际光功率。
 - 当前 DC photoresponse 组合线支持选用无激励、6221 DC、2182A 电压、2400／Three-SMU，以及温磁场组合。只连接选中的模块，防止重复设备所有权和双激励源冲突。
-- 早期 `integration-photonics-nonlinear-hall` 是 PEM／锁相集成线，涉及 SR830/SR865A、谐波、参考链路、光学与 gate 组合。不能把该分支的接线、record_continue政策或配置字段直接移入当前 `module/NKT-photonics` 活动路径。
+- 早期 `integration-photonics-nonlinear-hall` 是 PEM／锁相集成线，涉及 SR830/SR865A、谐波、参考链路、光学与 gate 组合。不能把该分支的接线、record_continue政策或配置字段直接移入当前 `module/integration-photovoltage/current` 活动路径（原名 `module/NKT-photonics`）。
 - 当前仓库代码与临时实机入口是不同交付物：本次纯 CLD/PM 测试入口和机器配置保存在 ignored `run_data`，没有成为受版本控制的通用 CLI。
 
 ## 开发与协作方式

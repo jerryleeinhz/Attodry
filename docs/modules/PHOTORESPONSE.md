@@ -1,6 +1,7 @@
 # DC photoresponse work package
 
-Updated: 2026-10-13. User-selected branch: `module/NKT-photonics`.
+Updated: 2026-10-15. Current branch: `module/integration-photovoltage/current`
+(formerly the user-selected `module/NKT-photonics`).
 
 ## Updated operator acceptance contract (2026-10-13)
 

@@ -28,8 +28,18 @@ simulations passed locally and on target. No instrument connection/output or
 active target checkout update during offline validation. The operator subsequently
 confirmed both Jupyter kernels are plotting only and authorized commit, push and
 deployment to the current `module/integration-photovoltage/current` branch.
-Release/deployment is a separate delivery step; real timing/transient comparison
-has not been performed by these tests.
+Functional release `0b05f904eb8b47da1369e204aa5ca06d42ae97ae` is committed,
+pushed and deployed. LK_setup NKT fast-forwarded from `46c7b82` to `0b05f90`;
+both local and station branches now track `module/integration-photovoltage/current`.
+A fresh origin clone on lyr passed **678/678 full tests** plus NKT/CLD simulations
+with confirmed zero exit codes before deployment. All **13 local TOML config
+hashes** stayed unchanged; active tracked files are clean. Independent plotting
+and offline-validation processes were left alone. The first deployment verifier
+lost the native ExitCode despite an OK log; its raw attempt was retained, the
+verifier repaired and validation repeated in a new clone before any update.
+Delivery records live in ignored `run_data/deploy-dark-20261015T1846Z` on target.
+This delivery changed no experimental parameters and contacted no instruments;
+real timing/transient comparison remains separate from these offline results.
 Usage: `docs/PHOTORESPONSE_GUIDE.md`; timing evidence and limitations:
 `docs/PHOTORESPONSE_TIMING.md`.
 

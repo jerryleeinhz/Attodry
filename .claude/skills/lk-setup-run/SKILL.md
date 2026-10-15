@@ -57,9 +57,10 @@ SSH="/c/Program Files/OpenSSH/ssh.exe"
 2. **Update the active checkout.** Run `git fetch origin`, then
    `git merge --ff-only origin/<branch>`. Fast-forward only.
    - If the checkout has local tracked changes, or its upstream branch was
-     renamed or deleted, stop and ask. The `NKT` checkout still tracks the
-     deleted `module/NKT-photonics`. The current branch is
-     `module/integration-photovoltage/current`.
+     renamed or deleted, stop and ask.
+     The current branch is `module/integration-photovoltage/current` (formerly
+     `module/NKT-photonics`); inspect the actual checkout rather than assuming
+     a legacy upstream still exists.
 3. **Leave local files alone.** Ignored files (`*.local.toml`, `run_data/`)
    are never overwritten or deleted.
 

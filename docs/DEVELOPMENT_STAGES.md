@@ -7,7 +7,19 @@ Update this file whenever a feature is completed. A stage is complete only when 
 Status: software and isolated target offline acceptance complete (2026-10-15).
 New hardware timing/transient comparison is not claimed by the offline results.
 The operator confirmed Jupyter is plotting only and authorized commit, push and
-deployment. These release operations are recorded separately after verification.
+deployment. Functional release `0b05f90` is pushed and deployed on
+`module/integration-photovoltage/current`; the target advanced from `46c7b82`.
+
+- Delivery validation: a fresh origin clone on LK_setup lyr passed **678/678**
+  full tests and both NKT/CLD simulations with confirmed zero exit codes. The
+  earlier verifier's missing native ExitCode was treated as failed validation;
+  its raw logs were kept, the wrapper fixed and a new clone validated before
+  touching the active tree. No measurement source changed during delivery.
+- Fast-forward deployment left tracked files clean and verified all **13**
+  local TOML configuration hashes unchanged. Local/station branch names and
+  upstreams now match the published branch. Existing plotting processes and a
+  separate Integration-photonics offline task were not interrupted. Private
+  receipts/config hashes remain ignored; no hardware access/output occurred.
 
 - Operator approved `dark` as the first power point and one baseline per full
   repeat/environment/optical visit, then matched light-minus-dark V/I. Added
