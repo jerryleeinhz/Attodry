@@ -219,7 +219,10 @@ class RoleHarmonicTests(unittest.TestCase):
         self.assertEqual(code, 0, result.get('error'))
         self.assertNotIn('pre_abort_h1_diagnostics', json.dumps(result))
         self.assertEqual(xy.writes.count('HARM 2'), 1)
-        self.assertIn('status_recheck', result['points'][-1]['samples'][0])
+        windows = result['points'][-1]['settling_transition_windows']
+        self.assertTrue(any(w['status']['lockin_xy']['lia_status']['input_or_reserve_overload']
+                            for w in windows))
+        self.assertNotIn('status_recheck', result['points'][-1]['samples'][0])
 
     def test_transition_input_trip_also_records_abort_diagnosis(self):
         def mutate(xx, xy):
@@ -232,8 +235,8 @@ class RoleHarmonicTests(unittest.TestCase):
         code, result, xx, xy, _ = self.execute('sweep-excitation', extra=FIXED,
             config_edit=select_roles, mutate=mutate)
         self.assertNotEqual(code, 0)
-        self.assertFalse(result['points'])
-        self.assertIn('pre_abort_h1_diagnostics', json.dumps(result['sensitivity_setup']))
+        self.assertTrue(result['points'][0]['samples'])
+        self.assertIn('pre_abort_h1_diagnostics', json.dumps(result['points']))
         self.assertTrue(result['cleanup']['verified'])
 
     def test_partial_read_preserves_completed_role(self):

@@ -1,5 +1,29 @@
 # Development stages
 
+## Current: axis-entry qualification and shared Lock-in settling (2026-10-15)
+
+- Qualify each temperature axis entry once before its inner scan in the common
+  coordinator. Preserve literal nesting, duplicate indices, repeats and fresh
+  recovery entry. Field point execution owns its arrival/dwell once.
+- Record sample/VTI/powers and post-qualification temperature drift/target/range
+  quality flags without a new dwell or ordinary stability trip. Hard bounds,
+  overshoot, control, communication, field and electrical protection remain.
+- Apply final HARM/SENS/Reserve directly in normal acquisition; use per-role
+  monotonic deadlines and credit time already spent, including SMU delay. A source
+  or other-axis disturbance affects both detectors. XX/XY share the later deadline
+  and retain sequential timestamps. Automatic range changes restart the deadline.
+- Archive switching latches separately and require the fresh formal status
+  window. Initialization, cleanup and bounded fault diagnostics retain their own
+  checks. New run snapshots carry explicit qualification/settling policy versions;
+  historical raw records and recovery source review remain intact.
+- Final local guarded verification passed 467 tests in 232.596 s, zero failures,
+  errors or skips: deterministic clocks, all 64 module orders, direct transitions,
+  native receiver, telemetry/protection, same-version whole-condition recovery
+  (including the six-accepted fixture), storage and analysis. Historical guard
+  capability tests pin their original file inventory; new timing sources cannot
+  bypass that historical source boundary. Target offline delivery is pending.
+  No real commissioning or experimental replay is part of this feature.
+
 ## Current: unified plotting snapshots for active SQLite scans (2026-10-15)
 
 - Replace global database/WAL stat invalidation with one short read-only

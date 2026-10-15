@@ -100,7 +100,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             AxisPoint({"temperature_k": v}, "main", "ordered") for v in points))
         hardware["temperature"] = asdict(temperature)
         hardware["temperature"].update(effective_interrupt_policy="abort",
-            qualification="fresh_dwell_after_all_axis_settings", pre_measure_wait_s_used=False)
+            qualification="fresh_dwell_per_axis_entry", formal_temperature_policy="record_with_quality_flags",
+            pre_measure_wait_s_used=False)
     if "magnetic" in order:
         magnetic = configuration.load_magnetic_field_operation_config(path)
         segments = magnetic.run.segment_plan
@@ -163,6 +164,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         hardware["lockin"] = {name: asdict(getattr(lockin, name)) for name in vars(lockin)}
         hardware["lockin"]["safety_sha256"] = hashlib.sha256(safety_path.read_bytes()).hexdigest()
         hardware["lockin"]["point_mode"] = mode
+        from .lockin_settling import SETTLING_POLICY
+        hardware["lockin"]["settling_policy"] = SETTLING_POLICY
         hardware["lockin"]["harmonics_by_role"] = prepared.harmonics_by_role
         hardware["lockin"]["skipped_harmonics_by_frequency"] = prepared.skipped_by_frequency
     addresses = []
@@ -278,7 +281,7 @@ class HardwareCombinationStation:
             self.lockin = LockinPointSession(
                 self.config.path, self.config.lockin, self.events.event,
                 manager_factory=self.manager_factory, mode=self.config.lockin_mode,
-                authorize_writes=self.authorize_hardware)
+                authorize_writes=self.authorize_hardware, monotonic=self.monotonic, sleep=self.sleep)
             preflight["lockin"] = (self.lockin.open(recovery=True) if self.recovery is not None
                                    else self.lockin.open())
         # All active preflights must succeed before any configuration writes.
@@ -366,11 +369,16 @@ class HardwareCombinationStation:
 
     def apply(self, module, point):
         if module in {"temperature", "magnetic"}:
-            return self.cryo.apply(module, point)
+            result = self.cryo.apply(module, point)
+            if self.lockin is not None:
+                self.lockin.disturbed(module)
+            return result
         if module == "smu":
             self.point = point
             self.smu.set_point({key[:-2]: v for key, v in point.values.items()},
-                               segment=point.segment)
+                               segment=point.segment,
+                               on_settings_applied=(lambda: self.lockin.disturbed("smu"))
+                                   if self.lockin is not None else None)
             # Actual sensed coordinates are produced only by the formal read.
             return {"requested": point.values}
         lockin_axis = next(axis for axis in self.config.plan.axes if axis.module == "lockin")
@@ -378,12 +386,17 @@ class HardwareCombinationStation:
         return {"actual": self.lockin.set_point(point.values["lockin_excitation_v_rms"],
             point.values["lockin_frequency_hz"], point_index=index)}
 
+    def qualify_axis(self, module, point, scope):
+        if module in {"temperature", "magnetic"}:
+            return self.cryo.qualify(modules=(module,), scope=scope)
+        return {"ready": True, "axis_scope": scope}
+
     def qualify(self, modules):
         if self.lockin is not None:
             self.lockin.qualify()
-        if self.cryo is not None:
-            self.cryo.qualify()
-        return {"ready": True, "mode": "hardware", "active_modules": modules}
+        return {"ready": True, "mode": "hardware", "active_modules": modules,
+                "temperature_qualification": (self.cryo.temperature_qualification
+                    if self.cryo is not None else None)}
 
     def begin_sample(self):
         if self.cryo is not None:

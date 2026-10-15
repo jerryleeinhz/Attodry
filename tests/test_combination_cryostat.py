@@ -1,5 +1,5 @@
 """Real point/driver code with fake DLL and fake VISA only."""
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from itertools import permutations
 import io
 import json
@@ -10,7 +10,7 @@ from unittest.mock import patch
 from attodry_control.combination_analysis import load_combination_rows
 from attodry_control.combination_cli import run as cli
 from attodry_control.combination_hardware import load_hardware_combination, run_hardware_combination
-from attodry_control.combination_store import CombinationStore
+from attodry_control.combination_store import CombinationStore, open_readonly
 from attodry_control.cryostat_points import CryostatPointSession
 from attodry_control.attodry import AttoDryError, AttoDryTimeout
 from tests.test_attodry import FakeAttoDryDll, StepClock
@@ -59,6 +59,17 @@ class CryostatCombinationTests(unittest.TestCase):
                 self.assertEqual(self.dll.events.count("end"), int(environmental))
                 self.assertEqual("set_temperature" in self.dll.events, "temperature" in order)
                 self.assertEqual("toggle_field_control" in self.dll.events, "magnetic" in order)
+                if "temperature" in order:
+                    config = load_hardware_combination(self.path)
+                    count = 1
+                    for axis in config.plan.axes:
+                        count *= len(axis.points)
+                        if axis.module == "temperature":
+                            break
+                    with closing(open_readonly(self.database)) as db:
+                        observed = db.execute("SELECT count(*) FROM combination_events WHERE run_id=? "
+                            "AND event_type='temperature_qualification_completed'", ("-".join(order),)).fetchone()[0]
+                    self.assertEqual(observed, count)
                 rows = load_combination_rows(self.database, run_id="-".join(order))
                 self.assertEqual(len(rows), (3 if "smu" in order else 1) * (2 if "lockin" in order else 1))
 
@@ -90,7 +101,7 @@ class CryostatCombinationTests(unittest.TestCase):
         self.assertEqual(plan["hardware"]["effective_cryostat"]["magnet"]["limits"]["hardware_z_max_t"], 9)
         self.assertEqual(self.dll.events, [])
 
-    def test_ordered_magnetic_duplicates_reversal_and_temperature_requalification(self):
+    def test_ordered_magnetic_duplicates_reversal_share_temperature_qualification(self):
         source = self.base.replace('{ bx_t = 0.0, bz_t = 0.0 },',
             '{ bx_t = 0.01, bz_t = 0.0 },\n{ bx_t = 0.01, bz_t = 0.0 },\n{ bx_t = -0.01, bz_t = 0.0 },')
         self.write_config(("temperature", "magnetic", "lockin"), source=source)
@@ -99,7 +110,7 @@ class CryostatCombinationTests(unittest.TestCase):
         rows = load_combination_rows(self.database)
         self.assertEqual([r["requested.field_x_t"] for r in rows], [.01, .01, .01, .01, -.01, -.01])
         events = self.events()
-        self.assertEqual(sum(k == "temperature_qualification_completed" for k, _ in events), 6)
+        self.assertEqual(sum(k == "temperature_qualification_completed" for k, _ in events), 1)
         points = [v for k, v in events if k == "magnetic_point_event" and v.get("event") == "point_completed"]
         self.assertEqual(len(points), 3)
         for row in rows:
@@ -146,7 +157,7 @@ class CryostatCombinationTests(unittest.TestCase):
         self.assertEqual(self.adapters, {})
         self.assertTrue(result["cleanup"]["manual_verification_required"])
 
-    def test_drift_during_electrical_read_rejects_and_cleans_all(self):
+    def test_drift_during_electrical_read_records_quality_and_holds(self):
         self.write_config(("temperature", "magnetic", "smu"))
         def modify(adapter):
             original = adapter.read
@@ -158,12 +169,12 @@ class CryostatCombinationTests(unittest.TestCase):
             adapter.read = read
         self.modify_adapter = modify
         result = self.execute()
-        self.assertEqual(result["status"], "failed", result)
-        self.assertIn("drifted", result["error"])
-        self.assertEqual(load_combination_rows(self.database), ())
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(load_combination_rows(self.database))
+        self.assertTrue(any("temperature_baseline_drift" in v["temperature_quality_flags"]
+            for k, v in self.events() if k == "environment_formal_window"))
         self.assertTrue(any(k == "smu_formal_sample" for k, _ in self.events()))
-        self.assertIn("sweep_zero", self.dll.events)
-        self.assertEqual(self.dll.temperature_control, 0)
+        self.assertEqual(self.dll.temperature_control, 1)
         self.assertFalse(self.adapters["smu_bias"].output)
 
     def test_communication_failure_retains_last_state_and_still_attempts_cleanup(self):

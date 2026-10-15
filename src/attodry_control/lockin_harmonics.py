@@ -13,6 +13,7 @@ from dataclasses import asdict
 from .lockin_overload import OverloadPolicy
 from .lockin_autorange import AutorangePolicy, AutorangeState
 from .sr830_settings import SensitivityMode
+from .lockin_settling import LockinSettling, SETTLING_POLICY
 
 from .sr830 import RESERVE_MODE_CODES, Sr830Error
 from .lockin_model_settings import (
@@ -24,10 +25,10 @@ from .lockin_model_settings import (
 
 class HarmonicSensitivitySession:
     @classmethod
-    def create(cls, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None, overload_policy="abort"):
-        return cls(xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role, overload_policy)
+    def create(cls, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None, overload_policy="abort", **clock):
+        return cls(xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role, overload_policy, **clock)
 
-    def __init__(self, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None, overload_policy="abort"):
+    def __init__(self, xx, xy, sensitivity_setup, reserve_setup, harmonics_by_role=None, overload_policy="abort", *, monotonic=None, sleep=None):
         self.configs = {"lockin_xx": xx, "lockin_xy": xy}
         self.sensitivity_setup = sensitivity_setup
         self.ranges = sensitivity_setup["ranges"]
@@ -55,6 +56,57 @@ class HarmonicSensitivitySession:
                     self.states[role, harmonic] = AutorangeState(initial)
         self.current_harmonics = {role: 1 for role in self.configs}
         self.expected_reserves = {role: value["configured_code"] for role, value in self.reserves.items()}
+        self.settling = LockinSettling(monotonic=monotonic, sleep=sleep)
+        self.settling.changed("acquisition_initialization")
+        self.frequency_transition_pending = False
+
+    def track_pair(self, xx, xy):
+        return (self.settling.wrap(xx, "lockin_xx"), self.settling.wrap(xy, "lockin_xy"))
+
+    def open_transition_window(self, xx, xy, record):
+        """Archive switching latches before the fresh settled/formal window.
+
+        Only deliberate-setting input/filter latches are transitional. Device,
+        unknown, TC and unexpected unlock faults remain blocking. Never clear a
+        formal overload by repeatedly reopening an unchanged settings window.
+        """
+        changes = list(self.settling.pending)
+        if not changes:
+            return
+        self.frequency_transition_pending |= any(
+            c["reason"].endswith("set_internal_reference_frequency") for c in changes)
+        transition, blocking = {}, []
+        event = {"policy": SETTLING_POLICY, "changes": changes, "status": transition,
+                 "opened_monotonic_s": self.settling.monotonic(), "formal_sample": False}
+        record.setdefault("settling_transition_windows", []).append(event)
+        for role, instrument in (("lockin_xx", xx), ("lockin_xy", xy)):
+            status, error = instrument.read_status_latches()
+            transition[role] = {"lia_status": asdict(status), "error_status": error}
+            if status.reference_unlocked and not (self.frequency_transition_pending and role == "lockin_xy"):
+                blocking.append(role + " reference unlocked")
+            if status.time_constant_changed:
+                blocking.append(role + " time constant changed")
+            if error:
+                blocking.append(role + " instrument error " + str(error))
+            if getattr(status, "model", "SR830") == "SR865A":
+                from .electrical_lockin_backend import native_status_problems
+                blocking.extend(role + " " + p for p in native_status_problems(status))
+                if status.output_overload:
+                    blocking.append(role + " native output scale overload")
+        if blocking:
+            event["blocking_problems"] = blocking
+            raise Sr830Error("Unsafe final settings transition: " + "; ".join(blocking))
+        self.settling.window_generation = len(self.settling.changes)
+        return event
+
+    def ensure_settled(self, xx, xy, settle_s, record):
+        self.verify(xx, xy, self.current_harmonics, record)
+        self.open_transition_window(xx, xy, record)
+        slowest = max(c.time_constant_s for c in self.configs.values())
+        required = {r: settle_s * c.time_constant_s / slowest for r, c in self.configs.items()}
+        self.settling.wait(required, record)
+        self.frequency_transition_pending = False
+        self.verify(xx, xy, self.current_harmonics, record)
 
     def setting(self, role, harmonic):
         config = self.configs[role]
@@ -132,7 +184,7 @@ class HarmonicSensitivitySession:
             raise Sr830Error("Unsafe harmonic settings transition: " + "; ".join(problems))
         time.sleep(settle_s)
 
-    def _apply(self, xx, xy, targets, harmonic, settle_s, event, *, cleanup=False):
+    def _apply(self, xx, xy, targets, harmonic, settle_s, event, *, cleanup=False, deferred=False):
         instruments = {"lockin_xx": xx, "lockin_xy": xy}
         before = self._read(instruments, event.setdefault("readbacks", []))
         commands = event.setdefault("commands", [])
@@ -166,7 +218,7 @@ class HarmonicSensitivitySession:
         for role, (sensitivity, reserve) in targets.items():
             self.ranges[role]["current_sensitivity_code"] = sensitivity
             self.expected_reserves[role] = reserve
-        if commands:
+        if commands and not deferred:
             if cleanup:
                 # Minimum source was requested first. Do not consume a mixed-HARM
                 # pair as a sample: final cleanup validates statuses after HARM 1.
@@ -252,7 +304,6 @@ class HarmonicSensitivitySession:
             self.verify(xx, xy, self.current_harmonics, record)
             changed = {role for role, h in targets.items() if h != self.current_harmonics[role]}
             if changed:
-                self.prepare_bridge(xx, xy, settle_s, record, roles=changed)
                 event["harmonic_write_attempted"] = True
                 for role, instrument in (("lockin_xx", xx), ("lockin_xy", xy)):
                     if role in changed:
@@ -260,11 +311,17 @@ class HarmonicSensitivitySession:
                         event["commands"].append(attempt)
                         instrument.set_harmonic(targets[role])
                         attempt["returned"] = True
-                self._settle(xx, xy, targets, settle_s, event)
-                record.setdefault("harmonic_transition_status", []).append(event["status"])
                 self.current_harmonics = targets
             self._apply(xx, xy, self._targets(targets, selected), targets, settle_s,
-                        event.setdefault("target_settings", {}))
+                        event.setdefault("target_settings", {}), deferred=True)
+            window = self.open_transition_window(xx, xy, record)
+            if changed and window is not None:
+                values = set(targets.values())
+                record.setdefault("harmonic_transition_status", []).append({
+                    "harmonic": next(iter(values)) if len(values) == 1 else None,
+                    "harmonics_by_role": targets, "policy": SETTLING_POLICY,
+                    "formal_sample": False, **window["status"]})
+            event["settling_policy"] = SETTLING_POLICY
             event["completed"] = True
         except BaseException as exc:
             event["error"] = str(exc) or type(exc).__name__
@@ -275,6 +332,7 @@ class HarmonicSensitivitySession:
                 frequency_rel_tolerance, record, roles=None):
         """One existing bounded-auto controller, with state owned by (role, h)."""
         from . import lockin_test as daily
+        self.ensure_settled(xx, xy, settle_s, record)
         selected = set(self.configs if roles is None else ("lockin_" + role for role in roles))
         policies = {role: policy for (role, h), policy in self.policies.items()
                     if h == harmonic and role in selected}
@@ -291,7 +349,7 @@ class HarmonicSensitivitySession:
                 settle_s=settle_s, record=audit, harmonic=self.current_harmonics,
                 overload_policy=self.overload,
                 on_input_overload=lambda status: self.diagnose_overload(xx, xy, status, settle_s, audit),
-                verify_settings=lambda: self.verify(xx, xy, self.current_harmonics, audit))
+                verify_settings=lambda: self.verify(xx, xy, self.current_harmonics, audit), settling=self)
             # Preserve the first legacy auto audit view; per-harmonic entries
             # remain authoritative when a role selects multiple harmonics.
             record.setdefault("autorange", audit["autorange"])

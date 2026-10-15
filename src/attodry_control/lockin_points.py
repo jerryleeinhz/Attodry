@@ -79,13 +79,14 @@ class _AuditedInstrument:
 class LockinPointSession:
     def __init__(self, config_path, config, event, *, manager_factory=None,
                  mode="excitation", authorize_writes=False, recovery_owner_guard=None,
-                 recovery_abort_guard=None):
+                 recovery_abort_guard=None, monotonic=None, sleep=None):
         self.config = config
         self.mode = mode
         self.args, self.settings, self.points, self.safety = (
             daily.prepare_configured_lockin_sweep(config_path, config, scan=mode)
         )
         self.event = event
+        self.clock = {"monotonic": monotonic, "sleep": sleep}
         self.settings["authorize_writes"] = authorize_writes is True
         self.manager_factory = manager_factory
         self.recovery_owner_guard = recovery_owner_guard
@@ -242,8 +243,9 @@ class LockinPointSession:
             xx, xy, sensitivity_setup=self.sensitivity_setup, settle_s=self.args.settle_s)
         self.harmonic_control = (None if cleanup_only else daily.HarmonicSensitivitySession.create(
             self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup, self.harmonics_by_role,
-            overload_policy=self.config.lockin_sweep.overload_policy))
+            overload_policy=self.config.lockin_sweep.overload_policy, **self.clock))
         if self.harmonic_control is not None:
+            self.pair = xx, xy = self.harmonic_control.track_pair(xx, xy)
             self.harmonic_control.enter(
                 xx, xy, harmonic=self.harmonic_control.initial_harmonics(self.config.lockin_xx.frequency_hz), settle_s=self.args.settle_s,
                 record=self.sensitivity_setup.setdefault("harmonic_initialization", {}))
@@ -280,7 +282,6 @@ class LockinPointSession:
                 absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
             if target_hz != self.target_frequency_hz:
                 xx.set_minimum_sine_output()
-                daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
                 minimum = xx.read_sine_output()
                 self.point_record["source_before_frequency_v_rms"] = minimum
                 if abs(minimum - daily.MINIMUM_SINE_OUTPUT_V) > 1e-9:
@@ -289,18 +290,11 @@ class LockinPointSession:
                                                         self.args.settle_s, self.point_record)
                 self.point_record["frequency_write_attempted"] = True
                 xx.set_internal_reference_frequency(target_hz)
-                daily.time.sleep(self.args.settle_s)
-                transition, problems = daily._consume_frequency_transition(
-                    xx, xy, harmonic=self.harmonic_control.current_harmonics)
-                self.point_record["frequency_transition_status"] = transition
-                if problems:
-                    raise daily.Sr830Error("Unsafe frequency transition: " + "; ".join(problems))
                 self.target_frequency_hz = target_hz
-                daily.time.sleep(self.args.settle_s)
-            # Verify frequency before restoring the requested source amplitude.
-            self._read_coordinates()
-            xx.set_sine_output(source_v)
-            daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
+            # Source and internal-register readbacks are immediate; the external
+            # reference is qualified after the shared final-setting deadline.
+            if not daily.math.isclose(xx.read_sine_output(), source_v, rel_tol=0, abs_tol=1e-12):
+                xx.set_sine_output(source_v)
         except BaseException:
             self.event("lockin_point_transition", self.point_record)
             raise
@@ -312,19 +306,26 @@ class LockinPointSession:
             overload_policy=self.harmonic_control.overload,
             on_input_overload=lambda status: self.harmonic_control.diagnose_overload(
                 xx, xy, status, self.args.settle_s, self.point_record),
+            settling=self.harmonic_control,
         )
+        self.harmonic_control.enter(xx, xy,
+            harmonic=self.harmonic_control.initial_harmonics(target_hz),
+            settle_s=self.args.settle_s, record=self.point_record)
         self.sample_count = 0
-        return self._read_coordinates()
+        return self._read_coordinates(verify_companion=False)
 
-    def _read_coordinates(self):
+    def _read_coordinates(self, *, verify_companion=True):
         xx, xy = self.pair
         source = xx.read_sine_output()
         safety = daily._validate_excitation_safety(self.args, (source,))
         frequency, companion = xx.read_reference_frequency(), xy.read_reference_frequency()
-        daily._verify_frequency_readbacks(
-            self.target_frequency_hz, frequency, companion,
-            rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
-            absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+        if verify_companion:
+            daily._verify_frequency_readbacks(
+                self.target_frequency_hz, frequency, companion,
+                rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
+                absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+        else:
+            daily._validate_frequency_observations(self.target_frequency_hz, frequency, companion)
         self.point_record.update(source_readback_v_rms=source,
                                  actual_frequency_hz=frequency,
                                  frequency_readback_hz={"lockin_xx": frequency, "lockin_xy": companion},
@@ -337,11 +338,25 @@ class LockinPointSession:
         return {"lockin_excitation_v_rms": source, "lockin_frequency_hz": frequency}
 
     def qualify(self):
-        # Also when SMU is the inner axis: response/range may have changed.
-        daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
-        actual = self._read_coordinates()
+        try:
+            self.harmonic_control.enter(*self.pair,
+                harmonic=self.harmonic_control.initial_harmonics(self.target_frequency_hz),
+                settle_s=self.args.settle_s, record=self.point_record)
+            self.harmonic_control.ensure_settled(*self.pair, self.args.settle_s, self.point_record)
+            self._read_coordinates()
+        except BaseException as exc:
+            self.event("lockin_point_qualification_failed", {
+                "error": str(exc) or type(exc).__name__, "point": self.point_record})
+            raise
         self.event("lockin_point_qualification", self.point_record)
         self.sample_count = 0
+
+    def disturbed(self, module):
+        """Called on the same acquisition thread after another axis changes."""
+        if self.harmonic_control is not None:
+            self.harmonic_control.settling.changed(module + ".axis_setting")
+            self.harmonic_control.open_transition_window(*self.pair,
+                self.point_record if self.point_record is not None else self.sensitivity_setup)
 
     def sample_point(self, *, measurement_context=None):
         if self.sample_count:

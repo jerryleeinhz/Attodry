@@ -314,10 +314,11 @@ autorange_stable_samples = 2
 才缩窄；计数与当前档位按 `(角色, 谐波)` 独立保留，组合采集也不会每次重置。
 达到最高档仍不满足条件时拒绝本次运行，不调用无界 Auto Gain。
 
-各台仪器只切换自己的已选 HARM。切换前先使用当前/已配置档中的宽档及较高保护的
-已配置 Reserve；完成谐波过渡后再施加目标小档。HARM 变化与 SENS/RMOD 变化
-分别执行状态检查和两段 `settle_s` 等待，必要的单次过载复查另加等待。
-因此启用分谐波量程会增加点间耗时；等待不等于样品物理稳态。
+各台仪器只切换自己的已选 HARM。正常采集直接施加该阶数的目标 HARM/SENS/Reserve，
+不强制经过最宽基准档或临时 Reserve。全部最终设置确认后，共用单调时钟补足
+一个 settle；中间设置不各自增加等待。实际调档重新计时，未改变的角色保留已有
+截止时间。初始化和最小激励 cleanup 的独立验证仍按各自路径执行。
+切换锁存单独保存，正式窗口仍检查持续过载、失锁、错误和设置漂移。
 
 H2 很小也不能跳过整路输入/储备/滤波过载检查。两台仪器（包括未选为正式
 输出的伴随通道）的状态均须记录；默认持续异常则保留原始尝试并拒绝。
@@ -707,8 +708,8 @@ SR830 全部允许的时间常数如下；在 TOML 中统一填写秒数：
 `谐波阶数 × 参考频率 > 200 Hz` 时，不能使用大于 30 s 的时间常数。若高频 sweep 中
 仪器因此改变时间常数，项目的 `OFLT?` 读回和 `time_constant_changed` 状态检查会拒绝
 该次测量。设置长时间常数前也要估算总耗时；例如 `30.0 s` 配合
-`settle_time_constants = 5.0` 时，一个 interval 为 150 s，设置改变后的两个 interval
-合计 300 s。
+`settle_time_constants = 5.0` 时，一个 interval 为 150 s，正常采集在最终设置后
+补足这一个 interval。已有等待时间可计入。
 
 `fixed` 模式只保留 `sensitivity_mode` 和 `sensitivity_full_scale_v`；所有
 `autorange_*` 字段必须完全不存在（继续注释），并非“被忽略”。例如：
@@ -762,9 +763,17 @@ sample_interval_time_constants = 1.0
 
 程序取 XX/XY 中较慢的 `time_constant_s` 为 `τslow`，自动计算
 `settle_interval_s = τslow × settle_time_constants`。频率、谐波、SINE OUT 或量程发生
-实际改变后，正式样本前保留两次 interval 和中间状态检查；例如 0.3 s 时为 3.0 s，
-1.0 s 时为 10.0 s，30 s 时为 300 s。`settle_s` 已删除，日常配置和 CLI 都不能再
+实际改变后，正式样本前从最后一次变化补足一个 interval；在本例的5倍 TC 下，
+0.3 s 时为 1.5 s，1.0 s 时为 5.0 s，30 s 时为 150 s。XX/XY 分别使用本台
+TC 推导截止时间，两台共同等待较晚截止时间，然后顺序读取。
+`settle_s` 已删除，日常配置和 CLI 都不能再
 手动填写秒数。
+
+`settling_policy=final-settings-one-settle-v1` 标识此策略。`settling_transition_windows`
+保留设置后的原始锁存；`settling_waits` 记录要求、最后变化、已过时间及实际补等。
+`post_setting_settle_s`/`source_step_settle_s` 是派生预算，不能把它们与已记录等待相加。
+正式输入/滤波过载的既有有限复查属于异常处理，可能额外等待；普通正常路径只有
+一次最终设置稳定等待。固定等待不构成任意饱和恢复或样品物理稳态的保证。
 
 `sample_interval_time_constants` 决定同一点重复样本之间的间隔：实际秒数为
 `τslow × sample_interval_time_constants`。示例的 `1.0` 在 0.3 s/1.0 s 时间常数下分别是
@@ -881,7 +890,7 @@ sensitivity_full_scale_v = 0.050
 | `skip_unsupported_harmonics` | 布尔值 `true` 或 `false`。为 `true` 时，超过 102 kHz 的 h2/h3 不写入仪器，而是在 JSON 写入 `skipped_harmonics`；日常高频扫描推荐 `true`。 |
 | `run_name` | 非空、最多 80 个字符；不可含控制字符或 `\ / : * ? " < > |`。可使用中文，且进入 JSON 文件名。 |
 | `note` | 非空、最多 2000 个字符且不可含 NUL；记录样品、接线改动或测试目的，写入 JSON 但不进入文件名。 |
-| `settle_time_constants` | 有限数且至少 `5.0`。程序以较慢的 XX/XY `time_constant_s × settle_time_constants` 自动计算一个 settle interval；不可再填写 `settle_s`。每次实际设置改变在正式样本前经过两个 interval。 |
+| `settle_time_constants` | 有限数且至少 `5.0`。各角色以 `time_constant_s × settle_time_constants` 推导截止时间，两台共同等待至较晚截止时间；正常采样补足一个 interval，已有等待计入，不再填写 `settle_s`。 |
 | `samples_per_point` | 整数，至少 1；版本库示例为 3。 |
 | `sample_interval_time_constants` | 有限非负数；同一点相邻样本间隔为较慢时间常数乘以该倍数。版本库示例为 `1.0`；这是相关的稳定性样本间隔，不是独立重复实验保证。 |
 | `external_series_resistance_ohm` | 正数，单位 Ω；外部串联电阻。SR830 固有 50 Ω 输出阻抗会自动加入。 |

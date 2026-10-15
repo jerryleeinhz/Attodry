@@ -1,5 +1,5 @@
 """No real instruments: exercise per-harmonic configuration and acquisition."""
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, nullcontext
 import io
 import json
 import re
@@ -69,7 +69,7 @@ class HarmonicSweepTests(unittest.TestCase):
     setUp = fixtures.Sr830Tests.setUp
     _hardware_config = fixtures.Sr830Tests._hardware_config
 
-    def execute(self, command='sweep-frequency', *, extra=FIXED, mutate=None, config_edit=None, points_hz="17.777,1000"):
+    def execute(self, command='sweep-frequency', *, extra=FIXED, mutate=None, config_edit=None, points_hz="17.777,1000", clock=None):
         path = self._hardware_config()
         source = path.read_text(encoding='utf-8') + extra
         if command == 'sweep-frequency-excitation':
@@ -88,7 +88,9 @@ class HarmonicSweepTests(unittest.TestCase):
                    'sweep-excitation': ['--points-v', '0.004,0.008'],
                    'sweep-frequency-excitation': []}
         out, err = io.StringIO(), io.StringIO()
-        with patch('attodry_control.lockin_test.time.sleep'), redirect_stdout(out), redirect_stderr(err):
+        with patch('attodry_control.lockin_test.time.sleep', side_effect=clock.sleep if clock else None), \
+                (patch('time.monotonic', side_effect=clock.monotonic) if clock else nullcontext()), \
+                redirect_stdout(out), redirect_stderr(err):
             try:
                 code = run([command, '--config', str(path), '--xx-address', 'XX', '--xy-address', 'XY',
                             '--samples-per-point', '1', *options[command]], resource_manager_factory=lambda: manager)
@@ -121,7 +123,7 @@ class HarmonicSweepTests(unittest.TestCase):
                 profile = json.loads((directory / result['measurement_profile_ref']['path']).read_text(encoding='utf-8'))
                 self.assertIn('harmonic_settings', json.dumps(profile))
 
-    def test_widen_before_harmonic_then_narrow_after_transition(self):
+    def test_direct_target_settings_without_protective_bridge(self):
         code, result, xx, xy, _ = self.execute()
         self.assertEqual(code, 0, result)
         writes = xy.writes
@@ -130,8 +132,9 @@ class HarmonicSweepTests(unittest.TestCase):
         h3 = writes.index('HARM 3')
         self.assertLess(writes.index('SENS 23'), h2)
         self.assertLess(h2, narrow)
-        self.assertLess(narrow, writes.index('SENS 23', narrow))
-        self.assertLess(writes.index('SENS 23', narrow), h3)
+        self.assertNotIn('SENS 23', writes[narrow:h3])
+        self.assertFalse(any(e['stage'] == 'bridge' for p in result['points']
+                             for e in p['harmonic_settings_transitions']))
         self.assertNotIn('AGAN', writes)
 
     def test_failure_and_ctrl_c_keep_attempt_and_restore(self):
@@ -174,6 +177,8 @@ class HarmonicSweepTests(unittest.TestCase):
         def mutate(xx, xy):
             original = xy.write
             def write(command):
+                if command == 'HARM 3':
+                    raise OSError('stop before cleanup bridge')
                 if command == 'SENS 23' and xy.responses['HARM?'].strip() == '2':
                     raise OSError('bridge range could not be confirmed')
                 return original(command)
@@ -195,7 +200,7 @@ class HarmonicSweepTests(unittest.TestCase):
                 result = original(command)
                 if command == 'SNAP? 1,2,3,4,9' and xy.responses['SENS?'].strip() == '18':
                     h2_samples += 1
-                    if h2_samples == 2:  # First is the transition, second formal.
+                    if h2_samples == 1:  # Switching now consumes status only.
                         xy.responses['SENS?'] = '17'
                 return result
             xy.query = query
@@ -232,7 +237,8 @@ class HarmonicSweepTests(unittest.TestCase):
             xx.query = query
         code, result, _, _, _ = self.execute(mutate=mutate)
         self.assertNotEqual(code, 0)
-        self.assertFalse(any(s['harmonic'] == 2 for s in result['points'][0]['samples']))
+        raw = next(s for s in result['points'][0]['samples'] if s['harmonic'] == 2)
+        self.assertFalse(raw['valid_for_analysis_by_role']['lockin_xx'])
 
     def test_other_role_autorange_remains_independent(self):
         def edit(source):

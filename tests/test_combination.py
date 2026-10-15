@@ -117,7 +117,7 @@ class CombinationTests(unittest.TestCase):
                                 y="measured.smu_bias_current_a")
         self.assertEqual(len(grouped), 8)
 
-    def test_requalifies_temperature_after_field_change_before_formal_read(self):
+    def test_qualifies_temperature_before_inner_field_and_reads(self):
         station = SimulatedCombinationStation()
         plan = CombinationPlan((axes()["temperature"], axes()["magnetic"], axes()["smu"]))
         self.execute(plan, station)
@@ -125,8 +125,12 @@ class CombinationTests(unittest.TestCase):
         field = next(i for i, op in enumerate(operations) if op[:2] == ("apply", "magnetic"))
         qualify = next(i for i, op in enumerate(operations) if op[0] == "qualify")
         read = next(i for i, op in enumerate(operations) if op[0] == "read")
+        temperature = next(i for i, op in enumerate(operations)
+                           if op[:2] == ("qualify_axis", "temperature"))
+        self.assertLess(temperature, field)
         self.assertLess(field, qualify)
         self.assertLess(qualify, read)
+        self.assertEqual(sum(op[:2] == ("qualify_axis", "temperature") for op in operations), 2)
 
     def test_partial_read_failure_retained_cleanup_all_modules_then_close(self):
         class Fault(SimulatedCombinationStation):

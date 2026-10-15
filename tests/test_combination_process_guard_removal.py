@@ -36,8 +36,24 @@ class ProcessGuardRemovalTests(unittest.TestCase):
         self.database = self.fixture.database.with_name("process-guard.sqlite")
         self.run_id = "synthetic-process-guard-removal-342"
         actual = load_hardware_combination(self.fixture.config.path)
+        self.current_sources = deepcopy(actual.snapshot["source_sha256"])
+        # This capability is deliberately limited to the historical 80/81-file
+        # release. Model that old filesystem, not today's acquisition additions.
+        # Production's exact source-count/difference guard remains unchanged.
+        historical_sources = {k: v for k, v in self.current_sources.items()
+                              if k != "lockin_settling.py"}
+        original_glob = Path.glob
+        source_directory = Path(__file__).resolve().parents[1] / "src" / "attodry_control"
+        def historical_glob(directory, pattern, *args, **kwargs):
+            paths = original_glob(directory, pattern, *args, **kwargs)
+            if directory == source_directory and pattern == "*.py":
+                return (p for p in paths if p.name in historical_sources)
+            return paths
+        source_fixture = patch.object(Path, "glob", historical_glob)
+        source_fixture.start()
+        self.addCleanup(source_fixture.stop)
         self.new_plan = deepcopy(self.fixture.new_plan)
-        self.new_plan["source_sha256"] = actual.snapshot["source_sha256"]
+        self.new_plan["source_sha256"] = historical_sources
         self.old_sources = deepcopy(self.new_plan["source_sha256"])
         self.old_sources.update({name: hashlib.sha256(("old " + name).encode()).hexdigest() for name in CHANGED})
         self.old_plan = {**self.new_plan, "source_sha256": self.old_sources}
@@ -130,6 +146,12 @@ class ProcessGuardRemovalTests(unittest.TestCase):
             self.assertEqual(cli(["resume", "--run-id", "daily-recovery", "--acknowledge-failure", *common]), 0)
             self.assertEqual(backend.call_count, 2)
             self.assertTrue(all("recovery_owner_guard" not in call.kwargs for call in backend.call_args_list))
+
+    def test_new_timing_release_is_not_authorized_by_historical_guard_removal(self):
+        old = deepcopy(self.current_sources)
+        old.update({name: hashlib.sha256(("old " + name).encode()).hexdigest() for name in CHANGED})
+        with self.assertRaisesRegex(ValueError, "reviewed source transition"):
+            self.capability(old_source_sha256=old, new_source_sha256=self.current_sources)
 
     def test_file_flag_and_serialized_proof_cannot_replace_fresh_capability(self):
         for forged in ({"process_guards_disabled": True}, True, "proof.json"):

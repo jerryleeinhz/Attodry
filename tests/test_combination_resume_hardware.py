@@ -304,13 +304,15 @@ class HardwareRecoveryTests(unittest.TestCase):
         self.write_config(("temperature", "lockin"), source=source)
         config = load_hardware_combination(self.path)
         self.assertEqual(len(config.plan.conditions()), 342)
-        qualification_count = [0]
+        sample_count = [0]
         capture = CryostatPointSession.capture
         def fail_seventh(session, stage, *args, **kwargs):
-            if stage == "qualification":
-                qualification_count[0] += 1
+            if stage == "before_sample":
+                sample_count[0] += 1
             result = capture(session, stage, *args, **kwargs)
-            if stage == "before_sample" and qualification_count[0] == 7:
+            if stage == "before_sample" and sample_count[0] == 7:
+                # Inject the historical failure explicitly. New acquisitions
+                # record ordinary drift instead of recreating this old gate.
                 raise AttoDryError("Temperature drifted from qualified baseline")
             return result
         with patch.object(CryostatPointSession, "capture", fail_seventh):
@@ -354,7 +356,8 @@ class HardwareRecoveryTests(unittest.TestCase):
                                row["payload_sha256"] for row in final["sample_manifest"]}
         self.assertTrue(all(after_sample_hashes[key] == value for key, value in before_sample_hashes.items()))
         kinds = [kind for kind, _ in self.events()]
-        self.assertEqual(kinds.count("temperature_qualification_started"), 343)
+        # One original entry plus all 18 fresh temperature entries on resume.
+        self.assertEqual(kinds.count("temperature_qualification_started"), 19)
         self.assertTrue(result["cleanup"]["clean"])
 
 

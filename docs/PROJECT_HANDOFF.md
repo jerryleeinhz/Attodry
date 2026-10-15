@@ -4,6 +4,34 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+### Axis-entry qualification and shared Lock-in settling (2026-10-15)
+
+- User-approved combination scheduling qualifies temperature once per axis entry,
+  before all inner measurements; resets/repeats/recovery qualify afresh. Ordinary
+  formal temperature drift, target deviation and window range are recorded quality
+  flags. Actual temperature/power brackets, hard/overshoot/control/communication,
+  magnetic/electrical protection and verified cleanup remain.
+- Normal sweeps and combination share direct final HARM/SENS/Reserve and one
+  monotonic settling deadline per detector. Source/reference and other-axis changes
+  disturb both; SMU delay counts. Qualification only tops up remaining time;
+  XX/XY wait together and read sequentially. Actual auto-range changes reopen a
+  window; transition latches stay distinct from formal faults. Initial preparation,
+  cleanup and bounded fault diagnostics retain their separate checks.
+- Snapshots identify `axis-entry-qualification-temperature-record-v1` and
+  `final-settings-one-settle-v1`. New settings/time/qualification provenance is
+  additive; old records retain their original interpretation and source review.
+- Local hardware-blocked verification passed 467 tests in 232.596 s, with zero
+  failures/errors/skips. It covers fake clocks, all module orders, native receivers,
+  real acquisition adapters with fake instruments, protection/cleanup, telemetry,
+  storage/analysis and fresh whole-condition recovery. Historical guard capability
+  source boundaries remain strict; this release cannot use that old capability.
+- Target offline delivery is pending. Read-only LK_setup checks found its latest
+  run terminal and no active run/execution; five locally modified/untracked
+  acquisition sources match published parent db34685. Notebook/safety edits must
+  be preserved during software synchronization.
+  No experiment restart or real transient-response commissioning is authorized by
+  this code change.
+
 ### Unified SQLite snapshots during active acquisition (2026-10-15)
 
 - Fixed the file-signature policy that rejected cached plots whenever a

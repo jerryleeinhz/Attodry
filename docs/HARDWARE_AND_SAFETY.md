@@ -1,5 +1,28 @@
 # Hardware and safety guide
 
+## Axis-entry qualification and acquisition timing (2026-10-15)
+
+The operator approved one temperature qualification on each axis entry, before
+its inner scan. Nested electrical/field settings reuse that entry's qualification;
+returns, duplicate indices, repeats and recovery establish fresh qualification.
+Ordinary post-qualification temperature drift, target deviation and window range
+are recorded as quality flags rather than acquisition trips. Actual temperatures,
+linked qualification provenance and synchronous sample/VTI/power brackets remain
+raw evidence. Hard temperature bounds, overshoot, control/setpoint, communication,
+magnetic and electrical protections still fail closed.
+
+Normal Lock-in acquisition applies final HARM/SENS/Reserve directly and uses
+`final-settings-one-settle-v1`: each detector has a monotonic deadline following
+its last setting change; source/reference and other-axis disturbances affect both.
+Already elapsed time, including SMU delay, counts. Both detectors share the later
+deadline and are read sequentially. Switching latches are archived before the
+fresh measurement window; formal persistent faults retain the existing policy.
+No widest-range/Reserve bridge or independent second qualification wait is used
+in normal acquisition. Initialization, cleanup and bounded fault diagnostics keep
+their separate verification. One settle is a timing policy, not proof of physical
+convergence following every possible saturation. This is offline implementation;
+real transient-response commissioning remains a separate stage.
+
 ## User-authorized removal of process supervision (2026-10-15)
 
 The user explicitly removed process supervision from the active combination

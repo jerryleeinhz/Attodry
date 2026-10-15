@@ -74,6 +74,8 @@ class CryostatPointSession:
         self.window = None
         self.baseline_temperature = None
         self.temperature_ceiling = None
+        self.temperature_qualification = None
+        self.temperature_entry = 0
         self.recovery_action = None
         self.recovery_scan_limits_violated = False
         self.field_policy = (FieldReadbackPolicy.from_targets(
@@ -217,21 +219,25 @@ class CryostatPointSession:
         state = self.driver.set_temperature_and_enable(target, **self.clock)
         self.temperature_target = target
         self.temperature_changed = True
+        self.temperature_qualification = None
+        self.baseline_temperature = None
+        self.temperature_entry += 1
         self.validate_state(state)
         self.event("temperature_command_confirmed", {"target_k": target, "state": asdict(state)})
         self._finish_temperature_record(state, stage="temperature_command_confirmed", target_k=target)
         return {"state": asdict(state)}
 
-    def qualify(self):
-        if self.field_target is not None:
-            self.driver.wait_for_field(self.field_target, **self.clock)
-        if self.temperature_target is not None:
-            # Always requalify AFTER every axis has been applied, including B
-            # changes and inner-axis resets. A duplicate T point needs dwell,
-            # but must not demand a new thermal response to the same target.
+    def qualify(self, modules=None, scope=None):
+        # execute_field_target already includes field arrival/dwell. Formal
+        # captures continue checking its control, setpoint, tolerance and range.
+        modules = ("temperature", "magnetic") if modules is None else modules
+        if ("temperature" in modules and self.temperature_target is not None
+                and self.temperature_qualification is None):
             samples = []
             self.event("temperature_qualification_started", {
-                "target_k": self.temperature_target, "after_all_axis_settings": True})
+                "target_k": self.temperature_target, "axis_scope": scope,
+                "temperature_entry": self.temperature_entry,
+                "policy": "fresh_dwell_per_axis_entry"})
             def on_sample(state, elapsed):
                 # read_state has already persisted and validated this state.
                 self._finish_temperature_record(state, stage="temperature_qualification",
@@ -250,10 +256,16 @@ class CryostatPointSession:
             values = [value for elapsed, value in samples if elapsed >= cutoff]
             self.baseline_temperature = sum(values) / len(values)
             self.temperature_changed = False
-            self.event("temperature_qualification_completed", {
+            qualification = {
                 "target_k": self.temperature_target, "stable_mean_k": self.baseline_temperature,
-                "samples": samples})
+                "samples": samples, "axis_scope": scope,
+                "temperature_entry": self.temperature_entry,
+                "qualified_at_utc": utc_now(), "policy": "fresh_dwell_per_axis_entry"}
+            self.event("temperature_qualification_completed", qualification)
+            self.temperature_qualification = {k: v for k, v in qualification.items() if k != "samples"}
         self.capture("qualification")
+        return {"ready": True, "axis_scope": scope,
+                "temperature_qualification": self.temperature_qualification}
 
     def capture(self, stage, harmonic=None, sample_index=None):
         state = self.driver.read_state()
@@ -274,13 +286,23 @@ class CryostatPointSession:
                     abs(state.field.bz_t - self.field_target.bz_t) > tolerance or
                     (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance)):
                 raise AttoDryError("Magnetic readback outside target tolerance")
-        if self.temperature_target is not None and self.baseline_temperature is not None:
+        if self.temperature_qualification is not None:
             criteria = self.config.temperature_stability.criteria
-            if abs(state.sample_temperature_k - self.baseline_temperature) > criteria.stable_range:
-                raise AttoDryError("Temperature drifted from qualified baseline")
+            drift = state.sample_temperature_k - self.baseline_temperature
+            target_error = state.sample_temperature_k - self.temperature_target
+            flags = []
+            if abs(drift) > criteria.stable_range:
+                flags.append("temperature_baseline_drift")
             if (self.config.temperature_stability.acceptance_mode is TemperatureStabilityMode.TARGET
-                    and abs(state.sample_temperature_k - self.temperature_target) > criteria.tolerance):
-                raise AttoDryError("Temperature readback outside target tolerance")
+                    and abs(target_error) > criteria.tolerance):
+                flags.append("temperature_outside_target_tolerance")
+            record["temperature_assessment"] = {
+                "policy": "record_after_axis_qualification", "temperature_entry": self.temperature_entry,
+                "qualification_utc": self.temperature_qualification["qualified_at_utc"],
+                "target_k": self.temperature_target, "qualified_mean_k": self.baseline_temperature,
+                "baseline_drift_k": drift, "target_error_k": target_error,
+                "stable_range_k": criteria.stable_range, "target_tolerance_k": criteria.tolerance,
+                "quality_flags": flags}
         if self.telemetry is not None:
             completed = self.telemetry.finish(record)
             record.update(completed)
@@ -307,6 +329,13 @@ class CryostatPointSession:
                        "temperature_statistics": statistics,
                        "temperature_mean_k": statistics["mean_k"],
                        "temperature_min_k": min(values), "temperature_max_k": max(values)}
+            flags = sorted({flag for sample in self.window
+                            for flag in sample.get("temperature_assessment", {}).get("quality_flags", [])})
+            if (self.temperature is not None and
+                    max(values) - min(values) > self.config.temperature_stability.criteria.stable_range):
+                flags.append("temperature_window_range_exceeded")
+            summary["temperature_quality_flags"] = flags
+            summary["temperature_qualification"] = self.temperature_qualification
             field_means = {}
             field_range_ok = True
             for axis in ("x", "z"):
@@ -320,9 +349,6 @@ class CryostatPointSession:
                 summary["field_readback_assessment"] = self.field_policy.assessment(
                     VectorField(field_means["field_x_t"], field_means["field_z_t"]))
             self.event("environment_formal_window", summary)
-            if (self.temperature is not None and
-                    max(values) - min(values) > self.config.temperature_stability.criteria.stable_range):
-                raise AttoDryError("Temperature range exceeded during formal sample")
             if self.magnetic is not None and not field_range_ok:
                 raise AttoDryError("Magnetic range exceeded during formal sample")
             for reading in reads:

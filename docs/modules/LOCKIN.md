@@ -268,8 +268,10 @@ Reserve 分别为 4/24/34 dB，对应的前端 AC 增益约为 50/30/20 dB，可
   已接受配置。
 - `[lockin_sweep].settle_time_constants`（至少 5.0）给出一次 transition 的倍数：
   `settle_interval_s = τslow × settle_time_constants`。设定、频率、谐波或量程实际改变后，
-  程序使用两个 interval 与中间状态检查；0.3 s/5.0 时为 3.0 s，1.0 s/5.0 时为 10.0 s。
-- 每个实际 SINE OUT (`SLVL`) 幅值改变也使用两个 interval，随后读回输出并采集 h1。
+  正常采集在最终设置后补足一个 interval；0.3 s/5.0 时为 1.5 s，1.0 s/5.0 时为 5.0 s。
+  归档 `final-settings-one-settle-v1`，各角色保留最后变化和截止时间，XX/XY共同等待。
+- 实际 SINE OUT (`SLVL`) 幅值变化与 HARM/SENS/Reserve 变化合并到最终截止时间，
+  正常扫描不强制经过保护宽档，qualification 不追加固定等待。
   JSON 记录派生的 `settle_interval_s`、`post_setting_settle_s`、`source_step_settle_s`，
   不修改任何相位设置。
 - `[lockin_sweep].sample_interval_time_constants` 给出同一点重复样本的间隔：

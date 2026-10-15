@@ -23,6 +23,7 @@ from .config import (
     load_config,
 )
 from .lockin_harmonics import HarmonicSensitivitySession
+from .lockin_settling import SETTLING_POLICY
 from .lockin_model_settings import (
     model_name, sensitivity_code_for, sensitivity_full_scale_for,
     time_constant_code_for, reserve_code_for, harmonic_supported, ElectricalSettingCodes,
@@ -1483,7 +1484,7 @@ def _run_frequency_sweep(
     requested_nominal_current_a_rms = frequency_source_v / float(
         excitation_path["nominal_total_resistance_ohm"]
     )
-    source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+    source_step_settle_s = args.settle_s
     records: list[dict[str, object]] = []
     progress_writer = _new_sweep_progress_writer(
         record_directory, settings, scan="frequency", points_total=len(points)
@@ -1557,6 +1558,7 @@ def _run_frequency_sweep(
                 config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
                 overload_policy=config.lockin_sweep.overload_policy,
             )
+            lockin_xx, lockin_xy = harmonic_control.track_pair(lockin_xx, lockin_xy)
             if harmonic_control is not None:
                 harmonic_control.enter(
                     lockin_xx, lockin_xy, harmonic=harmonic_control.initial_harmonics(baseline_hz), settle_s=args.settle_s,
@@ -1570,9 +1572,6 @@ def _run_frequency_sweep(
             )
             if source_write_performed:
                 lockin_xx.set_sine_output(frequency_source_v)
-                time.sleep(source_step_settle_s)
-            else:
-                time.sleep(args.settle_s)
             source_readback_v = lockin_xx.read_sine_output()
             source_readback_safety = _validate_frequency_source_safety(
                 config, source_readback_v
@@ -1614,17 +1613,8 @@ def _run_frequency_sweep(
                     harmonic_control.prepare_frequency(
                         lockin_xx, lockin_xy, target_hz, args.settle_s, point_record)
                     lockin_xx.set_internal_reference_frequency(target_hz)
-                    time.sleep(args.settle_s)
-                    transition, transition_problems = _consume_frequency_transition(
-                        lockin_xx, lockin_xy, harmonic=harmonic_control.current_harmonics
-                    )
-                    point_record["transition_status"] = transition
-                    if transition_problems:
-                        raise Sr830Error(
-                            "Unsafe frequency transition: "
-                            + "; ".join(transition_problems)
-                        )
-                time.sleep(args.settle_s)
+                    window = harmonic_control.open_transition_window(lockin_xx, lockin_xy, point_record)
+                    point_record["transition_status"] = window["status"]
                 xx_readback = lockin_xx.read_reference_frequency()
                 xy_readback = lockin_xy.read_reference_frequency()
                 point_record["frequency_readback_hz"] = {
@@ -1667,6 +1657,7 @@ def _run_frequency_sweep(
                     overload_policy=harmonic_control.overload,
                     on_input_overload=lambda status: harmonic_control.diagnose_overload(
                         lockin_xx, lockin_xy, status, args.settle_s, point_record),
+                    settling=harmonic_control,
                 )
                 _capture_sweep_point(
                     lockin_xx,
@@ -1779,7 +1770,7 @@ def _run_frequency_sweep(
             "slowest_time_constant_s": args.slowest_time_constant_s,
             "settle_interval_s": args.settle_s,
             "post_setting_settle_s": (
-                EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+                args.settle_s
             ),
             "samples_per_point": args.samples_per_point,
             "sample_interval_time_constants": (
@@ -1828,7 +1819,7 @@ def _run_frequency_excitation_sweep(
         _validate_harmonic_detection_frequencies(frequencies, harmonics, config=config, harmonics_by_role=harmonics_by_role)
     baseline_hz = float(settings["frequency_hz"])
     baseline_source_v = _sweep_baseline_source_voltage(settings)
-    source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+    source_step_settle_s = args.settle_s
     frequency_specs = args.frequency_point_specs
     excitation_specs = args.excitation_point_specs
     first_point_spec = _combined_point_spec(
@@ -1906,6 +1897,7 @@ def _run_frequency_excitation_sweep(
                 config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
                 overload_policy=config.lockin_sweep.overload_policy,
             )
+            lockin_xx, lockin_xy = harmonic_control.track_pair(lockin_xx, lockin_xy)
             if harmonic_control is not None:
                 harmonic_control.enter(
                     lockin_xx, lockin_xy, harmonic=harmonic_control.initial_harmonics(baseline_hz), settle_s=args.settle_s,
@@ -1914,7 +1906,8 @@ def _run_frequency_excitation_sweep(
             for frequency_index, target_hz in enumerate(frequencies):
                 if frequency_index > 0:
                     lockin_xx.set_minimum_sine_output()
-                    time.sleep(source_step_settle_s)
+                    if abs(lockin_xx.read_sine_output() - MINIMUM_SINE_OUTPUT_V) > 1e-9:
+                        raise Sr830Error("4 mV before frequency change was not confirmed")
                 frequency_record: dict[str, object] = {
                     "frequency_index": frequency_index,
                     "target_frequency_hz": target_hz,
@@ -1933,17 +1926,8 @@ def _run_frequency_excitation_sweep(
                     harmonic_control.prepare_frequency(
                         lockin_xx, lockin_xy, target_hz, args.settle_s, frequency_record)
                     lockin_xx.set_internal_reference_frequency(target_hz)
-                    time.sleep(args.settle_s)
-                    transition, transition_problems = _consume_frequency_transition(
-                        lockin_xx, lockin_xy, harmonic=harmonic_control.current_harmonics
-                    )
-                    frequency_record["transition_status"] = transition
-                    if transition_problems:
-                        raise Sr830Error(
-                            "Unsafe frequency transition: "
-                            + "; ".join(transition_problems)
-                        )
-                time.sleep(args.settle_s)
+                    window = harmonic_control.open_transition_window(lockin_xx, lockin_xy, frequency_record)
+                    frequency_record["transition_status"] = window["status"]
                 xx_readback = lockin_xx.read_reference_frequency()
                 xy_readback = lockin_xy.read_reference_frequency()
                 frequency_record["frequency_readback_hz"] = {
@@ -2003,9 +1987,6 @@ def _run_frequency_excitation_sweep(
                     frequency_record["point_indices"].append(point_record["point_index"])
                     if wrote_source:
                         lockin_xx.set_sine_output(source_v)
-                        time.sleep(source_step_settle_s)
-                    else:
-                        time.sleep(args.settle_s)
                     output_readback = lockin_xx.read_sine_output()
                     point_record["source_readback_v_rms"] = output_readback
                     source_readback_safety = _validate_excitation_safety(
@@ -2034,6 +2015,7 @@ def _run_frequency_excitation_sweep(
                         overload_policy=harmonic_control.overload,
                         on_input_overload=lambda status: harmonic_control.diagnose_overload(
                             lockin_xx, lockin_xy, status, args.settle_s, point_record),
+                        settling=harmonic_control,
                     )
                     _capture_sweep_point(
                         lockin_xx,
@@ -2145,7 +2127,7 @@ def _run_frequency_excitation_sweep(
             "settle_time_constants": config.lockin_sweep.settle_time_constants,
             "slowest_time_constant_s": args.slowest_time_constant_s,
             "settle_interval_s": args.settle_s,
-            "post_setting_settle_s": EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s,
+            "post_setting_settle_s": args.settle_s,
             "source_step_settle_s": source_step_settle_s,
             "samples_per_point": args.samples_per_point,
             "sample_interval_time_constants": config.lockin_sweep.sample_interval_time_constants,
@@ -2302,7 +2284,7 @@ def _execute_excitation_sweep_on_open_pair(
     harmonics = _requested_sweep_harmonics(args)
     baseline_hz = float(settings["frequency_hz"])
     baseline_source_v = _sweep_baseline_source_voltage(settings)
-    source_step_settle_s = EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+    source_step_settle_s = args.settle_s
     records: list[dict[str, object]] = []
     controller = _pair_controller(lockin_xx, lockin_xy)
     preflight_xx = None
@@ -2368,6 +2350,7 @@ def _execute_excitation_sweep_on_open_pair(
             config.lockin_xx, config.lockin_xy, sensitivity_setup, reserve_setup, harmonics_by_role,
             overload_policy=config.lockin_sweep.overload_policy,
         )
+        lockin_xx, lockin_xy = harmonic_control.track_pair(lockin_xx, lockin_xy)
         if harmonic_control is not None:
             harmonic_control.enter(
                 lockin_xx, lockin_xy, harmonic=harmonic_control.initial_harmonics(baseline_hz), settle_s=args.settle_s,
@@ -2403,9 +2386,6 @@ def _execute_excitation_sweep_on_open_pair(
             records.append(point_record)
             if wrote_setting:
                 lockin_xx.set_sine_output(source_v)
-                time.sleep(source_step_settle_s)
-            else:
-                time.sleep(args.settle_s)
             output_readback = lockin_xx.read_sine_output()
             point_record["source_readback_v_rms"] = output_readback
             source_readback_safety = _validate_excitation_safety(args, (output_readback,))
@@ -2445,6 +2425,7 @@ def _execute_excitation_sweep_on_open_pair(
                 overload_policy=harmonic_control.overload,
                 on_input_overload=lambda status: harmonic_control.diagnose_overload(
                     lockin_xx, lockin_xy, status, args.settle_s, point_record),
+                settling=harmonic_control,
             )
             _capture_sweep_point(
                 lockin_xx,
@@ -2530,7 +2511,7 @@ def _execute_excitation_sweep_on_open_pair(
         "settle_time_constants": config.lockin_sweep.settle_time_constants,
         "slowest_time_constant_s": args.slowest_time_constant_s,
         "settle_interval_s": args.settle_s,
-        "post_setting_settle_s": EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s,
+        "post_setting_settle_s": args.settle_s,
         "source_step_settle_s": source_step_settle_s,
         "samples_per_point": args.samples_per_point,
         "sample_interval_time_constants": config.lockin_sweep.sample_interval_time_constants,
@@ -2608,9 +2589,8 @@ def _measurement_config_snapshot(
         "settle_time_constants": config.lockin_sweep.settle_time_constants,
         "slowest_time_constant_s": args.slowest_time_constant_s,
         "settle_interval_s": args.settle_s,
-        "post_setting_settle_s": (
-            EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
-        ),
+        "post_setting_settle_s": args.settle_s,
+        "settling_policy": SETTLING_POLICY,
         "samples_per_point": args.samples_per_point,
         "sample_interval_time_constants": (
             config.lockin_sweep.sample_interval_time_constants
@@ -2639,7 +2619,7 @@ def _measurement_config_snapshot(
             config.lockin_sweep.frequency_source_voltage_v_rms
         )
         sweep_snapshot["source_step_settle_s"] = (
-            EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+            args.settle_s
         )
         sweep_snapshot["skip_unsupported_harmonics"] = (
             args.skip_unsupported_harmonics
@@ -2649,7 +2629,7 @@ def _measurement_config_snapshot(
             config.lockin_sweep.frequency_source_voltage_v_rms
         )
         sweep_snapshot["source_step_settle_s"] = (
-            EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+            args.settle_s
         )
         sweep_snapshot["traversal"] = (
             "frequency outer loop, ascending excitation inner loop; source returns "
@@ -2660,7 +2640,7 @@ def _measurement_config_snapshot(
         )
     else:
         sweep_snapshot["source_step_settle_s"] = (
-            EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * args.settle_s
+            args.settle_s
         )
     return {
         "schema_version": 14,
@@ -3593,6 +3573,7 @@ def _apply_sweep_segment_ranges(
     harmonic: int | Mapping[str, int] = 1,
     on_input_overload: Callable[[dict[str, object]], None] | None = None,
     overload_policy=None,
+    settling=None,
 ) -> None:
     """Apply an optional fixed-range override at a named range segment.
 
@@ -3650,7 +3631,8 @@ def _apply_sweep_segment_ranges(
             "target_full_scale_v": sensitivity_full_scale_for(role_configs[role], target_code),
         }
         instruments[role].set_sensitivity(target_code)
-    time.sleep(settle_s)
+    if settling is None:
+        time.sleep(settle_s)
     for role, instrument in instruments.items():
         range_record = ranges[role]
         if not isinstance(range_record, dict):
@@ -3672,6 +3654,9 @@ def _apply_sweep_segment_ranges(
             "readback_sensitivity_code": readback,
             "readback_full_scale_v": sensitivity_full_scale_for(role_configs[role], readback),
         }
+    if settling is not None:
+        transition_record["settling_policy"] = SETTLING_POLICY
+        return  # The final HARM/SENS/RMOD batch opens and settles one window.
     transition, problems = _consume_sensitivity_transition(
         lockin_xx,
         lockin_xy,
@@ -3763,6 +3748,7 @@ def _apply_sweep_autorange(
     verify_settings: Callable[[], object] | None = None,
     on_input_overload: Callable[[dict[str, object]], None] | None = None,
     overload_policy=None,
+    settling=None,
 ) -> None:
     """Apply adjacent range changes, repeating widening within one point.
 
@@ -3913,7 +3899,8 @@ def _apply_sweep_autorange(
             )
             instruments[role].set_sensitivity(target_code)
             transitions[-1]["returned"] = True
-        time.sleep(settle_s)
+        if settling is None:
+            time.sleep(settle_s)
         for role, instrument in instruments.items():
             range_record = ranges.get(role)
             if not isinstance(range_record, dict):
@@ -3933,12 +3920,17 @@ def _apply_sweep_autorange(
 
         if verify_settings is not None:
             verify_settings()
-        transition, transition_problems = _consume_sensitivity_transition(
-            lockin_xx,
-            lockin_xy,
-            settle_s=settle_s,
-            harmonic=harmonic,
-        )
+        if settling is None:
+            transition, transition_problems = _consume_sensitivity_transition(
+                lockin_xx, lockin_xy, settle_s=settle_s, harmonic=harmonic)
+        else:
+            settling.ensure_settled(lockin_xx, lockin_xy, settle_s, record)
+            transition, transition_problems = _consume_harmonic_transition(
+                lockin_xx, lockin_xy, harmonic=harmonic)
+            transition["allow_xx_output_overload"] = False
+            transition["allow_output_overload_roles"] = []
+            transition["ignored_record_only_latches"] = [role + ".output_overload"
+                for role, instrument in instruments.items() if model_name(instrument) == "SR830"]
         transition["autorange_actions"] = {
             role: decision.action.value for role, decision in changes.items()
         }
@@ -3954,7 +3946,8 @@ def _apply_sweep_autorange(
             raise Sr830Error(
                 "Unsafe autorange transition: " + "; ".join(transition_problems)
             )
-        time.sleep(settle_s)
+        if settling is None:
+            time.sleep(settle_s)
         if verify_settings is not None:
             verify_settings()
         verification_xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))

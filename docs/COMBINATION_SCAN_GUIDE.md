@@ -67,12 +67,15 @@ segments 或固定模长 angle_segments，
 请在离线预览中确认这种嵌套是否符合实验目的。
 
 温度与磁场只创建一个 attoDRY 连接；所有 active 模块 preflight 通过后才开始设置。
-每个组合条件在全部轴设置完成后重新确认磁场和温度稳定，因此扫场后的温漂不会
-被前一次的温度稳定标记掩盖。温度轴的降温返回也检查最大位移：冷却途中上限为
+组合器在每次进入一个环境轴点时完成该轴的稳定判定，再进入它的内层扫描。
+温度点只等待一次完整 dwell；内层磁场、SMU、激励变化不重复温度判稳。
+温度轴的降温返回也检查最大位移：冷却途中上限为
 `max(起始实测温度, 新目标) + max_overshoot_k`，不允许借此接受仍然过热的平台；
 正式采样恢复新目标的严格 overshoot 上限。无法冷却/稳定会超时并拒绝数据。
-稳定判据沿用 `[temperature_stability]`（含 stable-readback 最小响应）；同一温度
-重复点重新等待 dwell，不要求对同一目标再次产生温度响应。
+入口稳定判据沿用 `[temperature_stability]`（含 stable-readback 最小响应）；
+返回温度点、重复索引、新 repeat 和恢复都重新等待 dwell，不复用上一段资格。
+对同一目标重新进入时不要求新的温度响应。磁场点的实际到点和稳定等待由
+磁场点执行器完成一次，正式窗口仍核验场控、寄存器、读回误差及范围。
 和现有 temperature scan 一样，不叠加单点 `pre_measure_wait_s` 固定等待；
 组合中断统一 abort/cleanup，不采用独立温控的交互 resume。
 
@@ -80,8 +83,19 @@ segments 或固定模长 angle_segments，
 `environment_sample`/`environment_formal_window` 和样本 status 内。
 `actual.temperature_k` 使用这些实测点的带时间权重梯形均值，不用目标值或稳定窗口均值；
 `actual.field_x_t/field_z_t` 为正式窗口读回的算术均值，并保存各原始点及时间戳。
-正式窗口同时检查温漂、磁场误差和范围。它是**同步前后夹取，不是连续监控**，
+正式窗口的普通温度基线漂移、目标偏差及温差范围只记录质量标记，不触发
+重新 dwell 或中止；硬温度界、overshoot、控温/设定值异常和通信仍拒绝。
+`temperature_assessment` 保存各次偏差，`temperature_quality_flags` 保存窗口标记，
+`temperature_qualification` 关联本次轴入口的目标、均值、作用域和 UTC。
+磁场误差及范围继续检查。它是**同步前后夹取，不是连续监控**，
 无法证明阻塞 VISA 调用期间没有短暂异常；不另开 DLL/VISA 后台读取线程。
+
+运行归档保存 `qualification_policy=axis-entry-qualification-temperature-record-v1`。
+Lock-in 使用 `final-settings-one-settle-v1`：直接施加目标 HARM/SENS/Reserve，
+从最后一次相关设置完成时间补足一个 settle。SMU 设置完成后的 delay 可以计入，
+重复 qualification 不再追加固定等待。XX/XY 共用截止时间等待、依次读取；
+`settling_waits` 保存各角色要求、最后变化、已过时间和实际补等秒数。
+旧记录按当时策略解释；新版本不自动迁移旧运行或绕过恢复的源码/配置审核。
 
 集成路径按完整计划使用TOML的标称限值：single X最多3 T、single Z最多9 T，
 vector的全部目标模长最多3 T（包括纯轴端点）。降低的配置上限仍生效；精确float32

@@ -2483,7 +2483,6 @@ class Sr830Tests(unittest.TestCase):
         )
         xy_responses = responses(reference_mode=0)
         xy_responses["SENS?"] = "20\n"
-        xy_responses["LIAS?"] = ["0\n"] * 7 + ["4\n"] + ["0\n"] * 12
         xy_resource = TrackingVisaResource(
             xy_responses,
             shared_frequency=shared_frequency,
@@ -2500,6 +2499,13 @@ class Sr830Tests(unittest.TestCase):
                 self._snapshot(amplitude_v=0.0005, frequency_hz=25),
             ],
         )
+        original_write = xy_resource.write
+        def latch_narrowing(command):
+            result = original_write(command)
+            if command == "SENS 17":
+                xy_resource.responses["LIAS?"] = ["4\n"] + ["0\n"] * 20
+            return result
+        xy_resource.write = latch_narrowing
         output = io.StringIO()
 
         with patch("attodry_control.lockin_test.time.sleep"), redirect_stdout(output):
@@ -2545,7 +2551,9 @@ class Sr830Tests(unittest.TestCase):
             transition["ignored_record_only_latches"],
             ["lockin_xx.output_overload", "lockin_xy.output_overload"],
         )
-        self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 4)
+        self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 0)
+        windows = second["harmonic_autorange"][0]["settling_transition_windows"]
+        self.assertEqual(windows[0]["status"]["lockin_xy"]["lia_status"]["raw"], 4)
         self.assertEqual(transition["problems"], [])
         self.assertEqual(verification["problems"], [])
         self.assertEqual(verification["lockin_xy"]["lia_status"]["raw"], 0)
@@ -2688,14 +2696,19 @@ class Sr830Tests(unittest.TestCase):
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
         )
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "0\n", "0\n", "8\n"] + ["0\n"] * 8
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
         )
+        from attodry_control import lockin_test as daily
+        original_pair_read = daily._read_sweep_pair
+        def unlock_formal(*args, **kwargs):
+            xy_resource.responses["LIAS?"] = ["8\n"] + ["0\n"] * 20
+            return original_pair_read(*args, **kwargs)
         output = io.StringIO()
 
         with (
             patch("attodry_control.lockin_test.time.sleep"),
+            patch("attodry_control.lockin_test._read_sweep_pair", side_effect=unlock_formal),
             redirect_stdout(output),
             self.assertRaisesRegex(Sr830Error, "unlocked"),
         ):
@@ -3042,10 +3055,15 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_failure_restores_first_harmonic(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 8
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
+        original_query = xx_resource.query
+        def overload_h2(command):
+            if command == "LIAS?" and xx_resource.responses["HARM?"].strip() == "2":
+                return "1\n"
+            return original_query(command)
+        xx_resource.query = overload_h2
         xy_resource = TrackingVisaResource(
             responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
         )
@@ -3082,15 +3100,21 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_frequency_sweep_all_harmonics_records_observed_transition_latches(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "18\n"] + ["0\n"] * 11
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "16\n"] + ["0\n"] * 11
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
         )
+        for resource, raw in ((xx_resource, "18\n"), (xy_resource, "16\n")):
+            original_write = resource.write
+            def inject_h2(command, resource=resource, raw=raw, write=original_write):
+                result = write(command)
+                if command == "HARM 2":
+                    resource.responses["LIAS?"] = [raw] + ["0\n"] * 20
+                return result
+            resource.write = inject_h2
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
@@ -3115,11 +3139,8 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(transition["harmonic"], 2)
         self.assertEqual(transition["lockin_xx"]["lia_status"]["raw"], 18)
         self.assertEqual(transition["lockin_xy"]["lia_status"]["raw"], 16)
-        self.assertEqual(
-            transition["problems"],
-            ["lockin_xx filter overload during harmonic transition"],
-        )
-        self.assertTrue(transition["verification_passed"])
+        self.assertFalse(transition["formal_sample"])
+        self.assertEqual(result["points"][0]["samples"][1]["lockin_xx"]["lia_status"]["raw"], 0)
 
     def test_cli_frequency_sweep_separates_transition_latches_from_sample_window(self) -> None:
         shared_frequency = {"hz": 17.777}
@@ -3127,12 +3148,18 @@ class Sr830Tests(unittest.TestCase):
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
         )
         xy_responses = responses(reference_mode=0)
-        xy_responses["LIAS?"] = [
-            "0\n", "0\n", "0\n", "0\n", "26\n", "0\n", "24\n", "0\n", "0\n"
-        ]
         xy_resource = TrackingVisaResource(
             xy_responses, shared_frequency=shared_frequency, name="xy"
         )
+        original_write = xx_resource.write
+        def inject_frequency_latches(command):
+            result = original_write(command)
+            if command == "FREQ 25":
+                xy_resource.responses["LIAS?"] = ["26\n"] + ["0\n"] * 20
+            if command == "SLVL 0.004" and shared_frequency["hz"] == 25:
+                xy_resource.responses["LIAS?"] = ["24\n"] + ["0\n"] * 20
+            return result
+        xx_resource.write = inject_frequency_latches
         manager = FakeResourceManager({"XX": xx_resource, "XY": xy_resource})
         output = io.StringIO()
 
@@ -3612,7 +3639,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertAlmostEqual(result["points"][0]["source_readback_v_rms"], 0.2)
         self.assertIn("SLVL 0.004", xx_resource.writes)
 
-    def test_cli_excitation_sweep_derives_interval_and_waits_two_after_source_step(self) -> None:
+    def test_cli_excitation_sweep_derives_single_final_setting_interval(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_resource = TrackingVisaResource(
             responses(reference_mode=1), shared_frequency=shared_frequency, name="xx"
@@ -3643,10 +3670,10 @@ class Sr830Tests(unittest.TestCase):
                 ),
             )
 
-        self.assertIn(3.0, [call.args[0] for call in sleeper.call_args_list])
+        self.assertIn(1.5, [call.args[0] for call in sleeper.call_args_list])
         result = json.loads(output.getvalue())
-        self.assertEqual(result["source_step_settle_s"], 3.0)
-        self.assertEqual(result["points"][1]["source_step_settle_s"], 3.0)
+        self.assertEqual(result["source_step_settle_s"], 1.5)
+        self.assertEqual(result["points"][1]["source_step_settle_s"], 1.5)
 
     def test_cli_sweep_derives_time_constant_settle_and_sample_intervals(self) -> None:
         config_path = self._hardware_config()
@@ -3686,10 +3713,9 @@ class Sr830Tests(unittest.TestCase):
         result = json.loads(output.getvalue())
         waits = [call.args[0] for call in sleeper.call_args_list]
         self.assertTrue(any(abs(wait - 1.8) < 1e-9 for wait in waits))
-        self.assertTrue(any(abs(wait - 3.6) < 1e-9 for wait in waits))
         self.assertEqual(result["settle_time_constants"], 6.0)
         self.assertAlmostEqual(result["settle_interval_s"], 1.8)
-        self.assertAlmostEqual(result["post_setting_settle_s"], 3.6)
+        self.assertAlmostEqual(result["post_setting_settle_s"], 1.8)
         self.assertEqual(result["sample_interval_time_constants"], 1.0)
         self.assertEqual(result["sample_interval_s"], 0.3)
         self.assertAlmostEqual(
@@ -3734,7 +3760,7 @@ class Sr830Tests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(result["slowest_time_constant_s"], 1.0)
         self.assertEqual(result["settle_interval_s"], 5.0)
-        self.assertEqual(result["post_setting_settle_s"], 10.0)
+        self.assertEqual(result["post_setting_settle_s"], 5.0)
         self.assertEqual(result["sample_interval_s"], 1.0)
         self.assertGreaterEqual(waits.count(1.0), 2)
         self.assertIn(5.0, waits)
@@ -3884,10 +3910,20 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_excitation_sweep_clears_range_restoration_overload_before_final_status(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "0\n", "4\n", "0\n"]
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
+        original_write = xx_resource.write
+        was_high = [False]
+        def overload_cleanup_range(command):
+            if float(xx_resource.responses["SLVL?"]) > .004:
+                was_high[0] = True
+            result = original_write(command)
+            if command.startswith("SENS ") and was_high[0] and float(xx_resource.responses["SLVL?"]) == .004:
+                xx_resource.responses["LIAS?"] = ["4\n"] + ["0\n"] * 20
+                was_high[0] = False
+            return result
+        xx_resource.write = overload_cleanup_range
         xy_resource = TrackingVisaResource(
             responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
         )
@@ -3938,10 +3974,15 @@ class Sr830Tests(unittest.TestCase):
     def test_cli_excitation_overload_keeps_rejected_sample_and_cleans_up(self) -> None:
         shared_frequency = {"hz": 17.777}
         xx_responses = responses(reference_mode=1)
-        xx_responses["LIAS?"] = ["0\n", "0\n", "0\n", "0\n", "1\n", "1\n"] + ["0\n"] * 20
         xx_resource = TrackingVisaResource(
             xx_responses, shared_frequency=shared_frequency, name="xx"
         )
+        original_query = xx_resource.query
+        def overload_high_source(command):
+            if command == "LIAS?" and float(xx_resource.responses["SLVL?"]) > .004:
+                return "1\n"
+            return original_query(command)
+        xx_resource.query = overload_high_source
         xy_resource = TrackingVisaResource(
             responses(reference_mode=0), shared_frequency=shared_frequency, name="xy"
         )
