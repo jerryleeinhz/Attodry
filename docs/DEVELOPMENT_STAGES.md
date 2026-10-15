@@ -2,6 +2,75 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## CLD1010LP PM100D current-mode scan - first illuminated run
+
+Status: 50 uW qualified; 100-200 uW not reachable inside the 30 mA limit
+(2026-10-15). Run rejected as a whole; cleanup fully confirmed.
+
+- Start at 10 mA gave 61 nW (below the 100 nW minimum signal): stopped with no
+  current increase. Rerun from 20 mA with the same limits (step <= 0.6 mA).
+- Measured light-current curve on the PM100D route (730 nm): 0.54 uW at 20 mA,
+  2.9 uW at 25.4 mA, 5.1 uW at 26.0 mA, 16.7 uW at 26.6 mA, 29.2 uW at 27.2 mA,
+  44.2 uW at 27.8 mA, 56.9 uW at 28.4 mA, 67.8 uW at 29.0 mA. Threshold is near
+  26 mA; slope above it is about 21 uW/mA, so 100/150/200 uW would need roughly
+  30.5/33/35 mA.
+- 50 uW qualified at 28.10 mA: 10 formal readings, mean 50.563 uW, p2p 2.29 uW.
+  It is not accepted because the run did not complete.
+- At the 29.6 mA step the controller's own LD current-limit detection tripped:
+  measured LD current 0.026 mA, output read back off, and `STAT:MEAS:COND`
+  became 8200 (bit 3, "LD current limit reached", per DOC-104772). The gate
+  rejected the changed pattern. Bit 3 was still set after LD off and 0 A.
+- Cleanup: LD off, setpoint 0 A, measured 0 A, TEC left on at 26.000 C, CLD and
+  PM closed, no errors. Further LD enables are blocked until bit 3 clears.
+
+## CLD1010LP operator-acknowledged connection diagnostics and output control
+
+Status: real LD output control verified at 10/15/20 mA (2026-10-15); PM100D
+feedback (50/100/150/200 uW) prepared and fake-tested, pending the operator's
+optical route change.
+
+- The persistent `OUTP1/OUTP2:PROT:CONN:TRIP? = 1/1` and `STAT:MEAS:COND? = 8192`
+  readings were a software gate in `require_connection_diagnostics`; the
+  instrument never refused an LD-enable command because none had been sent.
+- The operator explicitly authorized LD enable for this device with exactly that
+  pattern. New optional `[cld1010] acknowledged_connection_diagnostics = [LD, TEC,
+  MEAS]` plus a required `acknowledgement_note` allows only the identical reading;
+  any other asserted indication still blocks. Default behaviour is unchanged.
+  Keylock/interlock, temperature protection, TEC stability, current limit,
+  readback and cleanup rules are untouched. 2 new VISA fake tests; 657/657 offline.
+- Single-use output-control entry (CLD only, no PM/electrical factory) ran from a
+  `14a0253` clone with the uncommitted CLD change overlaid and hash-pinned:
+  measured LD current 10.006/15.032/20.035 mA at 1.820/1.887/1.944 V, TEC
+  26.000 C. Diagnostics stayed 1/1/8192 before, during and after emission.
+  Cleanup confirmed LD off, setpoint 0 A, measured 0 A and the original TEC-on
+  state. The pre-test setpoint of 30 mA (earlier manual use) was not restored.
+- No optical power was measured; the PM100D was still on the NKT route.
+
+## NKT constant-power feedback - first real target scan
+
+Status: real constant-power PM100D feedback accepted for 50-200 uW at 633 nm
+(2026-10-15); one VARIA band, sample blocked, PM100D-only route.
+
+- User-authorized single-use NKT/PM100D entry (ignored, no electrical, PEM,
+  cryostat or lock-in factory) ran from a fresh clone pinned at `14a0253`; a
+  68-file SHA-256 manifest covered entry, config, interpreter, NKTPDLL and every
+  package source file. Target `lyr`: 655/655 suite and 7/7 entry fake tests.
+- The user approved running alongside an unrelated, already running Integration
+  acquisition with the sample blocked; that process was identity-checked and
+  never contacted.
+- The source was already in constant-power mode (Setup 1, power setpoint 6%), so
+  `apply_control` wrote nothing to Setup. VARIA moved once to 628/638 nm; ND and
+  pulse picker were not written. 76 SDK writes, none failed.
+- Targets 50/100/150/200 uW, +/-5%, 2 s window, then 10 formal 1 s readings:
+  formal means 49.951/101.709/150.418/201.489 uW (p2p 0.14/1.01/0.36/1.26 uW) at
+  setpoints 11.9/24.1/35.9/48.6% after 2/4/6/9 capped steps. All accepted.
+- Response was close to linear, about 4.1 uW per setpoint percent on this route;
+  the 6% start read 24.9 -> 24.6 uW over three minutes. With every point restarting
+  at 6% and a 5% step cap, far targets needed many steps (whole run 3 min 11 s).
+- Cleanup: emission off confirmed (state 0), NKT port and PM100D closed, no
+  cleanup or audit errors. The source remains in constant-power mode with power
+  setpoint 48.6% and emission off.
+
 ## NKT constant-power feedback actuator
 
 Status: offline complete (2026-10-15). No NKT hardware was connected; real

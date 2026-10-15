@@ -4,6 +4,22 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+CLD1010LP (2026-10-15): the persistent CONN=1/1, MEAS=8192 readings were a
+software gate, not an instrument refusal. With the operator's explicit
+acknowledgment (`acknowledged_connection_diagnostics`, exact pattern only) the LD
+was driven at 10/15/20 mA and in a PM100D current-mode scan. Threshold is near
+26 mA and slope about 21 uW/mA; 50 uW qualified at 28.1 mA, but the controller's
+own LD current-limit detection tripped at 29.6 mA (MEAS bit 3), so 100-200 uW
+need a higher, datasheet-confirmed current limit. Bit 3 stayed set after cleanup
+and blocks the next LD enable until it clears. Details in
+`docs/DEVELOPMENT_STAGES.md`.
+
+NKT constant-power real scan (2026-10-15): accepted 50/100/150/200 uW at
+633 nm / 10 nm with PM100D feedback in constant-power mode (formal means
+49.95/101.71/150.42/201.49 uW; setpoints 11.9-48.6%). Emission off and both
+instruments closed afterwards; the source is left in constant-power mode at a
+48.6% setpoint. Details in `docs/DEVELOPMENT_STAGES.md`.
+
 NKT constant-power feedback (2026-10-15, offline complete): PM100D feedback can
 now drive the SuperK power setpoint (`actuator = "source_power"`, proportional
 step capped by `source_power_step_pct`) with `[nkt_source] control = "power"`.
