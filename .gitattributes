@@ -2,3 +2,6 @@
 src/attodry_control/photonic_smu/three_smu.py text eol=lf
 src/attodry_control/photonic_smu/three_smu_config.py text eol=lf
 src/attodry_control/photonic_smu/keithley2400.py text eol=lf
+
+# Shell scripts must keep LF so Git Bash can run them after a Windows checkout.
+*.sh text eol=lf
