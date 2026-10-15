@@ -10,6 +10,7 @@ import time
 
 from .lockin_backend import create_lockin_backend, capabilities_for
 from .lockin_overload import PhotonicsStatusPolicy, overload_summary
+from .lockin_settling import LockinSettling
 from .models import LockinRole
 from .reference_transients import ReferenceTransientError
 
@@ -62,6 +63,8 @@ class PhotonicsLockinPointSession:
         self.manager_factory = manager_factory
         self.sleep = time.sleep if sleep is None else sleep
         self.clock = time.monotonic if clock is None else clock
+        # Keep guarded recovery sleeps and the session's monotonic clock.
+        self.settling = LockinSettling(monotonic=self.clock, sleep=self._wait)
         self.grid = tuple(PhotonicsLockinGridPoint(v, config.reference_expected_hz, i,
                           pem_reference_harmonic=config.pem_reference_harmonic)
                           for i, v in enumerate(config.excitation_points_v_rms))
@@ -90,6 +93,28 @@ class PhotonicsLockinPointSession:
         self.reference_recovery_guard = None
         self._reference_operation_context = None
         self._configuration_settings_applied = False
+
+    def disturbed(self, reason, *, roles=("lockin_xx", "lockin_xy")):
+        """Record a successful setting or a completed external signal change."""
+        self.settling.changed(reason, roles)
+        self.event("lockin_settling_changed", dict(self.settling.changes[-1]))
+
+    def _wait_settled(self, stage):
+        record = {"stage": stage, "changes": list(self.settling.pending),
+                  "harmonics_by_role": dict(self.current_harmonics), "sample_index": self.sample_count}
+        try:
+            self.settling.wait({"lockin_" + cfg.role.value:
+                cfg.time_constant_s * self.config.settle_time_constants for cfg in self.roles}, record)
+            self.settling.window_generation = len(self.settling.changes)
+        except BaseException as error:
+            # Preserve the primary timeout/interrupt even when its audit also
+            # fails. An incomplete wait is never certified by a later cleanup.
+            try:
+                self.event("lockin_settling_wait", record)
+            except BaseException as audit_error:
+                error.add_note(f"Settling audit failed: {audit_error}")
+            raise
+        self.event("lockin_settling_wait", record)
 
     def _fail(self, error):
         # A typed reference transient reaches the operation boundary before
@@ -234,6 +259,7 @@ class PhotonicsLockinPointSession:
             if not stable:
                 settle_until = None
             elif consecutive >= self.config.reference_recovery_consecutive_good and settle_until is None:
+                self.disturbed("reference_recovery_stable")
                 settle_until = self.clock() + self.config.settle_s
             interval = max(0.0, 1.0 - (self.clock() - poll_started))
             if interval:
@@ -385,11 +411,18 @@ class PhotonicsLockinPointSession:
             self._verify_reference_output()
         if self._reference_operation_context is not None:
             self._reference_operation_context["fully_recovered"] = False
-        return self.pair[0].set_source_amplitude(value,
+        start = len(self.pair[0].audit)
+        result = self.pair[0].set_source_amplitude(value,
             minimum_v=self.config.minimum_source_voltage_v,
             maximum_v=self.config.maximum_source_voltage_v,
             expected_dc_mode=self.config.source.dc_mode,
             authorize_writes=True, protect=protect)
+        if any(io.operation == "write" for io in self.pair[0].audit[start:]):
+            # Do not let a new event failure interrupt protection verification
+            # during cleanup. The next wait records these changes; source I/O
+            # and cleanup already have their own unconditional audit handling.
+            self.settling.changed("xx.source_protection" if protect else "xx.source_amplitude")
+        return result
 
     def _verify_reference_output(self):
         """Preserve XY SINE amplitude/DC; it is a clock, never sample excitation."""
@@ -608,6 +641,9 @@ class PhotonicsLockinPointSession:
                     self._check_frequencies(frequencies)
                     self.event("lockin_reference_wait_finished", {**outcome,
                         "elapsed_s": self.clock() - started, "reference_hz": frequencies})
+            # record_continue can finish this wait unlocked; status and validity
+            # remain separate from the detector's settling deadline.
+            self.disturbed("external_reference_wait_finished")
             self.reference_wait_pending = False
         except BaseException as error:
             self._fail(error)
@@ -815,8 +851,11 @@ class PhotonicsLockinPointSession:
 
     def _transition(self, *, allow_reference_unlock=False):
         # Transition samples retain the old latch window and are never accepted.
-        before = self._pair_samples(require_clean=False, allow_reference_unlock=allow_reference_unlock)
-        self._wait(self.config.settle_s)
+        # A no-op has no owned settings transition to excuse a fresh range/TC
+        # event. This is especially important when no further sleep is needed.
+        before = self._pair_samples(require_clean=not bool(self.settling.pending),
+                                    allow_reference_unlock=allow_reference_unlock)
+        self._wait_settled("transition")
         settled = self._pair_samples(require_clean=True)
         self._verify_settings()
         self._coordinates()
@@ -839,6 +878,7 @@ class PhotonicsLockinPointSession:
                         sync_output_mode=cfg.sync_output_mode, reference_source=cfg.reference_source,
                         authorize_writes=True)
                     device.configure_fixed_measurement(cfg, authorize_writes=True)
+                    self.disturbed("measurement_configuration", roles=("lockin_" + cfg.role.value,))
                 self._configuration_settings_applied = True
                 if self.config.reference_lock_timeout_s == 0:
                     # With the legacy zero wait, consume the owned settings
@@ -865,6 +905,7 @@ class PhotonicsLockinPointSession:
                 if self.current_harmonics[cfg.role.value] != cfg.harmonics[0]:
                     device.set_harmonic(cfg.harmonics[0], authorize_writes=True)
                     self.current_harmonics[cfg.role.value] = cfg.harmonics[0]
+                    self.disturbed("harmonic", roles=("lockin_" + cfg.role.value,))
             self._transition(allow_reference_unlock=True)
             self.configured = True
             self.event("lockin_configured", {"reference_topology": self.config.reference_topology,
@@ -924,7 +965,8 @@ class PhotonicsLockinPointSession:
         if self.point_record is None:
             raise RuntimeError("A source point must be selected before qualification.")
         try:
-            self._wait(self.config.settle_s)
+            self.wait_for_reference_lock()
+            self._wait_settled("qualification")
             self._verify_settings()
             actual, raw = self._coordinates()
             self._pair_samples(require_clean=True)
@@ -964,10 +1006,12 @@ class PhotonicsLockinPointSession:
                 changed = any(self.current_harmonics[role] != harmonic for role, harmonic in selected.items())
                 if changed:
                     for cfg, device in zip(self.roles, self.pair):
-                        if cfg.role.value in selected:
+                        if (cfg.role.value in selected
+                                and self.current_harmonics[cfg.role.value] != selected[cfg.role.value]):
                             harmonic = selected[cfg.role.value]
                             device.set_harmonic(harmonic, authorize_writes=True)
                             self.current_harmonics[cfg.role.value] = harmonic
+                            self.disturbed("harmonic", roles=("lockin_" + cfg.role.value,))
                     bracket["transition"], bracket["settled"] = self._transition(allow_reference_unlock=True)
                     candidate["bracket_samples"].update(
                         {stage: _plain(bracket[stage]) for stage in ("transition", "settled")})
@@ -976,6 +1020,7 @@ class PhotonicsLockinPointSession:
                 actual, coordinate_before = self._coordinates()
                 candidate["coordinates_before"] = _plain(coordinate_before)
                 before = None if measurement_context is None else measurement_context("before", None, self.sample_count)
+                self._wait_settled("formal_sample")
                 pair = self._pair_samples(require_clean=True)
                 candidate["samples"] = _plain(pair)
                 after = None if measurement_context is None else measurement_context("after", None, self.sample_count)

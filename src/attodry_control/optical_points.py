@@ -99,11 +99,13 @@ class OpticalPointSession:
     """
 
     def __init__(self, config, event_sink=None, *, backend_factory=None,
-                 pem_factory=None, meter_factory=None, clock=time.monotonic, sleep=time.sleep):
+                 pem_factory=None, meter_factory=None, clock=time.monotonic, sleep=time.sleep,
+                 on_settings_applied=None):
         config.validate()
         self.config, self.event_sink = config, event_sink
         self.backend_factory, self.pem_factory, self.meter_factory = backend_factory, pem_factory, meter_factory
         self.clock, self.sleep = clock, sleep
+        self.on_settings_applied = on_settings_applied
         self.backend = self.pem = self.meter = self.engine = None
         self.opened = self.configured = self.qualified = self.sample_active = False
         self._opening_attempted = False
@@ -323,6 +325,10 @@ class OpticalPointSession:
             self.point, result, _ = self.engine._stabilize(
                 self.row, self.point, self.wavelength, self.deadline, self.feedback)
             self.row["feedback_result"] = result
+        if self.on_settings_applied is not None:
+            # Only time after the final tuning operation can settle the signal.
+            # The subsequent guarded optical dwell can overlap detector settling.
+            self.on_settings_applied()
         # Keep the tuned settings throughout dwell and acquisition. The selected
         # policy decides whether target drift is fatal or informational.
         until = self.clock() + self.config.nkt.dwell_s

@@ -56,6 +56,10 @@ class CryostatPointSession:
         self.window = None
         self.baseline_temperature = None
         self.temperature_ceiling = None
+        self.temperature_qualification = None
+        self.temperature_entry = 0
+        self.field_qualification = None
+        self.field_entry = 0
         self.recovery_action = None
         self.recovery_scan_limits_violated = False
         self.strict_resultant = getattr(config, "strict_resultant", False)
@@ -166,6 +170,7 @@ class CryostatPointSession:
             raise AttoDryError("Cannot resume point writes after cryostat cleanup")
         if module == "magnetic":
             target = VectorField(point.values["field_x_t"], point.values["field_z_t"])
+            self.field_qualification = None
             self.touched.add(module)  # Includes interrupted/uncertain command attempts.
             result = execute_field_target(
                 self.driver, target, self.magnetic.run.max_step_t,
@@ -173,6 +178,10 @@ class CryostatPointSession:
                 field_readback_policy=self.field_policy,
                 on_event=lambda payload: self.event("magnetic_point_event", payload), **self.clock)
             self.field_target = float32_field(target)
+            self.field_entry += 1
+            self.field_qualification = {"field_entry": self.field_entry,
+                "target": asdict(self.field_target), "qualified_at_utc": utc_now(),
+                "policy": "arrival_and_dwell_in_execute_field_target"}
             return {"result": asdict(result), "segment": point.segment,
                     "direction": point.direction}
         target = point.values["temperature_k"]
@@ -195,20 +204,26 @@ class CryostatPointSession:
         state = self.driver.set_temperature_and_enable(target, **self.clock)
         self.temperature_target = target
         self.temperature_changed = True
+        self.temperature_qualification = None
+        self.baseline_temperature = None
+        self.temperature_entry += 1
         self.validate_state(state)
         self.event("temperature_command_confirmed", {"target_k": target, "state": asdict(state)})
         return {"state": asdict(state)}
 
-    def qualify(self):
-        if self.field_target is not None:
-            self.driver.wait_for_field(self.field_target, **self.clock)
-        if self.temperature_target is not None:
-            # Always requalify AFTER every axis has been applied, including B
-            # changes and inner-axis resets. A duplicate T point needs dwell,
-            # but must not demand a new thermal response to the same target.
+    def qualify(self, modules=None, scope=None):
+        # The magnetic executor already owns arrival and a complete stability
+        # window. Revisit/repeat applications execute it again; never cache by value.
+        modules = ("temperature", "magnetic") if modules is None else modules
+        if ("magnetic" in modules and self.field_target is not None
+                and self.field_qualification is None):
+            raise AttoDryError("Magnetic axis has no completed qualification")
+        if ("temperature" in modules and self.temperature_target is not None
+                and self.temperature_qualification is None):
             samples = []
             self.event("temperature_qualification_started", {
-                "target_k": self.temperature_target, "after_all_axis_settings": True})
+                "target_k": self.temperature_target, "axis_scope": scope,
+                "temperature_entry": self.temperature_entry, "policy": "fresh_dwell_per_axis_entry"})
             self.driver.wait_for_temperature(
                 self.temperature_target,
                 max_overshoot_k=(self.temperature_ceiling - self.temperature_target
@@ -222,10 +237,16 @@ class CryostatPointSession:
             values = [value for elapsed, value in samples if elapsed >= cutoff]
             self.baseline_temperature = sum(values) / len(values)
             self.temperature_changed = False
-            self.event("temperature_qualification_completed", {
+            qualification = {
                 "target_k": self.temperature_target, "stable_mean_k": self.baseline_temperature,
-                "samples": samples})
+                "samples": samples, "axis_scope": scope, "temperature_entry": self.temperature_entry,
+                "qualified_at_utc": utc_now(), "policy": "fresh_dwell_per_axis_entry"}
+            self.event("temperature_qualification_completed", qualification)
+            self.temperature_qualification = {k: v for k, v in qualification.items() if k != "samples"}
         self.capture("qualification")
+        return {"ready": True, "axis_scope": scope,
+                "temperature_qualification": self.temperature_qualification,
+                "field_qualification": self.field_qualification}
 
     def capture(self, stage, harmonic=None, sample_index=None):
         state = self.driver.read_state()
@@ -234,6 +255,19 @@ class CryostatPointSession:
                   "state": asdict(state)}
         if self.field_policy is not None:
             record["field_readback_assessment"] = self.field_policy.assessment(state.field)
+        record["field_qualification"] = self.field_qualification
+        if self.temperature_target is not None and self.baseline_temperature is not None:
+            criteria = self.config.temperature_stability.criteria
+            drift = state.sample_temperature_k - self.baseline_temperature
+            target_error = state.sample_temperature_k - self.temperature_target
+            flags = []
+            if abs(drift) > criteria.stable_range:
+                flags.append("temperature_baseline_drift")
+            if (self.config.temperature_stability.acceptance_mode is TemperatureStabilityMode.TARGET
+                    and abs(target_error) > criteria.tolerance):
+                flags.append("temperature_outside_target_tolerance")
+            record["temperature_assessment"] = {"baseline_drift_k": drift, "target_error_k": target_error,
+                "quality_flags": flags, "policy": "strict_checks", "qualification": self.temperature_qualification}
         self.event("environment_sample", record)
         if self.window is not None:
             self.window.append(record)

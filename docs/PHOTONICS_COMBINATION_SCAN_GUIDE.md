@@ -1,5 +1,17 @@
 # Photonics / nonlinear Hall combination scan
 
+## 组合扫描等待优化（2026-10-15）
+
+PEM 外参考点引擎按每路最后相关变化的单调时间，只补足
+`time_constant_s * settle_time_constants` 的剩余等待。实际激励/谐波变化、
+光学调功结束和每次 gate 变化会重新计时，后续光学 dwell、SMU delay 和检查时间
+可参与抵扣。资格检查、正式读回、恢复超时和清理继续执行。
+温度每次进入轴点完成一次判稳；磁场复用本次执行器已完成的实际到场及稳定窗口，
+内层条件保留新鲜读回和严格异常检查。无需新增 TOML 参数。
+适用范围、真实耗时及验证边界见 [耗时优化记录](PHOTONICS_SPEED_OPTIMIZATION.md)。
+实现阶段已完成本地离线验证；后续授权部署和目标机离线验收状态见
+`PROJECT_HANDOFF.md`。实机速度对照仍待操作者确认。
+
 ## 持续照光 gate 扫描与直接跳转（2026-10-06）
 
 用户批准的模式适用于 `order=["optical","smu","lockin"]`、PEM 外参考、

@@ -1,5 +1,37 @@
 # Development stages
 
+## Photonics settling and axis qualification optimization (2026-10-15)
+
+- Implements the operator-approved timing plan on
+  `integration-photonics-nonlinear-hall`, reusing the public `accacb0` detector
+  deadline helper instead of duplicating its algorithm. Physical time constants,
+  configured settle multipliers, sample intervals and safety limits remain intact.
+- Adds conservative signal-change notifications after successful optical tuning,
+  SMU settings and environment qualification. Optical dwell, SMU delay and fresh
+  verification can overlap detector settling; time before the latest change cannot.
+  Only changed harmonic roles are set. Successful no-op source readbacks reuse
+  settling, while every real source write resets both detectors.
+- Moves temperature qualification to each axis entry and removes magnetic leaf
+  re-dwell already covered by the field executor. Retains intermediate waypoint
+  waits, revisits/repeats, strict drift/control/frequency checks and actual-zero
+  cleanup. No hardware resume or expansion of illuminated axis support is added.
+- Records qualification scopes and detector waiting provenance; failures remain
+  raw rejected data. New fake tests cover remaining-time budgets, distinct detector
+  constants, formal-entry enforcement, recovery, interrupted protection, optical
+  and gate overlap, duplicate magnetic entries and temperature repeat/reset.
+- Offline A/B keeps 6 accepted conditions, 18 clean samples, identical VISA counts
+  and clean final protection for both versions. Fake-clock budget falls 13.3% for
+  h1 and 4.0% for h1/h2 in the selected synthetic plan. Real benefit is unmeasured.
+  See `PHOTONICS_SPEED_OPTIMIZATION.md` and ignored timing-audit receipts.
+- Final photonics verification passes 294 tests; the Python 3.12 core set passes
+  64. All initial full-suite dependency/loopback errors and the repaired float
+  assertion are resolved by targeted reruns; analysis/environment rerun passes
+  209 tests with no skips. The 1,560-test initial failure log is retained.
+- Implementation and tests were local only. The operator subsequently authorized
+  source publication and LK_setup deployment on 2026-10-15; delivery receipts are
+  recorded separately. Active scans retain their files and ownership, and real
+  comparison still waits for user confirmation.
+
 ## Consolidated photonics delivery and portable plotting (2026-10-09)
 
 - Packages the previously approved station photonics source, tests and guides

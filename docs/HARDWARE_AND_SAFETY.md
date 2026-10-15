@@ -1,5 +1,25 @@
 # Hardware and safety guide
 
+## Photonics timing optimization boundary (2026-10-15)
+
+The approved offline optimization reuses per-role monotonic settling deadlines.
+Actual source/harmonic or sample-condition changes restart the relevant deadline;
+only elapsed time after that change can count. Formal entry checks the complete
+configured TC-times-multiplier duration even if qualification was skipped.
+Optical tuning finishes before its signal-change notification; SMU settings
+finish before their notification. Existing guarded optical dwell and SMU delay
+can then overlap detector settling. Reference recovery retains its shared deadline,
+consecutive-good requirement, complete filter dwell and optical guard.
+
+Temperature is qualified once per axis entry; magnetic execution already owns
+arrival/dwell and its safety waypoints. Fresh formal readbacks and existing hard
+temperature/field/control/communication checks remain. Duplicate/revisited/repeated
+entries do not inherit old qualification. Actual-zero cleanup is unchanged.
+This implementation is not real commissioning or permission to alter an active
+scan. The operator separately authorized source publication and LK_setup deployment
+on 2026-10-15. Real A/B still waits for confirmation; deployment must preserve any
+active acquisition owner and local configuration.
+
 ## User-approved continuous illumination and gate transitions (2026-10-06)
 
 The operator approves optical qualification before a gate loop and small-step gate

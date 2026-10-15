@@ -119,6 +119,30 @@ class ContinuousGateCombinationTests(unittest.TestCase):
             return [json.loads(r[0]) for r in connection.execute(
                 "SELECT payload_json FROM combination_samples ORDER BY rowid")]
 
+    def test_optical_dwell_and_gate_delay_overlap_detector_wait_without_reusing_old_deadline(self):
+        case = self.make()
+        result = self.execute(case, "settling")
+        self.assertEqual(result["status"], "completed", result)
+        events = case.events()
+        changes = [p for k, p in events if k == "lockin_settling_changed"]
+        self.assertEqual(sum(p["reason"] == "optical.tuning_completed" for p in changes), 2)
+        self.assertEqual(sum(p["reason"] == "smu.settings_applied" for p in changes), 6)
+        qualification = [p for k, p in events
+                         if k == "lockin_settling_wait" and p["stage"] == "qualification"]
+        optical_waits = [p["settling_waits"][0] for p in qualification
+                         if any(c["reason"] == "optical.tuning_completed" for c in p["changes"])]
+        gate_waits = [p["settling_waits"][0] for p in qualification
+                      if any(c["reason"] == "smu.settings_applied" for c in p["changes"])]
+        self.assertEqual(len(optical_waits), 2)
+        self.assertEqual(len(gate_waits), 6)
+        for wait in (*optical_waits, *gate_waits):
+            self.assertTrue(wait["completed"])
+            self.assertGreater(wait["already_elapsed_s_by_role"]["lockin_xx"], 0)
+            self.assertLess(wait["sleep_requested_s"], max(wait["required_s_by_role"].values()))
+            self.assertGreaterEqual(wait["finished_monotonic_s"] + 1e-9,
+                                    max(wait["deadline_monotonic_s_by_role"].values()))
+        self.assertTrue(result["cleanup"]["clean"])
+
     def assert_failed_raw_and_off_first(self, case, result, *, status="failed",
                                        manual=False, off_confirmed=True):
         self.assertEqual(result["status"], status, result)

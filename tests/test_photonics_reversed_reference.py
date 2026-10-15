@@ -107,7 +107,9 @@ class ReversedReferenceTests(unittest.TestCase):
         session.sleep = settle
         session.open()
         session.configure()
-        self.assertEqual(waits, [1.0, session.config.settle_s])
+        self.assertEqual(len(waits), 2)
+        self.assertEqual(waits[0], 1.0)
+        self.assertAlmostEqual(waits[1], session.config.settle_s)
         self.assertEqual(xy.responses["HARM?"], "2")
         self.assertFalse(any(cmd.startswith(("SLVL ", "SOFF ", "REFM ")) for cmd in xy.writes))
         self.assertTrue(session.cleanup()["source_protection_verified"])

@@ -120,7 +120,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             AxisPoint({"temperature_k": v}, "main", "ordered") for v in points))
         hardware["temperature"] = asdict(temperature)
         hardware["temperature"].update(effective_interrupt_policy="abort",
-            qualification="fresh_dwell_after_all_axis_settings", pre_measure_wait_s_used=False)
+            qualification="fresh_dwell_per_axis_entry", formal_temperature_policy="strict_checks",
+            pre_measure_wait_s_used=False)
     if "magnetic" in order:
         magnetic = configuration.load_magnetic_field_operation_config(path)
         segments = magnetic.run.segment_plan
@@ -255,6 +256,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                            strict_resultant=photonics or optical is not None)
     snapshot = plan.snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
+                    qualification_policy="axis-entry-strict-environment-v1",
                     lockin_mode=mode,
                     illumination_policy=illumination,
                     hardware=_json(hardware), config_path=str(path),
@@ -266,7 +268,9 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                         "magnetic_failure": "monitored_zero_or_manual_verification"},
                     resume_supported=False)
     if photonics:
+        from .lockin_settling import SETTLING_POLICY
         snapshot.update(hardware_scope="photonics-lockin-v1", reference_topology=topology)
+        snapshot["hardware"]["lockin"]["settling_policy"] = SETTLING_POLICY
         snapshot["cleanup_policy"]["lockin"] = "explicit_source_cleanup_preserve_external_reference"
     if optical is not None:
         snapshot["hardware_scope"] = "photonics-combination-v1"
@@ -364,7 +368,8 @@ class HardwareCombinationStation:
                 "backend_factory": self.optical_backend_factory, "pem_factory": self.pem_factory,
                 "meter_factory": self.meter_factory, "clock": self.monotonic,
                 "sleep": self.sleep}.items() if value is not None}
-            self.optical = OpticalPointSession(self.config.optical, self.events.event, **kwargs)
+            self.optical = OpticalPointSession(self.config.optical, self.events.event,
+                on_settings_applied=self._signal_change_callback("optical.tuning_completed"), **kwargs)
             preflight["optical"] = self.optical.open(authorize_writes=True, confirm_manual_route=True)
         if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
             self.lockin.reference_recovery_guard = self._reference_recovery_guard
@@ -404,11 +409,16 @@ class HardwareCombinationStation:
                 self.lockin.prepare_reference_transition()
             return self.optical.set_point(index)
         if module in {"temperature", "magnetic"}:
-            return self.cryo.apply(module, point)
+            result = self.cryo.apply(module, point)
+            # Magnetic execution already includes the arrival/stability window.
+            if module == "magnetic":
+                self._signal_changed("magnetic.qualified")
+            return result
         if module == "smu":
             self.point = point
             self.smu.set_point({key[:-2]: v for key, v in point.values.items()},
-                               segment=point.segment)
+                               segment=point.segment,
+                               on_settings_applied=self._signal_change_callback("smu.settings_applied"))
             # Actual sensed coordinates are produced only by the formal read.
             return {"requested": point.values}
         if module != "lockin":
@@ -422,6 +432,26 @@ class HardwareCombinationStation:
         if not self._optical_group_ready:
             raise ValueError("A continuous optical group must qualify before gate movement")
         return self.optical.observe_hold(phase="gate_transition")
+
+    def _signal_change_callback(self, reason):
+        # The photonics adapter owns external-reference guarded settling. The
+        # legacy electrical adapter retains its separate acquisition contract.
+        if self.lockin is not None and self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
+            return lambda: self.lockin.disturbed(reason)
+        return None
+
+    def _signal_changed(self, reason):
+        callback = self._signal_change_callback(reason)
+        if callback is not None:
+            callback()
+
+    def qualify_axis(self, module, point, scope):
+        if module in {"temperature", "magnetic"}:
+            result = self.cryo.qualify(modules=(module,), scope=scope)
+            if module == "temperature":
+                self._signal_changed("temperature.qualified")
+            return result
+        return {"ready": True, "axis_scope": scope}
 
     def _apply_continuous_gate(self, module, point):
         if module == "optical":
@@ -459,7 +489,8 @@ class HardwareCombinationStation:
             self._verify_optical_reference()
             self.point = point
             self.smu.set_point({key[:-2]: value for key, value in point.values.items()},
-                segment=point.segment, transition_guard=self._guard_continuous_optical)
+                segment=point.segment, transition_guard=self._guard_continuous_optical,
+                on_settings_applied=self._signal_change_callback("smu.settings_applied"))
             self._guard_continuous_optical()
             return {"requested": point.values, "illumination_held": True,
                     "group_sequence": self._optical_group_sequence}

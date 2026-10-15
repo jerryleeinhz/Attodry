@@ -39,6 +39,28 @@ class OpticalPointSessionTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(len(cfg.points), len(cfg.nkt.points))
 
+    def test_settings_callback_only_runs_after_new_tuning_before_dwell(self):
+        session, _, _, _, clock = self.make(source_current=True)
+        self.addCleanup(session.close)
+        calls = []
+        session.on_settings_applied = lambda: calls.append((clock(), "feedback_result" in session.row))
+        self.start(session)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][1])
+        self.assertGreaterEqual(clock() - calls[0][0] + 1e-9, session.config.nkt.dwell_s)
+        session.qualify()
+        self.assertEqual(len(calls), 1)
+
+    def test_failed_settings_callback_does_not_certify_light_and_cleanup_remains_available(self):
+        session, backend, _, _, _ = self.make()
+        self.addCleanup(session.close)
+        session.on_settings_applied = Mock(side_effect=OSError("audit failed"))
+        with self.assertRaisesRegex(OSError, "audit failed"):
+            self.start(session)
+        self.assertFalse(session.qualified)
+        self.assertTrue(session.cleanup()["off_confirmed"])
+        self.assertEqual(backend.source["emission_state"], 0)
+
     def test_prepare_leaves_off_until_explicit_qualification_barrier(self):
         session, backend, pem, meter, _ = self.make()
         session.open()

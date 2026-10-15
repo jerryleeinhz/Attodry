@@ -206,11 +206,14 @@ class SimulatedCombinationStation:
         return {"actual": dict(point.values), "simulated": True}
 
     def qualify(self, modules: tuple[str, ...]) -> dict:
-        # Called after *all* changed axes, including a field move, before sampling.
+        # Leaf readiness remains fresh; environmental dwell belongs to axis entry.
         self.operations.append(("qualify", modules))
         return {"ready": True, "simulated": True,
-                "temperature_rechecked": "temperature" in modules,
-                "field_rechecked": "magnetic" in modules}
+                "temperature_rechecked": False, "field_rechecked": False}
+
+    def qualify_axis(self, module, point, scope):
+        self.operations.append(("qualify_axis", module, dict(scope)))
+        return {"ready": True, "simulated": True, "axis_scope": scope}
 
     def read(self, module: str) -> dict:
         self.operations.append(("read", module))
@@ -342,6 +345,14 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                     point = axis.points[condition["axes"][axis.module]["index"]]
                     emit("axis_setting", {"module": axis.module, "requested": point.values})
                     emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
+                    if hasattr(station, "qualify_axis"):
+                        scope = {"repeat_index": condition["repeat_index"],
+                                 "axis_indices": list(indices[1:depth + 2]),
+                                 "condition_id": condition["condition_id"]}
+                        axis_qualification = station.qualify_axis(axis.module, point, scope)
+                        emit("axis_qualification", {"module": axis.module, **axis_qualification})
+                        if axis_qualification.get("ready") is not True:
+                            raise ValueError("Axis did not qualify: " + axis.module)
             qualification = station.qualify(modules)
             emit("condition_qualification", qualification)
             if qualification.get("ready") is not True:

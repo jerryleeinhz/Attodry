@@ -1,8 +1,44 @@
 # Project handoff
 
-Last updated: 2026-10-09
+Last updated: 2026-10-15
 
 ## Current stage
+
+### Photonics settling and axis qualification optimization (2026-10-15)
+
+- Reuses `lockin_settling.py` from published four-module feature `accacb0`.
+  The photonics SR830/SR865A point engine records per-role monotonic deadlines,
+  waits jointly and reads sequentially. Qualification/formal entry only fill
+  remaining configured settling; actual harmonic/source changes reset deadlines.
+  External-reference recovery keeps its shared timeout, status probes and guarded
+  optical waits. No instantaneous or latched status checks are cached away.
+- Optical final tuning and SMU final settings notify the detector before their
+  existing dwell/delay. Temperature axis entries qualify once; magnetic leaves
+  reuse the executor's complete arrival/dwell, including safe waypoint waits.
+  Revisited/duplicate/repeated axis entries qualify again. Fresh formal environment
+  brackets, strict temperature faults, magnetic limits and verified cleanup remain.
+  Hardware resume remains unsupported. Legacy internal-reference electrical and
+  standalone diagnostic acquisition retain their separate engines.
+- Versioned snapshot policies and new settling events preserve requirements,
+  last-change time, elapsed credit, remaining sleep and interrupted-wait evidence.
+  Historical rejected/invalid data and filled local configuration are preserved.
+- Same-fixture offline A/B (2 optical groups x 3 gates x 3 samples, TC 1 s,
+  15 tau) reduces fake-clock budget by 30.26 s: h1 227.75 ->197.49 s (13.3%),
+  h1/h2 752.75 ->722.49 s (4.0%). Both versions retain 18 clean samples, identical
+  VISA call counts and clean cleanup. These are synthetic budgets, not real speed
+  or sample-response measurements; see `PHOTONICS_SPEED_OPTIMIZATION.md`.
+- Local feature/recovery/environment regressions pass with instrument imports
+  and real DLL loading blocked; detailed receipts are ignored under
+  `.test-tmp/timing-audit-20261015`. All changes stay in the local photonics worktree.
+  Final photonics regression passes 294 cases; Python 3.12 core verification
+  passes 64. The complete initial 1,560-case run exposed missing analysis extras,
+  sandbox loopback denial and one exact-float assertion. After isolated dependency
+  setup and assertion repair, all affected/previously skipped modules pass a
+  209-case rerun with no skips. Original failures remain in the receipt directory.
+  LK_setup production files, current instrument owners and running scans were not
+  modified during implementation. The operator then authorized publication and
+  deployment on 2026-10-15; the deployment receipt is recorded separately below.
+  Real A/B remains pending explicit confirmation.
 
 ### Consolidated photonics delivery and portable plotting (2026-10-09)
 

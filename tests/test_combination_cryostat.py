@@ -13,6 +13,7 @@ from attodry_control.combination_hardware import load_hardware_combination, run_
 from attodry_control.combination_store import CombinationStore
 from attodry_control.cryostat_points import CryostatPointSession
 from attodry_control.attodry import AttoDryError, AttoDryTimeout
+from attodry_control.attodry import AttoDryDriver
 from tests.test_attodry import FakeAttoDryDll, StepClock
 from tests import test_combination_hardware as fixtures
 
@@ -90,7 +91,7 @@ class CryostatCombinationTests(unittest.TestCase):
         self.assertEqual(plan["hardware"]["effective_cryostat"]["magnet"]["limits"]["hardware_z_max_t"], 9)
         self.assertEqual(self.dll.events, [])
 
-    def test_ordered_magnetic_duplicates_reversal_and_temperature_requalification(self):
+    def test_ordered_magnetic_duplicates_reversal_and_single_temperature_qualification(self):
         source = self.base.replace('{ bx_t = 0.0, bz_t = 0.0 },',
             '{ bx_t = 0.01, bz_t = 0.0 },\n{ bx_t = 0.01, bz_t = 0.0 },\n{ bx_t = -0.01, bz_t = 0.0 },')
         self.write_config(("temperature", "magnetic", "lockin"), source=source)
@@ -99,7 +100,7 @@ class CryostatCombinationTests(unittest.TestCase):
         rows = load_combination_rows(self.database)
         self.assertEqual([r["requested.field_x_t"] for r in rows], [.01, .01, .01, .01, -.01, -.01])
         events = self.events()
-        self.assertEqual(sum(k == "temperature_qualification_completed" for k, _ in events), 6)
+        self.assertEqual(sum(k == "temperature_qualification_completed" for k, _ in events), 1)
         points = [v for k, v in events if k == "magnetic_point_event" and v.get("event") == "point_completed"]
         self.assertEqual(len(points), 3)
         for row in rows:
@@ -127,6 +128,67 @@ class CryostatCombinationTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed", result)
         rows = load_combination_rows(self.database, run_id="reset")
         self.assertEqual([r["requested.temperature_k"] for r in rows], [2, 2.1] * 3)
+        qualifications = [p for k, p in self.events()
+                          if k == "temperature_qualification_completed" and p.get("axis_scope", {}).get("condition_id")]
+        self.assertEqual(sum(p["temperature_entry"] == 6 for p in qualifications), 1)
+
+    def test_field_dwell_runs_once_per_axis_entry_including_duplicate_values(self):
+        source = self.base.replace('{ bx_t = 0.0, bz_t = 0.0 },',
+            '{ bx_t = 0.01, bz_t = 0.0 },\n{ bx_t = 0.01, bz_t = 0.0 },\n{ bx_t = -0.01, bz_t = 0.0 },')
+        self.write_config(("magnetic", "smu", "lockin"), source=source)
+        calls, qualifying = [], [False]
+        original = AttoDryDriver.wait_for_field
+        original_qualify = CryostatPointSession.qualify
+        def wait(driver, target, **kwargs):
+            calls.append((target, qualifying[0]))
+            return original(driver, target, **kwargs)
+        def qualify(session, *args, **kwargs):
+            qualifying[0] = True
+            try:
+                return original_qualify(session, *args, **kwargs)
+            finally:
+                qualifying[0] = False
+        with patch.object(AttoDryDriver, "wait_for_field", wait), patch.object(CryostatPointSession, "qualify", qualify):
+            result = self.execute("field-dwell")
+        self.assertEqual(result["status"], "completed", result)
+        # The executor can also wait at safe intermediate waypoints. None of
+        # those physical waits may be removed; only leaf qualification is free
+        # of a redundant field dwell.
+        self.assertGreaterEqual(len(calls), 3)
+        self.assertFalse(any(during_qualification for _, during_qualification in calls))
+        self.assertEqual(sum(k == "magnetic_point_event" and p.get("event") == "point_completed"
+                             for k, p in self.events()), 3)
+        self.assertEqual(len(load_combination_rows(self.database)), 18)
+        self.assertGreaterEqual(sum(k == "environment_formal_window" for k, _ in self.events()), 18)
+
+    def test_repeat_requalifies_temperature_even_for_same_value(self):
+        self.write_config(("temperature", "smu"))
+        self.path.write_text(self.path.read_text(encoding="utf-8").replace('repeats = 1', 'repeats = 2'),
+                             encoding="utf-8")
+        result = self.execute("temperature-repeat")
+        self.assertEqual(result["status"], "completed", result)
+        qualifications = [p for k, p in self.events() if k == "temperature_qualification_completed"]
+        self.assertEqual([p["temperature_entry"] for p in qualifications], [1, 2])
+        self.assertEqual([p["axis_scope"]["repeat_index"] for p in qualifications], [0, 1])
+
+    def test_cached_field_qualification_cannot_hide_drift_during_formal_sample(self):
+        self.write_config(("magnetic", "smu"))
+        def modify(adapter):
+            original = adapter.read
+            def read():
+                result = original()
+                if adapter.read_count == 2:
+                    self.dll.bx_t = .01
+                return result
+            adapter.read = read
+        self.modify_adapter = modify
+        result = self.execute("field-drift")
+        self.assertEqual(result["status"], "failed", result)
+        self.assertIn("Magnetic readback outside target tolerance", result["error"])
+        self.assertEqual(load_combination_rows(self.database), ())
+        self.assertTrue(any(k == "environment_sample" and abs(p["state"]["field"]["bx_t"] - .01) < 1e-8
+                            for k, p in self.events()))
+        self.assertIn("sweep_zero", self.dll.events)
 
     def test_preflight_limits_and_static_temperature_reset_reject(self):
         source = self.base.replace('bz_t = 0.0 },', 'bz_t = 9.01 },')

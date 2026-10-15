@@ -153,7 +153,9 @@ class PhotonicsPointTests(unittest.TestCase):
         session.sleep = settle
         session.open()
         session.configure()
-        self.assertEqual(waits, [1.0, session.config.settle_s])
+        self.assertEqual(len(waits), 2)
+        self.assertEqual(waits[0], 1.0)
+        self.assertAlmostEqual(waits[1], session.config.settle_s)
         self.assertEqual([kind for kind, _ in events if "reference_wait" in kind],
                          ["lockin_reference_wait_started", "lockin_reference_wait_finished"])
         session.read_coordinates()

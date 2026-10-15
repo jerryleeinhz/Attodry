@@ -117,7 +117,7 @@ class CombinationTests(unittest.TestCase):
                                 y="measured.smu_bias_current_a")
         self.assertEqual(len(grouped), 8)
 
-    def test_requalifies_temperature_after_field_change_before_formal_read(self):
+    def test_axis_qualifications_precede_inner_settings_and_leaf_readiness_is_fresh(self):
         station = SimulatedCombinationStation()
         plan = CombinationPlan((axes()["temperature"], axes()["magnetic"], axes()["smu"]))
         self.execute(plan, station)
@@ -125,8 +125,25 @@ class CombinationTests(unittest.TestCase):
         field = next(i for i, op in enumerate(operations) if op[:2] == ("apply", "magnetic"))
         qualify = next(i for i, op in enumerate(operations) if op[0] == "qualify")
         read = next(i for i, op in enumerate(operations) if op[0] == "read")
+        temperature_qualification = next(i for i, op in enumerate(operations)
+                                         if op[:2] == ("qualify_axis", "temperature"))
+        self.assertLess(temperature_qualification, field)
         self.assertLess(field, qualify)
         self.assertLess(qualify, read)
+        self.assertEqual(sum(op[:2] == ("qualify_axis", "temperature") for op in operations), 2)
+        self.assertEqual(sum(op[:2] == ("qualify_axis", "magnetic") for op in operations), 4)
+
+    def test_axis_qualification_failure_blocks_inner_settings_and_keeps_rejected_attempt(self):
+        class Fault(SimulatedCombinationStation):
+            def qualify_axis(self, module, point, scope):
+                return {"ready": False}
+        station = Fault()
+        result = self.execute(CombinationPlan((axes()["temperature"], axes()["smu"])), station)
+        self.assertEqual(result["status"], "failed")
+        self.assertFalse(any(op[:2] == ("apply", "smu") for op in station.operations))
+        self.assertTrue(station.closed)
+        with closing(open_readonly(self.path)) as db:
+            self.assertEqual(db.execute("SELECT status FROM combination_attempts").fetchone()[0], "rejected")
 
     def test_partial_read_failure_retained_cleanup_all_modules_then_close(self):
         class Fault(SimulatedCombinationStation):

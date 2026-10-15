@@ -366,12 +366,15 @@ class ReferenceRecoveryTests(unittest.TestCase):
                 reused = next(p for kind, p in events if kind == "lockin_reference_settling_reused")
                 self.assertEqual(reused["settle_s"], 15)
                 self.assertFalse(reused["source_settings_written"])
-                # The backend avoids a duplicate write when the source was
-                # already restored; the post-source dwell remains complete.
+                # A source write after recovery needs a new dwell. An already
+                # restored source reuses the complete recovery dwell.
                 self.assertEqual(xx.writes.count("SLVL 0.006"), 1)
                 self.assertFalse(manager.resources["FAKE::XY"].writes)
                 completed = next(p for kind, p in events if kind == "reference_recovery_recovered")
-                self.assertGreaterEqual(now[0] - (start["deadline_monotonic"] - 45), 32)
+                self.assertGreaterEqual(now[0] - (start["deadline_monotonic"] - 45),
+                                        32 if phase == "protected_reference" else 17)
+                if phase == "source_restored":
+                    self.assertAlmostEqual(now[0], completed["elapsed_s"] + start["deadline_monotonic"] - 45)
                 self.assertEqual(completed["settle_s"], 15)
 
     def test_reused_reference_dwell_still_rejects_new_range_in_fresh_probe(self):

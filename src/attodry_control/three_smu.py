@@ -394,7 +394,8 @@ class ThreeSmuSession:
 
     def set_point(self, coordinates: dict[str, float], *, index: int = 0,
                   segment: str = "main",
-                  transition_guard: Callable[[], None] | None = None) -> None:
+                  transition_guard: Callable[[], None] | None = None,
+                  on_settings_applied: Callable[[], None] | None = None) -> None:
         if self._point_recorder is None or self._closed:
             raise ThreeSmuError("begin_points is required")
         if set(coordinates) != self._active_roles:
@@ -415,6 +416,8 @@ class ThreeSmuSession:
                 ScanPoint(index, segment, coordinates), self._point_recorder,
                 transition_guard=transition_guard,
             )
+            if on_settings_applied is not None:
+                on_settings_applied()
             if self.plan.delay_s:
                 self._guarded_sleep(self.plan.delay_s, transition_guard)
             for role in direct_roles:
