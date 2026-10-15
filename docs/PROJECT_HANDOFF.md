@@ -13,10 +13,13 @@ measured; the last attempt confirmed laser OFF and electrical safe cleanup.
 Added optional `photoresponse_2182.channel` (1/2, legacy default 1), channel-specific
 ranges and explicit CHAN2 range/filter/relative settings and readbacks. Channel 2
 offers 0.1/1/10 V, not channel 1's 0.01/100 V. The station's reviewed 630 nm dark+7
-profile will select channel 2 at the existing 1 V range and retain its 1 V sample
+profile selects channel 2 at the existing 1 V range and retains its 1 V sample
 bound; alternatives are comments. This change does not restart acquisition or
 claim channel-2 hardware acceptance. Offline validation/deployment is recorded
-in `docs/DEVELOPMENT_STAGES.md`.
+in `docs/DEVELOPMENT_STAGES.md`. Functional commit `8ca4e88` is pushed and deployed;
+both local and isolated LK_setup full suites passed 684/684, plus target NKT/CLD
+simulations. The operator TOML was backed up and updated separately; no instrument
+connection or acquisition occurred during this correction.
 
 Dark-first photoresponse and timing optimization (2026-10-15): software/offline
 complete. Explicit `power_feedback.power_points = ["dark", positive W, ...]`

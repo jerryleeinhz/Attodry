@@ -24,6 +24,12 @@ Status: software/offline complete (2026-10-15); channel-2 real acquisition pendi
   transports, CH2 settings/ranges, pre-I/O rejection and changed-channel guards.
   The initial focused run hit sandbox temporary-directory permissions; it was
   repeated in an explicitly writable workspace temporary directory in the full suite.
+- An isolated fresh origin clone on LK_setup lyr passed **684/684** plus both NKT/CLD
+  simulations. Functional commit `8ca4e88` is pushed and deployed by fast-forward
+  from `163eef6`; all 14 local TOMLs were unchanged during code deployment. The
+  requested profile was then separately backed up and atomically updated to CH2;
+  static validation passed at the retained 1 V range/sample limit. Private receipts
+  and config backup remain in ignored `run_data/`; historical run files are unchanged.
 
 ## Dark-first power scans and timing optimization
 
