@@ -7,6 +7,60 @@ PM100D 反馈稳定实际光功率，并在正式窗口保存电学读数和各�
 **PM100D 闭环与组合入口已完成离线集成；此前完成声明仅适用于开环流程，硬件联合验收尚未完成。**
 程序不会扫描总线、复位仪器或自动接管已开启的输出。工作边界见 [工作包](modules/PHOTORESPONSE.md)。
 
+## 单次暗态与外层功率扫描（2026-10-15）
+
+新增可选协议将 `dark` 放在每轮功率扫描的首点。原 `target_power_w` /
+`target_powers_w` 配置仍执行逐点暗—亮—暗；要使用新协议，在 `[power_feedback]`
+中用下面的字段替换目标功率字段（W），保留原反馈限值、容差及窗口配置：
+
+```toml
+[power_feedback]
+power_points = ["dark", 50e-6, 100e-6, 150e-6, 200e-6]
+initial_actuator_mode = "previous" # point（默认）| previous
+# 其余 actuator、范围、步长、功率边界、容差、window 等仍须填写。
+
+[photoresponse_combination]
+order = ["repeat", "environment", "optical", "target_power_w", "bias", "smu"]
+```
+
+在 `[photoresponse]` 可加 `dark_recovery_s`；省略时使用 `settle_s`。
+两者是操作者确定的样品响应时间，不是 PM 积分时间或锁相时间常数。
+新的可直接运行离线示例：
+`config/photoresponse_dark_nkt_simulation.toml`、
+`config/photoresponse_dark_cld_simulation.toml`。示例值均为合成值。
+
+执行顺序：完整扫描重复 → 温磁组合点（外层判稳）→ 光学点（NKT 波长/带宽，
+CLD 固定波长）→ dark/各亮态功率 → 全部 bias/SMU 电学点。
+配置顺序不符合这些外内层约束时，在打开仪器前拒绝。
+
+- `dark` 确认关光、等待恢复并扫描全部电学坐标。它不是 0 W 反馈目标，
+  不执行最小亮态信号检查或寻光。PM 只记录配置/状态核对，未触发暗功率 READ。
+- 每个亮点：所有电学输出已安全关闭 → 准备光学设置 → PM 调功并判稳 →
+  核对电学配置 → 允许开启激励/测量 → 在照明保持期间完成全部内层电学点。
+- 内层持续记录实际温磁及质量标记，执行原安全/漂移检查，不重新判稳温磁。
+  光功率在正式读数前后依次测量；漂移超限拒绝并退出，不在正式采集中调功。
+- 每个光学点结束，电学/SMU 零关闭核实后才关光并进入下一点。
+  外层回访、外层重复、恢复运行都重新执行外层判稳和新暗态扫描。
+- `previous` 仅复用同一次功率扫描的上一完整合格亮点控制坐标，记录来源；
+  不跨 dark、环境/光学点或进程恢复使用，不复用稳定性证明。每个亮点重新判稳。
+  沿用原电流/功率/ND 上限、步长和低信号保护；它不保证所有目标序列都更快。
+
+在相同 bias/SMU 坐标上计算 `delta_voltage_v = light_mean - dark_mean` 或
+`delta_current_a = light_mean - dark_mean`，方法名为 `single_dark_baseline_v1`。
+结果含 `dark_condition_id`、暗/亮均值、采集时刻、`baseline_age_s` 和
+`baseline_drift_corrected=false`。不插值、不补测第二暗态。暗态无效或配对不符时
+整次尝试拒绝；恢复重新运行完整计划，不把旧暗态拼入新尝试。
+
+2182A 测电压；6221 的电流设定/状态不伪装成电流测量。6221 有偏置时的
+电压差是该偏置下的光致电压变化。电流测量仍要求电流检测通道；底栅接线的
+2400 只代表栅支路偏置/漏电，不能自动改成源漏光电流通道。
+
+JSON/SQLite 保留全部 dark、light、失败样本及清理证据。默认分析/CSV 导出亮态
+差分行；Python `load_results(..., include_dark=True)` 可同时读取暗参考行。
+只有整次完成且清理通过才接受任何行。旧配置的快照形状保持兼容已有恢复哈希。
+
+速度优化与真实耗时证据见 [耗时分析](PHOTORESPONSE_TIMING.md)。
+
 ## 已知实验状态（2026-10-13）
 
 - 最新验收范围：P0/P1 接线隔离及参考配置复用已确认；P2/P3 按无样品控制流程验收，

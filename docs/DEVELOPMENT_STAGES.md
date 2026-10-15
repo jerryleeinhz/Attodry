@@ -2,6 +2,48 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Dark-first power scans and timing optimization
+
+Status: software and isolated target offline acceptance complete (2026-10-15).
+New hardware timing/transient comparison is not claimed by the offline results.
+The operator confirmed Jupyter is plotting only and authorized commit, push and
+deployment. These release operations are recorded separately after verification.
+
+- Operator approved `dark` as the first power point and one baseline per full
+  repeat/environment/optical visit, then matched light-minus-dark V/I. Added
+  strict mixed power-point parsing, outer optical/inner electrical ordering,
+  dark recovery delay, optional previous qualified actuator initialization,
+  baseline ID/age and explicit absence of drift correction.
+- Environment qualifies at axis entry, including outer prefixes/revisits;
+  inner samples retain actual T/B and quality with existing strict rejection.
+  All sources are zero/off during optical qualification; post-qualification
+  electrical verification precedes output. Formal power drift aborts without
+  retuning. Inner electrical leaves do not toggle illumination or requalify.
+- Reused existing PM100D, PowerWindow, bounded feedback, optical controllers and
+  pinned SMU session. Applied the `accacb0` remaining-deadline and axis-entry
+  principles without transplanting SR830 settings/time constants into DCV.
+  SEND/ENTER locking, poll delay, protections, failed raw records and independent
+  cleanup remain. Pinned SMU source files/hashes were not modified.
+- Eliminated repeated passive-detector verification inside PM guards and one
+  immediate post-READ repetition; retained acquisition checks and complete 2400
+  guards. Unchanged PM preparation captures once. Source setting completion
+  timestamps allow existing waiting/status time to count toward response delay.
+  New phase/I/O/relay-poll timings include failures and separate audit overhead.
+- **678/678 full local tests** passed. New 21 tests cover coordinate matching,
+  complete repeats/resume, NKT/CLD/current/SMU/fake VISA paths, injected serial
+  latency, remaining waits, unsafe state, drift, transition/final-close failure,
+  SQLite acceptance, CSV selection and strict configuration. Both new CLI
+  examples simulate successfully locally and on LK_setup.
+- Target **283/283 offline tests** passed from an isolated, 172-file hash-pinned
+  snapshot with the lyr interpreter. Original target checkout/configs and the
+  two open Jupyter kernels were untouched. No hardware access, bus discovery,
+  status clear, real output or new hardware acceptance occurred.
+- Workload comparison at equal light leaves: NKT electrical reads 72→36,
+  qualifications 8→4; CLD reads 36→18, qualifications 6→2. These are synthetic
+  workload counts, not station speedup claims. See `PHOTORESPONSE_TIMING.md`
+  for the real 191.41 s NKT / 211.46 s rejected CLD timing breakdown and
+  hardware comparison requirements; `PHOTORESPONSE_GUIDE.md` for migration.
+
 ## CLD1010LP PM100D current-mode scan - first illuminated run
 
 Status: 50 uW qualified; 100-200 uW not reachable inside the 30 mA limit

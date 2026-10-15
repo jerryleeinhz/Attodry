@@ -8,6 +8,17 @@ import statistics
 from .nkt_config import NktError, number, tenths
 
 
+def actuator_domain(config):
+    """Coordinate, bounds and step shared by preparation and feedback writes."""
+    f = config.feedback
+    return {
+        "source_current": ("source_level_pct", f.source_current_min_pct, f.source_current_max_pct, f.source_current_step_pct),
+        "source_power": ("source_level_pct", f.source_power_min_pct, f.source_power_max_pct, f.source_power_step_pct),
+        "varia_nd": ("nd_pct", f.nd_min_pct, f.nd_max_pct, f.nd_step_pct),
+        "cld_current": ("current_a", f.current_min_a, f.current_max_a, f.current_step_a),
+    }[f.actuator]
+
+
 class PowerWindow:
     def __init__(self, config, *, epoch_s, max_power_w):
         config.validate()

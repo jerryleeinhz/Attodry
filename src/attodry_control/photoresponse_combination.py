@@ -23,7 +23,8 @@ class PhotoresponseCombinationPlan:
             "repeat": tuple(range(config.repeats))}
         order = config.combination_order
         if order is None:
-            order = AXES  # Preserve the previous open-loop traversal by default.
+            order = (("repeat", "environment", "optical", "target_power_w", "bias", "smu")
+                     if config.shared_dark else AXES)
         if not isinstance(order, tuple) or not order or any(type(v) is not str or v not in AXES for v in order):
             raise NktError("Combination order must contain known axis names")
         if len(order) != len(set(order)):
@@ -32,6 +33,13 @@ class PhotoresponseCombinationPlan:
         if any(len(self.values[axis]) > 1 for axis in missing):
             raise NktError("Every multi-point axis must appear in combination order")
         self.order = order + tuple(missing)
+        if config.shared_dark:
+            # Validate even singleton axes: explicit ordering documents which
+            # settings are held throughout the inner electrical scan.
+            depth = self.order.index("target_power_w")
+            if (any(self.order.index(a) > depth for a in ("repeat", "environment", "optical"))
+                    or any(self.order.index(a) < depth for a in ("bias", "smu"))):
+                raise NktError("Dark-first order requires repeat/environment/optical outside power and bias/smu inside")
         if config.environment:
             outer = self.order[:self.order.index("environment")]
             if any(len(self.values[axis]) > 1 for axis in outer):
@@ -59,4 +67,11 @@ class PhotoresponseCombinationPlan:
         return {"order": list(self.order), "selected_modules": self.modules,
                 "axis_lengths": {axis: len(values) for axis, values in self.values.items()},
                 "sampling": "sequential fresh reads bracketed by optical/electrical/environment guards",
-                "acceptance": "complete dark/light/dark and successful cleanup required"}
+                "acceptance": ("matched single dark baseline, all light points and successful cleanup required"
+                               if self.values["target_power_w"][0] == "dark" else
+                               "complete dark/light/dark and successful cleanup required")}
+
+    def axis_visit(self, coordinates, axis):
+        """Axis entry includes its outer prefix (accacb0 combination semantics)."""
+        return tuple((name, coordinates[name]["index"])
+                     for name in self.order[:self.order.index(axis) + 1])

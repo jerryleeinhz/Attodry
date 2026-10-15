@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from contextlib import contextmanager
 from dataclasses import asdict
 import math
 from statistics import fmean
@@ -13,6 +14,27 @@ from .photoresponse_config import PhotoresponseConfig
 
 
 WINDOWS = ("dark_before", "light", "dark_after")
+
+
+def single_dark_difference(dark, light, quantity):
+    """Match one freshly acquired baseline by electrical coordinate and visit."""
+    if (dark.get("optical_state") != "dark" or light.get("optical_state") != "light"
+            or dark["baseline_key"] != light["baseline_key"]):
+        raise NktError("Dark/light baseline coordinates or visit differ")
+    def summary(row):
+        samples = row["windows"][0]["samples"]
+        if not samples or any(not s["valid"] for s in samples):
+            raise NktError("Difference requires valid dark and light samples")
+        return (fmean(number(s[quantity], quantity, -math.inf, math.inf) for s in samples),
+                fmean((s["started_s"] + s["finished_s"]) / 2 for s in samples))
+    d, td = summary(dark)
+    value, tl = summary(light)
+    if tl <= td:
+        raise NktError("Light must follow its dark baseline")
+    return {"method": "single_dark_baseline_v1", "quantity": quantity,
+            "dark_condition_id": dark["condition_id"], "dark_mean": d, "light_mean": value,
+            "dark_mean_time_s": td, "light_mean_time_s": tl, "baseline_age_s": tl - td,
+            "baseline_drift_corrected": False, "delta_" + quantity: value - d}
 
 
 def differential(windows: list[dict], quantity: str) -> dict:
@@ -71,6 +93,7 @@ class SimulatedElectrical:
                 "6221" if config.excitation == "dc_current" else "2400"),
                 "output_enabled": False, "setpoint": 0.0}
         self.closed = False
+        self.last_change_monotonic_s = None
 
     def snapshot(self):
         if self.closed:
@@ -87,6 +110,8 @@ class SimulatedElectrical:
             return
         limit = self.config.max_abs_current_a if self.config.excitation == "dc_current" else self.config.max_abs_voltage_v
         number(bias, "bias", -limit, limit)
+        if self.state["source"]["setpoint"] != bias or not self.state["source"]["output_enabled"]:
+            self.last_change_monotonic_s = self.clock()
         self.commands.append(("source_set", bias))
         self.state["source"].update(setpoint=bias, output_enabled=True)
 
@@ -158,16 +183,47 @@ class PhotoresponseRunner:
                        "last_confirmed_electrical_state": None, "electrical_state_current": False,
                        "environment": None, "measured_power_w": None,
                        "combination": self.plan.snapshot()}
+        self.record["timings"] = []
+
+    @contextmanager
+    def _timed(self, phase, **values):
+        row = {"phase": phase, **values, "started_monotonic_s": self.clock(), "completed": False}
+        self.record["timings"].append(row)
+        try:
+            yield row
+            row["completed"] = True
+        finally:
+            row["finished_monotonic_s"] = self.clock()
+            row["duration_s"] = row["finished_monotonic_s"] - row["started_monotonic_s"]
+
+    def _settle(self, last_change, required, destination):
+        now = self.clock()
+        remaining = max(0., last_change + required - now)
+        wait = {"policy": "last-change-remaining-settle-v1", "required_s": required,
+                "last_change_monotonic_s": last_change, "checked_monotonic_s": now,
+                "already_elapsed_s": now - last_change, "sleep_requested_s": remaining, "completed": False}
+        destination["settling_wait"] = wait
+        with self._timed("settle", requested_s=remaining):
+            if remaining:
+                self.sleep(remaining)
+        wait.update(completed=True, finished_monotonic_s=self.clock())
 
     def _event(self, phase, **values):
+        started = self.clock()
         event = {"phase": phase, "captured_at_utc": utc_now(), **deepcopy(values)}
         self.record["events"].append(event)
-        if self.on_event:
-            self.on_event(event)
+        try:
+            if self.on_event:
+                self.on_event(event)
+        finally:
+            self.record["timings"].append({"phase": "audit_event", "event_phase": phase,
+                "started_monotonic_s": started, "finished_monotonic_s": self.clock(),
+                "duration_s": self.clock() - started})
 
     def _state(self):
         self.record["electrical_state_current"] = False
-        state = self.electrical.snapshot()
+        with self._timed("electrical_state"):
+            state = self.electrical.snapshot()
         self._retain_state(state)
         return state
 
@@ -201,22 +257,32 @@ class PhotoresponseRunner:
             if not source["output_enabled"] or not math.isclose(source["setpoint"], bias, abs_tol=tolerance, rel_tol=1e-7):
                 raise NktError("Source output or setpoint changed")
 
-    def _window(self, condition, phase, bias):
+    def _window(self, condition, phase, bias, *, manage_optics=True):
         illuminated = phase == "light"
         window = {"phase": phase, "samples": []}
         condition["windows"].append(window)
         if self.smu:
             self.smu.verify()
-        self.laser.set_emission(illuminated)
+        last_change = None
+        if manage_optics:
+            self.laser.set_emission(illuminated)
+            last_change = self.clock()
+        def emission_changed():
+            nonlocal last_change
+            last_change = self.clock()
         def guard():
-            state = self._state()
+            self.record["electrical_state_current"] = False
+            state = getattr(self.electrical, "guard", self.electrical.snapshot)()
             self._check_state(state, bias)
             return {"electrical": state,
                     "smu": self.smu.verify() if self.smu else None,
                     "environment": self.environment.verify() if self.environment else None}
-        if self.power and illuminated:
-            self.power.qualify(guard)
-        self.sleep(self.config.settle_s)
+        if manage_optics:
+            if self.power and illuminated:
+                self._check_state(self._state(), bias)
+                self.power.qualify(guard, on_emission_changed=emission_changed)
+                self._check_state(self._state(), bias)
+            self._settle(last_change, self.config.settle_s, window)
         for _ in range(self.config.samples_per_window):
             # The interval also keeps one-sample windows strictly ordered with fake clocks.
             self.sleep(self.config.sample_interval_s)
@@ -239,7 +305,8 @@ class PhotoresponseRunner:
                 if self.power:
                     sample["power_before"] = self.power.formal_sample(phase + "_before", illuminated=illuminated, guard=guard)
                 sample["started_s"] = self.clock() - self._epoch
-                reading = self.electrical.read(illuminated=illuminated)
+                with self._timed("electrical_acquisition", condition_id=condition["condition_id"]):
+                    reading = self.electrical.read(illuminated=illuminated)
                 sample["finished_s"] = self.clock() - self._epoch
                 sample["raw_reading"] = deepcopy(reading)
                 if self.electrical.is_hardware:
@@ -338,6 +405,148 @@ class PhotoresponseRunner:
             raise NktError("Selected combination module readback is missing")
         return deepcopy(rows)
 
+    def _condition(self, coordinates):
+        bias = coordinates["bias"]["value"]
+        point, smu_point = coordinates["optical"]["value"], coordinates["smu"]["value"]
+        target = coordinates["target_power_w"]["value"]
+        row = {"condition_id": f"photo-{len(self.record['conditions']):06d}",
+               "attempt_index": self.attempt_index, "accepted": False,
+               **{name + "_index": coordinates[axis]["index"] for name, axis in (
+                   ("optical", "optical"), ("bias", "bias"), ("repeat", "repeat"),
+                   ("power", "target_power_w"), ("smu", "smu"), ("environment", "environment"))},
+               "target_power_w": None if target == "dark" else target,
+               "requested_smu": asdict(smu_point) if smu_point else None,
+               "axis_indices": {name: v["index"] for name, v in coordinates.items()},
+               "combination_order": list(self.plan.order),
+               "requested_environment": coordinates["environment"]["value"],
+               "requested_optical": asdict(point), "excitation": self.config.excitation,
+               "requested_current_a": bias if self.config.excitation == "dc_current" else None,
+               "requested_voltage_v": bias if self.config.excitation == "dc_voltage" else None,
+               "windows": [], "result": None}
+        if smu_point and self.config.excitation in ("smu_current", "smu_voltage"):
+            row["requested_current_a" if self.config.excitation == "smu_current" else "requested_voltage_v"] = smu_point.coordinates["smu_bias"]
+        self.record["conditions"].append(row)
+        return row
+
+    def _suspend_electrical(self):
+        with self._timed("electrical_cleanup"):
+            self._check_state(self.electrical.cleanup(), None, inactive=True)
+            if self.smu:
+                self.smu.suspend()
+
+    def _run_shared_dark(self):
+        """Outer optical points own illumination; inner leaves only acquire."""
+        from itertools import groupby
+        from .power_feedback import actuator_domain
+        baselines, previous = {}, None
+        environment_visit = self.plan.axis_visit(next(self.plan.conditions()), "environment")
+        for visit, entries in groupby(self.plan.conditions(), lambda c: self.plan.axis_visit(c, "target_power_w")):
+            coordinates = next(entries)
+            leaves = [coordinates, *entries]
+            point = coordinates["optical"]["value"]
+            scan_visit = visit[:-1]
+            new_environment = self.plan.axis_visit(coordinates, "environment")
+            if self.environment and new_environment != environment_visit:
+                with self._timed("environment_prepare", visit=new_environment):
+                    self.environment.prepare(coordinates["environment"]["value"])
+                environment_visit = new_environment
+            dark = coordinates["target_power_w"]["value"] == "dark"
+            phase = "dark" if dark else "light"
+            if dark:
+                baselines, previous = {}, None
+            first = self._condition(coordinates)
+            first["optical_state"] = phase
+            first["power_visit"] = visit
+            initial = previous["value"] if (previous and previous["scan_visit"] == scan_visit
+                                             and self.config.power.initial_actuator_mode == "previous") else None
+            with self._timed("optical_prepare", visit=visit):
+                self.laser.prepare_power_point(point, self.config.power, initial_value=initial)
+                self.power.prepare(first, point)
+            self.power.row["initial_actuator"] = {"mode": self.config.power.initial_actuator_mode,
+                "source": "previous" if initial is not None else "point", "value": initial,
+                "previous_power_visit": previous["visit"] if initial is not None else None}
+            optical_session = self.power.row
+            last_change = self.clock()
+            def changed():
+                nonlocal last_change
+                last_change = self.clock()
+            def off_guard():
+                state = self.electrical.guard() if hasattr(self.electrical, "guard") else self.electrical.snapshot()
+                self._check_state(state, None, inactive=True)
+                return {"electrical": state, "smu": "suspended" if self.smu else None,
+                        "environment": self.environment.verify() if self.environment else None}
+            off_guard()
+            if not dark:
+                self.laser.set_emission(True)
+                changed()
+                with self._timed("power_qualification", visit=visit):
+                    self.power.qualify(off_guard, on_emission_changed=changed)
+            # Recheck after the long optical operation, before enabling sources.
+            with self._timed("electrical_begin", visit=visit):
+                if self.electrical.is_hardware:
+                    self.electrical.begin()
+                active_zero = self.electrical.is_hardware and self.config.quantity == "current_a"
+                self._check_state(self._state(), 0. if active_zero else None, inactive=not active_zero)
+                if self.smu:
+                    self.smu.begin()
+            required = (self.config.dark_recovery_s if dark and self.config.dark_recovery_s is not None
+                        else self.config.settle_s)
+            self._settle(last_change, required, optical_session)
+            last_electrical_change = max(last_change, getattr(self.electrical, "last_change_monotonic_s", None) or last_change)
+            previous_electrical_key = None
+            for index, leaf in enumerate(leaves):
+                row = first if index == 0 else self._condition(leaf)
+                bias, smu_point = leaf["bias"]["value"], leaf["smu"]["value"]
+                row.update(optical_state=phase, power_visit=visit,
+                           baseline_key=[scan_visit, leaf["bias"]["index"], leaf["smu"]["index"]],
+                           power=optical_session)
+                with self._timed("electrical_prepare", condition_id=row["condition_id"]):
+                    self.electrical.prepare(bias)
+                    self._check_state(self._state(), bias)
+                    if self.smu:
+                        def transition_guard():
+                            self.laser.verify_point(emitting=not dark, phase="smu_transition")
+                            self._check_state(self._state(), bias)
+                            if self.environment:
+                                self.environment.verify()
+                        row["smu_prepared"] = self.smu.prepare(smu_point, transition_guard)
+                electrical_key = (bias, tuple(smu_point.coordinates.items()) if smu_point else None)
+                if (self.config.excitation != "none" or self.smu) and electrical_key != previous_electrical_key:
+                    confirmed_change = getattr(self.electrical, "last_change_monotonic_s", None)
+                    # The pinned SMU session has no setting-completion callback;
+                    # retain a conservative post-prepare timestamp for that path.
+                    last_electrical_change = (self.clock() if self.smu or confirmed_change is None
+                                              else confirmed_change)
+                previous_electrical_key = electrical_key
+                # Source/SMU drivers retain their own ramp waits. This additional
+                # sample-response wait starts after the latest electrical prepare.
+                self._settle(last_electrical_change, self.config.settle_s, row)
+                self._window(row, phase, bias, manage_optics=False)
+                row["actual"] = row["windows"][0]["samples"][-1]["module_readings"]
+                key = (leaf["bias"]["index"], leaf["smu"]["index"])
+                if dark:
+                    baselines[key] = row
+                    samples = row["windows"][0]["samples"]
+                    row["result"] = {"method": "single_dark_reference_v1", "quantity": self.config.quantity,
+                                     "dark_mean": fmean(s[self.config.quantity] for s in samples)}
+                else:
+                    if key not in baselines:
+                        raise NktError("No matching dark coordinate in this power scan")
+                    row["result"] = single_dark_difference(baselines[key], row, self.config.quantity)
+                    row["result"].update(target_power_w=row["target_power_w"],
+                        measured_power_w=fmean(s[k]["power_w"] for s in row["windows"][0]["samples"]
+                                              for k in ("power_before", "power_after")),
+                        measurement_plane=self.config.power.meter.measurement_plane)
+                self._event("condition_complete", condition=row)
+            self._suspend_electrical()
+            optical = self.laser.verify_point(emitting=not dark, phase="power_point_complete")
+            if not dark:
+                field, _, _, _ = actuator_domain(self.config.power)
+                value = (optical["source"]["getLdCurrSetpoint"] if field == "current_a" else
+                         optical["filter"]["nd_pct"] if field == "nd_pct" else optical["source"]["level_pct"])
+                previous = {"scan_visit": scan_visit, "visit": visit, "value": value}
+            self.laser.set_emission(False)
+
     def run(self):
         if self._used:
             raise NktError("Photoresponse sessions are single-use")
@@ -354,69 +563,61 @@ class PhotoresponseRunner:
                              confirm_manual_route=self.confirm_manual_route)
             if self.environment:
                 self.environment.begin()
-                self.environment.prepare(self.config.environment.points[0])
-            if self.electrical.is_hardware:
-                electrical_owned = True
-                self.electrical.begin()
+                with self._timed("environment_prepare", initial=True):
+                    self.environment.prepare(self.config.environment.points[0])
+            electrical_owned = True
+            if self.config.shared_dark:
+                self._run_shared_dark()
             else:
-                electrical_owned = True
-            if self.smu:
-                self.smu.begin()
-            last_environment_index = 0 if self.environment else None
-            for coordinates in self.plan.conditions():
-                environment_index, environment_point = coordinates["environment"].values()
-                optical_index, point = coordinates["optical"].values()
-                bias_index, bias = coordinates["bias"].values()
-                power_index, target_power = coordinates["target_power_w"].values()
-                smu_index, smu_point = coordinates["smu"].values()
-                repeat = coordinates["repeat"]["value"]
-                if self.environment and last_environment_index != environment_index:
-                    if last_environment_index is not None:
-                        self.laser.set_emission(False)
-                        self._check_state(self.electrical.cleanup(), None, inactive=True)
-                        if self.smu:
-                            self.smu.suspend()
-                    self.environment.prepare(environment_point)
-                    if last_environment_index is not None and self.electrical.is_hardware:
-                        self.electrical.begin()
-                    if self.smu:
-                        self.smu.begin()
-                    last_environment_index = environment_index
-                row = {"condition_id": f"photo-{len(self.record['conditions']):06d}",
-                       "attempt_index": self.attempt_index, "accepted": False, "optical_index": optical_index,
-                       "bias_index": bias_index, "repeat_index": repeat,
-                       "power_index": power_index, "target_power_w": target_power,
-                       "smu_index": smu_index, "requested_smu": asdict(smu_point) if smu_point else None,
-                       "axis_indices": {name: v["index"] for name, v in coordinates.items()},
-                       "combination_order": list(self.plan.order),
-                       "environment_index": environment_index, "requested_environment": environment_point,
-                       "requested_optical": asdict(point), "excitation": self.config.excitation,
-                       "requested_current_a": bias if self.config.excitation == "dc_current" else None,
-                       "requested_voltage_v": bias if self.config.excitation == "dc_voltage" else None,
-                       "windows": [], "result": None}
-                self.record["conditions"].append(row)
-                if smu_point and self.config.excitation in ("smu_current", "smu_voltage"):
-                    row["requested_current_a" if self.config.excitation == "smu_current" else "requested_voltage_v"] = smu_point.coordinates["smu_bias"]
-                self.laser.prepare_point(point)
-                if self.power:
-                    self.power.prepare(row, point)
-                self.electrical.prepare(bias)
-                self._check_state(self._state(), bias)
+                if self.electrical.is_hardware:
+                    electrical_owned = True
+                    self.electrical.begin()
+                else:
+                    electrical_owned = True
                 if self.smu:
-                    def transition_guard():
-                        self.laser.verify_point(emitting=False, phase="smu_transition")
-                        self._check_state(self._state(), bias)
-                        if self.environment: self.environment.verify()
-                    row["smu_prepared"] = self.smu.prepare(smu_point, transition_guard)
-                for phase in WINDOWS:
-                    self._window(row, phase, bias)
-                row["result"] = differential(row["windows"], self.config.quantity)
-                row["actual"] = row["windows"][1]["samples"][-1]["module_readings"]
-                if self.power:
-                    row["result"].update(target_power_w=target_power,
-                        measured_power_w=self.power.row["formal_mean_power_w"],
-                        measurement_plane=self.power.config.meter.measurement_plane)
-                self._event("condition_complete", condition=row)
+                    self.smu.begin()
+                last_environment_visit = self.plan.axis_visit(next(self.plan.conditions()), "environment")
+                for coordinates in self.plan.conditions():
+                    environment_index, environment_point = coordinates["environment"].values()
+                    optical_index, point = coordinates["optical"].values()
+                    bias_index, bias = coordinates["bias"].values()
+                    power_index, target_power = coordinates["target_power_w"].values()
+                    smu_index, smu_point = coordinates["smu"].values()
+                    repeat = coordinates["repeat"]["value"]
+                    environment_visit = self.plan.axis_visit(coordinates, "environment")
+                    if self.environment and last_environment_visit != environment_visit:
+                        if last_environment_visit is not None:
+                            self.laser.set_emission(False)
+                            self._check_state(self.electrical.cleanup(), None, inactive=True)
+                            if self.smu:
+                                self.smu.suspend()
+                        self.environment.prepare(environment_point)
+                        if last_environment_visit is not None and self.electrical.is_hardware:
+                            self.electrical.begin()
+                        if self.smu:
+                            self.smu.begin()
+                        last_environment_visit = environment_visit
+                    row = self._condition(coordinates)
+                    self.laser.prepare_point(point)
+                    if self.power:
+                        self.power.prepare(row, point)
+                    self.electrical.prepare(bias)
+                    self._check_state(self._state(), bias)
+                    if self.smu:
+                        def transition_guard():
+                            self.laser.verify_point(emitting=False, phase="smu_transition")
+                            self._check_state(self._state(), bias)
+                            if self.environment: self.environment.verify()
+                        row["smu_prepared"] = self.smu.prepare(smu_point, transition_guard)
+                    for phase in WINDOWS:
+                        self._window(row, phase, bias)
+                    row["result"] = differential(row["windows"], self.config.quantity)
+                    row["actual"] = row["windows"][1]["samples"][-1]["module_readings"]
+                    if self.power:
+                        row["result"].update(target_power_w=target_power,
+                            measured_power_w=self.power.row["formal_mean_power_w"],
+                            measurement_plane=self.power.config.meter.measurement_plane)
+                    self._event("condition_complete", condition=row)
             self.record["outcome"] = "completed"
         except (Exception, KeyboardInterrupt) as exc:
             self.record["error"] = f"{type(exc).__name__}: {exc}"

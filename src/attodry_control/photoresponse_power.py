@@ -30,9 +30,11 @@ class PhotoresponsePower:
             self.on_event({"phase": phase, "captured_at_utc": utc_now(), **deepcopy(values)})
 
     def prepare(self, condition, point):
-        self.feedback = self.config.for_target(condition["power_index"])
+        dark = self.config.power_points is not None and condition["power_index"] == 0
+        self.feedback = self.config.for_target(1 if dark else condition["power_index"])
         self.row = {"samples": [], "adjustments": [], "qualification_windows": [],
-                    "target_power_w": self.feedback.target_power_w,
+                    "target_power_w": None if dark else self.feedback.target_power_w,
+                    "optical_state": "dark" if dark else "light",
                     "target_tolerance_w": self.feedback.target_tolerance_w,
                     "measurement_plane": self.config.meter.measurement_plane,
                     "qualified": False, "formal_mean_power_w": None}
@@ -49,7 +51,8 @@ class PhotoresponsePower:
     def _sample(self, phase, illuminated, guard=None):
         # Append before I/O: incomplete/invalid READ replies remain attached to
         # the exact attempt, even when no valid PM last_sample was produced.
-        entry = {"phase": phase, "captured_at_utc": utc_now(), "sample": None, "valid": False}
+        entry = {"phase": phase, "captured_at_utc": utc_now(), "sample": None, "valid": False,
+                 "started_monotonic_s": self.clock()}
         self.row["samples"].append(entry)
         start = len(self.meter.transcript)
         try:
@@ -77,6 +80,8 @@ class PhotoresponsePower:
             entry["error"] = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            entry["finished_monotonic_s"] = self.clock()
+            entry["duration_s"] = entry["finished_monotonic_s"] - entry["started_monotonic_s"]
             entry["pm_transcript"] = deepcopy(self.meter.transcript[start:])
             self._event("power_sample", evidence=entry)
 
@@ -84,7 +89,7 @@ class PhotoresponsePower:
         if self.clock() > deadline:
             raise NktError("Power qualification timed out")
 
-    def qualify(self, guard):
+    def qualify(self, guard, *, on_emission_changed=None):
         """May tune only before the formal light window; resets proof per step."""
         f = self.feedback
         self.row["qualified"] = False
@@ -146,6 +151,8 @@ class PhotoresponsePower:
                     adjustment["modules_after"] = guard()
                     self._deadline(deadline)
                     self.laser.set_emission(True)
+                    if on_emission_changed:
+                        on_emission_changed()
                     self._deadline(deadline)
                     adjustment["finished"] = True
                 except (Exception, KeyboardInterrupt) as exc:

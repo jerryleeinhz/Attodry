@@ -30,6 +30,11 @@ class PhotoresponseConfig:
     power: object | None = None
     combination_order: tuple[str, ...] | None = None
     smu: object | None = None
+    dark_recovery_s: float | None = None
+
+    @property
+    def shared_dark(self):
+        return self.power is not None and self.power.power_points is not None
 
     @property
     def quantity(self):
@@ -61,6 +66,10 @@ class PhotoresponseConfig:
         integer(self.repeats, "repeats", 1, 10000)
         number(self.sample_interval_s, "sample_interval_s", 0.001, 3600)
         number(self.settle_s, "settle_s", 0, 3600)
+        if self.dark_recovery_s is not None:
+            number(self.dark_recovery_s, "dark_recovery_s", 0, 3600)
+            if not self.shared_dark:
+                raise NktError("dark_recovery_s requires dark-first power_points")
         # These are operator values, not vendor or sample ratings.
         number(self.max_abs_voltage_v, "max_abs_voltage_v", 1e-15, 1e6)
         if self.max_abs_current_a is not None or not (
@@ -103,6 +112,12 @@ class PhotoresponseConfig:
 
     def snapshot(self):
         result = asdict(self)
+        if not self.shared_dark:
+            # Keep the existing plan hash for legacy resume configurations.
+            result.pop("dark_recovery_s")
+            if result["power"]:
+                result["power"].pop("power_points")
+                result["power"].pop("initial_actuator_mode")
         result["nkt"] = self.nkt.snapshot()
         result["environment"] = self.environment.snapshot() if self.environment else None
         result["smu"] = self.smu.snapshot() if self.smu else None
@@ -119,7 +134,7 @@ def load_photoresponse_config(path: str | Path) -> PhotoresponseConfig:
         table = doc.get("photoresponse", {})
     required = {"mode", "detector", "samples_per_window", "repeats", "sample_interval_s",
                 "settle_s", "max_abs_voltage_v"}
-    keys(table, "photoresponse", required, {"bias_current_points_a", "bias_voltage_points_v", "light_source", "max_abs_current_a"})
+    keys(table, "photoresponse", required, {"bias_current_points_a", "bias_voltage_points_v", "light_source", "max_abs_current_a", "dark_recovery_s"})
     light_source = table.get("light_source", "nkt")
     if light_source == "nkt":
         nkt = load_nkt_config(path)
@@ -146,7 +161,7 @@ def load_photoresponse_config(path: str | Path) -> PhotoresponseConfig:
                                  **{key: table[key] for key in required})
     from dataclasses import replace
     from .power_config import load_photoresponse_power
-    config = replace(config, power=load_photoresponse_power(doc))
+    config = replace(config, power=load_photoresponse_power(doc), dark_recovery_s=table.get("dark_recovery_s"))
     from .photoresponse_smu import load_photoresponse_smu
     config = replace(config, smu=load_photoresponse_smu(doc, path))
     if "photoresponse_combination" in doc:

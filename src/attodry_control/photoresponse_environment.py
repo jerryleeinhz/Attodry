@@ -119,20 +119,27 @@ class EnvironmentController:
             raise NktError("Environment feedback control is disabled")
         target = self.target
         tolerance = self.config.magnet.stability.criteria.tolerance
+        criteria = self.config.temperature_stability.criteria
+        allowed = criteria.tolerance if criteria.tolerance is not None else criteria.stable_range
+        quality = {"field_within_window": math.hypot(state.field.bx_t-target["bx_t"], state.field.bz_t-target["bz_t"]) <= tolerance,
+                   "temperature_within_window": abs(state.sample_temperature_k-self.temperature_reference) <= allowed,
+                   "temperature_below_overshoot": state.sample_temperature_k <= target["temperature_k"] + self.config.max_temperature_overshoot_k}
+        self.last_confirmed_state["quality"] = deepcopy(quality)
+        if self.on_event:
+            self.on_event({"phase": "environment_quality", "state": deepcopy(self.last_confirmed_state)})
         if math.hypot(state.field.bx_t-target["bx_t"], state.field.bz_t-target["bz_t"]) > tolerance:
             raise NktError("Field left the accepted measurement window")
         if math.hypot(state.field_setpoint.bx_t-target["bx_t"], state.field_setpoint.bz_t-target["bz_t"]) > 1e-6:
             raise NktError("Field setpoint changed externally")
         if abs(state.user_temperature_k-target["temperature_k"]) > 1e-4:
             raise NktError("Temperature setpoint changed externally")
-        criteria = self.config.temperature_stability.criteria
-        allowed = criteria.tolerance if criteria.tolerance is not None else criteria.stable_range
         if abs(state.sample_temperature_k-self.temperature_reference) > allowed:
             raise NktError("Temperature left the accepted measurement window")
         if state.sample_temperature_k > target["temperature_k"] + self.config.max_temperature_overshoot_k:
             raise NktError("Temperature exceeded approved overshoot")
         result = asdict(state)
         result["measurement_temperature_k"] = state.sample_temperature_k
+        result["quality"] = quality
         return result
 
     def finish(self, *, failed):

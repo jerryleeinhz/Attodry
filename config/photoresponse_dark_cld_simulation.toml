@@ -1,0 +1,73 @@
+# Synthetic diode, NOT an installed diode specification. No hardware is opened.
+[photoresponse]
+light_source = "cld1010lp"
+mode = "voltage_bias_current"
+detector = "keithley2400"
+bias_voltage_points_v = [-0.001, 0.0, 0.001]
+samples_per_window = 2
+repeats = 1
+sample_interval_s = 0.01
+settle_s = 0.01 # Minimum sample response wait since the last relevant change.
+dark_recovery_s = 0.02 # Minimum dark recovery; synthetic example only.
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.000001
+
+[cld1010]
+backend = "simulation"
+dll_path = ""
+address = ""
+expected_serial = "SIMULATED"
+diode_model = "SIMULATED ONLY"
+diode_wiring_confirmed = false
+wavelength_nm = 760.0 # Nominal; no wavelength tuning or wavelength readback.
+current_points_a = [0.01]
+max_current_a = 0.03
+max_voltage_v = 3.0
+max_tec_current_a = 0.1
+temperature_min_c = 20.0
+temperature_max_c = 30.0
+temperature_c = 25.0
+temperature_tolerance_c = 0.1
+stable_dwell_s = 0.1
+current_tolerance_a = 0.00001
+manual_route = "SIMULATED optical path"
+timeout_s = 5.0
+poll_interval_s = 0.05
+output_directory = "../run_data/dark_cld_sim"
+run_name = "dark_cld_offline"
+note = "Synthetic photodiode current; no calibrated sample power."
+
+[photoresponse_storage]
+database_path = "../run_data/dark_cld_sim/audit.sqlite"
+
+[photoresponse_combination]
+# Outer to inner; optical is one complete wavelength/bandwidth/initial-actuator row.
+order = ["repeat", "environment", "optical", "target_power_w", "bias", "smu"]
+
+[pm100d]
+backend = "simulation"
+io_timeout_s = 1.0
+wavelength_tolerance_nm = 0.1
+average_count = 1
+auto_range = true
+max_power_w = 0.003
+measurement_plane = "SIMULATED reference monitor; not sample calibration"
+
+[power_feedback]
+actuator = "cld_current"
+power_points = ["dark", 0.0008, 0.0012]
+initial_actuator_mode = "previous" # point | previous; never reuses stability proof
+target_tolerance_w = 0.000001
+max_power_w = 0.0025
+minimum_signal_power_w = 0.00001
+timeout_s = 3.0
+hold_s = 0.01
+current_min_a = 0.002
+current_max_a = 0.028
+current_step_a = 0.002
+
+[power_feedback.window]
+duration_s = 0.02
+min_samples = 3
+sample_interval_s = 0.01
+max_peak_to_peak_w = 0.000001

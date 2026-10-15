@@ -70,7 +70,7 @@ def ensure(transport, command, value, *, tolerance=0, matches=None):
 
 class CurrentSource6221(Keithley6221Queries):
     def __init__(self, resource, *, expected_idn, max_current_a, compliance_v,
-                 max_step_a, settle_s, tolerance_a, sleep=time.sleep):
+                 max_step_a, settle_s, tolerance_a, sleep=time.sleep, clock=time.perf_counter):
         super().__init__(resource, expected_idn=expected_idn)
         number(max_current_a, "max_current_a", 1e-13, 0.105)
         number(compliance_v, "6221 compliance_v", 0.1, 105)
@@ -81,6 +81,7 @@ class CurrentSource6221(Keithley6221Queries):
         self.max_current_a, self.compliance_v = max_current_a, compliance_v
         self.max_step_a, self.settle_s, self.tolerance_a = max_step_a, settle_s, tolerance_a
         self.sleep = sleep
+        self.clock, self.last_change_monotonic_s = clock, None
         self.owned = False
         self.ready = False
         self.faulted = False
@@ -149,11 +150,13 @@ class CurrentSource6221(Keithley6221Queries):
         self.check(state)
         if not self.expected_output:
             ensure(self.resource, "OUTP:STAT", True)
+            self.last_change_monotonic_s = self.clock()
             self.expected_output = True
             self.check(self.snapshot())  # Includes a zero-current request with no ramp steps.
         for value in ramp_values(self.expected_current, target, self.max_step_a):
             self.check(self.snapshot())
             ensure(self.resource, "SOUR:CURR", value, tolerance=self.tolerance_a)
+            self.last_change_monotonic_s = self.clock()
             self.expected_current = value
             self.sleep(self.settle_s)
             self.check(self.snapshot())
@@ -250,8 +253,9 @@ class Voltmeter2182(Keithley2182Queries):
         self.last_raw_reading = raw
         value = number(_float(raw), "2182 voltage", -self.limit, self.limit)
         no_error(self.resource)
-        self.verify()
+        after = self.verify()
         return {"voltage_v": value, "current_a": None, "fresh": True, "raw_response": raw,
+                "detector_after": after,
                 "acquisition_started_monotonic_s": started, "acquisition_finished_monotonic_s": finished}
 
 
@@ -259,7 +263,7 @@ class Meter2400:
     """2400 source-V/current sensing or documented zero-A/fixed-range voltmeter."""
     def __init__(self, resource, *, expected_idn, current_mode, voltage_range_v,
                  current_range_a, compliance, nplc, max_voltage_v, max_current_a,
-                 max_step_v, settle_s, tolerance_v, sleep=time.sleep):
+                 max_step_v, settle_s, tolerance_v, sleep=time.sleep, clock=time.perf_counter):
         if type(current_mode) is not bool:
             raise NktError("2400 current_mode must be boolean")
         if voltage_range_v not in (.2, 2., 20., 200.) or current_range_a not in (1e-6, 1e-5, 1e-4, .001, .01, .1, 1.):
@@ -278,6 +282,7 @@ class Meter2400:
             if compliance <= max_voltage_v:
                 raise NktError("Voltmeter compliance must exceed maximum expected voltage")
         self.resource, self.expected_idn = resource, expected_idn
+        self.clock, self.last_change_monotonic_s = clock, None
         self.current_mode = current_mode
         self.voltage_range, self.current_range = voltage_range_v, current_range_a
         self.compliance, self.nplc = compliance, nplc
@@ -361,6 +366,7 @@ class Meter2400:
                        matches=lambda actual: self._matches(command, actual, expected))
         self.verify(output=False)
         ensure(self.resource, "OUTP", True)
+        self.last_change_monotonic_s = self.clock()
         self.ready = True
         self.verify()
 
@@ -391,6 +397,7 @@ class Meter2400:
         self.verify()
         for value in ramp_values(self.expected, target, self.max_step):
             ensure(self.resource, "SOUR:VOLT:LEV", value, tolerance=self.tolerance)
+            self.last_change_monotonic_s = self.clock()
             self.expected = value
             self.sleep(self.settle_s)
             self.read_values()

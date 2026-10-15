@@ -22,10 +22,11 @@ def clean_response(raw):
 
 
 class VisaTransport:
-    def __init__(self, resource, *, role, authorize_writes=False, on_event=None):
+    def __init__(self, resource, *, role, authorize_writes=False, on_event=None, clock=time.perf_counter):
         self.resource, self.role = resource, role
         self.authorize_writes = authorize_writes is True
         self.on_event = on_event
+        self.clock = clock
         self.lock = threading.RLock()
         self.poisoned = False
         self.transcript = []
@@ -36,6 +37,7 @@ class VisaTransport:
         row = {"phase": "instrument_io", "role": self.role, "command": command,
                "query": query, "captured_at_utc": utc_now(), "response": None}
         with self.lock:
+            row["started_monotonic_s"] = self.clock()
             self.transcript.append(row)
             try:
                 row["response"] = self.resource.query(command) if query else self.resource.write(command)
@@ -45,6 +47,9 @@ class VisaTransport:
                 row["error"] = f"{type(exc).__name__}: {exc}"
                 raise
             finally:
+                row["finished_monotonic_s"] = self.clock()
+                row["duration_s"] = row["finished_monotonic_s"] - row["started_monotonic_s"]
+                row["finished_at_utc"] = utc_now()
                 if self.on_event:
                     try:
                         self.on_event(dict(row))
@@ -99,7 +104,8 @@ class Serial2182Transport:
         with self.host.lock:
             if self.poisoned or self.host.poisoned:
                 raise NktError("Serial response ownership is uncertain; new session required")
-            row = {"command": command, "responses": []}
+            row = {"command": command, "responses": [], "started_monotonic_s": self.clock(),
+                   "poll_wait_requested_s": 0.0}
             self.transcript.append(row)
             try:
                 # SEND is a transport envelope; an IDN/settings query is still read-only.
@@ -107,6 +113,7 @@ class Serial2182Transport:
                 deadline = self.clock() + self.timeout_s
                 while True:
                     self.sleep(0.1)
+                    row["poll_wait_requested_s"] += 0.1
                     response = self.host.query("SYST:COMM:SER:ENT?")
                     row["responses"].append(response)
                     if response:
@@ -117,6 +124,9 @@ class Serial2182Transport:
                 self.poisoned = True
                 row["error"] = f"{type(exc).__name__}: {exc}"
                 raise
+            finally:
+                row["finished_monotonic_s"] = self.clock()
+                row["duration_s"] = row["finished_monotonic_s"] - row["started_monotonic_s"]
 
     def write(self, command):
         with self.host.lock:

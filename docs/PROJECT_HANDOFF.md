@@ -4,6 +4,35 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+Dark-first photoresponse and timing optimization (2026-10-15): software/offline
+complete. Explicit `power_feedback.power_points = ["dark", positive W, ...]`
+selects one dark electrical scan per outer repeat/environment/optical visit;
+light leaves subtract the matching bias/SMU dark coordinate. New outer ordering
+holds light throughout inner electrical scans and qualifies power once before
+electrical configuration/output. Legacy dark/light/dark configs and their plan
+hash shape remain supported. Actual temperature/field plus quality are retained,
+with strict safety/drift checks and the 3 T invariant unchanged.
+
+Reduced nested passive-2182 configuration queries and same-call duplicate
+post-READ verification; kept fresh source/relay and full 2400 guards. Monotonic
+remaining waits credit optical qualification and confirmed 6221/2400 setting
+time; pinned SMU waits stay conservative. Optional same-scan previous actuator
+start never reuses qualification proof. Timing audit retains failed operations.
+All raw data, single baseline ID/age, source configuration and cleanup remain
+recorded; defaults export accepted light differences only.
+
+Validation: **678/678 local tests**, including 21 new dark-scan/timing tests;
+**283/283 isolated LK_setup lyr offline tests** (180 photoresponse, 24 PM100D,
+35 NKT, 44 legacy SMU), 172-file manifest verified, both new NKT/CLD CLI
+simulations passed locally and on target. No instrument connection/output or
+active target checkout update during offline validation. The operator subsequently
+confirmed both Jupyter kernels are plotting only and authorized commit, push and
+deployment to the current `module/integration-photovoltage/current` branch.
+Release/deployment is a separate delivery step; real timing/transient comparison
+has not been performed by these tests.
+Usage: `docs/PHOTORESPONSE_GUIDE.md`; timing evidence and limitations:
+`docs/PHOTORESPONSE_TIMING.md`.
+
 CLD1010LP (2026-10-15): the persistent CONN=1/1, MEAS=8192 readings were a
 software gate, not an instrument refusal. With the operator's explicit
 acknowledgment (`acknowledged_connection_diagnostics`, exact pattern only) the LD

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+import time
 
 from .nkt_config import NktError, integer, keys, number, text
 from .photoresponse_devices import CurrentSource6221, Voltmeter2182, Meter2400
@@ -136,7 +137,7 @@ def load_electrical_hardware(doc, config):
 class HardwareElectrical:
     is_hardware = True
 
-    def __init__(self, config, transports, *, sleep=None):
+    def __init__(self, config, transports, *, sleep=None, clock=time.perf_counter):
         self.config, self.transports = config, transports
         h = config.hardware
         h.require_run(config)
@@ -146,7 +147,7 @@ class HardwareElectrical:
         if config.excitation == "dc_current":
             self.source = CurrentSource6221(transports["6221"],
                 **{k: v for k, v in h.source.items() if k != "address"},
-                max_current_a=config.max_abs_current_a, **options)
+                max_current_a=config.max_abs_current_a, clock=clock, **options)
         detector_transport = transports.get("detector")
         if h.detector_transport == "via_6221":
             if self.source is None:
@@ -159,9 +160,14 @@ class HardwareElectrical:
         else:
             self.detector = Meter2400(detector_transport, **values,
                 current_mode=config.quantity == "current_a", max_voltage_v=config.max_abs_voltage_v,
-                max_current_a=config.max_abs_current_a, **options)
+                max_current_a=config.max_abs_current_a, clock=clock, **options)
         self.started = False
         self.cleanup_details = []
+
+    @property
+    def last_change_monotonic_s(self):
+        changes = [getattr(device, "last_change_monotonic_s", None) for device in (self.source, self.detector)]
+        return max((value for value in changes if value is not None), default=None)
 
     def _host_guard(self):
         if self.config.hardware.detector_transport != "via_6221":
@@ -208,11 +214,32 @@ class HardwareElectrical:
     def begin(self):
         self.preflight()
         self.started = True  # cleanup owns only instruments whose own begin succeeded
-        self.detector.begin()
+        if isinstance(self.detector, Voltmeter2182) and self.detector.ready:
+            self.detector.verify()  # Same session after a confirmed source shutdown.
+        else:
+            self.detector.begin()
         if self.source:
             self.source.begin()
 
     def snapshot(self):
+        return self._snapshot(self._detector_snapshot)
+
+    def guard(self):
+        """Fresh source safety, without claiming a passive 2182A settings check."""
+        if isinstance(self.detector, Voltmeter2182):
+            state = self._snapshot(lambda: None)
+            state["detector_verification"] = "deferred_to_acquisition_boundary"
+            return state
+        return self.snapshot()  # 2400 can source: retain its complete guard.
+
+    def _detector_snapshot(self):
+        if self.started and self.detector.ready:
+            return self.detector.verify()
+        if isinstance(self.detector, Meter2400):
+            return self.detector.snapshot()
+        return self.detector.snapshot(authorize_queries=True)
+
+    def _snapshot(self, detector_reader):
         host_state = self._host_guard()
         relay = self.relay_host.snapshot(authorize_queries=True) if self.relay_host else None
         if relay:
@@ -226,16 +253,13 @@ class HardwareElectrical:
         source = None
         if self.source:
             readback = self.source.snapshot()
+            if readback["unsafe_condition"]:
+                raise NktError("6221 unsafe condition while guarding the optical operation")
             if self.source.ready:
                 self.source.check(readback)
             source = {"model": "6221", "output_enabled": readback["output_enabled"],
                       "setpoint": readback["source_current_setpoint_a"], "readback": readback}
-        if self.started:
-            meter = self.detector.verify()
-        elif isinstance(self.detector, Meter2400):
-            meter = self.detector.snapshot()
-        else:
-            meter = self.detector.snapshot(authorize_queries=True)
+        meter = detector_reader()
         if self.config.quantity == "current_a":
             source = {"model": "2400", "output_enabled": meter["output_enabled"],
                       "setpoint": meter["setpoint"], "readback": meter}
@@ -252,7 +276,8 @@ class HardwareElectrical:
 
     def read(self, *, illuminated):
         reading = self.detector.read_values() if isinstance(self.detector, Meter2400) else self.detector.read_voltage()
-        reading["state"] = self.snapshot()
+        reading["state"] = (self._snapshot(lambda: deepcopy(reading["detector_after"]))
+                            if isinstance(self.detector, Voltmeter2182) else self.snapshot())
         return reading
 
     def cleanup(self):

@@ -77,7 +77,8 @@ class Pm100d:
             raise NktError("READ? triggers acquisition and requires measurement authorization")
         if self.closed or self.poisoned:
             raise NktError("PM100D session uncertain/closed; no automatic retry")
-        entry = {"command": command, "kind": kind, "started_at_utc": utc_now(), "reply": None}
+        entry = {"command": command, "kind": kind, "started_at_utc": utc_now(), "reply": None,
+                 "started_monotonic_s": self.clock()}
         self.transcript.append(entry)
         self.state_current = False
         try:
@@ -94,6 +95,8 @@ class Pm100d:
             entry["error"] = f"{type(exc).__name__}: {exc}"
             raise
         finally:
+            entry["finished_monotonic_s"] = self.clock()
+            entry["duration_s"] = entry["finished_monotonic_s"] - entry["started_monotonic_s"]
             entry["finished_at_utc"] = utc_now()
 
     def _parse_reply(self, command, parser, kind="query"):
@@ -231,7 +234,8 @@ class Pm100d:
                         if reply != "1":
                             raise NktError("PM100D setting completion not acknowledged")
                     self._parse_reply("*OPC?", complete)
-            state = self.capture()
+            if any(needed for needed, _ in changes):
+                state = self.capture()
         self._check(state, wavelength_nm)
         self.target_nm = wavelength_nm
         return state

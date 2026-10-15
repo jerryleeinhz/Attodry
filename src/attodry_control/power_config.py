@@ -207,18 +207,36 @@ class PhotoresponsePowerConfig:
     meter: PmConfig
     feedback: FeedbackConfig
     nd_control_verified: bool = False
+    power_points: tuple[str | float, ...] | None = None
+    initial_actuator_mode: str = "point"
 
     @property
     def targets(self):
-        return self.feedback._targets()
+        return self.power_points if self.power_points is not None else self.feedback._targets()
 
     def for_target(self, index):
-        return self.feedback.for_point(index, len(self.targets))
+        if self.power_points is not None:
+            if type(index) is not int or not 1 <= index < len(self.targets):
+                raise NktError("Dark has no light feedback target")
+            index -= 1
+        return self.feedback.for_point(index, len(self.feedback._targets()))
 
     def validate(self, optical):
         self.meter.validate()
         self.feedback.validate()
         boolean(self.nd_control_verified, "nd_control_verified")
+        if self.initial_actuator_mode not in ("point", "previous"):
+            raise NktError("initial_actuator_mode must be point or previous")
+        if self.power_points is not None:
+            if (type(self.power_points) is not tuple or len(self.power_points) < 2
+                    or self.power_points[0] != "dark"):
+                raise NktError("power_points must start with dark and contain light targets")
+            for target in self.power_points[1:]:
+                number(target, "light power point W", 1e-15, self.feedback.max_power_w)
+            if self.power_points[1:] != self.feedback._targets():
+                raise NktError("power_points differ from feedback light targets")
+        elif self.initial_actuator_mode != "point":
+            raise NktError("previous initial actuator requires a dark-first power scan")
         f = self.feedback
         if (optical.backend == "simulation") != (self.meter.backend == "simulation"):
             raise NktError("Power meter and light source must share simulation/hardware mode")
@@ -269,6 +287,13 @@ def load_photoresponse_power(doc):
     keys(pm, "pm100d", {f.name for f in fields(PmConfig)} - optional, optional)
     raw = dict(doc["power_feedback"])
     verified = raw.pop("nd_control_verified", False)
+    power_points = raw.pop("power_points", None)
+    initial_mode = raw.pop("initial_actuator_mode", "point")
+    if power_points is not None:
+        if (type(power_points) is not list or len(power_points) < 2 or power_points[0] != "dark"
+                or any(k in raw for k in ("target_power_w", "target_powers_w"))):
+            raise NktError("Use power_points = ['dark', positive W, ...] without target_power keys")
+        raw["target_powers_w"] = power_points[1:]
     optional = {"target_power_w", "target_powers_w", "target_tolerance_w", "target_tolerance_fraction",
                 "actuator", "nd_min_pct", "nd_max_pct", "nd_step_pct", "increasing_nd_increases_power",
                 "source_current_min_pct", "source_current_max_pct", "source_current_step_pct",
@@ -283,4 +308,5 @@ def load_photoresponse_power(doc):
         if type(values["target_powers_w"]) is not list:
             raise NktError("target_powers_w must be an explicit array")
         values["target_powers_w"] = tuple(values["target_powers_w"])
-    return PhotoresponsePowerConfig(PmConfig(**pm), FeedbackConfig(**values), verified)
+    return PhotoresponsePowerConfig(PmConfig(**pm), FeedbackConfig(**values), verified,
+                                    tuple(power_points) if power_points is not None else None, initial_mode)

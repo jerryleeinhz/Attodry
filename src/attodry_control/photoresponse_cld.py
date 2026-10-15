@@ -582,6 +582,18 @@ class CldController:
         self.failed = False
         return self.verify_point(emitting=False)
 
+    def prepare_power_point(self, point, policy, *, initial_value=None):
+        from .power_feedback import actuator_domain
+        if not self.owned or self.closed or self.failed or point not in self.config.points:
+            raise NktError("CLD point/session invalid")
+        policy.validate(self.config)
+        self._feedback_anchor = point
+        field, low, high, _ = actuator_domain(policy)
+        if initial_value is not None:
+            number(initial_value, "previous qualified actuator", low, high)
+            point = replace(point, **{field: initial_value})
+        return self._prepare_validated_point(point)
+
     def adjust_power(self, value, policy):
         """One bounded current step with LD off; TEC/connection guards unchanged."""
         policy.validate(self.config)

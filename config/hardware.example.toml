@@ -369,6 +369,13 @@ samples_per_window = "CHANGE_ME"
 repeats = "CHANGE_ME"
 sample_interval_s = "CHANGE_ME" # Waiting before each read, not a promised hardware sampling rate.
 settle_s = "CHANGE_ME" # Waiting after optical transition; nkt_run.dwell_s must be 0.
+# Dark-first power scans: minimum sample response wait since the last optical/electrical change.
+# Optional dark_recovery_s = operator-confirmed seconds (defaults to settle_s).
+# Copy the full PM100D/power_feedback tables from the dedicated hardware template.
+# Replace target_power_w/target_powers_w with power_points = ["dark", positive W, ...].
+# Optional power_feedback.initial_actuator_mode = "point" (default) | "previous".
+# Order: ["repeat", "environment", "optical", "target_power_w", "bias", "smu"].
+# Offline examples: photoresponse_dark_nkt_simulation.toml / photoresponse_dark_cld_simulation.toml.
 max_abs_voltage_v = "CHANGE_ME" # Independent sample safety value, not a vendor rating.
 max_abs_current_a = "CHANGE_ME" # Independent sample safety value, not a vendor rating.
 # No excitation: omit BOTH bias arrays. None is not 0 A.

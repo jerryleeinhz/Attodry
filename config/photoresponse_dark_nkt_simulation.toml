@@ -1,0 +1,83 @@
+# OFFLINE ONLY. These synthetic values are not sample limits or hardware permission.
+# NKT constant-power mode: PM100D feedback adjusts the source power setpoint (0x37).
+# Copy the relevant tables into ignored hardware.local.toml for one-file offline use.
+[photoresponse]
+bias_current_points_a = [0.0, 0.000001]
+mode = "dc_current_voltage" # open_circuit_voltage | dc_current_voltage | voltage_bias_current
+detector = "keithley2182a" # keithley2182a | keithley2400; current requires 2400
+samples_per_window = 3
+repeats = 1
+sample_interval_s = 0.01
+settle_s = 0.01 # Minimum sample response wait since the last relevant change.
+dark_recovery_s = 0.02 # Minimum dark recovery; synthetic example only.
+max_abs_voltage_v = 0.01
+max_abs_current_a = 0.00001
+# dc_current_voltage requires bias_current_points_a = [-0.000001, 0.0, 0.000001]
+# voltage_bias_current requires bias_voltage_points_v = [-0.001, 0.0, 0.001]
+# open_circuit_voltage forbids BOTH bias arrays; none is distinct from DC 0 A.
+
+[nkt_source]
+control = "power" # constant-power mode
+apply_control = true # preflight switches a confirmed-off source to `control`
+max_level_pct = 10.0
+allowed_pp_ratios = []
+
+[nkt_varia]
+monitor_present = false
+
+[nkt_run]
+backend = "simulation" # Real acquisition uses separate hardware templates and run flags.
+mode = "varia_bandpass"
+manual_route = "SIMULATED VARIA route"
+emit = true # Only simulated emission.
+timeout_s = 5.0
+poll_interval_s = 0.1
+dwell_s = 0.0 # Photoresponse settling is controlled by photoresponse.settle_s.
+output_directory = "../run_data/dark_nkt_sim"
+run_name = "dark_nkt_offline"
+note = "Synthetic response; no instruments, field, temperature or calibrated optical power."
+
+[[nkt_run.points]]
+source_level_pct = 5.0
+wavelength_nm = 750.0
+bandwidth_nm = 20.0
+nd_pct = 10.0
+
+[[nkt_run.points]]
+source_level_pct = 5.0
+wavelength_nm = 760.0
+bandwidth_nm = 20.0
+nd_pct = 10.0
+
+[photoresponse_combination]
+# Outer to inner; optical is one complete wavelength/bandwidth/initial-actuator row.
+order = ["repeat", "environment", "optical", "target_power_w", "bias", "smu"]
+
+[pm100d]
+backend = "simulation"
+io_timeout_s = 1.0
+wavelength_tolerance_nm = 0.1
+average_count = 1
+auto_range = true
+max_power_w = 0.003
+measurement_plane = "SIMULATED reference monitor; not sample calibration"
+
+[power_feedback]
+actuator = "source_power"
+power_points = ["dark", 0.0008, 0.0012]
+initial_actuator_mode = "previous" # point | previous; never reuses stability proof
+target_tolerance_w = 0.000001
+max_power_w = 0.0025
+minimum_signal_power_w = 0.00001
+timeout_s = 3.0
+hold_s = 0.01
+# Next setpoint = current * target / measured, capped at one step and the bounds.
+source_power_min_pct = 1.0
+source_power_max_pct = 8.0
+source_power_step_pct = 2.0
+
+[power_feedback.window]
+duration_s = 0.02
+min_samples = 3
+sample_interval_s = 0.01
+max_peak_to_peak_w = 0.000001

@@ -7,7 +7,7 @@ import math
 import time
 from typing import Protocol
 
-from .nkt_config import NktConfig, NktError, NktPoint
+from .nkt_config import NktConfig, NktError, NktPoint, number
 
 
 SOURCE_FAULT_MASK = 0xE0FE  # EXTREME S4x2 SDK: bits 1..7, 13..15.
@@ -284,6 +284,22 @@ class NktController:
         self._expected_emitting = False
         self._faulted = False
         return {"source": source, "filter": filt}
+
+    def prepare_power_point(self, point, policy, *, initial_value=None):
+        """Configured anchor with an optional previous qualified OFF setpoint."""
+        from .power_feedback import actuator_domain
+        self._require_session()
+        policy.validate(self.config)
+        if point not in self.config.points:
+            raise NktError("Point is outside the configured scan")
+        self._feedback_anchor = point
+        field, low, high, _ = actuator_domain(policy)
+        if initial_value is not None:
+            number(initial_value, "previous qualified actuator", low, high)
+            point = replace(point, **{field: initial_value})
+        point.validate(self.config.mode, self.config.max_level_pct, self.config.allowed_pp_ratios)
+        self._faulted = True
+        return self._prepare_validated_point(point)
 
     def adjust_power(self, value, policy):
         """One approved actuator step, preserving the configured optical anchor."""
