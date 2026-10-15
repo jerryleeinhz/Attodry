@@ -97,17 +97,31 @@ explicit yes. Before uploading, compute the manifest hash locally with
 that changed after review is refused. Then do a dry run, followed by the real
 launch:
 
-```bash
-bash .claude/skills/lk-setup-monitor/scripts/lk_ps.sh .claude/skills/lk-setup-run/scripts/lk_launch.ps1 \
-  "TaskDir=C:\Users\LK_Setup\Yuanrong Li\NKT\run_data\<run>" \
-  "Command=<exact command line>" "ManifestSha256=<sha256>" \
-  "Authorization=<user approval, quoted>" DryRun=1
+Bash quoting of Windows paths and nested `"` is fragile. Put the variables in
+a small PowerShell header file and prepend it to the launcher:
+
+```powershell
+# launch_params.ps1 (PowerShell single-quoted strings)
+$TaskDir = 'C:\Users\LK_Setup\Yuanrong Li\NKT\run_data\<run>'
+$Command = 'cmd.exe /d /s /c ""C:\Users\LK_Setup\Yuanrong Li\NKT\run_data\<run>\run.cmd""'
+$ManifestSha256 = '<sha256>'
+$Authorization = '<user approval, quoted>'
+# $Coexist = '<pid>@<creation UTC ISO>;...'  # only acquisitions the user approved to run alongside
 ```
 
-Drop `DryRun=1` for the real launch. The launcher:
+```bash
+cat launch_params.ps1 .claude/skills/lk-setup-run/scripts/lk_launch.ps1 > launch_combined.ps1
+bash .claude/skills/lk-setup-monitor/scripts/lk_ps.sh launch_combined.ps1 DryRun=1
+```
+
+Drop `DryRun=1` for the real launch. A `run.cmd` wrapper in the run directory
+that redirects stdout/stderr to `stdout.log`/`stderr.log` keeps startup errors,
+which a hidden process would otherwise lose. Pin it in the manifest. The launcher:
 
 - refuses a changed manifest or an already-claimed directory
-- refuses if other non-Jupyter Python processes are running
+- refuses if other non-Jupyter Python processes are running, except those the
+  user explicitly approved in `$Coexist`, re-checked by PID and creation time
+  and written into the launch claim
 - refuses anything under `Integration`
 - writes `launch_claim.json`, then starts the command hidden through
   `Win32_Process.Create`, then writes `launch-identity.json` (PID + creation
@@ -124,6 +138,8 @@ a preflight stop, then pace checks to the point cadence.
 A hidden process has no console, so Ctrl+C can't reach it remotely.
 
 - Use the stop method recorded in the manifest, if the entry point has one.
+  The single-use NKT/CLD power entries stop when a `STOP` file appears in
+  their output directory: they turn emission off and run normal cleanup.
 - Otherwise, ask the user to stop the run at the station.
 - `Stop-Process` and other force-kills skip the cleanup state machine. Use one
   only if the user explicitly asks for it after being told that, and then ask

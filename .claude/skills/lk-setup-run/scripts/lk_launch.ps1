@@ -6,6 +6,8 @@
 #   $Authorization   one sentence quoting what the user approved
 #   $WorkDir         working directory (default: $TaskDir)
 #   $DryRun          '1' runs every check and prints the plan without launching
+#   $Coexist         optional 'pid@creationUtcIso;...' of running acquisitions the user
+#                    explicitly approved to run alongside this one (identity re-checked)
 foreach ($name in 'TaskDir', 'Command', 'ManifestSha256', 'Authorization') {
     if (-not (Get-Variable $name -ErrorAction SilentlyContinue)) { throw "missing variable $name" }
 }
@@ -21,8 +23,25 @@ foreach ($name in 'launch_claim.json', 'launch-identity.json', 'launch-result.js
     if (Test-Path -LiteralPath (Join-Path $TaskDir $name)) { throw "Task already launched or claimed: $name. Use a new run directory." }
 }
 
-$busy = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-    Where-Object { $_.CommandLine -notmatch 'jupyter|ipykernel' })
+$approved = @{}
+if (Get-Variable Coexist -ErrorAction SilentlyContinue) {
+    foreach ($item in $Coexist -split ';' | Where-Object { $_ }) {
+        $parts = $item -split '@', 2
+        $approved[[int]$parts[0]] = ([DateTime]$parts[1]).ToUniversalTime().ToString('o')
+    }
+}
+$coexisting = @()
+$busy = @()
+foreach ($p in Get-CimInstance Win32_Process -Filter "Name='python.exe'") {
+    if ($p.CommandLine -match 'jupyter|ipykernel') { continue }
+    $created = $p.CreationDate.ToUniversalTime().ToString('o')
+    if ($approved.ContainsKey([int]$p.ProcessId) -and $approved[[int]$p.ProcessId] -eq $created) {
+        $coexisting += "pid=$($p.ProcessId) created=$created $($p.CommandLine)"
+    } else {
+        $busy += $p
+    }
+}
+if ($coexisting.Count -gt 0) { 'User-approved coexisting processes:'; $coexisting | ForEach-Object { "  $_" } }
 if ($busy.Count -gt 0) {
     "Other non-Jupyter python processes are running:"
     $busy | ForEach-Object { "  pid=$($_.ProcessId) $($_.CommandLine)" }
@@ -34,7 +53,7 @@ if ($busy.Count -gt 0) {
 if ($dry) { 'DRY RUN: all checks passed, nothing launched'; return }
 
 # CreateNew makes the claim atomic: a second launch attempt fails here.
-$claim = @{ at_utc = [DateTime]::UtcNow.ToString('o'); command = $Command; manifest_sha256 = $actual; authorization = $Authorization }
+$claim = @{ at_utc = [DateTime]::UtcNow.ToString('o'); command = $Command; manifest_sha256 = $actual; authorization = $Authorization; coexisting = $coexisting }
 $stream = [IO.File]::Open((Join-Path $TaskDir 'launch_claim.json'), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
 $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -Depth 5 -InputObject $claim))
 $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true); $stream.Dispose()
