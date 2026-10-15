@@ -1,5 +1,23 @@
 # Development stages
 
+## LK_setup timing optimization deployment verified (2026-10-15)
+
+- Origin publishes `8d83f94` timing optimization and `874682d` project launcher.
+  LK_setup Integration-photonics fast-forwards from `016d741` after no-active-run
+  preflight, backups and station-lock acquisition. Existing notebook modifications
+  and all four local TOMLs retain their original bytes and SHA256.
+- Target lyr Python 3.12.13 passes 126 engine/optical/gate/environment cases and
+  13 final launcher/timing cases. The acquisition package is identical between
+  candidates; current local TOML preview and actual deployed source-origin check
+  pass with real instrument imports/DLL loads blocked.
+- Project-local launcher fixes worktree selection without changing global conda
+  installs, existing kernels, configuration, experimental data or acquisition
+  ownership. Code and test files match origin; two prior notebook edits remain.
+- Raw logs (including the initial PowerShell stderr redirection error), archives,
+  backup patch and SHA256/preview/deployment receipts remain ignored under
+  `speed-deployment-20261015T184033Z`. Delivery performs no instrument I/O and
+  starts no real scan or comparison.
+
 ## Authorized publication and checkout source selection (2026-10-15)
 
 - Pushes timing implementation `8d83f94`; LK_setup isolated lyr verification

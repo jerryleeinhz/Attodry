@@ -4,6 +4,30 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+### LK_setup timing optimization deployment verified (2026-10-15)
+
+- Publishes timing feature `8d83f94` and checkout launcher `874682d` to
+  `origin/integration-photonics-nonlinear-hall`, then fast-forwards LK_setup's
+  existing Integration-photonics worktree from `016d741` to `874682d`.
+  File-only preflight finds no active photonics database run and a free station
+  lease; deployment holds existing station locks during the short source update.
+- Isolated target verification uses lyr Python 3.12.13: 126 related cases pass,
+  followed by 13 launcher/timing cases. The final candidate's acquisition package
+  is byte-identical to the 126-case candidate. The unchanged local TOML previews
+  six optical points x one lock-in point with both new versioned timing policies.
+- Post-deployment, the actual `tools/run_combination.py describe-hardware` entry
+  passes with hardware imports and DLL loading denied. Package and photonics
+  module origins resolve to this worktree's src. Default `python -m` still follows
+  the separately installed checkout; global Python/conda configuration is untouched.
+- All four local TOMLs and all six notebooks retain their original SHA256.
+  The two previously modified notebooks remain modified and uncommitted on the
+  station; source/tests/config templates match the published commit. Original
+  files, binary diff, archive hashes, preflight, target tests and deployment
+  receipts are backed up under ignored `speed-deployment-20261015T184033Z`.
+- No instrument connection, status consumption, setting write, illumination or
+  new acquisition occurs during this delivery. Existing owners/kernels are not
+  stopped or restarted. Real A/B remains pending user confirmation.
+
 ### Authorized publication and checkout source selection (2026-10-15)
 
 - Timing feature `8d83f94` is pushed to origin. LK_setup's isolated candidate
@@ -17,9 +41,9 @@ Last updated: 2026-10-15
   invoked process and its children, preserving all existing CLI authorization.
   It rejects an already loaded foreign package rather than mixing versions.
   Global conda installs, other terminals and running kernels remain unchanged.
-- Launcher/source-selection tests pass locally (13 including detector timing
-  regressions). Target launcher verification and guarded fast-forward deployment
-  are recorded in the ignored `speed-deployment-20261015T184033Z` receipts.
+- Launcher/source-selection tests pass locally and on LK_setup (13 including
+  detector timing regressions). Target verification and guarded fast-forward
+  deployment are recorded in ignored `speed-deployment-20261015T184033Z` receipts.
   Real acquisition/A/B remains pending the operator's confirmation.
 
 ### Photonics settling and axis qualification optimization (2026-10-15)
