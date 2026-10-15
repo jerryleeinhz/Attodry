@@ -33,7 +33,8 @@ nplc = "CHANGE_ME"
 # address is REQUIRED with detector_transport=visa and FORBIDDEN via_6221.
 
 [nkt_source]
-control = "current"
+control = "current" # current | power (constant-power mode; pair with actuator = "source_power")
+# apply_control = true # optional: preflight switches a healthy, emission-off source to `control`
 max_level_pct = "CHANGE_ME"
 allowed_pp_ratios = []
 dll_path = "CHANGE_ME_X64_NKTPDLL_PATH"
@@ -94,6 +95,10 @@ hold_s = "CHANGE_ME"
 source_current_min_pct = "CHANGE_ME"
 source_current_max_pct = "CHANGE_ME"
 source_current_step_pct = "CHANGE_ME"
+# Constant-power mode instead (control = "power"): set actuator = "source_power" and
+# replace the three source_current_* keys with
+# source_power_min_pct / source_power_max_pct / source_power_step_pct (0.1 % units).
+# Each step is current * target / measured, capped at source_power_step_pct.
 
 [power_feedback.window]
 duration_s = "CHANGE_ME"

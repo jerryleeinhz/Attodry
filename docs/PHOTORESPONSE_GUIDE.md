@@ -127,8 +127,21 @@ order = ["optical", "target_power_w", "bias", "repeat"]
 | `target_tolerance_w` 或 `target_tolerance_fraction` | 二选一的目标容差 |
 | `power_feedback.window` | 稳定持续时间、最少样本数、采样间隔和峰峰值上限 |
 | `actuator="source_current"` | NKT 源电流百分比反馈；设置百分比范围、单步和最小可信信号 |
+| `actuator="source_power"` | NKT 恒功率模式（`[nkt_source] control="power"`）下调功率设定百分比（寄存器 0x37）；设置 `source_power_min_pct / source_power_max_pct / source_power_step_pct` 和最小可信信号 |
 | `actuator="varia_nd"` | NKT ND 反馈；需已确认调光方向、范围和单步，真实路径须另行验收 |
 | `actuator="cld_current"` | CLD 电流反馈；`current_min_a / current_max_a / current_step_a` 受 LD 上限约束 |
+
+`source_power` 每步按 `当前% × 目标W / 实测W` 估算下一设定，再受单步上限和
+最小／最大值约束；估算小于 0.1 % 时仍按方向走 0.1 %。反向时与 `source_current` 一样把单步减半。
+恒功率模式下设定与输出近似成比例，远离目标时比固定步长少走几步；比例只用来选步长，
+是否合格仍完全由 PM100D 稳定窗口判定。示例见
+`config/photoresponse_power_nkt_power_mode_simulation.toml`。
+
+`[nkt_source] apply_control = true`（可选，默认 false）表示预检阶段把设备切到 `control`
+指定的恒流／恒功率模式：仅在发射已确认关闭、联锁正常、无故障位时写 Setup 寄存器 0x31 并读回，
+事件记录 `control_mode_request` / `control_mode_applied`。外部调制等其他 Setup 模式不会被覆盖。
+不写该项时保持原规则：设备模式必须已经与 `control` 一致，否则拒绝运行。
+恒流和恒功率的百分比是不同标尺，切换模式时要重新确认 `max_level_pct` 和各点初始设定。
 
 准备波长和 PM 校正时保持关光。亮态功率达到目标并通过稳定窗口与 hold 后，
 才开始正式电学窗口；每次有界调节都先关光，再重建稳定证据。

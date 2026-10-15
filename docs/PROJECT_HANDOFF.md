@@ -4,6 +4,15 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+NKT constant-power feedback (2026-10-15, offline complete): PM100D feedback can
+now drive the SuperK power setpoint (`actuator = "source_power"`, proportional
+step capped by `source_power_step_pct`) with `[nkt_source] control = "power"`.
+Optional `apply_control = true` lets preflight switch a healthy emission-off
+source between constant current and constant power. Every step still turns
+emission off. No NKT hardware was contacted; real mode switching, single-step
+writes and illuminated qualification each need their own authorization. See
+`docs/DEVELOPMENT_STAGES.md`.
+
 CLD-only power commissioning preparation (2026-10-15):
 
 - New-chat guide: [goals, development workflow and CLD next steps](PHOTORESPONSE_NEW_CHAT_HANDOFF.md).

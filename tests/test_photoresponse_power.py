@@ -17,7 +17,8 @@ from attodry_control.photoresponse_power import open_photoresponse_power
 from attodry_control.photoresponse_combination import PhotoresponseCombinationPlan
 from attodry_control.photoresponse_analysis import load_results, export_results
 from attodry_control.photoresponse_cli import _run
-from attodry_control.power_feedback import PowerWindow, next_cld_current_a, next_nd_pct, next_source_current_pct
+from attodry_control.power_feedback import (PowerWindow, next_cld_current_a, next_nd_pct,
+                                           next_source_current_pct, next_source_power_pct)
 from attodry_control.photoresponse_storage import PhotoStore
 from test_photoresponse import Clock, example, setup as open_loop_setup
 from test_photoresponse_integration import hardware_setup, environment_config
@@ -430,6 +431,103 @@ class PowerPolicyTests(unittest.TestCase):
             with self.assertRaises(NktError): next_cld_current_a(current, power, f)
         with self.assertRaises(NktError): next_nd_pct(1, .001, f)
         with self.assertRaises(NktError): next_source_current_pct(1, .001, f)
+
+
+
+def power_mode_config():
+    return load_photoresponse_config(ROOT / "config/photoresponse_power_nkt_power_mode_simulation.toml")
+
+
+class PowerModeTests(unittest.TestCase):
+    def test_power_mode_example_qualifies_with_bounded_source_power_steps(self):
+        runner, backend, _, power, _ = setup(config=power_mode_config())
+        record = runner.run()
+        self.assertTrue(record["completed"], (record["error"], record["cleanup"]))
+        self.assertTrue(power.meter.closed)
+        self.assertEqual(backend.source["control"], "power")
+        step = runner.config.power.feedback.source_power_step_pct
+        adjustments = [a for r in record["conditions"] for a in r["power"]["adjustments"]]
+        self.assertTrue(adjustments)
+        for a in adjustments:
+            self.assertEqual(a["actuator"], "source_power")
+            self.assertLessEqual(abs(a["requested"] - a["before"]), step + 1e-9)
+        self.assertTrue(all(r["power"]["qualified"] for r in record["conditions"]))
+
+    def test_proportional_estimate_needs_fewer_steps_than_fixed_current_steps(self):
+        def adjustments(config, target):
+            f = replace(config.power.feedback, target_powers_w=(target,))
+            runner, _, _, _, _ = setup(config=replace(config, power=replace(config.power, feedback=f)))
+            record = runner.run()
+            self.assertTrue(record["completed"], record["error"])
+            return sum(len(r["power"]["adjustments"]) for r in record["conditions"])
+        current = config_for()
+        current = replace(current, power=replace(current.power, feedback=replace(
+            current.power.feedback, source_current_max_pct=10., source_current_step_pct=1.)))
+        power = power_mode_config()
+        power = replace(power, power=replace(power.power, feedback=replace(
+            power.power.feedback, source_power_max_pct=10., source_power_step_pct=3.)))
+        # Simulated W is linear in the setpoint: 5 % -> 1.0 mW, target 1.8 mW -> 9 %.
+        self.assertLess(adjustments(power, .0018), adjustments(current, .0018))
+
+    def test_policy_is_proportional_capped_bounded_and_never_searches_for_light(self):
+        f = power_mode_config().power.for_target(0)  # 0.8 mW +/- 1 uW, 1..8 %, step 2 %
+        self.assertEqual(next_source_power_pct(5., .001, f), 4.)  # 5 * 0.8 / 1.0
+        self.assertEqual(next_source_power_pct(5., .0004, f), 7.)  # estimate 10 %, capped at +2 %
+        self.assertEqual(next_source_power_pct(5., .000798, f), 5.1)  # below resolution: one count
+        self.assertEqual(next_source_power_pct(5., .0008, f), 5.)  # in tolerance: unchanged
+        self.assertEqual(next_source_power_pct(5., .0004, f, step_pct=1.), 6.)  # halved step honoured
+        for current, power in ((8., .0004), (1., .002), (5., 0.), (5., .000005)):
+            with self.assertRaises(NktError):
+                next_source_power_pct(current, power, f)
+        with self.assertRaises(NktError):
+            next_source_current_pct(5., .001, f)
+        with self.assertRaises(NktError):
+            next_source_power_pct(5., .001, config_for().power.for_target(0))
+
+    def test_config_requires_power_mode_and_separate_parameters(self):
+        c = power_mode_config()
+        f = c.power.feedback
+        invalid = [
+            replace(c, nkt=replace(c.nkt, source_control="current")),
+            replace(c, power=replace(c.power, feedback=replace(f, source_power_max_pct=11.))),
+            replace(c, power=replace(c.power, feedback=replace(f, source_power_min_pct=6.))),
+            replace(c, power=replace(c.power, feedback=replace(f, source_power_step_pct=.05))),
+            replace(c, power=replace(c.power, feedback=replace(f, source_current_step_pct=1.))),
+            replace(c, power=replace(c.power, feedback=replace(f, minimum_signal_power_w=None))),
+        ]
+        current = config_for()
+        invalid.append(replace(current, power=replace(current.power, feedback=replace(
+            current.power.feedback, source_power_step_pct=1.))))
+        for config in invalid:
+            with self.assertRaises(NktError):
+                config.validate()
+        c.validate()
+
+    def test_apply_control_switches_only_a_confirmed_off_source(self):
+        c = power_mode_config().nkt
+        for apply, emission, ok in ((True, 0, True), (False, 0, False), (True, 3, False)):
+            with self.subTest(apply=apply, emission=emission):
+                config = replace(c, apply_control=apply)
+                backend = SimulatedNkt(config)
+                backend.source.update(control="current", emission_state=emission,
+                                      status_bits=1 if emission else 0)
+                clock = Clock()
+                laser = NktController(config, backend, clock=clock, sleep=clock.sleep)
+                try:
+                    if ok:
+                        laser.begin()
+                        self.assertEqual(backend.source["control"], "power")
+                        phases = [e["phase"] for e in laser.record["events"]]
+                        self.assertIn("control_mode_request", phases)
+                        self.assertIn("control_mode_applied", phases)
+                    else:
+                        with self.assertRaises(NktError):
+                            laser.begin()
+                        self.assertEqual(backend.source["control"], "current")
+                        self.assertNotIn(("control", "power"), backend.commands)
+                finally:
+                    if ok:
+                        laser.finish()
 
 
 if __name__ == "__main__":

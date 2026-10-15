@@ -121,6 +121,7 @@ class NktConfig:
     varia_address: int = 2
     varia_serial: str = ""
     varia_monitor_present: bool = False
+    apply_control: bool = False
 
     def validate(self):
         if self.backend not in ("simulation", "nkt_sdk") or self.mode not in MODES:
@@ -138,6 +139,8 @@ class NktConfig:
         text(self.varia_serial, "varia_serial", empty=True)
         if not isinstance(self.emit, bool) or not isinstance(self.varia_monitor_present, bool):
             raise NktError("emit and monitor_present must be booleans")
+        if not isinstance(self.apply_control, bool):
+            raise NktError("apply_control must be a boolean")
         if not self.points or len(self.points) > 10000:
             raise NktError("Provide 1 to 10000 explicit scan points")
         for ratio in self.allowed_pp_ratios:
@@ -183,7 +186,7 @@ def load_nkt_config(path: str | Path) -> NktConfig:
     keys(run, "nkt_run", {"backend", "mode", "emit", "manual_route", "timeout_s",
          "poll_interval_s", "dwell_s", "output_directory", "run_name", "note", "points"})
     keys(source, "nkt_source", {"control", "max_level_pct", "allowed_pp_ratios"},
-         {"dll_path", "port", "address", "expected_serial"})
+         {"dll_path", "port", "address", "expected_serial", "apply_control"})
     if not isinstance(source["allowed_pp_ratios"], list):
         raise NktError("allowed_pp_ratios must be an array")
     if not isinstance(run["points"], list):
@@ -212,6 +215,7 @@ def load_nkt_config(path: str | Path) -> NktConfig:
         source_address=source.get("address", 1), source_serial=source.get("expected_serial", ""),
         varia_address=varia.get("address", 2), varia_serial=varia.get("expected_serial", ""),
         varia_monitor_present=varia.get("monitor_present", False),
+        apply_control=source.get("apply_control", False),
     )
     if config.backend == "nkt_sdk":
         if "address" not in source or (config.mode == "varia_bandpass" and "address" not in varia):

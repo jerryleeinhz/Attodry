@@ -316,7 +316,8 @@ step = 1.0
 # NKT standalone module. Other module loaders ignore these tables.
 # Offline demonstration: config/nkt_simulation.toml; never copy its limits to hardware.
 [nkt_source]
-control = "current" # current | power; must match the already-active source mode.
+control = "current" # current | power; must match the source mode unless apply_control = true.
+# apply_control = true # optional: preflight switches a healthy, emission-off source to `control`.
 max_level_pct = "CHANGE_ME" # Operator-approved percent cap, NOT measured sample mW.
 allowed_pp_ratios = [] # Leave pulse picker unchanged unless a verified ratio list is supplied.
 dll_path = "CHANGE_ME_X64_NKTPDLL_PATH"

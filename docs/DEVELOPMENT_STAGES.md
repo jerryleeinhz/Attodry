@@ -2,6 +2,35 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## NKT constant-power feedback actuator
+
+Status: offline complete (2026-10-15). No NKT hardware was connected; real
+constant-power switching and illuminated feedback still need staged acceptance.
+
+- Operator request: control NKT output in constant-power mode for faster, simpler
+  PM100D power targeting. The operator confirms the lab SuperK supports that mode,
+  selects the mode in TOML before each experiment, and keeps emission off for
+  every feedback step.
+- Added `actuator = "source_power"` with `source_power_min_pct`,
+  `source_power_max_pct` and `source_power_step_pct`. It requires
+  `[nkt_source] control = "power"`, forbids mixing ND/current parameters, and
+  keeps the minimum-signal, reduce-above and max-level rules of `source_current`.
+- Step policy: next setpoint = current x target W / measured W, capped at the
+  approved step and bounds, at least one 0.1 % count, halved on reversal. The
+  estimate only selects step size; PM100D windows remain the acceptance authority.
+  Simulation reaches a far target in 2 steps where fixed 1 % current steps need 4.
+- Added optional `[nkt_source] apply_control` (default false keeps the old
+  verify-only rule). When true, preflight writes Setup 0x31 only between current
+  and power, only with healthy confirmed emission off, verifies readback and logs
+  `control_mode_request`/`control_mode_applied`. External-modulation setups are
+  never overwritten.
+- New example `config/photoresponse_power_nkt_power_mode_simulation.toml` (short
+  output path: the deep OneDrive checkout otherwise exceeds Windows' 260-character
+  limit). Hardware templates document the alternative keys.
+- **655/655 full local tests** passed (7 new: policy, config domains, simulated
+  completion, step comparison, preflight switch, SDK Setup write refusal cases,
+  boolean config). CLI simulate and analyze passed for the new example.
+
 ## CLD-only six-point power commissioning preparation
 
 Status: single-use entry and target offline preparation complete (2026-10-15);

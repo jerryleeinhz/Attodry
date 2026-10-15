@@ -105,6 +105,38 @@ def next_source_current_pct(current, power_w, config, *, step_pct=None):
     return value
 
 
+def next_source_power_pct(current, power_w, config, *, step_pct=None):
+    """Constant-power setpoint step: proportional estimate, capped at one approved step.
+
+    In constant-power mode the source stabilises its own output, so measured W
+    scales roughly with the setpoint. The estimate only chooses the step size;
+    the bounds, step cap and PM100D window remain the acceptance authority.
+    """
+    config.validate()
+    if config.actuator != "source_power":
+        raise NktError("Source power correction requires the source_power actuator")
+    number(current, "current source power setpoint", config.source_power_min_pct, config.source_power_max_pct)
+    tenths(current)
+    number(power_w, "feedback power W", 0, config.max_power_w)
+    if power_w == 0:
+        raise NktError("Zero signal: do not increase output to search for light")
+    if power_w < config.minimum_signal_power_w:
+        raise NktError("Signal below minimum_signal_power_w; source power feedback is disabled")
+    if target_in_tolerance(power_w, config):
+        return current
+    step = config.source_power_step_pct if step_pct is None else number(
+        step_pct, "Source power step", 0.1, config.source_power_step_pct)
+    tenths(step)
+    sign = 1 if power_w < config.target_power_w else -1
+    delta = current * config.target_power_w / power_w - current
+    delta = sign * min(step, max(0.1, abs(delta)))  # at least one 0.1 % count
+    value = round(min(config.source_power_max_pct,
+                      max(config.source_power_min_pct, current + delta)), 1)
+    if math.isclose(value, current, abs_tol=0.01):
+        raise NktError("Target unreachable at configured source power boundary/resolution")
+    return value
+
+
 def next_cld_current_a(current, power_w, config, *, step_a=None):
     """Bounded LD-current step, with no assumed current-to-optical-power law."""
     config.validate()

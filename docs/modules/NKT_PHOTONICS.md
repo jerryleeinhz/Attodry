@@ -135,6 +135,8 @@ cleanup errors、last confirmed state。断点恢复重做未完成点，并重�
 1. 输出设定显式区分 `source_current_pct`、受支持模式的 `source_power_pct`、
    `varia_nd_pct`、实测 `measured_power_w`。百分比及监测百分比不是样品处 mW。
    只有确认固件支持的模式才允许调用；不假设所有 EXTREME 都支持恒功率模式。
+   （2026-10-15：操作者确认实验室 SuperK 支持恒功率模式；PM100D 闭环新增
+   `source_power` 调节方式，模式由 TOML `control` 与可选 `apply_control` 决定。）
 2. VARIA 下优先以稳定光源设置配合 ND 改变输出强度；改变源电流可能改变光谱，
    PP 改频会改变平均功率与时域条件，二者均需单独记录。
    LLTF 初版不提供未经厂家证实的独立强度设置。

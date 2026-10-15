@@ -275,6 +275,35 @@ class SdkTests(unittest.TestCase):
     def tearDown(self):
         NktSdk._owned_ports.clear()
 
+    def test_set_control_writes_setup_only_when_safe(self):
+        api = FakeApi()
+        b = NktSdk(hardware_config(), api=api, authorize_writes=True).open(authorize_connection=True)
+        b.set_control("power")
+        self.assertIn(("write", 1, 0x31, 1, 2), api.calls)
+        self.assertEqual(b.read_source()["control"], "power")
+        self.assertEqual(b.read_source()["level_pct"], 5.0)  # power setpoint register 0x37
+        writes = sum(c[0] == "write" for c in api.calls)
+        b.set_control("power")  # already matching: no write
+        self.assertEqual(sum(c[0] == "write" for c in api.calls), writes)
+        for register, value, width in ((0x30, 3, 1), (0x31, 2, 2)):  # emitting; external modulation
+            api.data[1, register] = value.to_bytes(width, "little")
+            with self.assertRaises(NktError):
+                b.set_control("current")
+            api.data[1, 0x30], api.data[1, 0x31] = bytes([0]), (1).to_bytes(2, "little")
+        with self.assertRaises(NktError):
+            b.set_control("external")
+        b.close()
+        b = NktSdk(hardware_config(), api=api).open(authorize_connection=True)
+        with self.assertRaises(NktError):
+            b.set_control("current")
+        b.close()
+        self.assertEqual(sum(c[0] == "write" for c in api.calls), writes)
+
+    def test_apply_control_must_be_boolean(self):
+        with self.assertRaises(NktError):
+            replace(example(), apply_control="yes").validate()
+        self.assertFalse(example().apply_control)
+
     def test_no_implicit_io_and_authorization(self):
         api = FakeApi()
         b = NktSdk(hardware_config(), api=api)

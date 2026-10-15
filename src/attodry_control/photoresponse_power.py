@@ -10,7 +10,7 @@ import time
 from .nkt_config import NktError, number
 from .nkt_control import utc_now
 from .power_feedback import (PowerWindow, next_nd_pct, next_source_current_pct,
-                             next_cld_current_a, target_in_tolerance)
+                             next_source_power_pct, next_cld_current_a, target_in_tolerance)
 
 
 class PhotoresponsePower:
@@ -93,7 +93,7 @@ class PhotoresponsePower:
         stable_since = None
         previous_direction = None
         step = {"varia_nd": f.nd_step_pct, "source_current": f.source_current_step_pct,
-                "cld_current": f.current_step_a}[f.actuator]
+                "source_power": f.source_power_step_pct, "cld_current": f.current_step_a}[f.actuator]
         while True:
             self._deadline(deadline)
             sample = self._sample("qualification", True, guard)
@@ -130,6 +130,9 @@ class PhotoresponsePower:
                 elif f.actuator == "source_current":
                     current = optical["source"]["level_pct"]
                     value = next_source_current_pct(current, result["mean_power_w"], f, step_pct=step)
+                elif f.actuator == "source_power":
+                    current = optical["source"]["level_pct"]
+                    value = next_source_power_pct(current, result["mean_power_w"], f, step_pct=step)
                 else:
                     current = optical["filter"]["nd_pct"]
                     value = next_nd_pct(current, result["mean_power_w"], f, step_pct=step)

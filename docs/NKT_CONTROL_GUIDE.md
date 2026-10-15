@@ -85,8 +85,10 @@ wavelength_nm = 1550.0
 
 `[nkt_run]` 保存模式、手动路线描述、是否发射、逐点驻留时间、运动超时、轮询间隔、
 记录目录、名称、备注和点列表。相对记录目录相对于 TOML 文件位置解析。
-`[nkt_source]` 中 `control=current|power` 必须与设备已处于的恒流/恒功率模式一致；
-初版不隐式修改 Setup 模式。`allowed_pp_ratios=[]` 意味着不允许修改 PP；如需修改，
+`[nkt_source]` 中 `control=current|power` 默认必须与设备已处于的恒流/恒功率模式一致，
+软件不隐式修改 Setup 模式。若同时写 `apply_control = true`，预检会在确认关发射、联锁正常且无故障时
+显式写 Setup（0x31）切到 `control` 指定模式并读回；外部调制等其他模式不会被覆盖。
+两种模式的百分比标尺不同，切换后需重新确认 `max_level_pct` 和点设定。`allowed_pp_ratios=[]` 意味着不允许修改 PP；如需修改，
 填写实机确认的分频集合，并在 point 中加入 `pulse_picker_ratio`。
 
 2026-09-22 经用户授权通过 SSH 在 `LK_setup` 做了只读软件清点：

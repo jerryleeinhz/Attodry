@@ -21,6 +21,7 @@ class NktBackend(Protocol):
     def read_source(self) -> dict: ...
     def read_filter(self) -> dict | None: ...
     def set_emission(self, enabled: bool) -> None: ...
+    def set_control(self, control: str) -> None: ...
     def configure(self, point: NktPoint) -> None: ...
     def close(self) -> None: ...
 
@@ -73,6 +74,12 @@ class SimulatedNkt:
         self.commands.append(("emission", enabled))
         self.source["emission_state"] = 3 if enabled else 0
         self.source["status_bits"] = (self.source["status_bits"] & ~1) | int(enabled)
+
+    def set_control(self, control):
+        if control not in ("current", "power") or self.source["emission_state"] != 0:
+            raise NktError("Control mode change requires confirmed emission off")
+        self.commands.append(("control", control))
+        self.source["control"] = control
 
     def configure(self, point):
         point.validate(self.config.mode, self.config.max_level_pct, self.config.allowed_pp_ratios)
@@ -218,6 +225,15 @@ class NktController:
         self._started = True
         self._faulted = True
         source, filt = self.capture("preflight")
+        if not self._emission_matches(source, False):
+            raise NktError("Preflight requires confirmed emission off; no automatic takeover")
+        if source["control"] != self.config.source_control and self.config.apply_control:
+            # Explicit TOML request, applied only to a healthy confirmed-off source.
+            self._healthy(source | {"control": self.config.source_control}, filt)
+            self._event("control_mode_request", before=source["control"],
+                        requested=self.config.source_control)
+            self.backend.set_control(self.config.source_control)
+            source, filt = self.capture("control_mode_applied")
         self._healthy(source, filt)
         if not self._emission_matches(source, False):
             raise NktError("Preflight requires confirmed emission off; no automatic takeover")
@@ -278,6 +294,9 @@ class NktController:
         if f.actuator == "source_current":
             field, low, high, step = ("source_level_pct", f.source_current_min_pct,
                                     f.source_current_max_pct, f.source_current_step_pct)
+        elif f.actuator == "source_power":
+            field, low, high, step = ("source_level_pct", f.source_power_min_pct,
+                                    f.source_power_max_pct, f.source_power_step_pct)
         elif f.actuator == "varia_nd":
             field, low, high, step = "nd_pct", f.nd_min_pct, f.nd_max_pct, f.nd_step_pct
         else:

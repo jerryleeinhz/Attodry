@@ -1,6 +1,7 @@
 """PM and stability contracts extracted from codex/pem-module optical_config.
 
 NKT feedback retains the existing policy; CLD adds a bounded current actuator.
+NKT constant-power mode adds a proportional, step-bounded power-setpoint actuator.
 No instrument I/O is performed by configuration.
 """
 from __future__ import annotations
@@ -70,6 +71,9 @@ class WindowConfig:
         number(self.max_peak_to_peak_w, "max_peak_to_peak_w", 0, 1e6)
 
 
+ACTUATORS = ("varia_nd", "source_current", "source_power", "cld_current")
+
+
 @dataclass(frozen=True)
 class FeedbackConfig:
     target_power_w: float | None
@@ -93,6 +97,9 @@ class FeedbackConfig:
     current_min_a: float | None = None
     current_max_a: float | None = None
     current_step_a: float | None = None
+    source_power_min_pct: float | None = None
+    source_power_max_pct: float | None = None
+    source_power_step_pct: float | None = None
 
     def _targets(self):
         if (self.target_power_w is None) == (self.target_powers_w is None):
@@ -126,13 +133,13 @@ class FeedbackConfig:
         return resolved
 
     def validate(self):
-        if self.actuator not in ("varia_nd", "source_current", "cld_current"):
-            raise NktError("Feedback actuator must be varia_nd, source_current or cld_current")
+        if self.actuator not in ACTUATORS:
+            raise NktError("Feedback actuator must be varia_nd, source_current, source_power or cld_current")
         self.window.validate()
         number(self.max_power_w, "feedback max_power_w", 1e-15, 1e6)
         if self.reduce_above_power_w is not None:
-            if self.actuator != "source_current":
-                raise NktError("reduce_above_power_w requires the source_current actuator")
+            if self.actuator not in ("source_current", "source_power"):
+                raise NktError("reduce_above_power_w requires the source_current or source_power actuator")
             number(self.reduce_above_power_w, "reduce_above_power_w", 1e-15, self.max_power_w)
             if self.reduce_above_power_w >= self.max_power_w:
                 raise NktError("Reduce-above threshold must be strictly below the hard power limit")
@@ -143,7 +150,7 @@ class FeedbackConfig:
                 raise NktError("Target tolerance exceeds power limit")
             if self.reduce_above_power_w is not None and target + tolerance > self.reduce_above_power_w:
                 raise NktError("Target tolerance exceeds the reduce-above power threshold")
-            if self.actuator in ("source_current", "cld_current"):
+            if self.actuator in ("source_current", "source_power", "cld_current"):
                 signal = number(self.minimum_signal_power_w, "minimum_signal_power_w", 1e-15, self.max_power_w)
                 if signal >= target - tolerance:
                     raise NktError("Minimum signal power must be below every target tolerance lower bound")
@@ -154,9 +161,13 @@ class FeedbackConfig:
                      self.increasing_nd_increases_power)
         current_values = (self.source_current_min_pct, self.source_current_max_pct,
                           self.source_current_step_pct)
+        power_values = (self.source_power_min_pct, self.source_power_max_pct,
+                        self.source_power_step_pct)
         cld_values = (self.current_min_a, self.current_max_a, self.current_step_a)
         if self.actuator != "cld_current" and any(value is not None for value in cld_values):
             raise NktError("CLD current parameters require cld_current actuator")
+        if self.actuator != "source_power" and any(value is not None for value in power_values):
+            raise NktError("NKT power setpoint parameters require source_power actuator")
         if self.actuator == "cld_current":
             if any(value is not None for value in nd_values + current_values):
                 raise NktError("cld_current feedback must not contain NKT actuator parameters")
@@ -173,6 +184,14 @@ class FeedbackConfig:
             for value in nd_values[:3]:
                 tenths(value)
             boolean(self.increasing_nd_increases_power, "increasing_nd_increases_power")
+        elif self.actuator == "source_power":
+            if any(value is not None for value in nd_values + current_values):
+                raise NktError("source_power feedback must not contain ND or source current parameters")
+            number(self.source_power_min_pct, "source_power_min_pct", 0, 100)
+            number(self.source_power_max_pct, "source_power_max_pct", self.source_power_min_pct, 100)
+            number(self.source_power_step_pct, "source_power_step_pct", 0.1, 100)
+            for value in power_values:
+                tenths(value)
         else:
             if any(value is not None for value in nd_values):
                 raise NktError("source_current feedback must not contain ND parameters")
@@ -226,6 +245,13 @@ class PhotoresponsePowerConfig:
                 for p in optical.points:
                     number(p.source_level_pct, "initial source current", f.source_current_min_pct,
                            f.source_current_max_pct)
+            elif f.actuator == "source_power":
+                if optical.source_control != "power":
+                    raise NktError("source_power requires NKT power control")
+                number(f.source_power_max_pct, "feedback NKT maximum", 0, optical.max_level_pct)
+                for p in optical.points:
+                    number(p.source_level_pct, "initial source power setpoint", f.source_power_min_pct,
+                           f.source_power_max_pct)
             else:
                 if optical.backend != "simulation" and not self.nd_control_verified:
                     raise NktError("Hardware ND feedback requires verified optical direction/control")
@@ -247,7 +273,7 @@ def load_photoresponse_power(doc):
                 "actuator", "nd_min_pct", "nd_max_pct", "nd_step_pct", "increasing_nd_increases_power",
                 "source_current_min_pct", "source_current_max_pct", "source_current_step_pct",
                 "minimum_signal_power_w", "reduce_above_power_w", "current_min_a", "current_max_a",
-                "current_step_a"}
+                "current_step_a", "source_power_min_pct", "source_power_max_pct", "source_power_step_pct"}
     keys(raw, "power_feedback", {f.name for f in fields(FeedbackConfig)} - optional, optional)
     keys(raw["window"], "power_feedback.window", {f.name for f in fields(WindowConfig)})
     values = {"target_power_w": None, "target_tolerance_w": None, "nd_min_pct": None,
