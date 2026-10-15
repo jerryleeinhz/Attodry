@@ -30,10 +30,20 @@ def voltage_resource():
     return Resource({"*IDN?": "KEITHLEY INSTRUMENTS INC.,MODEL 2182A,SIMULATED,1.0",
                      "SENS:FUNC?": '"VOLT:DC"', "SENS:CHAN?": "1",
                      "SENS:VOLT:DC:RANG?": "0.01", "SENS:VOLT:DC:RANG:AUTO?": "0",
+                     "SENS:VOLT:CHAN2:RANG?": "0.1", "SENS:VOLT:CHAN2:RANG:AUTO?": "0",
                      "SENS:VOLT:DC:NPLC?": "1", "FETC?": "0.000001"})
 
 
 class QueryContractTests(unittest.TestCase):
+    def test_channel2_snapshot_reads_its_own_range(self):
+        resource = voltage_resource()
+        resource.values["SENS:CHAN?"] = "2"
+        adapter = Keithley2182Queries(resource, expected_idn=resource.values["*IDN?"])
+        state = adapter.snapshot(authorize_queries=True)
+        self.assertEqual(state["channel"], 2)
+        self.assertEqual(state["voltage_range_v"], .1)
+        self.assertNotIn("SENS:VOLT:DC:RANG?", resource.commands)
+
     def test_no_implicit_io_and_exact_identity_before_other_queries(self):
         for cls, resource in ((Keithley6221Queries, current_resource()),
                               (Keithley2182Queries, voltage_resource())):

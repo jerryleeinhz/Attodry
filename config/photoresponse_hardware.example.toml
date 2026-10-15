@@ -28,7 +28,8 @@ tolerance_a = "CHANGE_ME"
 
 [photoresponse_2182]
 expected_idn = "CHANGE_ME_FULL_IDN"
-voltage_range_v = "CHANGE_ME" # 0.01, 0.1, 1, 10, 100 V
+channel = 1 # 1 or 2; omitted channel defaults to 1 for older profiles.
+voltage_range_v = "CHANGE_ME" # CH1: 0.01, 0.1, 1, 10, 100 V; CH2: 0.1, 1, 10 V.
 nplc = "CHANGE_ME"
 # address is REQUIRED with detector_transport=visa and FORBIDDEN via_6221.
 

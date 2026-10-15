@@ -11,7 +11,7 @@ import math
 import time
 
 from .nkt_config import NktError, number
-from .photoresponse_keithley import Keithley6221Queries, Keithley2182Queries, _float, _flag, _word
+from .photoresponse_keithley import Keithley6221Queries, Keithley2182Queries, _float, _flag, _word, voltage_ranges_2182
 from .three_smu import ramp_values
 
 
@@ -192,13 +192,16 @@ class CurrentSource6221(Keithley6221Queries):
 
 
 class Voltmeter2182(Keithley2182Queries):
-    def __init__(self, resource, *, expected_idn, voltage_range_v, nplc, max_voltage_v):
+    def __init__(self, resource, *, expected_idn, voltage_range_v, nplc, max_voltage_v, channel=1):
         super().__init__(resource, expected_idn=expected_idn)
-        if voltage_range_v not in (0.01, 0.1, 1.0, 10.0, 100.0):
-            raise NktError("2182A range must be 10 mV, 100 mV, 1 V, 10 V or 100 V")
+        ranges = voltage_ranges_2182(channel)
+        number(voltage_range_v, "2182 voltage range", min(ranges), max(ranges))
+        if voltage_range_v not in ranges:
+            raise NktError(f"2182A channel {channel} voltage range must be one of {ranges} V")
         number(nplc, "2182 NPLC", 0.01, 50)
         number(max_voltage_v, "max_voltage_v", 1e-15, voltage_range_v)
         self.range, self.nplc, self.limit = voltage_range_v, nplc, max_voltage_v
+        self.channel = channel
         self.ready = False
         self.faulted = False
 
@@ -206,13 +209,15 @@ class Voltmeter2182(Keithley2182Queries):
     def settings(self):
         # An inherited internal scan can reject filter changes with -221.
         # Leave scanning/derived modes before configuring single-channel DCV.
+        range_command = "SENS:VOLT:DC:RANG" if self.channel == 1 else "SENS:VOLT:CHAN2:RANG"
+        channel_command = f"SENS:VOLT:CHAN{self.channel}"
         return {"INIT:CONT": False, "ROUT:SCAN:LSEL": "NONE",
                 "SENS:VOLT:RAT": False, "SENS:VOLT:DELT": False,
-                "SENS:CHAN": 1, "SENS:FUNC": "VOLT",
+                "SENS:CHAN": self.channel, "SENS:FUNC": "VOLT",
                 "TRIG:SOUR": "IMM", "TRIG:COUN": 1, "TRIG:DEL": 0,
-                "SENS:VOLT:DC:RANG:AUTO": False, "SENS:VOLT:DC:RANG": self.range,
-                "SENS:VOLT:DC:NPLC": self.nplc, "SENS:VOLT:CHAN1:DFIL": False,
-                "SENS:VOLT:CHAN1:LPAS": False, "SENS:VOLT:CHAN1:REF:STAT": False,
+                range_command + ":AUTO": False, range_command: self.range,
+                "SENS:VOLT:DC:NPLC": self.nplc, channel_command + ":DFIL": False,
+                channel_command + ":LPAS": False, channel_command + ":REF:STAT": False,
                 "CALC:STAT": False, "SENS:HOLD:STAT": False, "SYST:AZER": True,
                 "SYST:FAZ": True, "SYST:LSYN": True, "FORM:DATA": "ASC",
                 "FORM:ELEM": "READ"}
@@ -236,7 +241,9 @@ class Voltmeter2182(Keithley2182Queries):
         for command, expected in self.settings.items():
             if not same(self._query(command + "?"), expected):
                 raise NktError("2182 acquisition setting changed: " + command)
-        state = self._retain({"identity": identity, "fresh_acquisition_configured": True})
+        state = self._retain({"identity": identity, "channel": self.channel,
+                              "voltage_range_v": self.range, "nplc": self.nplc,
+                              "fresh_acquisition_configured": True})
         state["acquisition_ready"] = True
         self.last_confirmed_state = deepcopy(state)
         return state

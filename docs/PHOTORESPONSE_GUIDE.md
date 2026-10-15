@@ -275,6 +275,26 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 无激励而使用转发时，6221 表只保留 `address` 与 `expected_idn`，不应含输出参数。
 2400 只支持直接 VISA，使用 `[photoresponse_2400]`。未选中的仪器不会被打开。
 
+`[photoresponse_2182].channel` 选择电压输入通道 `1` 或 `2`，旧配置省略时仍用 `1`。
+按 [Keithley 官方手册](https://download.tek.com/manual/2182A-900-01C_July_2022_User.pdf)，
+通道 1 可选 0.01、0.1、1、10、100 V，通道 2 仅可选 **0.1、1、10 V**。
+量程固定、自动量程关闭；通道 2 的量程、滤波和相对值用显式 `CHAN2` 命令设置及读回，
+`SENS:VOLT:DC:RANG` 省略通道的命令实际属于通道 1，不能当作当前选中通道的量程。
+积分时间 NPLC 是两个电压通道共用的设置。通道/量程/处理设置发生外部改变仍拒绝采集。
+
+```toml
+[photoresponse_2182]
+# 保留本机原有 expected_idn；直接 VISA 时还需 address。
+channel = 2
+voltage_range_v = 1.0  # 当前选中 1 V 档；以下是注释备选，只启用一个值。
+# voltage_range_v = 0.1  # 100 mV 档：同时将 photoresponse.max_abs_voltage_v 收紧到 <= 0.1。
+# voltage_range_v = 10.0 # 10 V 档：样品 max_abs_voltage_v 仍保持已批准边界，不自动放宽。
+nplc = 1.0
+```
+
+软件样品边界 `max_abs_voltage_v` 与量程分开，必须不大于选中量程；更大量程不代表
+允许更高样品电压。过载原值（例如 `+9.9E37`）保留在失败记录，不能作为暗态基线。
+
 NKT 复用现有 EXTREME/VARIA SDK 模块；LLTF 的真实 SDK 仍不可用。`nkt_run.emit=true`，
 `dwell_s=0`，由光响应窗口控制明暗和等待。NKT 百分比不代表样品瓦特。
 CLD 默认使用 `backend="visa"` 和已有 NI-VISA；也可选 `tl4000` 并提供 x64 DLL。

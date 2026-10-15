@@ -186,6 +186,47 @@ class CurrentSourceTests(unittest.TestCase):
 
 
 class DetectorTests(unittest.TestCase):
+    def test_channel2_fresh_read_does_not_configure_channel1(self):
+        r = Resource("2182A")
+        r.values.update({"SENS:VOLT:DC:RANG": "0.01", "SENS:VOLT:CHAN1:DFIL": "1",
+                         "SENS:VOLT:CHAN2:DFIL": "1", "SENS:VOLT:CHAN2:LPAS": "1",
+                         "SENS:VOLT:CHAN2:REF:STAT": "1"})
+        meter = Voltmeter2182(VisaTransport(r, role="2182", authorize_writes=True),
+            expected_idn=r.values["*IDN"], voltage_range_v=1, nplc=1, max_voltage_v=1, channel=2)
+        meter.begin()
+        reading = meter.read_voltage()
+        self.assertTrue(reading["fresh"])
+        self.assertEqual(reading["detector_after"]["channel"], 2)
+        self.assertEqual(r.values["SENS:VOLT:CHAN2:RANG"], "1")
+        self.assertEqual(r.values["SENS:VOLT:CHAN1:DFIL"], "1")
+        self.assertFalse(any(c.startswith("SENS:VOLT:CHAN1:") for c in r.commands))
+        self.assertNotIn("SENS:VOLT:DC:RANG?", r.commands)
+        r.values["SENS:VOLT:CHAN2:DFIL"] = "1"
+        with self.assertRaises(NktError):
+            meter.read_voltage()
+        self.assertEqual(r.commands.count("READ?"), 1)
+
+    def test_invalid_channel2_range_or_channel_rejected_before_io(self):
+        for channel, voltage_range in ((2, .01), (2, 100), (2, .2), (0, 1),
+                                       (3, 1), (2.0, 1), (True, 1), (2, True)):
+            r = Resource("2182A")
+            with self.subTest(channel=channel, voltage_range=voltage_range), self.assertRaises(NktError):
+                Voltmeter2182(r, expected_idn=r.values["*IDN"], voltage_range_v=voltage_range,
+                              nplc=1, max_voltage_v=.01, channel=channel)
+            self.assertEqual(r.commands, [])
+
+    def test_channel2_all_three_ranges_and_channel_drift(self):
+        for voltage_range in (.1, 1., 10.):
+            r = Resource("2182A")
+            meter = Voltmeter2182(VisaTransport(r, role="2182", authorize_writes=True),
+                expected_idn=r.values["*IDN"], voltage_range_v=voltage_range,
+                nplc=1, max_voltage_v=.1, channel=2)
+            meter.begin()
+            r.values["SENS:CHAN"] = "1"
+            with self.assertRaises(NktError):
+                meter.read_voltage()
+            self.assertNotIn("READ?", r.commands)
+
     def test_2182_disables_inherited_scan_before_filter_configuration(self):
         class ScanningResource(Resource):
             def write(self, command):

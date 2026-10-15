@@ -37,7 +37,7 @@ def environment_config():
     return load_environment(tomllib.loads((ROOT / "config/photoresponse_environment_simulation.toml").read_text()), False)
 
 
-def hardware_setup(mode="dc_current_voltage", detector="keithley2182a", relay=True):
+def hardware_setup(mode="dc_current_voltage", detector="keithley2182a", relay=True, channel=None):
     config = cld_config()
     optical = replace(config.nkt, backend="tl4000", dll_path="fake.dll", address="FAKE::CLD::INSTR",
                       expected_serial="FAKE", diode_model="FAKE DIODE", diode_wiring_confirmed=True)
@@ -47,6 +47,7 @@ def hardware_setup(mode="dc_current_voltage", detector="keithley2182a", relay=Tr
     if mode == "dc_current_voltage":
         source_config.update(compliance_v=.1, max_step_a=2.5e-9, settle_s=0, tolerance_a=1e-13)
     d = {"expected_idn":meter.values["*IDN"], "voltage_range_v":.1 if detector == "keithley2182a" else .2, "nplc":1}
+    if channel is not None: d["channel"] = channel
     if not relay: d["address"] = "FAKE::DETECTOR::INSTR"
     if detector == "keithley2400":
         d.update(current_range_a=1e-6, compliance=1e-8 if mode == "voltage_bias_current" else .2,
@@ -69,6 +70,28 @@ def hardware_setup(mode="dc_current_voltage", detector="keithley2182a", relay=Tr
 
 
 class HardwareIntegrationTests(unittest.TestCase):
+    def test_channel2_direct_and_relay_complete_without_excitation(self):
+        for relay in (False, True):
+            runner, host, meter, electrical, _ = hardware_setup(
+                "open_circuit_voltage", "keithley2182a", relay, channel=2)
+            record = runner.run()
+            self.assertTrue(record["completed"], record["error"] or record["cleanup"])
+            self.assertEqual(record["measurement_config"]["hardware"]["detector"]["channel"], 2)
+            self.assertEqual(meter.values["SENS:CHAN"], "2")
+            self.assertIn("SENS:VOLT:CHAN2:RANG?", meter.commands)
+            self.assertNotIn("SENS:VOLT:DC:RANG?", meter.commands)
+            self.assertIsNone(electrical.source)
+            self.assertNotIn("OUTP:STAT 1", host.commands)
+
+    def test_channel2_config_rejects_channel1_only_ranges_before_io(self):
+        for channel, voltage_range in ((2, .01), (2, 100), (2.0, 1), (True, 1)):
+            runner, host, meter, _, _ = hardware_setup("open_circuit_voltage", channel=2)
+            hardware = replace(runner.config.hardware, detector={
+                **runner.config.hardware.detector, "channel": channel, "voltage_range_v": voltage_range})
+            with self.assertRaises(NktError):
+                replace(runner.config, hardware=hardware).validate()
+            self.assertEqual(host.commands + meter.commands, [])
+
     def test_off_relay_compliance_keeps_raw_status_and_allows_fresh_2182_read(self):
         runner, host, meter, electrical, _ = hardware_setup("open_circuit_voltage", "keithley2182a", True)
         host.values["STAT:MEAS:COND"] = "8"

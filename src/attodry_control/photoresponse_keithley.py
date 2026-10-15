@@ -14,7 +14,7 @@ from __future__ import annotations
 from copy import deepcopy
 import math
 
-from .nkt_config import NktError, number
+from .nkt_config import NktError, integer, number
 from .nkt_control import utc_now
 
 
@@ -95,6 +95,12 @@ class Keithley6221Queries(_Queries):
                              "compliance_tripped": bool(status & 8), "dc_takeover_verified": False})
 
 
+def voltage_ranges_2182(channel):
+    """Nominal DCV ranges, per 2182A-900-01 Rev C (Range)."""
+    integer(channel, "2182 channel", 1, 2)
+    return (0.01, 0.1, 1.0, 10.0, 100.0) if channel == 1 else (0.1, 1.0, 10.0)
+
+
 class Keithley2182Queries(_Queries):
     def snapshot(self, *, authorize_queries=False):
         identity = self._identity(authorize_queries)
@@ -102,12 +108,12 @@ class Keithley2182Queries(_Queries):
             raise NktError("2182 adapter requires an explicitly identified MODEL 2182 or MODEL 2182A")
         function = self._query("SENS:FUNC?")
         channel = _word(self._query("SENS:CHAN?"))
-        voltage_range = _float(self._query("SENS:VOLT:DC:RANG?"))
-        autorange = _flag(self._query("SENS:VOLT:DC:RANG:AUTO?"))
+        ranges = voltage_ranges_2182(channel)
+        range_command = "SENS:VOLT:DC:RANG" if channel == 1 else "SENS:VOLT:CHAN2:RANG"
+        voltage_range = _float(self._query(range_command + "?"))
+        autorange = _flag(self._query(range_command + ":AUTO?"))
         nplc = _float(self._query("SENS:VOLT:DC:NPLC?"))
-        if channel not in (1, 2):
-            raise NktError("Unsupported 2182 voltage channel")
-        number(voltage_range, "2182 voltage range", 0.01, 100)
+        number(voltage_range, "2182 voltage range", min(ranges), max(ranges))
         # The 50 Hz limit is lower; mains/trigger readiness is deliberately unknown.
         number(nplc, "2182 NPLC", 0.01, 60)
         return self._retain({"identity": identity, "function": function, "channel": channel,

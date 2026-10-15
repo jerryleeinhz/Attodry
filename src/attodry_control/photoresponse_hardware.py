@@ -7,7 +7,7 @@ import time
 
 from .nkt_config import NktError, integer, keys, number, text
 from .photoresponse_devices import CurrentSource6221, Voltmeter2182, Meter2400
-from .photoresponse_keithley import _flag, _word, Keithley6221Queries
+from .photoresponse_keithley import _flag, _word, Keithley6221Queries, voltage_ranges_2182
 from .photoresponse_transport import Serial2182Transport
 
 
@@ -68,7 +68,8 @@ class ElectricalHardwareConfig:
             required.add("address")
         if config.detector == "keithley2400":
             required |= {"current_range_a", "compliance", "max_step_v", "settle_s", "tolerance_v"}
-        keys(d, "photoresponse detector", required)
+        keys(d, "photoresponse detector", required,
+             {"channel"} if config.detector == "keithley2182a" else ())
         if self.detector_transport == "visa":
             address(d["address"])
         identity(d["expected_idn"], "2182A" if config.detector == "keithley2182a" else "2400")
@@ -77,8 +78,10 @@ class ElectricalHardwareConfig:
         if self.timeout_ms / 1000 < d["nplc"] / 50 * 4 + 1:
             raise NktError("VISA timeout is too short for the selected integration time")
         if config.detector == "keithley2182a":
-            if d["voltage_range_v"] not in (.01, .1, 1., 10., 100.):
-                raise NktError("Invalid 2182A voltage range")
+            ranges = voltage_ranges_2182(d.get("channel", 1))
+            number(d["voltage_range_v"], "2182 voltage range", min(ranges), max(ranges))
+            if d["voltage_range_v"] not in ranges:
+                raise NktError(f"Invalid 2182A voltage range for channel {d.get('channel', 1)}")
         else:
             if d["voltage_range_v"] not in (.2, 2., 20., 200.):
                 raise NktError("Invalid 2400 voltage range")

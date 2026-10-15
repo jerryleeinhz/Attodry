@@ -2,6 +2,29 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## 2182A selectable DC voltage channel and range
+
+Status: software/offline complete (2026-10-15); channel-2 real acquisition pending.
+
+- Operator confirms channel 2. The production driver previously selected channel 1
+  unconditionally, and its dark READ returned +9.9E37. The failed attempt is kept;
+  no bright point was acquired and optical/electrical cleanup was confirmed.
+- Added optional `photoresponse_2182.channel` (integer 1 or 2; omitted = legacy 1).
+  Official 2182A-900-01 Rev C defines CH1 0.01/0.1/1/10/100 V and CH2 0.1/1/10 V.
+  Invalid channel/range combinations reject before resource construction.
+- CH2 uses explicit range/autorange, digital/analog filter and relative commands;
+  NPLC remains common to voltage channels. Fresh READ/identity/settings checks,
+  relay-only source OFF guards, overload/raw failure retention and cleanup remain.
+- Station profile selects CH2 at 1 V, retaining the approved 1 V software sample
+  boundary. Commented 0.1/10 V choices explain that a smaller range needs a matching
+  software bound, and a larger range never increases sample authorization.
+- No real instrument access or scan restart is part of this correction; channel-2
+  acquisition acceptance remains pending. See `PHOTORESPONSE_GUIDE.md`.
+- Local full regression **684/684** passed, including six new tests covering both
+  transports, CH2 settings/ranges, pre-I/O rejection and changed-channel guards.
+  The initial focused run hit sandbox temporary-directory permissions; it was
+  repeated in an explicitly writable workspace temporary directory in the full suite.
+
 ## Dark-first power scans and timing optimization
 
 Status: software and isolated target offline acceptance complete (2026-10-15).
