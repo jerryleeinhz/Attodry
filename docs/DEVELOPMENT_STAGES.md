@@ -2,6 +2,35 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## CLD-only six-point power commissioning preparation
+
+Status: single-use entry and target offline preparation complete (2026-10-15);
+real illuminated qualification remains blocked before any LD-enable attempt.
+
+- Published the [new-chat handoff](PHOTORESPONSE_NEW_CHAT_HANDOFF.md), including
+  operator-reported successful manual emission. OFF/ON diagnostic comparison
+  remains pending; no automatic illuminated acceptance or protection bypass
+  follows from this report.
+- Six operator-approved linear targets span 0.05 to 3 mW at nominal 730 nm;
+  the sample is blocked and the PM100D receives the test light.
+- Reuses the existing CLD/PM power and cleanup controllers without an electrical,
+  SMU, lock-in or cryostat factory. Enforces the connection diagnostic before
+  setting writes, the original 30 mA bound and a narrowed 3.3 mW test ceiling.
+- Requires ten formal readings per qualified point, independent LD zero/off and
+  PM close, original TEC switch state and complete error/audit evidence. Failed
+  preflight is retained without manufacturing an output-zero or cleanup pass.
+- **12/12** new ignored-entry fake tests, **31/31** existing CLD VISA tests and
+  **26/26** power tests pass. Default sandbox TEMP denied three power-test file
+  operations; rerunning with a writable workspace temporary directory passed.
+- Target lyr validated the actual six-point configuration and its **118** pinned
+  files offline. Query-only real preflight completed, but CONN/MEAS remains
+  unresolved. No setting writes, LD enable or illuminated feedback data resulted.
+- Continued with current official 2026 manuals and the matching firmware 2.3.0
+  release notes: definitions are unchanged and no diagnostic exception is given.
+  A fixed, **119**-file-pinned VISA-only query supplement completed with clear
+  keylock/LD-overtemperature flags and expected AG polarity; connection flags
+  still block emission. No native DLL, firmware installer, reset or clear was used.
+
 ## DC photoresponse - reference Three-SMU and revised control acceptance
 
 Status: software/offline complete and electrical control paths exercised (2026-10-13).

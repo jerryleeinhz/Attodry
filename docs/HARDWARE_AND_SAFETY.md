@@ -145,6 +145,10 @@ its source. Neither operation opens a laser or unused detector.
   retain unqualified firmware semantics; asserted or unreadable values block LD
   enable without being mislabelled as a proven cable failure. ENAB does not
   substitute for PROT; no reset/clear or polarity inversion bypasses protection.
+  Native TL4000 initialization is not query-only even when reset=false: the
+  vendor C driver unconditionally sends status-clear/preset commands and its
+  default error-checking getters consume SYST:ERR?. Do not use that initialization
+  for a read-only diagnostic or to make an unresolved protection indication pass.
 - Optional PM100D feedback requires an explicit meter/sensor identity, wavelength
   correction, measurement plane, power bounds and bounded actuator domain before
   connecting the selected hardware. Source settings do not establish measured W.

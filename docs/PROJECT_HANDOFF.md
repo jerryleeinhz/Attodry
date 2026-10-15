@@ -1,8 +1,50 @@
 # Project handoff
 
-Last updated: 2026-10-13
+Last updated: 2026-10-15
 
 ## Current stage
+
+CLD-only power commissioning preparation (2026-10-15):
+
+- New-chat guide: [goals, development workflow and CLD next steps](PHOTORESPONSE_NEW_CHAT_HANDOFF.md).
+- Latest operator evidence: manual laser output works and the front panel shows
+  no ERROR. No simultaneous diagnostic snapshot during manual emission exists
+  yet. Automatic acquisition was blocked by software preflight, not by an
+  observed rejection of an LD-enable command. Do not infer hardware damage or
+  a harmless status flag; compare documented diagnostics in OFF and manually
+  operating states before considering a state-specific policy change.
+- Operator requested six linear PM100D power targets, 0.05/0.64/1.23/1.82/2.41/3 mW,
+  at the confirmed 730 nm diode wavelength. The operator confirms the cryostat
+  sample is blocked and only the power meter is illuminated for this test.
+- Prepared a single-use, ignored CLD/PM entry that reuses CldController and
+  PhotoresponsePower directly. It never constructs electrical, SMU, SR830 or
+  environment hardware. Current remains limited to 30 mA; the test's measured
+  power ceiling is narrowed to 3.3 mW, not asserted as a detector rating.
+- Connection diagnostics are checked before any settings write. All six points
+  require the existing stable-power qualification, ten fresh formal readings and
+  verified LD zero/off, original TEC switch state and independent resource close.
+- Twelve synthetic entry tests passed, including zero-write rejection of the
+  actual diagnostic pattern, meter/open/close failures, STOP, audit failures and
+  no electrical hardware factory. Existing CLD VISA 31 and power 26 tests passed;
+  power tests required an explicitly writable workspace temporary directory.
+- Target lyr passed offline configuration and 118-file manifest validation.
+  A separate, previously registered query-only CLD preflight still reports the
+  same unresolved CONN/MEAS indications with LD off and stable TEC operation.
+  No LD enable or six-point power acquisition occurred. No power-feedback hardware
+  acceptance is claimed; production protection logic and electrical configuration
+  remain unchanged. The operator questioned the restart suggestion: restart is
+  an optional diagnostic, not an established requirement or proven remedy.
+- Follow-up checked current official DOC-104772 Rev B (2026-05-27), DOC-104674
+  Rev B (2026-05-18), and the published firmware 2.3.0 release notes. The newer
+  documents retain the connection/socket-failure definitions and provide no
+  model/polarity exception or supported software recovery. A separate fixed VISA
+  query supplement confirmed keylock and LD overtemperature trips clear, expected
+  AG polarity, and TEC power-on auto-start disabled; connection indicators persist.
+  This narrows diagnostics but does not certify physical damage or a harmless flag.
+- Static vendor-source review found that native TL4000 initialization clears
+  status/error state even with reset=false and native getters normally consume
+  the error queue. Do not use native DLL initialization as a query-only cross-check;
+  the current real diagnostic uses VISA and performs neither clear nor reset.
 
 DC photoresponse - reference reuse, Three-SMU and control-only acceptance (2026-10-13):
 
