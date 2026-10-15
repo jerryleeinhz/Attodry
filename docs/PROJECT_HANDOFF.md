@@ -25,10 +25,19 @@ Last updated: 2026-10-15
   real acquisition adapters with fake instruments, protection/cleanup, telemetry,
   storage/analysis and fresh whole-condition recovery. Historical guard capability
   source boundaries remain strict; this release cannot use that old capability.
-- Target offline delivery is pending. Read-only LK_setup checks found its latest
-  run terminal and no active run/execution; five locally modified/untracked
-  acquisition sources match published parent db34685. Notebook/safety edits must
-  be preserved during software synchronization.
+- LK_setup synchronized acquisition commit `accacb0` after confirming its latest
+  run terminal and no active/orphaned scan record. Five former local acquisition
+  sources matched published parent db34685 and were advanced to the release.
+  The lyr interpreter passed 74 guarded tests in 109.346 s from an isolated
+  canonical release. Independent verification at 2026-10-15T16:02:14Z confirms
+  clean acquisition source, byte-preserved original Notebooks/local safety and
+  unchanged private hardware TOML. Their local modifications and the existing
+  isolated plotting Notebook remain; backups and preserved stash stay on station.
+- The first target harness attempt failed on relative fixture paths from an
+  incorrect working directory, before backup/stash/source mutation. A separate
+  corrected delivery set its working directory and passed. Private evidence is
+  under ignored `run_data/operator_acq_timing_delivery_20261015T155800Z`; the first
+  preparation remains in the corresponding `155100Z` directory.
   No experiment restart or real transient-response commissioning is authorized by
   this code change.
 

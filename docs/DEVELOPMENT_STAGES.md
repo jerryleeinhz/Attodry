@@ -21,8 +21,15 @@
   native receiver, telemetry/protection, same-version whole-condition recovery
   (including the six-accepted fixture), storage and analysis. Historical guard
   capability tests pin their original file inventory; new timing sources cannot
-  bypass that historical source boundary. Target offline delivery is pending.
-  No real commissioning or experimental replay is part of this feature.
+  bypass that historical source boundary.
+- LK_setup synchronized acquisition commit `accacb0`; 74 guarded tests passed
+  under lyr in 109.346 s from an isolated canonical release. Independent readback
+  confirms acquisition source is clean against HEAD, both original Notebooks and
+  local safety file retain their exact bytes, and private hardware TOML is unchanged.
+  The initial target harness attempt used the wrong working directory and stopped
+  before backup/stash/source replacement; its logs remain in ignored run_data.
+  The corrected delivery sets the release working directory explicitly. No real
+  instrument I/O, experiment restart or transient-response commissioning occurred.
 
 ## Current: unified plotting snapshots for active SQLite scans (2026-10-15)
 
