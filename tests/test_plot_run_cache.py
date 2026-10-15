@@ -9,7 +9,9 @@ import unittest
 from unittest.mock import patch
 
 from attodry_control.analysis_observations import channel_quality, observation_id
-from attodry_control.combination_analysis import list_combination_runs, load_combination_rows
+from attodry_control.combination_analysis import (
+    list_combination_runs, load_combination_rows, load_combination_snapshot,
+)
 from attodry_control.combination_store import CombinationStore, encode
 from attodry_control.unified_plotting import (
     UnifiedPlotDashboard, _sample_token, _source_signature, load_plot_sources,
@@ -167,7 +169,7 @@ class RunCacheTests(unittest.TestCase):
 
     def test_no_samples_before_run_selection_and_cache_shared_between_cards(self):
         with redirect_stdout(io.StringIO()), patch(
-            "attodry_control.unified_plotting.load_plot_sources", wraps=load_plot_sources
+            "attodry_control.unified_plotting.load_combination_snapshot", wraps=load_combination_snapshot
         ) as loader:
             dashboard, card = self.dashboard()
             self.assertEqual(card["runs"].value, ())
@@ -280,26 +282,30 @@ class RunCacheTests(unittest.TestCase):
             self.assertEqual({run for _, run in card["runs"].value}, {"A", "B", "failed"})
             self.assertEqual(len(dashboard._selected_rows(card)), 8)
 
-    def test_load_race_never_caches_or_attests_a_changed_source(self):
+    def test_sqlite_load_uses_transaction_snapshot_without_file_stationarity(self):
         with redirect_stdout(io.StringIO()):
             dashboard, card = self.dashboard()
             card["updating"] = True
             card["runs"].value = ((str(self.path), "A"),)
             card["updating"] = False
             with patch("attodry_control.unified_plotting._source_signature",
-                       side_effect=[("before",), ("after",)]):
-                with self.assertRaisesRegex(ValueError, "while loading"):
-                    dashboard._selected_rows(card)
-            self.assertEqual(dashboard._cache, {})
+                       side_effect=AssertionError("WAL stat is not a SQLite snapshot")):
+                rows = dashboard._selected_rows(card)
+            self.assertEqual(len(rows), 4)
+            snapshot = dashboard._loaded_snapshots(card)[str(self.path)]
+            self.assertEqual(snapshot["row_count"], 4)
+            self.assertEqual(snapshot["run_ids"], ["A"])
+            self.assertEqual(dashboard._loaded_signatures(card), {})
 
-    def test_wal_change_keeps_cached_rows_and_refuses_render_export_until_refresh(self):
+    def test_wal_change_keeps_cached_render_export_until_manual_refresh(self):
         writer = sqlite3.connect(self.path)
         self.addCleanup(writer.close)
         writer.execute("PRAGMA wal_autocheckpoint=0")
         with redirect_stdout(io.StringIO()), patch(
-            "attodry_control.unified_plotting.load_plot_sources", wraps=load_plot_sources
+            "attodry_control.unified_plotting.load_combination_snapshot", wraps=load_combination_snapshot
         ) as loader:
             dashboard, card = self.dashboard(run="A")
+            dashboard.output_directory.value = str(self.directory / "exports")
             dashboard._render_card(card)
             self.assertIsNotNone(card["rendered"])
             before_signature = _source_signature(self.path)
@@ -319,34 +325,44 @@ class RunCacheTests(unittest.TestCase):
             self.assertEqual(loader.call_count, 1)
             self.assertNotIn("new-run", {value[1] for _, value in card["runs"].options})
             dashboard._export()
-            self.assertIn("changed after rendering", dashboard.status.value)
-            self.assertIsNone(card["rendered"])
-            with patch("attodry_control.unified_plotting.render_plot") as render:
-                dashboard._render_card(card)
-                render.assert_not_called()
-            self.assertIsNone(card["rendered"])
+            self.assertIn("Exported figures", dashboard.status.value)
+            self.assertIsNotNone(card["rendered"])
+            dashboard._render_card(card)
+            self.assertIsNotNone(card["rendered"])
+            self.assertEqual(card["rendered"]["data"]["rows"][0][Y], 10)
+            self.assertEqual(loader.call_count, 1)
             dashboard._refresh()
             self.assertEqual(loader.call_count, 2)
             self.assertEqual(dashboard._selected_rows(card)[0][Y], 99)
             self.assertIn("new-run", {value[1] for _, value in card["runs"].options})
             dashboard._render_card(card)
             self.assertIsNotNone(card["rendered"])
-            self.assertEqual(card["rendered"]["spec"]["source_signatures"][str(self.path)],
-                             _source_signature(self.path))
+            self.assertEqual(card["rendered"]["spec"]["source_signatures"], {})
+            snapshot = card["rendered"]["spec"]["source_snapshots"][str(self.path)]
+            self.assertEqual(snapshot["row_count"], 4)
+            self.assertEqual(snapshot["run_ids"], ["A"])
 
-    def test_mixed_run_revisions_require_one_refresh_before_render(self):
+    def test_new_run_selection_loads_one_batch_snapshot_without_mixing_cached_revisions(self):
         writer = sqlite3.connect(self.path)
         self.addCleanup(writer.close)
         writer.execute("PRAGMA wal_autocheckpoint=0")
         with redirect_stdout(io.StringIO()):
             dashboard, card = self.dashboard(run="A")
+            first = dashboard._loaded_snapshots(card)[str(self.path)]
             writer.execute("UPDATE combination_runs SET error='audit change' WHERE run_id='B'")
             writer.commit()
             card["runs"].value = ((str(self.path), "A"), (str(self.path), "B"))
-            with self.assertRaisesRegex(ValueError, "different source snapshots"):
-                dashboard._loaded_signatures(card)
+            snapshot = dashboard._loaded_snapshots(card)[str(self.path)]
+            self.assertEqual(snapshot["run_ids"], ["A", "B"])
+            self.assertEqual(snapshot["row_count"], 8)
+            self.assertNotEqual(snapshot["snapshot_id"], first["snapshot_id"])
+            self.assertEqual(next(run["error"] for run in snapshot["runs"] if run["run_id"] == "B"),
+                             "audit change")
+            dashboard._render_card(card)
+            self.assertIsNotNone(card["rendered"])
             dashboard._refresh()
-            self.assertEqual(dashboard._loaded_signatures(card)[str(self.path)], _source_signature(self.path))
+            self.assertEqual(dashboard._loaded_snapshots(card)[str(self.path)]["snapshot_id"],
+                             snapshot["snapshot_id"])
 
     def test_failed_refresh_clears_run_catalog_selection_cache_and_render(self):
         with redirect_stdout(io.StringIO()):
@@ -370,7 +386,7 @@ class RunCacheTests(unittest.TestCase):
                     compile(source, name, "exec")
                 exec(cells[0], namespace)
                 namespace["DATA_DIRECTORY"] = self.directory
-                with patch("attodry_control.unified_plotting.load_plot_sources", wraps=load_plot_sources) as loader:
+                with patch("attodry_control.unified_plotting.load_combination_snapshot", wraps=load_combination_snapshot) as loader:
                     exec(cells[1], namespace)
                     dashboard = namespace["dashboard"]
                     card = dashboard.cards[0]

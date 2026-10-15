@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import closing
 import csv
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -34,15 +35,55 @@ def list_combination_runs(path: str | Path) -> tuple[dict, ...]:
     return tuple(dict(row) for row in rows)
 
 
-def load_combination_rows(path: str | Path, *, run_id: str | None = None,
-                          audit: bool = False) -> tuple[dict, ...]:
-    """One wide row per formal sample. Audit opt-in exposes failed run samples.
+@dataclass(frozen=True, slots=True)
+class CombinationSnapshot:
+    """Materialized rows and provenance from one short SQLite read transaction."""
 
-    Raw partial reads remain in combination_events, not invented complete rows.
+    rows: tuple[dict, ...]
+    metadata: dict
+
+
+def _snapshot_json_value(value):
+    """Preserve nonfinite raw readings while giving their digest standard JSON."""
+    if isinstance(value, Mapping):
+        return {key: _snapshot_json_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_snapshot_json_value(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return {"__nonfinite_float__": "nan" if math.isnan(value) else "inf" if value > 0 else "-inf"}
+    return value
+
+
+def _snapshot_digest(value) -> str:
+    return hashlib.sha256(json.dumps(_snapshot_json_value(value), sort_keys=True, ensure_ascii=False,
+                                     allow_nan=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None = None,
+                              audit: bool = False, preview: bool = False) -> CombinationSnapshot:
+    """Read all selected runs and their provenance at one committed DB revision.
+
+    The connection closes before decoding payloads or rendering. Concurrent WAL
+    appends do not invalidate these already-materialized rows. ``preview`` adds
+    only clean formal samples from accepted attempts of active runs; they retain
+    ``accepted=False`` and are labelled ``preview=True``. Audit retains its
+    historical opt-in meaning. Raw partial events never become formal rows.
     """
+    selected_ids = None if run_ids is None else tuple(dict.fromkeys(run_ids))
+    if selected_ids is not None and any(not isinstance(value, str) for value in selected_ids):
+        raise ValueError("Run IDs must be strings")
+    clause = "" if selected_ids is None else (
+        " WHERE run_id IN (" + ",".join("?" for _ in selected_ids) + ")"
+        if selected_ids else " WHERE 0"
+    )
+    parameters = () if selected_ids is None else selected_ids
     with closing(open_readonly(path)) as connection:
         connection.execute("BEGIN")
-        where = "WHERE s.run_id=?" if run_id is not None else ""
+        run_rows = connection.execute(
+            "SELECT run_id, schema_version, created_at_utc, status, error, cleanup_json "
+            "FROM combination_runs" + clause + " ORDER BY created_at_utc, run_id", parameters,
+        ).fetchall()
+        where = clause.replace("run_id IN", "s.run_id IN")
         rows = connection.execute(f"""
             SELECT r.schema_version, r.status AS run_status, r.error AS run_error,
                    r.cleanup_json, r.plan_json,
@@ -52,8 +93,8 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             JOIN combination_conditions c USING(run_id, condition_id)
             JOIN combination_attempts a USING(run_id, condition_id, attempt_index)
             {where}
-            ORDER BY r.created_at_utc, c.sequence_index, s.attempt_index, s.sample_index
-        """, () if run_id is None else (run_id,)).fetchall()
+            ORDER BY r.created_at_utc, r.run_id, c.sequence_index, s.attempt_index, s.sample_index
+        """, parameters).fetchall()
         tables = {row[0] for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         executions, attempt_executions = {}, {}
@@ -61,8 +102,6 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         if tables & execution_tables and not execution_tables <= tables:
             raise ValueError("Incomplete execution provenance schema")
         if execution_tables <= tables:
-            clause = " WHERE run_id=?" if run_id is not None else ""
-            parameters = () if run_id is None else (run_id,)
             for execution in connection.execute(
                     "SELECT * FROM combination_executions" + clause, parameters):
                 executions.setdefault(execution["run_id"], {})[execution["execution_id"]] = dict(execution)
@@ -72,23 +111,33 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
                 attempt_executions[key] = mapping["execution_id"]
     output = []
     cleanup_by_run = {}
+    runs = []
+    for run in run_rows:
+        if run["schema_version"] not in {1, SCHEMA_VERSION}:
+            raise ValueError("Unsupported combination schema")
+        cleanup = json.loads(run["cleanup_json"] or "{}")
+        cleanup_by_run[run["run_id"]] = cleanup
+        runs.append({"run_id": run["run_id"], "schema_version": run["schema_version"],
+                     "created_at_utc": run["created_at_utc"], "status": run["status"],
+                     "error": run["error"], "cleanup": _snapshot_json_value(cleanup),
+                     "final": run["status"] == "completed" and cleanup.get("clean") is True})
     source_path = str(Path(path).resolve())
     for row in rows:
         if row["schema_version"] not in {1, SCHEMA_VERSION}:
             raise ValueError("Unsupported combination schema")
         sample = json.loads(row["payload_json"])
-        if row["run_id"] not in cleanup_by_run:
-            cleanup_by_run[row["run_id"]] = json.loads(row["cleanup_json"] or "{}")
         cleanup = cleanup_by_run[row["run_id"]]
         accepted = (row["attempt_status"] == "accepted" and row["run_status"] == "completed"
                     and cleanup.get("clean") is True and sample.get("clean") is True)
-        if not audit and not accepted:
+        preliminary = (preview and row["run_status"] == "active"
+                       and row["attempt_status"] == "accepted" and sample.get("clean") is True)
+        if not audit and not accepted and not preliminary:
             continue
         context = json.loads(row["context_json"])
         run_executions = executions.get(row["run_id"], {})
-        if run_executions:
-            execution_id = attempt_executions.get(
-                (row["run_id"], row["condition_id"], row["attempt_index"]))
+        attempt_key = row["run_id"], row["condition_id"], row["attempt_index"]
+        if run_executions or attempt_key in attempt_executions:
+            execution_id = attempt_executions.get(attempt_key)
             if execution_id not in run_executions:
                 raise ValueError("Formal sample lacks its archived execution/configuration")
             execution = run_executions[execution_id]
@@ -117,6 +166,7 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             "run_id": row["run_id"], "condition_id": row["condition_id"],
             "attempt_index": row["attempt_index"], "sample_index": row["sample_index"],
             "accepted": accepted, "run_status": row["run_status"], "run_error": row["run_error"],
+            "preview": bool(preliminary),
             "attempt_status": row["attempt_status"], "clean": sample["clean"],
             "sequence_index": context["sequence_index"], "repeat_index": context["repeat_index"],
             "loop_order": context["loop_order"],
@@ -130,7 +180,25 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             record[f"timestamps.{reading['module']}"] = reading["captured_at_utc"]
             record[f"status.{reading['module']}"] = reading.get("status")
         output.append(record)
-    return tuple(output)
+    materialized = tuple(output)
+    for run in runs:
+        run["row_count"] = sum(row["run_id"] == run["run_id"] for row in materialized)
+    metadata = {
+        "schema": "combination-analysis-snapshot-v1", "source_path": source_path,
+        "run_ids": list(selected_ids) if selected_ids is not None else [run["run_id"] for run in runs],
+        "runs": runs, "row_count": len(materialized), "rows_sha256": _snapshot_digest(materialized),
+        "audit": bool(audit), "preview": bool(preview),
+    }
+    metadata["snapshot_id"] = _snapshot_digest(metadata)
+    metadata["loaded_at_utc"] = datetime.now(timezone.utc).isoformat()
+    return CombinationSnapshot(materialized, metadata)
+
+
+def load_combination_rows(path: str | Path, *, run_id: str | None = None,
+                          audit: bool = False) -> tuple[dict, ...]:
+    """Compatibility API retaining the final-only default and audit opt-in."""
+    return load_combination_snapshot(path, run_ids=None if run_id is None else (run_id,),
+                                     audit=audit).rows
 
 
 def execution_provenance(rows: Sequence[Mapping]) -> tuple[dict, ...]:

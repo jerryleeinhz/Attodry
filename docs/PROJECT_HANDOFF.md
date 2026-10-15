@@ -4,6 +4,35 @@ Last updated: 2026-10-15
 
 ## Current stage
 
+### Unified SQLite snapshots during active acquisition (2026-10-15)
+
+- Fixed the file-signature policy that rejected cached plots whenever a
+  combination database or WAL changed. Selected runs from one database now load
+  in one short read-only transaction, including statuses and execution/config
+  provenance, then the connection closes before decoding/rendering.
+- Render and Export use the frozen loaded rows while acquisition, other runs or
+  WAL checkpoints continue. Manual Refresh reads a new snapshot. Static
+  CSV/JSON/archive sources retain their existing changed-file protection.
+- Added explicit, default-off **Preview in-progress runs**. Only whole accepted
+  attempts with clean formal samples from active runs enter this preview;
+  per-channel invalid filtering remains active, rejected/started samples still
+  require audit, and preview rows retain final `accepted=false`. Figures mark
+  in-progress data and unverified final cleanup.
+- Each card displays loaded UTC, run state, row count and a content-bound snapshot
+  ID. Exports retain that snapshot metadata and the exact rendered sample and
+  statistics tables. Setup files preserve the preview option; old setups default
+  to final-only behavior. Nonfinite audit observations remain raw, with tagged
+  standard-JSON values only in snapshot digest/metadata normalization.
+- Local synthetic WAL/concurrent-writer and analysis regressions validate
+  consistent multi-run/config snapshots, timely connection close, read-only
+  behavior, manual refresh, export fidelity and static-source protection.
+  Final guarded verification passed 104 tests in 29.458 s, with zero failures,
+  errors or skips. Both Notebook code-cell objects match the previous commit,
+  compile successfully and have empty outputs. Only explanatory Markdown changed.
+  Delivery is to origin only: no SSH, target source/configuration replacement,
+  kernel operation or instrument connection is part of this change while the
+  user's acquisition is running. Usage: DATA_ANALYSIS.md.
+
 ### Development and test-failure retrospective (2026-10-15)
 
 - Added [development and test lessons](PROJECT_DEVELOPMENT_AND_TEST_LESSONS.md),

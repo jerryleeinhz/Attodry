@@ -37,6 +37,8 @@ Restart an existing notebook kernel after updating the code, then run both cells
 1. Set **Data directory**, click **Refresh records**, and check the source files.
    For combination SQLite, select this card's **Run IDs** before samples load.
    New cards select no run automatically; Ctrl selects several runs.
+   **Preview in-progress runs** is off by default. Enable it explicitly to inspect
+   completed conditions within an active run; see the snapshot rules below.
 2. Choose **X/Y**, or **Component** (R, X, Y, phase) for the four-channel view.
    It places Vxx h1/h2 above Vxy h1/h2; a varying actual Bx/Bz is selected when available.
    Add independent curve, four-channel, **New XY–Z scatter** or **New heatmap**
@@ -68,8 +70,10 @@ Restart an existing notebook kernel after updating the code, then run both cells
    Large legends expand the figure and use multiple columns. Hiding the legend
    changes only the display, not the exported observations.
 6. **Render this plot** or **Render all plots**, then **Export figures + data**.
-   Edits clear the old figure and export state; changed files (including SQLite
-   WAL changes) require manual **Refresh records** and re-render. Failed refresh cannot keep stale sources.
+   Edits clear the old figure and export state. SQLite plots and exports use the
+   loaded snapshot even while acquisition appends new records. Click **Refresh
+   records** and render again when you want newer data. Changed static CSV/JSON
+   sources still require refresh and re-render; failed refresh cannot keep stale sources.
 7. **Save/Load setup** records sources, axes, filters, statistics, exclusions, legend and audit
    choices. Missing source files produce an error. Setup/export files are never
    overwritten.
@@ -87,17 +91,46 @@ combination database. Selecting **Run IDs** loads only those runs through direct
 run-filtered SQL; unselected formal rows and cleanup records are not decoded.
 Each run's cleanup JSON is parsed once per load rather than once per sample.
 
-The widget caches immutable rows by resolved file, run ID and audit selection.
+For SQLite, selected runs are loaded together in one short read-only transaction.
+The transaction closes after loading, and the widget freezes the resulting rows;
+rendering does not hold a database transaction open. The widget caches these rows
+by resolved file, selected runs and preview/audit selection.
 Changing axes, Stack/group, filters, statistics, legend or plot mode reuses the
-same loaded rows; different cards reuse matching cached runs. **Refresh records**
+same loaded rows; different cards can reuse matching cached snapshots. **Refresh records**
 explicitly clears the cache, refreshes the run catalog and reloads selected runs.
 There is no background polling or automatic full-database reload.
 
-The snapshot signature includes SQLite WAL state and is stored with the rows.
-Changed files, changes during loading and runs loaded at different database
-revisions cannot render/export as one current snapshot. Refresh and render again.
-Saved setups retain selected runs; old setups preserve their original run scope,
-and recorded sample identities keep exclusions stable under scoped loading.
+Background writes to SQLite or its WAL do not invalidate an already-loaded
+snapshot. A plot is a saved-data view at its recorded load time, not a live view
+of the database. The UI shows each source snapshot's UTC time, loaded row count
+and recorded run state. Separate sources may have different snapshot times;
+their provenance remains separate. Static CSV/JSON inputs retain their existing
+file-change checks and must be refreshed if changed.
+
+**Export figures + data** uses exactly the rows retained by the successful render;
+it does not reread SQLite and silently include later samples. The export manifest
+records `source_snapshots` with load times, counts, run states and content digests.
+These digests identify the cached content, rather than asserting that the entire
+database or WAL is unchanged. Saved setups retain selected runs and the preview
+choice; old setups preserve their original run scope. Recorded sample identities
+keep exclusions stable under scoped loading.
+
+### Preview in-progress combination runs
+
+The separate **Preview in-progress runs** checkbox defaults to off, preserving
+the completed/accepted/clean default. With it enabled, an active combination run
+can contribute only samples from whole conditions whose attempt is already
+`accepted`, and each included sample must be clean. A currently started condition,
+partial attempt or rejected attempt cannot enter this preview. Channel quality
+filters continue to exclude invalid readings by default; preview does not enable
+the independent rejected/problem audit option.
+
+Preview rows and exports are explicitly marked as preliminary. Their final
+`accepted` field remains false: an accepted condition inside an active run does
+not establish final run completion or verified cleanup. The recorded run state
+comes from the same snapshot and is not process-liveness or present hardware
+evidence. Refresh manually to load additional completed conditions or the final
+result; there is no timer, instrument query, acquisition setting change or restart.
 
 SR865A rows retain model/native status rather than applying SR830 LIAS masks.
 Unknown native safety state remains unknown. Exact finite X=Y=R=0 with explicitly

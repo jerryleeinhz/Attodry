@@ -1,6 +1,22 @@
 # Development stages
 
-## Current: development and test-failure retrospective (2026-10-15)
+## Current: unified plotting snapshots for active SQLite scans (2026-10-15)
+
+- Replace global database/WAL stat invalidation with one short read-only
+  transaction for each selected database/run batch and immutable loaded rows.
+  Manual Refresh advances the snapshot; Render/Export remain usable during writes.
+- Add explicit active-run preview with unchanged final acceptance and channel
+  quality rules, snapshot UTC/state/count/content identity and export provenance.
+  Keep static-file change checks, audit opt-in and old setup compatibility.
+- Add synthetic WAL/other-run/checkpoint/concurrent-commit tests, readonly/close
+  checks, partial-attempt/invalid preview exclusions and exact export regressions.
+  Notebook changes are explanatory Markdown only; both use the common dashboard.
+- Final guarded analysis/plot/cache/heatmap/recovery-analysis suite: 104 passed
+  in 29.458 s, zero failures/errors/skips. Notebook JSON, unchanged code cells,
+  syntax and empty outputs verified. Real hardware imports/DLL loads were blocked.
+- No target deployment or hardware interaction during the running experiment.
+
+## Development and test-failure retrospective (2026-10-15)
 
 - Added PROJECT_DEVELOPMENT_AND_TEST_LESSONS.md and README navigation.
   Record observed failure causes, bounded fixes, synthetic regression coverage,
