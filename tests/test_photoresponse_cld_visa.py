@@ -372,6 +372,63 @@ class VisaCldTests(unittest.TestCase):
         self.assertIs(driver.get("isTrippedLdOutputProtTemperature"), True)
         driver.close()
 
+    def test_operator_acknowledged_exact_pattern_allows_ld_and_keeps_other_guards(self):
+        ack = dict(acknowledged_connection_diagnostics=(1, 1, 8192),
+                   acknowledgement_note="operator 2026-10-15: manual emission works, no front-panel error")
+        asserted = {"OUTP1:PROT:CONN:TRIP?": "1", "OUTP2:PROT:CONN:TRIP?": "1", "STAT:MEAS:COND?": "8192"}
+        driver, resource, _ = backend(configuration(**ack))
+        resource.values.update(asserted)
+        clock = Clock()
+        controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+        controller.begin(authorize_writes=True, confirm_manual_route=True)
+        controller.prepare_point(driver.config.points[0])
+        controller.set_emission(True)
+        self.assertIn(("write", "OUTP1:STAT 1"), resource.calls)
+        diagnostics = controller.record["last_confirmed_state"]["diagnostics"]
+        self.assertEqual(diagnostics["measurement_condition_raw"], 8192)
+        self.assertEqual(diagnostics["acknowledged_pattern"], [1, 1, 8192])
+        self.assertIn("manual emission", diagnostics["acknowledgement_note"])
+        self.assertTrue(controller.finish()["off_confirmed"])
+        self.assertEqual(resource.values["OUTP1:STAT?"], "0")
+
+        for changes in ({"STAT:MEAS:COND?": "8193"}, {"OUTP2:PROT:CONN:TRIP?": "0"},
+                        {"OUTP1:PROT:CONN:TRIP?": "0", "STAT:MEAS:COND?": "8192"}):
+            with self.subTest(changes=changes):
+                driver, resource, _ = backend(configuration(**ack))
+                resource.values.update({**asserted, **changes})
+                with self.assertRaisesRegex(NktError, "connection diagnostic unresolved"):
+                    driver.set("switchLdOutput", True)
+                self.assertNotIn(("write", "OUTP1:STAT 1"), resource.calls)
+                driver.close()
+
+        driver, resource, _ = backend(configuration(**ack))
+        resource.values.update({**asserted, "OUTP1:PROT:INTL:TRIP?": "1"})
+        controller = CldController(driver.config, driver, clock=clock, sleep=clock.sleep)
+        with self.assertRaisesRegex(NktError, "interlock"):
+            controller.begin(authorize_writes=True, confirm_manual_route=True)
+        self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
+        driver.close()
+
+    def test_acknowledgement_configuration_is_strict(self):
+        for changes in ({"acknowledgement_note": "note without a pattern"},
+                        {"acknowledged_connection_diagnostics": (1, 1, 8192)},
+                        {"acknowledged_connection_diagnostics": (2, 1, 8192), "acknowledgement_note": "x"},
+                        {"acknowledged_connection_diagnostics": (1, 1, 70000), "acknowledgement_note": "x"},
+                        {"acknowledged_connection_diagnostics": (True, 1, 8192), "acknowledgement_note": "x"},
+                        {"acknowledged_connection_diagnostics": (1, 8192), "acknowledgement_note": "x"},
+                        {"acknowledged_connection_diagnostics": [1, 1, 8192], "acknowledgement_note": "x"}):
+            with self.subTest(changes=changes):
+                with self.assertRaises(NktError):
+                    configuration(**changes).validate()
+        with (ROOT / "config/photoresponse_cld_simulation.toml").open("rb") as stream:
+            doc = tomllib.load(stream)
+        doc["cld1010"].update(acknowledged_connection_diagnostics=[1, 1, 8192], acknowledgement_note="operator ack")
+        loaded = load_cld_config(doc, ROOT / "config/photoresponse_cld_simulation.toml")
+        self.assertEqual(loaded.acknowledged_connection_diagnostics, (1, 1, 8192))
+        self.assertIsNone(load_cld_config({**doc, "cld1010": {k: v for k, v in doc["cld1010"].items()
+            if k not in ("acknowledged_connection_diagnostics", "acknowledgement_note")}},
+            ROOT / "config/photoresponse_cld_simulation.toml").acknowledged_connection_diagnostics)
+
     def test_asserted_or_missing_connection_diagnostics_block_formal_stage(self):
         driver, _, _ = backend()
         controller = CldController(driver.config, driver)

@@ -48,6 +48,10 @@ class CldConfig:
     max_voltage_v: float | None = None  # Optional extra software threshold, not a voltage-source setting.
     emit: bool = True
     dwell_s: float = 0.0
+    # Operator acknowledgment of one exact (LD CONN, TEC CONN, STAT:MEAS:COND)
+    # pattern, e.g. (1, 1, 8192); any other asserted indication still blocks LD.
+    acknowledged_connection_diagnostics: tuple[int, int, int] | None = None
+    acknowledgement_note: str = ""
 
     def validate(self):
         if self.backend not in ("simulation", "tl4000", "visa"):
@@ -75,6 +79,16 @@ class CldConfig:
         for point in self.points:
             number(point.current_a, "diode current", 0, self.max_current_a)
             number(point.wavelength_nm, "nominal wavelength", 100, 10000)
+        ack = self.acknowledged_connection_diagnostics
+        if ack is None:
+            if self.acknowledgement_note != "":
+                raise NktError("acknowledgement_note requires acknowledged_connection_diagnostics")
+        else:
+            if type(ack) is not tuple or len(ack) != 3 or any(type(value) is not int for value in ack):
+                raise NktError("acknowledged_connection_diagnostics must be [LD CONN, TEC CONN, MEAS COND] integers")
+            if ack[0] not in (0, 1) or ack[1] not in (0, 1) or not 0 <= ack[2] <= 65535:
+                raise NktError("acknowledged_connection_diagnostics values are out of range")
+            text(self.acknowledgement_note, "acknowledgement_note")
 
     def require_hardware(self, writes=False):
         self.validate()
@@ -98,9 +112,14 @@ class CldConfig:
 
 def load_cld_config(doc, path):
     table = dict(doc.get("cld1010", {}))
-    fields = set(CldConfig.__dataclass_fields__) - {"points", "emit", "dwell_s", "dll_path", "max_voltage_v"}
-    keys(table, "cld1010", fields | {"current_points_a", "wavelength_nm"}, {"dll_path", "max_voltage_v"})
+    optional = {"dll_path", "max_voltage_v", "acknowledged_connection_diagnostics", "acknowledgement_note"}
+    fields = set(CldConfig.__dataclass_fields__) - {"points", "emit", "dwell_s"} - optional
+    keys(table, "cld1010", fields | {"current_points_a", "wavelength_nm"}, optional)
     table.setdefault("dll_path", "")
+    if "acknowledged_connection_diagnostics" in table:
+        if not isinstance(table["acknowledged_connection_diagnostics"], list):
+            raise NktError("acknowledged_connection_diagnostics must be an array")
+        table["acknowledged_connection_diagnostics"] = tuple(table["acknowledged_connection_diagnostics"])
     points = table.pop("current_points_a")
     if not isinstance(points, list):
         raise NktError("current_points_a must be an array")
@@ -112,8 +131,12 @@ def load_cld_config(doc, path):
     return result
 
 
-def require_connection_diagnostics(diagnostics):
-    """Unresolved CLD connection indications block LD, not TEC preparation."""
+def require_connection_diagnostics(diagnostics, acknowledged=None):
+    """Unresolved CLD connection indications block LD, not TEC preparation.
+
+    ``acknowledged`` is an operator-confirmed exact (LD CONN, TEC CONN, MEAS)
+    pattern from the configuration; only that identical reading may proceed.
+    """
     if not isinstance(diagnostics, dict) or diagnostics.get("qualification") != "unqualified":
         raise NktError("CLD connection diagnostic unresolved: missing qualification")
     for name in ("ld_connection_raw", "tec_connection_raw"):
@@ -123,9 +146,12 @@ def require_connection_diagnostics(diagnostics):
     condition = diagnostics.get("measurement_condition_raw")
     if type(condition) is not int or not 0 <= condition <= 65535:
         raise NktError("CLD connection diagnostic unresolved: invalid measurement condition")
-    if (diagnostics["ld_connection_raw"] or diagnostics["tec_connection_raw"]
-            or condition & (1 << 13)):
+    observed = (diagnostics["ld_connection_raw"], diagnostics["tec_connection_raw"], condition)
+    if observed[0] or observed[1] or condition & (1 << 13):
+        if acknowledged is not None and observed == tuple(acknowledged):
+            return "operator_acknowledged"
         raise NktError("CLD connection diagnostic unresolved; LD enable is blocked")
+    return "clear"
 
 
 class TL4000:
@@ -380,7 +406,7 @@ class VisaCld:
                 raise NktError("CLD LD output requires constant-current mode")
             if self.get("getTempProtMode") != 2 or self.get("isTrippedLdOutputProtTemperature"):
                 raise NktError("CLD LD temperature protection prevents emission")
-            require_connection_diagnostics(self._diagnostics())
+            require_connection_diagnostics(self._diagnostics(), self.config.acknowledged_connection_diagnostics)
         elif name == "switchTecOutput":
             number(self.get("getTecCurrLimit"), "TEC current limit", .001, self.config.max_tec_current_a)
             if self.get("getTecOperatingMode") != 1:
@@ -406,9 +432,12 @@ class VisaCld:
             if not 0 <= value <= (65535 if name == "measurement_condition_raw" else 1):
                 raise NktError("Invalid CLD raw diagnostic: " + name)
             values[name] = value
+        ack = self.config.acknowledged_connection_diagnostics
         return {**values, "raw_responses": raw, "qualification": "unqualified",
             "reason": "CLD1010LP connection indications and bit 13 have uncommissioned semantics; "
-                      "they establish neither a cable fault nor a connected state"}
+                      "they establish neither a cable fault nor a connected state",
+            "acknowledged_pattern": list(ack) if ack is not None else None,
+            "acknowledgement_note": self.config.acknowledgement_note}
 
     def snapshot(self):
         return {"identity": self._identity(), **{name: self.get(name) for name in self.QUERIES},
@@ -499,7 +528,7 @@ class CldController:
         if require_ld_ready or state["getLdOutputState"]:
             if trip: raise NktError("CLD LD temperature protection prevents emission")
             if self.backend.is_hardware and c.backend == "visa":
-                require_connection_diagnostics(state.get("diagnostics"))
+                require_connection_diagnostics(state.get("diagnostics"), c.acknowledged_connection_diagnostics)
 
     def stable(self, state):
         return state["getTecOutputState"] and abs(state["measTemp"]-self.config.temperature_c) <= self.config.temperature_tolerance_c
