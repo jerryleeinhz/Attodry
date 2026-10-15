@@ -60,15 +60,15 @@ Unsupported settings fail closed.
 
 ## Handoff and failures
 
-Normal combination launches and recovery share a station file lease and Windows
-resource mutexes covering overlapping instruments across checkouts/sessions.
-Recovery checks complete PID/creation/command identities and config/safety/source
-hashes. Unknown Python, replacement kernels and instrument GUIs block execution;
-no process is killed. Analysis kernels must be idle at the initial handoff.
-The exact known file-analysis identities may subsequently plot. File-only
-monitors remain allowed. Before recovery, manually reload analysis imports or
-restart/rerun the analysis kernel to load the new execution-aware analysis code;
-do not restart/create kernels while recovery is running.
+As explicitly requested on 2026-10-15, ordinary hardware run/resume no longer
+enumerates OS processes, checks PID/Jupyter/GUI identities or idle state, or
+acquires the former Windows resource mutexes/station file lease. Independent
+instrument or analysis processes starting/exiting do not trigger a scan stop.
+No periodic process/hash watcher or automatic retry is created. File/config/source
+review and atomic database claims still apply before recovery; unknown source
+compatibility is not automatically approved. Reload analysis imports when needed
+to use the execution-aware analysis code. Concurrent control of the same hardware
+can still produce an actual communication/status fault.
 
 All selected preflights pass before writes. Lock-in actual 4 mV/h1 and complete
 clear status are required; an overloaded baseline needs separately authorized
@@ -80,10 +80,9 @@ the pending transition from actual state and retains the 3 T ceiling.
 The first pending condition reapplies all axes and completes a new qualification.
 No old dwell, baseline, partial group or harmonic is reused. A new magnetic
 execution does not establish continuous magnetic history across interruption.
-Owner/hash guards continue during acquisition. On guard failure, stop writes,
-preserve last confirmed state, close connections and require manual verification;
-other faults use the existing owned cleanup procedures. Never infer zero/OFF
-after uncertain communication.
+Physical checks continue during acquisition. Hardware faults use the existing
+cleanup procedures, retaining primary errors, partial readbacks and any manual
+review requirement. Never infer zero/OFF after uncertain communication.
 
 Old failure/cleanup remains recorded even when individual reset actions were
 verified. New review/preflight establishes the new handoff without rewriting old
@@ -98,7 +97,16 @@ Additive execution and attempt-mapping tables preserve the original plan, raw
 samples and IDs. Each segment archives config/source/owner/review/error/cleanup.
 Schema-1 failures receive a legacy execution at actual recovery only. The
 reviewed 79ed5b4 LF/CRLF source set and identical current source are supported;
-unknown archived versions are refused.
+unknown archived versions are refused. Additional narrowly typed live-resolution
+APIs bind the reviewed historical owner/initialization/PID-reuse/process-removal
+cases to complete fresh physical evidence and repeat validation inside the atomic
+claim. A JSON flag or generic error spelling cannot substitute for the single-use
+in-memory capability. These APIs preserve old failure/manual/uncertain flags and
+are not a general CLI bypass for failed cleanup or arbitrary source changes.
+
+The station-specific automatic stable-range recovery and completion Sample
+Exchange helpers remain ignored one-shot operator artifacts. Ordinary CLI
+run/resume does not install those experiment policies or automatically warm up.
 
 Only whole conditions become accepted. Failed partial attempts remain rejected
 and the condition is remeasured. A unique database constraint prevents duplicate

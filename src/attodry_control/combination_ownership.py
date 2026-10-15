@@ -75,7 +75,7 @@ def process_inventory():
         raise ValueError("Real recovery owner verification currently requires Windows")
     command = ("$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; "
         "@(Get-CimInstance Win32_Process | ForEach-Object {"
-        "@{pid=$_.ProcessId;parent=$_.ParentProcessId;name=$_.Name;command=$_.CommandLine;"
+        "@{pid=$_.ProcessId;parent=$_.ParentProcessId;name=$_.Name;command=$_.CommandLine;executable=$_.ExecutablePath;"
         "created=$_.CreationDate.ToUniversalTime().ToString('o')}}) | ConvertTo-Json -Compress")
     result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
         capture_output=True, text=True, check=True, timeout=20,
@@ -170,9 +170,16 @@ def validate_inventory(rows, *, own_pid, idle_kernels):
 
 
 class RecoveryOwner:
-    def __init__(self, config, *, inventory=process_inventory, idle_reader=_idle_jupyter):
+    def __init__(self, config, *, inventory=process_inventory, idle_reader=_idle_jupyter,
+                 external_policy=None):
         self.config = config
-        self.inventory = inventory
+        if external_policy is not None:
+            from .external_owner_policy import ExternalOwnerPolicy
+            if not isinstance(external_policy, ExternalOwnerPolicy):
+                raise ValueError("External owner exception requires a verified file-pinned policy")
+        self.external_policy = external_policy
+        self.inventory = (external_policy.inventory_adapter(inventory)
+                          if external_policy is not None else inventory)
         self.idle_reader = idle_reader
         self.identity = None
         self.last_evidence = None
@@ -216,6 +223,9 @@ class RecoveryOwner:
         self.identity = deepcopy(own)
         self.last_evidence = {"pid": own["pid"], "created": own["created"],
                               "command": own["command"], "verified_owners": deepcopy(evidence)}
+        if self.external_policy is not None:
+            self.last_evidence["external_owner_policy_sha256"] = self.external_policy.policy_sha256
+            self.last_evidence["approved_external_owners"] = self.external_policy.current_approvals
         return self.last_evidence
 
     @contextmanager

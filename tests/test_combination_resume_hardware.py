@@ -19,7 +19,7 @@ class HardwareRecoveryTests(unittest.TestCase):
     factory = ElectricalCombinationTests.factory
     events = ElectricalCombinationTests.events
 
-    def execute(self, config, *, recovery=None, owner_guard=lambda: None):
+    def execute(self, config, *, recovery=None, owner_guard=None):
         with CombinationStore(self.database) as store:
             return run_hardware_combination(config, store, "recovery-test",
                 authorize_hardware=True, authorize_cryostat=True,
@@ -66,26 +66,36 @@ class HardwareRecoveryTests(unittest.TestCase):
             acknowledge_failure=True, manual_verification=manual,
             approve_protection_changes=True)
 
-    def test_recovery_requires_exclusive_owner_guard_before_connection(self):
+    def test_recovery_without_process_guard_runs_fresh_preflight_and_cleanup(self):
         config = self.seed(("temperature", "lockin"))
-        with self.assertRaisesRegex(ValueError, "exclusive-owner"):
-            self.execute(config, recovery=self.recovery(config), owner_guard=None)
-        self.assertEqual(self.dll.events, [])
-        self.assertEqual(self.manager.opened, [])
+        with patch("attodry_control.combination_ownership.process_inventory",
+                   side_effect=AssertionError("Process inventory must not run")), \
+             patch("attodry_control.combination_ownership._idle_jupyter",
+                   side_effect=AssertionError("Jupyter inspection must not run")), \
+             patch("attodry_control.combination_ownership.RecoveryOwner.acquire",
+                   side_effect=AssertionError("Process lease must not be acquired")):
+            result = self.execute(config, recovery=self.recovery(config), owner_guard=None)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn("recovery_preflight_verified", [kind for kind, _ in self.events()])
+        self.assertTrue(result["cleanup"]["clean"])
+        self.assertTrue(all(action["result"]["verified"] for action in result["cleanup"]["actions"]
+                            if action["module"] in {"temperature", "lockin"}))
+        self.assertTrue(self.manager.closed)
+        self.assertFalse(self.dll.connected)
 
-    def test_changed_owner_between_preflights_blocks_all_setting_writes(self):
+    def test_legacy_process_callback_is_ignored_between_preflights(self):
         config = self.seed(("temperature", "smu", "lockin"))
         calls = []
         def guard():
             calls.append(True)
-            if len(calls) == 3:
-                raise ValueError("new competing owner")
+            raise ValueError("unrelated process exited")
         result = self.execute(config, recovery=self.recovery(config), owner_guard=guard)
-        self.assertEqual(result["status"], "failed", result)
-        self.assertIn("competing owner", result["error"])
-        self.assertFalse(any(event.startswith("set_") for event in self.dll.events))
-        self.assertEqual(self.manager.opened, [])
-        self.assertEqual(self.adapters, {})
+        self.assertEqual(result["status"], "completed", result)
+        self.assertEqual(calls, [])
+        self.assertTrue(result["cleanup"]["clean"])
+        self.assertTrue(self.manager.closed)
+        self.assertFalse(self.adapters["smu_bias"].output)
+        self.assertFalse(self.dll.connected)
 
     def test_unsafe_fresh_field_blocks_recovery_before_electrical_writes(self):
         config = self.seed(("temperature", "smu", "lockin"))
@@ -139,73 +149,71 @@ class HardwareRecoveryTests(unittest.TestCase):
         self.assertFalse(any(command.startswith("PHAS ") for command in self.xx.writes + self.xy.writes))
         self.assertEqual(self.xy.responses["SENS?"].strip(), "23")
 
-    def test_owner_change_after_accepted_condition_stops_without_further_writes(self):
+    def test_analysis_exit_after_accepted_condition_does_not_stop_scan_or_cleanup(self):
         config = self.seed(("temperature", "smu", "lockin"))
         stop = [False]
-        writes_at_change = []
+        calls = []
         event = CombinationStore.event
         def guard():
+            calls.append(True)
             if stop[0]:
-                raise ValueError("new competing owner after accepted condition")
+                raise ValueError("Analysis owner identities changed during recovery")
         def observe(store, run_id, kind, payload):
             result = event(store, run_id, kind, payload)
             if kind == "condition_accepted" and not stop[0]:
                 stop[0] = True
-                writes_at_change.append((list(self.xx.writes), list(self.xy.writes),
-                    [value for value in self.log if value[0] in {"source", "output", "configure"}],
-                    [value for value in self.dll.events if value.startswith("set_") or value.startswith("toggle_")]))
             return result
         with patch.object(CombinationStore, "event", observe):
             result = self.execute(config, recovery=self.recovery(config), owner_guard=guard)
-        self.assertEqual(result["status"], "failed", result)
-        self.assertIn("competing owner", result["error"])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(stop[0])
+        self.assertEqual(calls, [])
         state = hardware_recovery_state(self.database, "recovery-test")
-        self.assertEqual(len(state["accepted_condition_ids"]), 1)
-        self.assertEqual(writes_at_change[0], (self.xx.writes, self.xy.writes,
-            [value for value in self.log if value[0] in {"source", "output", "configure"}],
-            [value for value in self.dll.events if value.startswith("set_") or value.startswith("toggle_")]))
-        self.assertTrue(result["cleanup"]["manual_verification_required"])
-        self.assertTrue(all(action["result"]["communication_uncertain"]
-            and action["result"]["last_confirmed_state_not_current"]
-            for action in result["cleanup"]["actions"]))
+        self.assertEqual(len(state["accepted_condition_ids"]), len(config.plan.conditions()))
+        self.assertTrue(result["cleanup"]["clean"])
+        self.assertFalse(result["cleanup"]["manual_verification_required"])
+        self.assertTrue(all(action["result"]["verified"] for action in result["cleanup"]["actions"]
+                            if action["module"] in {"temperature", "lockin"}))
+        self.assertNotIn("recovery_owner_verification_failed", [kind for kind, _ in self.events()])
         self.assertTrue(self.manager.closed)
+        self.assertFalse(self.adapters["smu_bias"].output)
         self.assertFalse(self.dll.connected)
 
-    def test_owner_change_after_last_accepted_blocks_cleanup_and_completed_status(self):
+    def test_process_change_after_last_accepted_does_not_block_cleanup(self):
         config = self.seed(("lockin",))
         stop = [False]
-        final_writes = []
+        calls = []
         event = CombinationStore.event
         def guard():
+            calls.append(True)
             if stop[0]:
                 raise ValueError("new owner before final cleanup")
         def observe(store, run_id, kind, payload):
             result = event(store, run_id, kind, payload)
             if kind == "condition_accepted" and payload["condition_id"] == "condition-000001":
                 stop[0] = True
-                final_writes.extend((list(self.xx.writes), list(self.xy.writes)))
             return result
         with patch.object(CombinationStore, "event", observe):
             result = self.execute(config, recovery=self.recovery(config), owner_guard=guard)
-        self.assertEqual(result["status"], "failed", result)
-        self.assertEqual(final_writes, [self.xx.writes, self.xy.writes])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(stop[0])
+        self.assertEqual(calls, [])
         self.assertEqual(len(hardware_recovery_state(self.database, "recovery-test")["accepted_condition_ids"]), 2)
-        self.assertTrue(result["cleanup"]["manual_verification_required"])
+        self.assertTrue(result["cleanup"]["clean"])
+        self.assertFalse(result["cleanup"]["manual_verification_required"])
+        self.assertEqual(float(self.xx.responses["SLVL?"].strip()), .004)
+        self.assertEqual(float(self.xy.responses["SLVL?"].strip()), .004)
         self.assertTrue(self.manager.closed)
 
-    def test_owner_loss_mid_cleanup_blocks_following_queries_and_writes(self):
+    def test_legacy_process_callback_is_not_called_during_cleanup(self):
         config = self.seed(("lockin",))
         cleanup_started = [False]
         cleanup_guards = [0]
-        stopped = []
         event = CombinationStore.event
         def guard():
             if cleanup_started[0]:
                 cleanup_guards[0] += 1
-                if cleanup_guards[0] == 3:
-                    stopped.append((list(self.xx.writes), list(self.xy.writes),
-                                    list(self.xx.queries), list(self.xy.queries)))
-                    raise ValueError("new owner during cleanup")
+                raise ValueError("unrelated owner changed during cleanup")
         def observe(store, run_id, kind, payload):
             result = event(store, run_id, kind, payload)
             if kind == "cleanup_started":
@@ -213,10 +221,12 @@ class HardwareRecoveryTests(unittest.TestCase):
             return result
         with patch.object(CombinationStore, "event", observe):
             result = self.execute(config, recovery=self.recovery(config), owner_guard=guard)
-        self.assertEqual(result["status"], "failed", result)
-        self.assertEqual(stopped[0], (self.xx.writes, self.xy.writes, self.xx.queries, self.xy.queries))
-        self.assertTrue(result["cleanup"]["manual_verification_required"])
-        self.assertTrue(result["cleanup"]["actions"][0]["result"]["communication_uncertain"])
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(cleanup_started[0])
+        self.assertEqual(cleanup_guards[0], 0)
+        self.assertTrue(result["cleanup"]["clean"])
+        self.assertTrue(result["cleanup"]["actions"][0]["result"]["verified"])
+        self.assertFalse(result["cleanup"]["manual_verification_required"])
         self.assertTrue(self.manager.closed)
 
     def test_unknown_current_communication_cannot_be_excused_by_review(self):

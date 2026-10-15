@@ -26,8 +26,8 @@ all 64 physical orders, fault cases or output ranges have been commissioned.
 每个叶节点重新读取所有 active SMU，按各角色配置保存真实 h1/h2/h3 锁相读数。
 不调用完整独立扫描来拼接；连接和配置只做一次，最终集中 cleanup。
 
-仍不支持：软件脉冲、实机 resume。
-这些请求在连接前拒绝。固定频率下若所选谐波越过 102 kHz，也在连接前拒绝，
+仍不支持软件脉冲。实机中断恢复使用下述独立 `resume` 子命令。
+固定频率下若所选谐波越过 102 kHz，在连接前拒绝，
 不静默减少谐波。此前四模块模拟器及专用温度×激励命令仍保留。
 
 在 ignored `hardware.local.toml` 中增加：
@@ -154,7 +154,45 @@ SMU保护限值、TC、过载与正常/异常清理策略，以及完整路径�
 断线声明；true会在连接前拒绝。接线变更后必须更新声明并核验实物。
 要先检查计划，使用 `describe-hardware`（完全离线），然后再执行run。
 连接前复核TOML和lockin_safety哈希，文件变动即拒绝。重复run ID仍拒绝；
-没有新增硬件resume或自动重放。旧授权参数与其别名继续接受，但不再必填。
+`run --json` 仅改变输出格式，不会恢复旧扫描。旧授权参数与其别名继续接受，但不再必填。
+
+### 同一 run 的整条件恢复（2026-10-15 更新）
+
+`resume` 保留原数据库、run ID 和全部 accepted 条件；从第一个未完成条件整条件重测，
+不拼接失败尝试中的部分谐波或样本。原 rejected/interrupted 记录和清理标记保持原样。
+原扫描必须已明确终止；`active` 记录不能直接续扫。
+
+先修改需要调整的运行配置，再做完全离线的差异检查：
+
+```powershell
+python -m attodry_control.combination_cli resume --run-id EXISTING_RUN_ID --check --json --acknowledge-failure
+```
+
+数据库默认来自当前 TOML；需要时用 `--database ORIGINAL_DATABASE` 明确指定原库。
+检查包括完整有序点列、模块/谐波/组数、accepted 前缀、原始记录、源码兼容和配置差异。
+温度稳定条件、Lock-in 量程/Reserve、SMU 保护等修改必须显示在 review 中；改变扫描点、
+轴顺序或采样结构应新建 run。未知源码差异不自动接受。
+
+只有 review 为 ready，且原故障已解决，才移除 `--check` 执行恢复：
+
+```powershell
+python -m attodry_control.combination_cli resume --run-id EXISTING_RUN_ID --acknowledge-failure
+```
+
+未知或未验证清理仍要求真实人工核验后才可使用 `--confirm-manual-verification`；
+显示为保护增加的 SMU 修改还需单独 `--approve-protection-changes`。这些参数不是绕过
+物理检查的开关。实际恢复会重新连接、检查状态和基线、重新等待温度/磁场稳定，并在
+数据库中原子登记新 execution；预检失败不声称已开始测量。
+
+按用户要求，当前 `run`/`resume` 不检查 OS 进程、PID、Jupyter/GUI 身份或空闲状态，
+也不获取原进程互斥锁/station lease，不创建后台监视或自动重试。
+独立仪器进程的出现或退出不会触发扫描停止。实际仪器通信、温度/磁场稳定与硬界、
+电学保护、接线声明及清理验证仍生效；同时控制同一设备仍可能造成真实通信或状态故障。
+`monitor` 仍是操作者显式选择的只读命令，不会由 `run`/`resume` 自动开启。
+
+本次实验的完成后 Sample Exchange 是 ignored 单次 operator 中的有限同步末阶段，
+普通 `combination_cli run/resume` 不自带自动升温或稳定范围调整。运行记录和这些
+站点专属 launcher/manifest 不属于 Git 发布内容。
 
 另开终端只读监控最新一次已登记运行：
 

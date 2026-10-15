@@ -1,0 +1,1096 @@
+{
+  "events": [
+    {
+      "created_at_utc": "2020-01-02T12:00:00+00:00",
+      "event_id": 1001,
+      "event_type": "launch_registered",
+      "payload": {
+        "config": "C:/Synthetic/config/local.toml",
+        "created_at_utc": "2020-01-02T12:00:00+00:00",
+        "database": "C:/Synthetic/audit.sqlite",
+        "execution_id": "execution-synthetic-startup",
+        "hostname": "SYNTHETIC-STATION",
+        "pid": 4100,
+        "run_id": "synthetic-process-guard-removal-342"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:02+00:00",
+      "event_id": 1002,
+      "event_type": "run_started",
+      "payload": {
+        "cleanup_only": false,
+        "execution_id": "execution-synthetic-startup",
+        "resume": true
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:04+00:00",
+      "event_id": 1003,
+      "event_type": "cryostat_state",
+      "payload": {
+        "captured_at_utc": "2020-01-02T12:00:04+00:00",
+        "execution_id": "execution-synthetic-startup",
+        "heater_power": {
+          "sample_w": null,
+          "vti_w": null
+        },
+        "sample_id": "synthetic-frame-1",
+        "stage": "adopted_preflight",
+        "state": {
+          "error_code": 0,
+          "error_message": "",
+          "field": {
+            "bx_t": 0.0,
+            "bz_t": 0.0
+          },
+          "field_control_enabled": false,
+          "field_setpoint": {
+            "bx_t": 0.0,
+            "bz_t": 0.0
+          },
+          "sample_temperature_k": 12.5,
+          "temperature_control_enabled": true,
+          "user_temperature_k": 12.5,
+          "vti_temperature_k": 6.25
+        },
+        "telemetry_complete": false,
+        "telemetry_version": 1
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:06+00:00",
+      "event_id": 1004,
+      "event_type": "temperature_telemetry",
+      "payload": {
+        "captured_at_utc": "2020-01-02T12:00:04+00:00",
+        "execution_id": "execution-synthetic-startup",
+        "heater_power": {
+          "sample_w": 0.125,
+          "vti_w": 0.25
+        },
+        "sample_id": "synthetic-frame-1",
+        "stage": "adopted_preflight",
+        "state": {
+          "error_code": 0,
+          "error_message": "",
+          "field": {
+            "bx_t": 0.0,
+            "bz_t": 0.0
+          },
+          "field_control_enabled": false,
+          "field_setpoint": {
+            "bx_t": 0.0,
+            "bz_t": 0.0
+          },
+          "sample_temperature_k": 12.5,
+          "temperature_control_enabled": true,
+          "user_temperature_k": 12.5,
+          "vti_temperature_k": 6.25
+        },
+        "telemetry_complete": true,
+        "telemetry_version": 1
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:08+00:00",
+      "event_id": 1005,
+      "event_type": "cryostat_connection_adopted",
+      "payload": {
+        "actual_resume_ack_verified": false,
+        "begin_or_connect_replayed": false,
+        "captured_at_utc": "2020-01-02T12:00:08+00:00",
+        "connected": true,
+        "connection_owned": true,
+        "execution_id": "execution-synthetic-startup",
+        "existing_driver_object_id": 101,
+        "fresh_preflight": {
+          "captured_at_utc": "2020-01-02T12:00:04+00:00",
+          "heater_power": {
+            "sample_w": 0.125,
+            "vti_w": 0.25
+          },
+          "sample_id": "synthetic-frame-1",
+          "stage": "adopted_preflight",
+          "state": {
+            "error_code": 0,
+            "error_message": "",
+            "field": {
+              "bx_t": 0.0,
+              "bz_t": 0.0
+            },
+            "field_control_enabled": false,
+            "field_setpoint": {
+              "bx_t": 0.0,
+              "bz_t": 0.0
+            },
+            "sample_temperature_k": 12.5,
+            "temperature_control_enabled": true,
+            "user_temperature_k": 12.5,
+            "vti_temperature_k": 6.25
+          },
+          "telemetry_complete": true,
+          "telemetry_version": 1
+        },
+        "initial_driver_object_id": 101,
+        "pid": 4100,
+        "qualification_context_reset": true,
+        "same_exclusive_lease": true,
+        "status": "adopted"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:10+00:00",
+      "event_id": 1006,
+      "event_type": "recovery_environment_initial",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "state": {
+          "error_code": 0,
+          "error_message": "",
+          "field": {
+            "bx_t": 0.0,
+            "bz_t": 0.0
+          },
+          "field_control_enabled": false,
+          "field_setpoint": {
+            "bx_t": 0.0,
+            "bz_t": 0.0
+          },
+          "sample_temperature_k": 12.5,
+          "temperature_control_enabled": true,
+          "user_temperature_k": 12.5,
+          "vti_temperature_k": 6.25
+        }
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:12+00:00",
+      "event_id": 1007,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_diagnostic",
+        "reading": {
+          "amplitude_v": 0.00025,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XX,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 1,
+          "reference_slope": 0,
+          "reserve_mode": 2,
+          "role": "xx",
+          "sensitivity": 26,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.00025,
+          "y_v": 0.0
+        },
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:14+00:00",
+      "event_id": 1008,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_diagnostic",
+        "reading": {
+          "amplitude_v": 0.0005,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XY,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 0,
+          "reference_slope": 1,
+          "reserve_mode": 0,
+          "role": "xy",
+          "sensitivity": 23,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.0005,
+          "y_v": 0.0
+        },
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:16+00:00",
+      "event_id": 1009,
+      "event_type": "lockin_recovery_baseline",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "problems": [],
+        "roles": {
+          "lockin_xx": {
+            "amplitude_v": 0.00025,
+            "error_status": 0,
+            "filter_slope": 3,
+            "frequency_hz": 200.0,
+            "harmonic": 1,
+            "identity": "Synthetic,SR830,FAKE-XX,TEST",
+            "input_coupling": 0,
+            "input_mode": 1,
+            "lia_status": {
+              "filter_overload": false,
+              "frequency_range_changed": false,
+              "input_or_reserve_overload": false,
+              "output_overload": false,
+              "raw": 0,
+              "reference_unlocked": false,
+              "time_constant_changed": false,
+              "triggered": false
+            },
+            "line_filter": 0,
+            "phase_deg": 0.0,
+            "phase_shift_deg": 0.0,
+            "reference_mode": 1,
+            "reference_slope": 0,
+            "reserve_mode": 2,
+            "role": "xx",
+            "sensitivity": 26,
+            "shield_grounding": 0,
+            "sine_output_v": 0.004,
+            "snapshot_frequency_hz": 200.0,
+            "time_constant": 10,
+            "x_v": 0.00025,
+            "y_v": 0.0
+          },
+          "lockin_xy": {
+            "amplitude_v": 0.0005,
+            "error_status": 0,
+            "filter_slope": 3,
+            "frequency_hz": 200.0,
+            "harmonic": 1,
+            "identity": "Synthetic,SR830,FAKE-XY,TEST",
+            "input_coupling": 0,
+            "input_mode": 1,
+            "lia_status": {
+              "filter_overload": false,
+              "frequency_range_changed": false,
+              "input_or_reserve_overload": false,
+              "output_overload": false,
+              "raw": 0,
+              "reference_unlocked": false,
+              "time_constant_changed": false,
+              "triggered": false
+            },
+            "line_filter": 0,
+            "phase_deg": 0.0,
+            "phase_shift_deg": 0.0,
+            "reference_mode": 0,
+            "reference_slope": 1,
+            "reserve_mode": 0,
+            "role": "xy",
+            "sensitivity": 23,
+            "shield_grounding": 0,
+            "sine_output_v": 0.004,
+            "snapshot_frequency_hz": 200.0,
+            "time_constant": 10,
+            "x_v": 0.0005,
+            "y_v": 0.0
+          }
+        }
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:18+00:00",
+      "event_id": 1010,
+      "event_type": "cleanup_started",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "module": "lockin"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:20+00:00",
+      "event_id": 1011,
+      "event_type": "lockin_command_attempt",
+      "payload": {
+        "arguments": [],
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_minimum_sine_output",
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:22+00:00",
+      "event_id": 1012,
+      "event_type": "lockin_command_return",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_minimum_sine_output",
+        "reading": null,
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:24+00:00",
+      "event_id": 1013,
+      "event_type": "lockin_command_attempt",
+      "payload": {
+        "arguments": [
+          2
+        ],
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_reserve_mode",
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:26+00:00",
+      "event_id": 1014,
+      "event_type": "lockin_command_return",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_reserve_mode",
+        "reading": null,
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:28+00:00",
+      "event_id": 1015,
+      "event_type": "lockin_command_attempt",
+      "payload": {
+        "arguments": [
+          0
+        ],
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_reserve_mode",
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:30+00:00",
+      "event_id": 1016,
+      "event_type": "lockin_command_return",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_reserve_mode",
+        "reading": null,
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:32+00:00",
+      "event_id": 1017,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_harmonic_sample",
+        "reading": {
+          "amplitude_v": 0.00025,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XX,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 1,
+          "reference_slope": 0,
+          "reserve_mode": 2,
+          "role": "xx",
+          "sensitivity": 26,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.00025,
+          "y_v": 0.0
+        },
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:34+00:00",
+      "event_id": 1018,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_harmonic_sample",
+        "reading": {
+          "amplitude_v": 0.0005,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XY,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 0,
+          "reference_slope": 1,
+          "reserve_mode": 0,
+          "role": "xy",
+          "sensitivity": 23,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.0005,
+          "y_v": 0.0
+        },
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:36+00:00",
+      "event_id": 1019,
+      "event_type": "lockin_command_attempt",
+      "payload": {
+        "arguments": [
+          26
+        ],
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_sensitivity",
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:38+00:00",
+      "event_id": 1020,
+      "event_type": "lockin_command_return",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_sensitivity",
+        "reading": null,
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:40+00:00",
+      "event_id": 1021,
+      "event_type": "lockin_command_attempt",
+      "payload": {
+        "arguments": [
+          23
+        ],
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_sensitivity",
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:42+00:00",
+      "event_id": 1022,
+      "event_type": "lockin_command_return",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "set_sensitivity",
+        "reading": null,
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:44+00:00",
+      "event_id": 1023,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_harmonic_sample",
+        "reading": {
+          "amplitude_v": 0.00025,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XX,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 1,
+          "reference_slope": 0,
+          "reserve_mode": 2,
+          "role": "xx",
+          "sensitivity": 26,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.00025,
+          "y_v": 0.0
+        },
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:46+00:00",
+      "event_id": 1024,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_harmonic_sample",
+        "reading": {
+          "amplitude_v": 0.0005,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XY,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 0,
+          "reference_slope": 1,
+          "reserve_mode": 0,
+          "role": "xy",
+          "sensitivity": 23,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.0005,
+          "y_v": 0.0
+        },
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:48+00:00",
+      "event_id": 1025,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_diagnostic",
+        "reading": {
+          "amplitude_v": 0.00025,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XX,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 1,
+          "reference_slope": 0,
+          "reserve_mode": 2,
+          "role": "xx",
+          "sensitivity": 26,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.00025,
+          "y_v": 0.0
+        },
+        "role": "lockin_xx"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:50+00:00",
+      "event_id": 1026,
+      "event_type": "lockin_raw_role",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "method": "read_diagnostic",
+        "reading": {
+          "amplitude_v": 0.0005,
+          "error_status": 0,
+          "filter_slope": 3,
+          "frequency_hz": 200.0,
+          "harmonic": 1,
+          "identity": "Synthetic,SR830,FAKE-XY,TEST",
+          "input_coupling": 0,
+          "input_mode": 1,
+          "lia_status": {
+            "filter_overload": false,
+            "frequency_range_changed": false,
+            "input_or_reserve_overload": false,
+            "output_overload": false,
+            "raw": 0,
+            "reference_unlocked": false,
+            "time_constant_changed": false,
+            "triggered": false
+          },
+          "line_filter": 0,
+          "phase_deg": 0.0,
+          "phase_shift_deg": 0.0,
+          "reference_mode": 0,
+          "reference_slope": 1,
+          "reserve_mode": 0,
+          "role": "xy",
+          "sensitivity": 23,
+          "shield_grounding": 0,
+          "sine_output_v": 0.004,
+          "snapshot_frequency_hz": 200.0,
+          "time_constant": 10,
+          "x_v": 0.0005,
+          "y_v": 0.0
+        },
+        "role": "lockin_xy"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:52+00:00",
+      "event_id": 1027,
+      "event_type": "cleanup_result",
+      "payload": {
+        "audit_errors": [],
+        "clean": false,
+        "execution_id": "execution-synthetic-startup",
+        "failure_requires_manual_review": true,
+        "module": "lockin",
+        "result": {
+          "attempted": true,
+          "errors": [],
+          "final": {
+            "lockin_xx": {
+              "amplitude_v": 0.00025,
+              "error_status": 0,
+              "filter_slope": 3,
+              "frequency_hz": 200.0,
+              "harmonic": 1,
+              "identity": "Synthetic,SR830,FAKE-XX,TEST",
+              "input_coupling": 0,
+              "input_mode": 1,
+              "lia_status": {
+                "filter_overload": false,
+                "frequency_range_changed": false,
+                "input_or_reserve_overload": false,
+                "output_overload": false,
+                "raw": 0,
+                "reference_unlocked": false,
+                "time_constant_changed": false,
+                "triggered": false
+              },
+              "line_filter": 0,
+              "phase_deg": 0.0,
+              "phase_shift_deg": 0.0,
+              "reference_mode": 1,
+              "reference_slope": 0,
+              "reserve_mode": 2,
+              "role": "xx",
+              "sensitivity": 26,
+              "shield_grounding": 0,
+              "sine_output_v": 0.004,
+              "snapshot_frequency_hz": 200.0,
+              "time_constant": 10,
+              "x_v": 0.00025,
+              "y_v": 0.0
+            },
+            "lockin_xy": {
+              "amplitude_v": 0.0005,
+              "error_status": 0,
+              "filter_slope": 3,
+              "frequency_hz": 200.0,
+              "harmonic": 1,
+              "identity": "Synthetic,SR830,FAKE-XY,TEST",
+              "input_coupling": 0,
+              "input_mode": 1,
+              "lia_status": {
+                "filter_overload": false,
+                "frequency_range_changed": false,
+                "input_or_reserve_overload": false,
+                "output_overload": false,
+                "raw": 0,
+                "reference_unlocked": false,
+                "time_constant_changed": false,
+                "triggered": false
+              },
+              "line_filter": 0,
+              "phase_deg": 0.0,
+              "phase_shift_deg": 0.0,
+              "reference_mode": 0,
+              "reference_slope": 1,
+              "reserve_mode": 0,
+              "role": "xy",
+              "sensitivity": 23,
+              "shield_grounding": 0,
+              "sine_output_v": 0.004,
+              "snapshot_frequency_hz": 200.0,
+              "time_constant": 10,
+              "x_v": 0.0005,
+              "y_v": 0.0
+            }
+          },
+          "verified": true
+        },
+        "startup_completed": false
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:54+00:00",
+      "event_id": 1028,
+      "event_type": "cleanup_started",
+      "payload": {
+        "execution_id": "execution-synthetic-startup",
+        "module": "temperature"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:56+00:00",
+      "event_id": 1029,
+      "event_type": "cleanup_result",
+      "payload": {
+        "audit_errors": [],
+        "clean": false,
+        "execution_id": "execution-synthetic-startup",
+        "failure_requires_manual_review": true,
+        "module": "temperature",
+        "result": {
+          "attempted": false,
+          "reason": "no writes attempted",
+          "verified": true
+        },
+        "startup_completed": false
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:00:58+00:00",
+      "event_id": 1030,
+      "event_type": "run_finished",
+      "payload": {
+        "cleanup": {
+          "actions": [
+            {
+              "audit_errors": [],
+              "clean": false,
+              "failure_requires_manual_review": true,
+              "module": "lockin",
+              "result": {
+                "attempted": true,
+                "errors": [],
+                "final": {
+                  "lockin_xx": {
+                    "amplitude_v": 0.00025,
+                    "error_status": 0,
+                    "filter_slope": 3,
+                    "frequency_hz": 200.0,
+                    "harmonic": 1,
+                    "identity": "Synthetic,SR830,FAKE-XX,TEST",
+                    "input_coupling": 0,
+                    "input_mode": 1,
+                    "lia_status": {
+                      "filter_overload": false,
+                      "frequency_range_changed": false,
+                      "input_or_reserve_overload": false,
+                      "output_overload": false,
+                      "raw": 0,
+                      "reference_unlocked": false,
+                      "time_constant_changed": false,
+                      "triggered": false
+                    },
+                    "line_filter": 0,
+                    "phase_deg": 0.0,
+                    "phase_shift_deg": 0.0,
+                    "reference_mode": 1,
+                    "reference_slope": 0,
+                    "reserve_mode": 2,
+                    "role": "xx",
+                    "sensitivity": 26,
+                    "shield_grounding": 0,
+                    "sine_output_v": 0.004,
+                    "snapshot_frequency_hz": 200.0,
+                    "time_constant": 10,
+                    "x_v": 0.00025,
+                    "y_v": 0.0
+                  },
+                  "lockin_xy": {
+                    "amplitude_v": 0.0005,
+                    "error_status": 0,
+                    "filter_slope": 3,
+                    "frequency_hz": 200.0,
+                    "harmonic": 1,
+                    "identity": "Synthetic,SR830,FAKE-XY,TEST",
+                    "input_coupling": 0,
+                    "input_mode": 1,
+                    "lia_status": {
+                      "filter_overload": false,
+                      "frequency_range_changed": false,
+                      "input_or_reserve_overload": false,
+                      "output_overload": false,
+                      "raw": 0,
+                      "reference_unlocked": false,
+                      "time_constant_changed": false,
+                      "triggered": false
+                    },
+                    "line_filter": 0,
+                    "phase_deg": 0.0,
+                    "phase_shift_deg": 0.0,
+                    "reference_mode": 0,
+                    "reference_slope": 1,
+                    "reserve_mode": 0,
+                    "role": "xy",
+                    "sensitivity": 23,
+                    "shield_grounding": 0,
+                    "sine_output_v": 0.004,
+                    "snapshot_frequency_hz": 200.0,
+                    "time_constant": 10,
+                    "x_v": 0.0005,
+                    "y_v": 0.0
+                  }
+                },
+                "verified": true
+              },
+              "startup_completed": false
+            },
+            {
+              "audit_errors": [],
+              "clean": false,
+              "failure_requires_manual_review": true,
+              "module": "temperature",
+              "result": {
+                "attempted": false,
+                "reason": "no writes attempted",
+                "verified": true
+              },
+              "startup_completed": false
+            }
+          ],
+          "clean": false,
+          "communication_uncertain": false,
+          "errors": [
+            "lockin: cleanup not certified; review recorded actions",
+            "temperature: cleanup not certified; review recorded actions"
+          ],
+          "manual_verification_required": true
+        },
+        "error": "ValueError: Prior/duplicate owner present",
+        "execution_id": "execution-synthetic-startup",
+        "status": "failed"
+      }
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:00+00:00",
+      "event_id": 1031,
+      "event_type": "data_quality_summary",
+      "payload": {
+        "completion_message": "failed",
+        "continued_overload_pairs": 0,
+        "data_quality": "no_overload_recorded",
+        "execution_id": "execution-synthetic-startup",
+        "formal_pairs": 74,
+        "overloaded_pairs_by_role": {
+          "lockin_xx": 0,
+          "lockin_xy": 0
+        },
+        "rejected_attempt_audit": {
+          "continued_overload_pairs": 0,
+          "data_quality": "no_overload_recorded",
+          "formal_pairs": 0,
+          "overloaded_pairs_by_role": {
+            "lockin_xx": 0,
+            "lockin_xy": 0
+          }
+        }
+      }
+    }
+  ],
+  "execution": {
+    "cleanup": {
+      "actions": [
+        {
+          "audit_errors": [],
+          "clean": false,
+          "failure_requires_manual_review": true,
+          "module": "lockin",
+          "result": {
+            "attempted": true,
+            "errors": [],
+            "final": {
+              "lockin_xx": {
+                "amplitude_v": 0.00025,
+                "error_status": 0,
+                "filter_slope": 3,
+                "frequency_hz": 200.0,
+                "harmonic": 1,
+                "identity": "Synthetic,SR830,FAKE-XX,TEST",
+                "input_coupling": 0,
+                "input_mode": 1,
+                "lia_status": {
+                  "filter_overload": false,
+                  "frequency_range_changed": false,
+                  "input_or_reserve_overload": false,
+                  "output_overload": false,
+                  "raw": 0,
+                  "reference_unlocked": false,
+                  "time_constant_changed": false,
+                  "triggered": false
+                },
+                "line_filter": 0,
+                "phase_deg": 0.0,
+                "phase_shift_deg": 0.0,
+                "reference_mode": 1,
+                "reference_slope": 0,
+                "reserve_mode": 2,
+                "role": "xx",
+                "sensitivity": 26,
+                "shield_grounding": 0,
+                "sine_output_v": 0.004,
+                "snapshot_frequency_hz": 200.0,
+                "time_constant": 10,
+                "x_v": 0.00025,
+                "y_v": 0.0
+              },
+              "lockin_xy": {
+                "amplitude_v": 0.0005,
+                "error_status": 0,
+                "filter_slope": 3,
+                "frequency_hz": 200.0,
+                "harmonic": 1,
+                "identity": "Synthetic,SR830,FAKE-XY,TEST",
+                "input_coupling": 0,
+                "input_mode": 1,
+                "lia_status": {
+                  "filter_overload": false,
+                  "frequency_range_changed": false,
+                  "input_or_reserve_overload": false,
+                  "output_overload": false,
+                  "raw": 0,
+                  "reference_unlocked": false,
+                  "time_constant_changed": false,
+                  "triggered": false
+                },
+                "line_filter": 0,
+                "phase_deg": 0.0,
+                "phase_shift_deg": 0.0,
+                "reference_mode": 0,
+                "reference_slope": 1,
+                "reserve_mode": 0,
+                "role": "xy",
+                "sensitivity": 23,
+                "shield_grounding": 0,
+                "sine_output_v": 0.004,
+                "snapshot_frequency_hz": 200.0,
+                "time_constant": 10,
+                "x_v": 0.0005,
+                "y_v": 0.0
+              }
+            },
+            "verified": true
+          },
+          "startup_completed": false
+        },
+        {
+          "audit_errors": [],
+          "clean": false,
+          "failure_requires_manual_review": true,
+          "module": "temperature",
+          "result": {
+            "attempted": false,
+            "reason": "no writes attempted",
+            "verified": true
+          },
+          "startup_completed": false
+        }
+      ],
+      "clean": false,
+      "communication_uncertain": false,
+      "errors": [
+        "lockin: cleanup not certified; review recorded actions",
+        "temperature: cleanup not certified; review recorded actions"
+      ],
+      "manual_verification_required": true
+    },
+    "error": "ValueError: Prior/duplicate owner present",
+    "execution_id": "execution-synthetic-startup",
+    "finished_at_utc": "2020-01-02T12:00:58+00:00",
+    "parent_state_sha256": "765987e3e2221c41d0ff0d7fefe889cf39b38eeb799645d313dcadf93b862e1f",
+    "sequence_index": 4,
+    "status": "failed"
+  },
+  "synthetic_fixture": true,
+  "utc": "2020-01-02T12:01:05+00:00"
+}

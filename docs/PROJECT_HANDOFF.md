@@ -1,10 +1,53 @@
 # Project handoff
 
-Last updated: 2026-10-12
+Last updated: 2026-10-15
 
 ## Current stage
 
-### Explicit combination recovery (2026-10-14; offline implementation)
+### Recovery and analysis release (2026-10-15)
+
+- Active hardware combination run/resume no longer enumerates OS processes,
+  checks PID/Jupyter/GUI identities or idle state, acquires the former process
+  mutex/station lease, or installs process callbacks. No periodic watcher or
+  automatic stability-retry task is created. Physical authorization, wiring,
+  stability/field/electrical/status checks and cleanup review remain active.
+- Whole-condition recovery preserves accepted conditions and raw rejected
+  attempts. Typed, single-use live-resolution capabilities support the reviewed
+  historical owner, initialization, PID-reuse and process-guard-removal cases.
+  Fresh complete physical evidence is revalidated inside the atomic DB claim;
+  historical manual/communication flags are retained, never rewritten as clean.
+  Generic source changes, secondary hardware faults and file-only flags cannot
+  manufacture this capability. Legacy ownership/pinned-exception helpers remain
+  for historical capability validation; ordinary CLI acquisition does not use them.
+- The commissioning Notebook has manual saved-progress loading, cumulative
+  requested-frequency/excitation exclusions shared by plots and fits, immediate
+  Apply redraw, Refresh preservation, and an explicit harmonic-fit toggle.
+  Each file/frequency/role/harmonic is fitted separately; no frequency must be
+  selected first. Raw data is read-only and invalid rows remain excluded by default.
+- Publication checks passed 133 hardware/recovery/store/policy tests, 50 synthetic
+  historical-resolution tests and 75 Notebook/analysis tests. DLL/VISA/serial
+  instrument access was blocked. Notebook JSON and all code cells compile and
+  contain no saved outputs. Five targeted fake-widget regressions cover the
+  reported exclusion/refresh/fitting behavior.
+- Public fixtures are generated from fabricated identities, XML, readbacks and
+  timelines. Original station evidence, private TOML/addresses, experimental DBs,
+  one-shot launchers/manifests/claims and logs remain local under ignored run_data.
+  The full chronological operational notes are also preserved there rather than
+  publishing their raw temperature/power observations.
+- Hardware deployment had already acknowledged the process-guard-free recovery
+  before this Git delivery. Later user-requested read-only queries recorded its
+  terminal stability timeout with 57/342 accepted, then a separate new scan's
+  first-condition qualified-baseline drift. Neither scan is claimed complete,
+  clean or currently active, and no retry or setting change followed these queries.
+- The authorized finite completion/Sample Exchange hook belongs to the ignored
+  experiment-specific operator, not ordinary combination_cli run/resume. It did
+  not run after the failed scans. No new generic automatic warming feature or
+  monitoring service is included in this release.
+- Usage and limitations: COMBINATION_RECOVERY.md and COMBINATION_SCAN_GUIDE.md.
+  The dated entries below describe earlier checkpoints; their former owner gates
+  do not override the user's later removal of process supervision.
+
+### Historical: explicit combination recovery (2026-10-14; offline implementation)
 
 - Add whole-condition hardware recovery with reviewed configuration changes,
   additive execution provenance and schema-1 compatibility, including the

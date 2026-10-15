@@ -1,0 +1,34 @@
+{
+  "cleanup_started_at_utc": "2020-01-02T12:00:18+00:00",
+  "failed_execution_id": "execution-synthetic-startup",
+  "full_failed_cim_snapshot_available": false,
+  "hardware_state_inferred": false,
+  "historical_identity": {
+    "command": "\"C:/Users/Synthetic/python.exe\" \"C:/Synthetic/resume.py\" --fixture",
+    "created": "2020-01-02T11:00:00+00:00",
+    "manifest_sha256": "cf40670b2122a9a70c65db5049aa6ea49924f0bfb1cec1cdc190a6d80ed02979",
+    "name": "python.exe",
+    "observed_utc": "2020-01-02T11:00:01+00:00",
+    "operation_dir": "C:/Synthetic/retired/operation_001",
+    "parent": 3000,
+    "pid": 18612,
+    "run_id": "synthetic-process-guard-removal-342"
+  },
+  "historical_pid": 18612,
+  "kind": "windows-powershell-pid-reuse",
+  "legacy_xml": [
+    "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='PowerShell'/><EventID>400</EventID><TimeCreated SystemTime='2020-01-02T12:00:17.200000+00:00'/><EventRecordID>501</EventRecordID><Correlation/><Execution ProcessID='0' ThreadID='1'/><Channel>Windows PowerShell</Channel><Computer>SYNTHETIC-STATION</Computer><Security UserID='S-1-5-21-1-2-3-1000'/></System><EventData><Data>Available</Data><Data>None</Data><Data>HostName=ConsoleHost\nHostApplication=powershell.exe -NoProfile -NonInteractive -Command @(Get-CimInstance Win32_Process | ForEach-Object { @{pid=[int]$_.ProcessId; parent=[int]$_.ParentProcessId;name=$_.Name;command=$_.CommandLine;executable=$_.ExecutablePath;created=$_.CreationDate.ToUniversalTime().ToString('o')}}) | ConvertTo-Json -Compress\nHostId=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\nRunspaceId=11111111-aaaa-bbbb-cccc-222222222222</Data></EventData></Event>",
+    "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='PowerShell'/><EventID>403</EventID><TimeCreated SystemTime='2020-01-02T12:00:17.400000+00:00'/><EventRecordID>502</EventRecordID><Correlation/><Execution ProcessID='0' ThreadID='1'/><Channel>Windows PowerShell</Channel><Computer>SYNTHETIC-STATION</Computer><Security UserID='S-1-5-21-1-2-3-1000'/></System><EventData><Data>Stopped</Data><Data>Available</Data><Data>HostName=ConsoleHost\nHostApplication=powershell.exe -NoProfile -NonInteractive -Command @(Get-CimInstance Win32_Process | ForEach-Object { @{pid=[int]$_.ProcessId; parent=[int]$_.ParentProcessId;name=$_.Name;command=$_.CommandLine;executable=$_.ExecutablePath;created=$_.CreationDate.ToUniversalTime().ToString('o')}}) | ConvertTo-Json -Compress\nHostId=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\nRunspaceId=11111111-aaaa-bbbb-cccc-222222222222</Data></EventData></Event>"
+  ],
+  "operational_xml": [
+    "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Microsoft-Windows-PowerShell'/><EventID>40961</EventID><TimeCreated SystemTime='2020-01-02T12:00:17+00:00'/><EventRecordID>901</EventRecordID><Correlation ActivityID='{11111111-2222-3333-4444-555555555555}'/><Execution ProcessID='18612' ThreadID='1'/><Channel>Microsoft-Windows-PowerShell/Operational</Channel><Computer>SYNTHETIC-STATION</Computer><Security UserID='S-1-5-21-1-2-3-1000'/></System><EventData></EventData></Event>",
+    "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Microsoft-Windows-PowerShell'/><EventID>53504</EventID><TimeCreated SystemTime='2020-01-02T12:00:17.100000+00:00'/><EventRecordID>902</EventRecordID><Correlation ActivityID='{11111111-2222-3333-4444-555555555555}'/><Execution ProcessID='18612' ThreadID='1'/><Channel>Microsoft-Windows-PowerShell/Operational</Channel><Computer>SYNTHETIC-STATION</Computer><Security UserID='S-1-5-21-1-2-3-1000'/></System><EventData><Data>18612</Data><Data>DefaultAppDomain</Data></EventData></Event>",
+    "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Microsoft-Windows-PowerShell'/><EventID>40962</EventID><TimeCreated SystemTime='2020-01-02T12:00:17.300000+00:00'/><EventRecordID>903</EventRecordID><Correlation ActivityID='{11111111-2222-3333-4444-555555555555}'/><Execution ProcessID='18612' ThreadID='1'/><Channel>Microsoft-Windows-PowerShell/Operational</Channel><Computer>SYNTHETIC-STATION</Computer><Security UserID='S-1-5-21-1-2-3-1000'/></System><EventData></EventData></Event>"
+  ],
+  "primary_error": "ValueError: Prior/duplicate owner present",
+  "process_parent_known": false,
+  "recorded_at_utc": "2020-01-02T12:01:05+00:00",
+  "run_id": "synthetic-process-guard-removal-342",
+  "synthetic_fixture": true,
+  "version": 1
+}

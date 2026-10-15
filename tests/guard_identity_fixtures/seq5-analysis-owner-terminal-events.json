@@ -1,0 +1,56 @@
+{
+  "events": [
+    {
+      "created_at_utc": "2020-01-02T12:01:40+00:00",
+      "event_id": 2001,
+      "event_type": "recovery_owner_verification_failed",
+      "payload_json": "{\"attempt_index\": 0, \"condition_id\": \"condition-000037\", \"error\": \"ValueError: Analysis owner identities changed during recovery\", \"execution_id\": \"execution-synthetic-analysis-failure\", \"further_instrument_writes_blocked\": true, \"hardware_zero_or_off_confirmed\": false}"
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:42+00:00",
+      "event_id": 2002,
+      "event_type": "environment_after_read_failed",
+      "payload_json": "{\"attempt_index\": 0, \"condition_id\": \"condition-000037\", \"error\": \"Analysis owner identities changed during recovery\", \"execution_id\": \"execution-synthetic-analysis-failure\"}"
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:44+00:00",
+      "event_id": 2003,
+      "event_type": "cleanup_started",
+      "payload_json": "{\"attempt_index\": 0, \"condition_id\": \"condition-000037\", \"execution_id\": \"execution-synthetic-analysis-failure\", \"module\": \"lockin\"}"
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:46+00:00",
+      "event_id": 2004,
+      "event_type": "cleanup_result",
+      "payload_json": "{\"attempt_index\": 0, \"audit_errors\": [], \"clean\": false, \"condition_id\": \"condition-000037\", \"execution_id\": \"execution-synthetic-analysis-failure\", \"failure_requires_manual_review\": true, \"module\": \"lockin\", \"result\": {\"attempted\": false, \"communication_uncertain\": true, \"last_confirmed_state_not_current\": {\"point_record\": {\"frequency_hz\": 200.0, \"samples\": [], \"source_readback_v_rms\": 0.25, \"source_v_rms\": 0.25}, \"preflight\": [{\"amplitude_v\": 0.00025, \"error_status\": 0, \"filter_slope\": 3, \"frequency_hz\": 200.0, \"harmonic\": 1, \"identity\": \"Synthetic,SR830,FAKE-XX,TEST\", \"input_coupling\": 0, \"input_mode\": 1, \"lia_status\": {\"filter_overload\": false, \"frequency_range_changed\": false, \"input_or_reserve_overload\": false, \"output_overload\": false, \"raw\": 0, \"reference_unlocked\": false, \"time_constant_changed\": false, \"triggered\": false}, \"line_filter\": 0, \"phase_deg\": 0.0, \"phase_shift_deg\": 0.0, \"reference_mode\": 1, \"reference_slope\": 0, \"reserve_mode\": 2, \"role\": \"xx\", \"sensitivity\": 26, \"shield_grounding\": 0, \"sine_output_v\": 0.004, \"snapshot_frequency_hz\": 200.0, \"time_constant\": 10, \"x_v\": 0.00025, \"y_v\": 0.0}, {\"amplitude_v\": 0.0005, \"error_status\": 0, \"filter_slope\": 3, \"frequency_hz\": 200.0, \"harmonic\": 1, \"identity\": \"Synthetic,SR830,FAKE-XY,TEST\", \"input_coupling\": 0, \"input_mode\": 1, \"lia_status\": {\"filter_overload\": false, \"frequency_range_changed\": false, \"input_or_reserve_overload\": false, \"output_overload\": false, \"raw\": 0, \"reference_unlocked\": false, \"time_constant_changed\": false, \"triggered\": false}, \"line_filter\": 0, \"phase_deg\": 0.0, \"phase_shift_deg\": 0.0, \"reference_mode\": 0, \"reference_slope\": 1, \"reserve_mode\": 0, \"role\": \"xy\", \"sensitivity\": 23, \"shield_grounding\": 0, \"sine_output_v\": 0.004, \"snapshot_frequency_hz\": 200.0, \"time_constant\": 10, \"x_v\": 0.0005, \"y_v\": 0.0}]}, \"manual_verification_required\": true, \"owner_guard_error\": \"ValueError: Analysis owner identities changed during recovery\", \"verified\": false}, \"startup_completed\": true}"
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:48+00:00",
+      "event_id": 2005,
+      "event_type": "cleanup_started",
+      "payload_json": "{\"attempt_index\": 0, \"condition_id\": \"condition-000037\", \"execution_id\": \"execution-synthetic-analysis-failure\", \"module\": \"temperature\"}"
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:50+00:00",
+      "event_id": 2006,
+      "event_type": "cleanup_result",
+      "payload_json": "{\"attempt_index\": 0, \"audit_errors\": [], \"clean\": false, \"condition_id\": \"condition-000037\", \"execution_id\": \"execution-synthetic-analysis-failure\", \"failure_requires_manual_review\": true, \"module\": \"temperature\", \"result\": {\"attempted\": false, \"communication_uncertain\": true, \"last_confirmed_state_not_current\": {\"error_code\": 0, \"error_message\": \"\", \"field\": {\"bx_t\": 0.0, \"bz_t\": 0.0}, \"field_control_enabled\": false, \"field_setpoint\": {\"bx_t\": 0.0, \"bz_t\": 0.0}, \"sample_temperature_k\": 12.5, \"temperature_control_enabled\": true, \"user_temperature_k\": 12.5, \"vti_temperature_k\": 6.25}, \"manual_verification_required\": true, \"owner_guard_error\": \"ValueError: Analysis owner identities changed during recovery\", \"verified\": false}, \"startup_completed\": true}"
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:52+00:00",
+      "event_id": 2007,
+      "event_type": "run_finished",
+      "payload_json": "{\"cleanup\": {\"actions\": [{\"audit_errors\": [], \"clean\": false, \"failure_requires_manual_review\": true, \"module\": \"lockin\", \"result\": {\"attempted\": false, \"communication_uncertain\": true, \"last_confirmed_state_not_current\": {\"point_record\": {\"frequency_hz\": 200.0, \"samples\": [], \"source_readback_v_rms\": 0.25, \"source_v_rms\": 0.25}, \"preflight\": [{\"amplitude_v\": 0.00025, \"error_status\": 0, \"filter_slope\": 3, \"frequency_hz\": 200.0, \"harmonic\": 1, \"identity\": \"Synthetic,SR830,FAKE-XX,TEST\", \"input_coupling\": 0, \"input_mode\": 1, \"lia_status\": {\"filter_overload\": false, \"frequency_range_changed\": false, \"input_or_reserve_overload\": false, \"output_overload\": false, \"raw\": 0, \"reference_unlocked\": false, \"time_constant_changed\": false, \"triggered\": false}, \"line_filter\": 0, \"phase_deg\": 0.0, \"phase_shift_deg\": 0.0, \"reference_mode\": 1, \"reference_slope\": 0, \"reserve_mode\": 2, \"role\": \"xx\", \"sensitivity\": 26, \"shield_grounding\": 0, \"sine_output_v\": 0.004, \"snapshot_frequency_hz\": 200.0, \"time_constant\": 10, \"x_v\": 0.00025, \"y_v\": 0.0}, {\"amplitude_v\": 0.0005, \"error_status\": 0, \"filter_slope\": 3, \"frequency_hz\": 200.0, \"harmonic\": 1, \"identity\": \"Synthetic,SR830,FAKE-XY,TEST\", \"input_coupling\": 0, \"input_mode\": 1, \"lia_status\": {\"filter_overload\": false, \"frequency_range_changed\": false, \"input_or_reserve_overload\": false, \"output_overload\": false, \"raw\": 0, \"reference_unlocked\": false, \"time_constant_changed\": false, \"triggered\": false}, \"line_filter\": 0, \"phase_deg\": 0.0, \"phase_shift_deg\": 0.0, \"reference_mode\": 0, \"reference_slope\": 1, \"reserve_mode\": 0, \"role\": \"xy\", \"sensitivity\": 23, \"shield_grounding\": 0, \"sine_output_v\": 0.004, \"snapshot_frequency_hz\": 200.0, \"time_constant\": 10, \"x_v\": 0.0005, \"y_v\": 0.0}]}, \"manual_verification_required\": true, \"owner_guard_error\": \"ValueError: Analysis owner identities changed during recovery\", \"verified\": false}, \"startup_completed\": true}, {\"audit_errors\": [], \"clean\": false, \"failure_requires_manual_review\": true, \"module\": \"temperature\", \"result\": {\"attempted\": false, \"communication_uncertain\": true, \"last_confirmed_state_not_current\": {\"error_code\": 0, \"error_message\": \"\", \"field\": {\"bx_t\": 0.0, \"bz_t\": 0.0}, \"field_control_enabled\": false, \"field_setpoint\": {\"bx_t\": 0.0, \"bz_t\": 0.0}, \"sample_temperature_k\": 12.5, \"temperature_control_enabled\": true, \"user_temperature_k\": 12.5, \"vti_temperature_k\": 6.25}, \"manual_verification_required\": true, \"owner_guard_error\": \"ValueError: Analysis owner identities changed during recovery\", \"verified\": false}, \"startup_completed\": true}], \"clean\": false, \"communication_uncertain\": true, \"errors\": [\"lockin: cleanup not certified; review recorded actions\", \"temperature: cleanup not certified; review recorded actions\"], \"manual_verification_required\": true}, \"error\": \"ValueError: Analysis owner identities changed during recovery\", \"execution_id\": \"execution-synthetic-analysis-failure\", \"status\": \"failed\"}"
+    },
+    {
+      "created_at_utc": "2020-01-02T12:01:54+00:00",
+      "event_id": 2008,
+      "event_type": "data_quality_summary",
+      "payload_json": "{\"attempt_index\": 0, \"completion_message\": \"failed\", \"condition_id\": \"condition-000037\", \"continued_overload_pairs\": 0, \"data_quality\": \"no_overload_recorded\", \"execution_id\": \"execution-synthetic-analysis-failure\", \"formal_pairs\": 74, \"overloaded_pairs_by_role\": {\"lockin_xx\": 0, \"lockin_xy\": 0}, \"rejected_attempt_audit\": {\"continued_overload_pairs\": 0, \"data_quality\": \"no_overload_recorded\", \"formal_pairs\": 0, \"overloaded_pairs_by_role\": {\"lockin_xx\": 0, \"lockin_xy\": 0}}}"
+    }
+  ],
+  "kind": "synthetic-seq5-terminal-events",
+  "run_id": "synthetic-process-guard-removal-342",
+  "source": "Generated in generate_synthetic.py; no real experiment was read",
+  "synthetic_fixture": true
+}

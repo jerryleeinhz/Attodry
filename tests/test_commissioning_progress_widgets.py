@@ -349,11 +349,14 @@ class CommissioningProgressWidgetsTests(unittest.TestCase):
         self.catalog_button.click()
         self.assertIn("Catalog refresh failed", self.status.value)
 
-    def test_notebook_has_thin_manual_progress_cell_and_all_code_compiles(self):
+    def test_notebook_has_analysis_only_manual_progress_cell_and_all_code_compiles(self):
         notebook = json.loads((PROJECT_ROOT / "notebooks" / "sr830_commissioning_sweeps.ipynb").read_text(encoding="utf-8"))
         cell = next(cell for cell in notebook["cells"] if cell.get("id") == "commissioning-progress-panel")
         source = "".join(cell["source"])
-        self.assertIn("build_progress_panel(", source)
+        self.assertIn("def build_notebook_progress_panel(", source)
+        self.assertIn("commissioning_progress_panel = build_notebook_progress_panel(", source)
+        self.assertIn("plot_callback=notebook_plot_progress_sweep", source)
+        self.assertIn("fit_callback=lambda rows: notebook_scaling_output(", source)
         self.assertIn("DATA_DIRECTORY", source)
         self.assertNotIn("lockin_test", source)
         self.assertNotIn("Timer", source)

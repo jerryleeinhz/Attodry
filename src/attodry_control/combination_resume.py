@@ -1,4 +1,8 @@
-"""File-only hardware recovery review. No resource, DLL or VISA is opened."""
+"""Hardware recovery review without database writes.
+
+Ordinary reviews are file-only. The optional live owner-resolution capability
+rechecks already exclusively owned instrument sessions through its callback.
+"""
 from __future__ import annotations
 
 from contextlib import closing
@@ -173,7 +177,8 @@ def _cleanup_review(cleanup, modules=None):
 
 
 def build_recovery(config, database, run_id, *, acknowledge_failure=False,
-                   manual_verification=False, approve_protection_changes=False):
+                   manual_verification=False, approve_protection_changes=False,
+                   live_owner_resolution=None):
     """Return an immutable-boundary review without modifying the database."""
     database = Path(database).resolve()
     if not run_id or run_id == "auto":
@@ -202,7 +207,17 @@ def build_recovery(config, database, run_id, *, acknowledge_failure=False,
         parent = (json.loads(state["executions"][-1]["plan_json"])
                   if state["executions"] else original)
         old_sources, new_sources = parent.get("source_sha256"), config.snapshot.get("source_sha256")
-        if not old_sources or (old_sources != new_sources and digest(old_sources) not in LEGACY_SOURCE_SETS):
+        live_resolution_review = None
+        if live_owner_resolution is not None:
+            from .combination_owner_resolution import (
+                LiveOwnerResolution, LiveInitialisationResolution, LiveGuardIdentityResolution,
+                LiveProcessGuardRemovalResolution,
+            )
+            if type(live_owner_resolution) not in (LiveOwnerResolution, LiveInitialisationResolution, LiveGuardIdentityResolution, LiveProcessGuardRemovalResolution) or manual_verification:
+                raise ValueError("Live owner resolution requires an ephemeral capability, not a manual flag or file")
+            live_resolution_review, _ = live_owner_resolution.verify(state, config.snapshot, connection)
+        if not old_sources or (old_sources != new_sources and digest(old_sources) not in LEGACY_SOURCE_SETS
+                               and live_resolution_review is None):
             raise ValueError("Archived source version has no reviewed recovery compatibility")
         changes = configuration_changes(parent, config.snapshot)
         accepted = set(state["accepted_condition_ids"])
@@ -217,7 +232,7 @@ def build_recovery(config, database, run_id, *, acknowledge_failure=False,
         blockers = []
         if not acknowledge_failure:
             blockers.append("Review original failure/cleanup and supply --acknowledge-failure")
-        if cleanup_review["manual_verification_required"] and not manual_verification:
+        if cleanup_review["manual_verification_required"] and not manual_verification and live_resolution_review is None:
             blockers.append("Resolve unknown cleanup physically, then supply --confirm-manual-verification")
         if any(c["category"] == "protection_increase" for c in changes) and not approve_protection_changes:
             blockers.append("Approve the displayed SMU protection increase with --approve-protection-changes")
@@ -228,13 +243,19 @@ def build_recovery(config, database, run_id, *, acknowledge_failure=False,
             "original_error": state["run"]["error"], "ready": not blockers,
             "blockers": blockers, "config_sha256": config.snapshot["config_sha256"],
             "scan_contract_sha256": digest(scan_contract(original)),
-            "source_compatibility": "reviewed-79ed5b4" if old_sources != new_sources else "unchanged"}
-        return {"expected_parent_state_sha256": state["state_sha256"],
+            "source_compatibility": (live_resolution_review["contract"] if live_resolution_review is not None
+                                     else "reviewed-79ed5b4" if old_sources != new_sources else "unchanged")}
+        if live_resolution_review is not None:
+            review["live_owner_resolution"] = live_resolution_review
+        result = {"expected_parent_state_sha256": state["state_sha256"],
             "original_conditions": state["conditions"], "review": review,
             "next_condition": None if first == len(flags) else state["conditions"][first],
             "cleanup_only": first == len(flags), "accepted_conditions": first,
             "total_conditions": len(flags), "remaining_conditions": len(flags) - first,
             "last_condition": state["conditions"][-1]}
+        if live_resolution_review is not None:
+            result["_live_owner_resolution"] = live_owner_resolution
+        return result
 
 
 def recovery_text(recovery, database, run_id):
@@ -248,5 +269,5 @@ def recovery_text(recovery, database, run_id):
     for change in review["configuration_changes"]:
         lines.append(f"{change['category']}: {change['path']}: {change['before']} -> {change['after']}")
     lines.extend("Required: " + reason for reason in review["blockers"])
-    lines.append("File review ready: " + str(review["ready"]) + "; fresh exclusive hardware preflight required")
+    lines.append("File review ready: " + str(review["ready"]) + "; fresh hardware preflight required")
     return "\n".join(lines)

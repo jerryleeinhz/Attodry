@@ -545,8 +545,22 @@ class CombinationStore:
                 if review.get("configuration_changes") != changes:
                     raise ValueError("Recovery configuration changes differ from review")
                 old_sources, new_sources = parent_plan.get("source_sha256"), plan.get("source_sha256")
+                live_resolution = recovery.get("_live_owner_resolution")
+                live_resolution_review = None
+                if live_resolution is not None or review.get("live_owner_resolution") is not None:
+                    from .combination_owner_resolution import (
+                        LiveOwnerResolution, LiveInitialisationResolution, LiveGuardIdentityResolution,
+                        LiveProcessGuardRemovalResolution,
+                    )
+                    if (type(live_resolution) not in (LiveOwnerResolution, LiveInitialisationResolution, LiveGuardIdentityResolution, LiveProcessGuardRemovalResolution)
+                            or review.get("manual_verification") is not False):
+                        raise ValueError("Live owner resolution requires the ephemeral capability, never a file/manual flag")
+                    live_resolution_review, _ = live_resolution.verify(state, plan, self.connection)
+                    if review.get("live_owner_resolution") != live_resolution_review:
+                        raise ValueError("Live owner resolution review differs from current capability")
                 if (not old_sources or not new_sources
-                        or old_sources != new_sources and digest(old_sources) not in LEGACY_SOURCE_SETS):
+                        or old_sources != new_sources and digest(old_sources) not in LEGACY_SOURCE_SETS
+                        and live_resolution_review is None):
                     raise ValueError("Archived source version has no reviewed recovery compatibility")
                 cleanup_review = _cleanup_review(
                     json.loads(prior["cleanup_json"] or "{}"),
@@ -554,12 +568,21 @@ class CombinationStore:
                 )
                 if (review.get("cleanup_review") != cleanup_review
                         or cleanup_review["manual_verification_required"]
-                        and review.get("manual_verification") is not True):
+                        and review.get("manual_verification") is not True and live_resolution_review is None):
                     raise ValueError("Unresolved cleanup requires explicit manual verification")
                 if (any(c["category"] == "protection_increase" for c in changes)
                         and review.get("protection_changes_approved") is not True):
                     raise ValueError("SMU protection increase requires explicit approval")
                 validate_accepted_records(self.connection, run_id, original_plan)
+                if live_resolution_review is not None:
+                    # Repeat live guard/lineage/readback validation immediately
+                    # before any writes, within the same atomic parent claim.
+                    claimed_review, claim_proof = live_resolution.verify(state, plan, self.connection, consume=True)
+                    if claimed_review != live_resolution_review:
+                        raise ValueError("Live owner resolution changed during the atomic claim")
+                    review = json.loads(encode(review))
+                    review["live_owner_resolution"]["claim_readbacks"] = claim_proof
+                    review["live_owner_resolution"]["claim_verified_at_utc"] = utc_now()
                 if not state["executions"]:
                     # Original schema-1 run remains byte-for-byte in the legacy
                     # execution. Its original top-level plan is never replaced.

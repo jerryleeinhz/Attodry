@@ -116,19 +116,15 @@ def run(argv: list[str] | None = None) -> int:
                   recovery_text(reviewed, database, run_id), flush=True)
             if args.check or not reviewed["review"]["ready"]:
                 return 0 if reviewed["review"]["ready"] else 2
-            from .combination_ownership import RecoveryOwner
             from .combination_registry import register_run
             from .combination_terminal import snapshot_text
-            owner = RecoveryOwner(config)
-            with owner.acquire():
-                reviewed["review"]["owner"] = owner.last_evidence
-                with CombinationStore(database) as store:
-                    result = run_hardware_combination(config, store, run_id,
-                        authorize_hardware=True, authorize_cryostat=config.cryostat is not None,
-                        confirm_xy_sine_disconnected=(config.lockin is not None
-                            and not config.lockin.lockin_xy.sine_output_connected),
-                        recovery=reviewed, recovery_owner_guard=owner.check,
-                        on_registered=lambda store, selected: register_run(config.path, store, selected))
+            with CombinationStore(database) as store:
+                result = run_hardware_combination(config, store, run_id,
+                    authorize_hardware=True, authorize_cryostat=config.cryostat is not None,
+                    confirm_xy_sine_disconnected=(config.lockin is not None
+                        and not config.lockin.lockin_xy.sine_output_connected),
+                    recovery=reviewed,
+                    on_registered=lambda store, selected: register_run(config.path, store, selected))
             print(json.dumps(result, ensure_ascii=False, indent=2) if args.json else
                   snapshot_text({**run_snapshot(database, run_id), **result}), flush=True)
             return 0 if result["status"] == "completed" else 2
@@ -153,16 +149,13 @@ def run(argv: list[str] | None = None) -> int:
         config = replace(config, snapshot={**config.snapshot, "launch": {
             "summary": summary, "authorization_method": "explicit_flags" if explicit else "run_command"}})
         database.parent.mkdir(parents=True, exist_ok=True)
-        from .combination_ownership import RecoveryOwner
-        # Share the station lease with recovery, including across databases/run IDs.
-        with RecoveryOwner(config).acquire(verify=False):
-            with CombinationStore(database) as store:
-                result = run_hardware_combination(
-                    config, store, run_id, authorize_hardware=True,
-                    confirm_xy_sine_disconnected=(config.lockin is not None
-                        and not config.lockin.lockin_xy.sine_output_connected),
-                    authorize_cryostat=config.cryostat is not None,
-                    on_registered=lambda store, selected: register_run(config.path, store, selected))
+        with CombinationStore(database) as store:
+            result = run_hardware_combination(
+                config, store, run_id, authorize_hardware=True,
+                confirm_xy_sine_disconnected=(config.lockin is not None
+                    and not config.lockin.lockin_xy.sine_output_connected),
+                authorize_cryostat=config.cryostat is not None,
+                on_registered=lambda store, selected: register_run(config.path, store, selected))
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:

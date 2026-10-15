@@ -1,6 +1,32 @@
 # Development stages
 
-## Explicit combination recovery (2026-10-14; offline)
+## Current: recovery and Notebook publication (2026-10-15)
+
+- Remove process inventories, PID/Jupyter/GUI checks and process mutex/station
+  leases from ordinary hardware run/resume. Retain physical limits, fresh status
+  and qualification, acknowledged failure review and verified cleanup.
+- Add single-use typed historical-resolution capabilities with exact archived
+  shape/source binding, fresh physical proof and atomic DB revalidation.
+  Preserve original accepted/rejected samples and failed/manual/uncertain history.
+- Add saved-progress Notebook cumulative frequency/excitation exclusions,
+  immediate Apply redraw, Refresh preservation and harmonic-fit controls.
+  Plot and fit consume the same filtered selection; no automatic file/kernel run.
+- Publication verification: 133 hardware/recovery/store/policy, 50 historical
+  capability and 75 Notebook/analysis guarded tests passed without instrument I/O.
+  Five new fake-widget cases cover selection persistence, fitting and failure cleanup.
+- Public regression inputs are synthetic and reproducible. Original measurements,
+  identities, configurations, operator claims and operational notes stay local.
+- The previously acknowledged hardware recovery later ended with a temperature
+  stability timeout at 57/342 accepted; the user's separate new scan ended at its
+  first condition with qualified-baseline drift. These are recorded outcomes,
+  not successful completion or permission to restart.
+- Completion Sample Exchange remains an ignored one-shot operator stage. The
+  generic CLI does not automatically warm, retry or create a monitor. No new
+  hardware operation is part of this origin synchronization.
+- The following dated entries are historical implementation checkpoints; current
+  process-supervision behavior is described above and in COMBINATION_RECOVERY.md.
+
+## Historical: explicit combination recovery (2026-10-14; offline)
 
 - Add a reviewed whole-condition hardware `resume` entry, independent files-only
   preview, frozen ordered grid/groups/harmonics and supported setting changes.

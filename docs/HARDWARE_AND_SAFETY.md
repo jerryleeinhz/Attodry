@@ -1,5 +1,27 @@
 # Hardware and safety guide
 
+## User-authorized removal of process supervision (2026-10-15)
+
+The user explicitly removed process supervision from the active combination
+run/resume path. It no longer enumerates or judges OS processes, Jupyter
+identities/idle state, historical/self PIDs or instrument GUI processes, and does
+not acquire the former global resource mutex or station lease. No process guard
+callback is installed in the cryostat or Lock-in station. The current recovery
+creates no periodic watcher or automatic retry task. A one-time post-Create
+identity record documents the launched command; it is not an acquisition gate.
+
+Actual instrument authorization, wiring declarations, status/readback/error
+checks, temperature qualification, field/vector bounds, electrical protections,
+raw invalid/rejected retention and verified cleanup remain. No field/output
+state is inferred from process absence. The specific failed analysis-owner
+history is preserved; the newly authorized recovery instead requires fresh
+physical evidence and canonical dual-SR830 readbacks before its atomic claim.
+
+The already-authorized final Sample Exchange is a finite synchronous execution
+stage after complete successful raw data and final cleanup, using physical
+readbacks to verify its own manufacturer sequence. It does not restore external
+process monitoring, retry a failed scan or relax the room-temperature evidence.
+
 ## SR865A electrical XY receiver exception (offline; 2026-10-07)
 
 The user explicitly approved software support for replacing only `lockin_xy`
