@@ -36,13 +36,17 @@ def load_photo_plot_rows(path, *, run_id=None, audit=False):
                 record = json.loads(run["record_json"])
             elif audit:
                 config = json.loads(run["config_json"])
-                backend = config.get("nkt", {}).get("backend")
+                backend = (config.get("nkt") or {}).get("backend")
+                if backend is None and config.get("modular"):
+                    backend = config["modular"]["original_config"]["combination_scan"].get("backend")
                 record = {"schema_version": 1, "measurement_type": "dc_photoresponse",
                     "run_id": run["run_id"], "completed": False, "outcome": run["outcome"],
                     "simulated": backend == "simulation" if backend is not None else None,
                     "measurement_config": config, "cleanup": {},
                     "conditions": [json.loads(row[0]) for row in connection.execute(
                         "SELECT condition_json FROM photo_conditions WHERE run_id=? ORDER BY condition_id", (run["run_id"],))]}
+                if config.get("modular"):
+                    record["record_contract"] = "modular-combination-v1"
             else:
                 continue
             output.extend(_record_rows(record, path, audit=audit))
@@ -57,7 +61,7 @@ def _record_rows(record, path, *, audit):
     selected = {r["condition_id"]: r for r in results_from_record(
         record, include_rejected=audit, include_dark=True)}
     config = record["measurement_config"]
-    quantity = config.get("quantity", "voltage_v")
+    quantity = config.get("quantity") or "voltage_v"
     feedback_actuator = ((config.get("power") or {}).get("feedback") or {}).get("actuator")
     rows = []
     for condition in record["conditions"]:
@@ -78,7 +82,7 @@ def _record_rows(record, path, *, audit):
             "simulated": record.get("simulated"), "run_status": record.get("outcome"),
             "measurement_type": "dc_photoresponse", "observation_unit": "condition mean; not an independent detector sample",
             "power_feedback_actuator": feedback_actuator,
-            "optical_state": optical_state, "quantity": quantity,
+            "optical_state": optical_state, "quantity": config.get("quantity", quantity),
             "requested.optical_state": optical_state,
             "requested.optical_target_power_w": condition.get("target_power_w"),
             "actual.optical_power_w": _number(result.get("measured_power_w")),
@@ -96,6 +100,27 @@ def _record_rows(record, path, *, audit):
             "raw.detector_readings": [s.get("detector_last_raw_reading") for s in samples if "detector_last_raw_reading" in s]}
         for key, value in condition["requested_optical"].items():
             row["requested.optical_" + key] = value
+        if record.get("record_contract") == "modular-combination-v1":
+            row["record_contract"] = record["record_contract"]
+            row["selected_modules"] = (config.get("combination") or {}).get("selected_modules", [])
+            for key, value in condition.get("requested", {}).items():
+                # Dark is a state, not a measured/illuminated zero-power point.
+                if optical_state == "dark" and key == "optical_target_power_w":
+                    continue
+                if isinstance(value, (int, float, str, bool)):
+                    row["requested." + key] = value
+            last = measured_samples[-1] if measured_samples else {}
+            for reading in last.get("module_readings", []):
+                for key, value in (reading.get("actual") or {}).items():
+                    if isinstance(value, (int, float, str, bool)):
+                        row["actual." + key] = value
+                for key, value in (reading.get("measurements") or {}).items():
+                    if isinstance(value, (int, float)):
+                        row.setdefault("measured." + reading["module"] + "_" + key, value)
+            for kind, prefix in (("module_means", ""), ("module_delta", "delta_")):
+                for module, fields in result.get(kind, {}).items():
+                    for name, value in fields.items():
+                        row["measured." + prefix + module + "_" + name] = _number(value)
         for name in ("dark", "light"):
             row[f"measured.{name}_{quantity}"] = _number(result.get(name + "_mean"))
         # Legacy interpolated-dark records use window_means instead of light_mean.
@@ -110,7 +135,7 @@ def _record_rows(record, path, *, audit):
         row["measured.detector_within_window_sd_" + quantity] = stdev(values) if len(values) > 1 else None
         for source_key, destination in (("level_pct", "optical_source_level_pct"),
                                        ("getLdCurrSetpoint", "optical_current_setpoint_a")):
-            values = [_number((s.get("optical_after") or {}).get("source", {}).get(source_key)) for s in measured_samples]
+            values = [_number(((s.get("optical_after") or {}).get("source") or {}).get(source_key)) for s in measured_samples]
             values = [v for v in values if v is not None]
             row["actual." + destination] = fmean(values) if values else None
         sources = [(s.get("electrical_after") or {}).get("source") or {} for s in measured_samples]

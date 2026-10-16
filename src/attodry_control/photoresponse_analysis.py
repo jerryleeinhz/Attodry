@@ -39,7 +39,9 @@ def results_from_record(record, *, include_rejected=False, include_dark=False):
         smu_values = {}
         for role in ("smu_bias", "gate_top", "gate_bottom"):
             readings = [s["smu_after"]["readings"][role]["reading"]
-                        for w in condition["windows"] if w["phase"] == "light" for s in w["samples"]
+                        for w in condition["windows"]
+                        if w["phase"] == "light" or record.get("record_contract") == "modular-combination-v1"
+                        for s in w["samples"]
                         if role in s.get("smu_after", {}).get("readings", {})]
             if readings:
                 smu_values[role + "_voltage_v"] = fmean(r["voltage_v"] for r in readings)
@@ -76,6 +78,9 @@ def export_results(record_path, output_path):
         values = {k:v for k,v in row.items() if not isinstance(v, dict)}
         values.update({"requested_optical_"+k:v for k,v in row["requested_optical"].items()})
         values.update({"mean_"+k:v for k,v in row.get("window_means", {}).items()})
+        for field, prefix in (("module_means", "mean_"), ("module_delta", "delta_")):
+            for module, measurements in row.get(field, {}).items():
+                values.update({prefix+module+"_"+name: value for name, value in measurements.items()})
         values.update({"axis_index_"+k:v for k,v in row["axis_indices"].items()})
         if row["requested_smu"]:
             values.update({"requested_"+k:v for k,v in row["requested_smu"]["coordinates"].items()})

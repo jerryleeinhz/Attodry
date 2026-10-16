@@ -69,20 +69,25 @@ class ElectricalHardwareConfig:
         if config.detector == "keithley2400":
             required |= {"current_range_a", "compliance", "max_step_v", "settle_s", "tolerance_v"}
         keys(d, "photoresponse detector", required,
-             {"channel"} if config.detector == "keithley2182a" else ())
+             {"channel", "analog_lowpass_enabled", "autozero", "front_autozero", "digital_filter"}
+             if config.detector == "keithley2182a" else ())
         if self.detector_transport == "visa":
             address(d["address"])
         identity(d["expected_idn"], "2182A" if config.detector == "keithley2182a" else "2400")
-        number(d["nplc"], "nplc", .01, 10 if config.detector == "keithley2400" else 50)
-        # Readback plus autozero can take multiple integration periods.
-        if self.timeout_ms / 1000 < d["nplc"] / 50 * 4 + 1:
-            raise NktError("VISA timeout is too short for the selected integration time")
+        number(d["nplc"], "nplc", .01, 10 if config.detector == "keithley2400" else 60)
         if config.detector == "keithley2182a":
             ranges = voltage_ranges_2182(d.get("channel", 1))
             number(d["voltage_range_v"], "2182 voltage range", min(ranges), max(ranges))
             if d["voltage_range_v"] not in ranges:
                 raise NktError(f"Invalid 2182A voltage range for channel {d.get('channel', 1)}")
+            device = Voltmeter2182(None, **{k: v for k, v in d.items() if k != "address"},
+                                   max_voltage_v=config.max_abs_voltage_v)
+            if self.timeout_ms / 1000 < device.minimum_timeout_s:
+                raise NktError("VISA timeout is too short for the selected 2182 integration/filter/autozero budget")
         else:
+            # Retain the established 2400 integration timeout policy.
+            if self.timeout_ms / 1000 < d["nplc"] / 50 * 4 + 1:
+                raise NktError("VISA timeout is too short for the selected integration time")
             if d["voltage_range_v"] not in (.2, 2., 20., 200.):
                 raise NktError("Invalid 2400 voltage range")
             if d["current_range_a"] not in (1e-6, 10e-6, 100e-6, .001, .01, .1, 1.):
@@ -159,7 +164,8 @@ class HardwareElectrical:
                 clock=clock, **options)
         values = {k: v for k, v in h.detector.items() if k != "address"}
         if config.detector == "keithley2182a":
-            self.detector = Voltmeter2182(detector_transport, **values, max_voltage_v=config.max_abs_voltage_v)
+            self.detector = Voltmeter2182(detector_transport, **values,
+                                         max_voltage_v=config.max_abs_voltage_v, clock=clock)
         else:
             self.detector = Meter2400(detector_transport, **values,
                 current_mode=config.quantity == "current_a", max_voltage_v=config.max_abs_voltage_v,
@@ -309,6 +315,22 @@ class HardwareElectrical:
         reading["state"] = (self._snapshot(lambda: deepcopy(reading["detector_after"]))
                             if isinstance(self.detector, Voltmeter2182) else self.snapshot())
         return reading
+
+    def prepare_condition(self, guard=None):
+        """After final optical/bias/gate change, invalidate moving-filter history.
+
+        The caller archives transition evidence and rechecks fresh optical
+        acceptance before formal sampling. No-filter/repeating modes add no
+        I/O. Never reset this boundary between samples in the same window.
+        """
+        if isinstance(self.detector, Voltmeter2182):
+            def guarded():
+                state = {"electrical": self.guard()}
+                if guard:
+                    state["external"] = guard()
+                return state
+            return self.detector.prepare_condition(guard=guarded)
+        return None
 
     def cleanup(self):
         errors = []

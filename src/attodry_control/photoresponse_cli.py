@@ -138,7 +138,8 @@ def _diagnose(config, event, authorize_connection):
 def main(argv=None, *, entrypoint="photoresponse_cli"):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("describe", "validate-config", "simulate", "run", "diagnose", "test-6221", "analyze", "export"))
-    parser.add_argument("--config", help=f"Measurement TOML; run defaults to {DEFAULT_RUN_CONFIG}; other commands use config/hardware.local.toml")
+    parser.add_argument("--config", default=DEFAULT_RUN_CONFIG,
+                        help=f"Measurement TOML (default: {DEFAULT_RUN_CONFIG})")
     parser.add_argument("--record", help="JSON record for read-only analysis")
     parser.add_argument("--output", help="Export CSV path")
     parser.add_argument("--resume-run", help="SQLite run_id to retry with a fresh preflight and new attempt")
@@ -150,9 +151,21 @@ def main(argv=None, *, entrypoint="photoresponse_cli"):
     parser.add_argument("--authorize-environment", action="store_true", help="Optional legacy flag; run includes selected environment control")
     parser.add_argument("--authorize-smu", action="store_true", help="Optional legacy flag; run includes selected SMU roles")
     args = parser.parse_args(argv)
-    if args.config is None:
-        args.config = DEFAULT_RUN_CONFIG if args.command == "run" else "config/hardware.local.toml"
     try:
+        if args.command in {"run", "simulate", "validate-config"} and Path(args.config).is_file():
+            import tomllib
+            with Path(args.config).open("rb") as stream:
+                modular_document = tomllib.load(stream)
+            if "combination_scan" in modular_document:
+                from .modular_cli import main as modular_main
+                modular_args = [args.command, "--config", args.config]
+                if args.database is not None:
+                    modular_args += ["--database", str(args.database)]
+                if args.resume_run:
+                    modular_args += ["--resume-run", args.resume_run]
+                if args.json:
+                    modular_args.append("--json")
+                return modular_main(modular_args, entrypoint=entrypoint)
         if args.command == "describe":
             print(json.dumps({"stage":"offline-tested drivers; real commissioning is device-specific",
                 "modes":["open_circuit_voltage","dc_current_voltage","voltage_bias_current", "smu_current_voltage", "smu_voltage_voltage"],

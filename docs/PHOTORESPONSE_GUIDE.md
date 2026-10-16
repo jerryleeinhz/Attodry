@@ -260,9 +260,8 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 新版 NKT 配置可省略 `nd_pct` 和未选择的 pulse picker：程序保持实际值，
 不写这些寄存器，并在每次正式核对中检测外部改动。
 
-日常 `run` 默认读取被忽略的
-`config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml`；
-其他命令的默认本地文件仍是 `config/hardware.local.toml`。默认扫描文件不存在时直接报错，
+两个 CLI 的日常运行及配置检查统一默认读取项目根目录下被忽略的
+`config/hardware.local.toml`，Combination monitor 的默认配置路径相同。文件不存在时直接报错，
 不会回退到其他配置。`--config` 可覆盖当前命令的路径。合并需要的表，保留已有站点配置。
 也可把临时配置放在被忽略的 `run_data/` 下。所有相对输出/数据库路径相对该 TOML 文件解析。
 

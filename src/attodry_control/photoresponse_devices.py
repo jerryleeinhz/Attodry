@@ -10,7 +10,7 @@ from functools import wraps
 import math
 import time
 
-from .nkt_config import NktError, number
+from .nkt_config import NktError, integer, keys, number
 from .photoresponse_keithley import Keithley6221Queries, Keithley2182Queries, _float, _flag, _word, voltage_ranges_2182
 from .three_smu import ramp_values
 
@@ -39,7 +39,8 @@ def same(actual, expected, *, tolerance=0.0):
         return _flag(actual) == expected
     if isinstance(expected, (float, int)):
         return math.isclose(_float(actual), expected, rel_tol=1e-7, abs_tol=tolerance)
-    aliases = {"VOLT:DC": "VOLT", "CURR:DC": "CURR", "ASCII": "ASC", "ASC,0": "ASC"}
+    aliases = {"VOLT:DC": "VOLT", "CURR:DC": "CURR", "ASCII": "ASC", "ASC,0": "ASC",
+               "MOVING": "MOV", "REPEAT": "REP"}
     actual = actual.strip().strip('"').upper()
     return aliases.get(actual, actual) == aliases.get(expected.upper(), expected.upper())
 
@@ -192,18 +193,53 @@ class CurrentSource6221(Keithley6221Queries):
 
 
 class Voltmeter2182(Keithley2182Queries):
-    def __init__(self, resource, *, expected_idn, voltage_range_v, nplc, max_voltage_v, channel=1):
+    def __init__(self, resource, *, expected_idn, voltage_range_v, nplc, max_voltage_v, channel=1,
+                 analog_lowpass_enabled=False, autozero=True, front_autozero=True,
+                 digital_filter=None, clock=time.perf_counter):
         super().__init__(resource, expected_idn=expected_idn)
         ranges = voltage_ranges_2182(channel)
         number(voltage_range_v, "2182 voltage range", min(ranges), max(ranges))
         if voltage_range_v not in ranges:
             raise NktError(f"2182A channel {channel} voltage range must be one of {ranges} V")
-        number(nplc, "2182 NPLC", 0.01, 50)
+        number(nplc, "2182 NPLC", 0.01, 60)
         number(max_voltage_v, "max_voltage_v", 1e-15, voltage_range_v)
+        for name, value in (("analog_lowpass_enabled", analog_lowpass_enabled),
+                            ("autozero", autozero), ("front_autozero", front_autozero)):
+            if type(value) is not bool:
+                raise NktError("2182 " + name + " must be boolean")
+        if digital_filter is None:
+            digital_filter = {"enabled": False}
+        keys(digital_filter, "2182 digital_filter", {"enabled"}, {"type", "count", "window_percent"})
+        self.digital_filter = {"type": "repeating", "count": 10, "window_percent": 1.0,
+                               **deepcopy(digital_filter)}
+        if type(self.digital_filter["enabled"]) is not bool:
+            raise NktError("2182 digital_filter.enabled must be boolean")
+        if self.digital_filter["type"] not in ("moving", "repeating"):
+            raise NktError("2182 digital_filter.type must be moving or repeating")
+        integer(self.digital_filter["count"], "2182 digital_filter.count", 1, 100)
+        number(self.digital_filter["window_percent"], "2182 digital_filter.window_percent", 0, 10)
         self.range, self.nplc, self.limit = voltage_range_v, nplc, max_voltage_v
+        self.analog_lowpass_enabled = analog_lowpass_enabled
+        self.autozero, self.front_autozero = autozero, front_autozero
         self.channel = channel
+        self.clock = clock
         self.ready = False
         self.faulted = False
+        self.condition_generation = 0
+        self.condition_prepared = False
+        self.filter_transition = None
+
+    @property
+    def minimum_timeout_s(self):
+        """Conservative integration budget, not a guaranteed device response time.
+
+        Rev C pp. 4-17..24: FAZ doubles cycles; AZ may add reference cycles;
+        analog filtering adds about 125 ms between conversions. Preserve the
+        old 4 * NPLC / 50 + 1 budget with both AZ modes on and filters off.
+        """
+        conversions = self.digital_filter["count"] if self.digital_filter["enabled"] else 1
+        cycles = (1 + int(self.front_autozero)) * (1 + int(self.autozero))
+        return 1 + conversions * cycles * (self.nplc / 50 + (.125 if self.analog_lowpass_enabled else 0))
 
     @property
     def settings(self):
@@ -211,22 +247,35 @@ class Voltmeter2182(Keithley2182Queries):
         # Leave scanning/derived modes before configuring single-channel DCV.
         range_command = "SENS:VOLT:DC:RANG" if self.channel == 1 else "SENS:VOLT:CHAN2:RANG"
         channel_command = f"SENS:VOLT:CHAN{self.channel}"
-        return {"INIT:CONT": False, "ROUT:SCAN:LSEL": "NONE",
+        settings = {"INIT:CONT": False, "ROUT:SCAN:LSEL": "NONE",
                 "SENS:VOLT:RAT": False, "SENS:VOLT:DELT": False,
                 "SENS:CHAN": self.channel, "SENS:FUNC": "VOLT",
                 "TRIG:SOUR": "IMM", "TRIG:COUN": 1, "TRIG:DEL": 0,
                 range_command + ":AUTO": False, range_command: self.range,
-                "SENS:VOLT:DC:NPLC": self.nplc, channel_command + ":DFIL": False,
-                channel_command + ":LPAS": False, channel_command + ":REF:STAT": False,
-                "CALC:STAT": False, "SENS:HOLD:STAT": False, "SYST:AZER": True,
-                "SYST:FAZ": True, "SYST:LSYN": True, "FORM:DATA": "ASC",
-                "FORM:ELEM": "READ"}
+                "SENS:VOLT:DC:NPLC": self.nplc}
+        if self.digital_filter["enabled"]:
+            settings.update({channel_command + ":DFIL:WIND": self.digital_filter["window_percent"],
+                             channel_command + ":DFIL:COUN": self.digital_filter["count"],
+                             channel_command + ":DFIL:TCON": "MOV" if self.digital_filter["type"] == "moving" else "REP"})
+        settings.update({channel_command + ":DFIL": self.digital_filter["enabled"],
+                channel_command + ":LPAS": self.analog_lowpass_enabled, channel_command + ":REF:STAT": False,
+                "CALC:STAT": False, "SENS:HOLD:STAT": False, "SYST:AZER": self.autozero,
+                "SYST:FAZ": self.front_autozero, "SYST:LSYN": True, "FORM:DATA": "ASC",
+                "FORM:ELEM": "READ"})
+        return settings
+
+    def _verify_line_frequency(self):
+        # Only the 60 Hz instrument domain permits NPLC above 50. Do this
+        # before any settings write; ordinary legacy configurations add no I/O.
+        if self.nplc > 50 and _float(self._query("SYST:LFR?")) != 60:
+            raise NktError("2182 NPLC above 50 requires confirmed 60 Hz line frequency")
 
     @acquisition_operation
     def begin(self):
         self._identity(True)
         if "MODEL 2182" not in self.expected_idn:
             raise NktError("Expected a 2182/2182A")
+        self._verify_line_frequency()
         no_error(self.resource)
         self.resource.write("ABOR")
         no_error(self.resource)
@@ -234,35 +283,101 @@ class Voltmeter2182(Keithley2182Queries):
             ensure(self.resource, command, value)
         self.verify()
         self.ready = True
+        self.condition_prepared = False
 
     @acquisition_operation
     def verify(self):
         identity = self._identity(True)
+        self._verify_line_frequency()
         for command, expected in self.settings.items():
             if not same(self._query(command + "?"), expected):
                 raise NktError("2182 acquisition setting changed: " + command)
         state = self._retain({"identity": identity, "channel": self.channel,
                               "voltage_range_v": self.range, "nplc": self.nplc,
+                              "analog_lowpass_enabled": self.analog_lowpass_enabled,
+                              "autozero": self.autozero, "front_autozero": self.front_autozero,
+                              "digital_filter": deepcopy(self.digital_filter),
+                              "minimum_timeout_s": self.minimum_timeout_s,
                               "fresh_acquisition_configured": True})
         state["acquisition_ready"] = True
         self.last_confirmed_state = deepcopy(state)
         return state
 
+    def prepare_condition(self, guard=None):
+        """Exclude old moving-filter history after the last condition change.
+
+        No undocumented reset, range hop or status clear is used. Rev C pp.
+        4-21..24 and 13-46 specify a FIFO of count conversions. Discard count-1
+        fresh READs here; the next formal READ supplies the final new conversion.
+        Repeating results already flush their stack. Raw transition results
+        remain here and in transport audit, including partial failures. Call
+        once per condition/attempt after optical, environment and bias changes.
+        Filter-disabled legacy mode performs no additional I/O.
+        """
+        if self.faulted or not self.ready:
+            raise NktError("2182 fresh acquisition is not configured")
+        self.condition_prepared = False
+        self.condition_generation += 1
+        evidence = {"condition_generation": self.condition_generation,
+                    "digital_filter": deepcopy(self.digital_filter), "valid": False,
+                    "purpose": "filter_history_transition", "readings": [], "complete": False}
+        self.filter_transition = evidence
+        count = (self.digital_filter["count"] - 1
+                 if self.digital_filter["enabled"] and self.digital_filter["type"] == "moving" else 0)
+        if count:
+            evidence["detector_before"] = self.verify()
+            for _ in range(count):
+                row = {"raw_response": None, "valid": False, "purpose": "filter_history_transition",
+                       "acquisition_started_monotonic_s": self.clock()}
+                evidence["readings"].append(row)
+                try:
+                    if guard:
+                        row["guard_before"] = deepcopy(guard())
+                    self._read_transition(row)
+                    if guard:
+                        row["guard_after"] = deepcopy(guard())
+                except (Exception, KeyboardInterrupt) as exc:
+                    row["error"] = f"{type(exc).__name__}: {exc}"
+                    raise
+            evidence["detector_after"] = self.verify()
+        self.condition_prepared = True
+        evidence["complete"] = True
+        return deepcopy(evidence)
+
+    @acquisition_operation
+    def _read_transition(self, row):
+        self.state_current = False
+        raw = self._query("READ?")
+        row.update(raw_response=raw, acquisition_finished_monotonic_s=self.clock())
+        self.last_raw_reading = raw
+        row["voltage_v"] = number(_float(raw), "2182 transition voltage", -self.limit, self.limit)
+        no_error(self.resource)
+
     @acquisition_operation
     def read_voltage(self):
         if not self.ready:
             raise NktError("2182 fresh acquisition is not configured")
+        if not self.condition_prepared:
+            self.prepare_condition()
         before = self.verify()
         self.state_current = False
-        started = time.perf_counter()
+        started = self.clock()
         raw = self._query("READ?")  # documented ABORt + INITiate + FETCh
-        finished = time.perf_counter()
+        finished = self.clock()
         self.last_raw_reading = raw
         value = number(_float(raw), "2182 voltage", -self.limit, self.limit)
         no_error(self.resource)
+        filter_condition = None
+        if self.digital_filter["enabled"]:
+            filter_condition = _word(self._query("STAT:OPER:COND?"))
+            if not filter_condition & (1 << 8):
+                raise NktError("2182 digital filter has not settled")
         after = self.verify()
         return {"voltage_v": value, "current_a": None, "fresh": True, "raw_response": raw,
                 "detector_before": before, "detector_after": after,
+                "filter_transition": deepcopy(self.filter_transition),
+                "filter_condition": filter_condition,
+                "filter_samples_may_overlap": self.digital_filter["enabled"] and self.digital_filter["type"] == "moving",
                 "acquisition_started_monotonic_s": started, "acquisition_finished_monotonic_s": finished}
 
 

@@ -14,7 +14,9 @@ def _finite(value):
 
 def initial_progress(config):
     plan = config.get("combination") or {}
-    total = math.prod(plan["axis_lengths"].values()) if plan.get("axis_lengths") else None
+    total = plan.get("condition_count")
+    if total is None:
+        total = math.prod(plan["axis_lengths"].values()) if plan.get("axis_lengths") else None
     return {"phase": "registered", "total_conditions": total,
             "collected_conditions": 0, "accepted_conditions": 0,
             "last_recorded_readings": {}, "current_attempt": None,
@@ -37,6 +39,16 @@ def update_progress(progress, event):
         progress["current_attempt"] = {key: event.get(key) for key in (
             "condition_id", "attempt_index", "optical_state", "target_power_w", "axis_indices")}
         progress["current_attempt"]["status"] = "acquiring"
+        if event.get("requested") is not None:
+            progress["current_attempt"]["requested"] = event["requested"]
+        if event.get("modules") is not None:
+            progress["current_attempt"]["modules"] = event["modules"]
+    if kind in {"axis_start", "axis_qualified"}:
+        progress["module_stage"] = {"module": event.get("module"), "scope": event.get("scope"),
+                                    "state": kind, "point": event.get("point")}
+        progress.update(phase=kind, phase_started_at_utc=stamp)
+    if kind == "module_readback":
+        progress["last_recorded_readings"][event["module"]] = event.get("reading", {})
     if kind == "condition_complete":
         row = event["condition"]
         progress["collected_conditions"] += 1

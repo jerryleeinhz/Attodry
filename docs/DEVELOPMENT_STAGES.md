@@ -1,5 +1,42 @@
 # Development stages
 
+## Modular Combination / optics — 2026-10-16
+
+- Operator-approved free module selection and ordered Cartesian combinations:
+  independent temperature/magnetic, composite optics, 6221 current source,
+  reused Three-SMU and optional 2182A/voltage detector. Lists and shared range
+  generation preserve explicit duplicate, paired and visit identities.
+- Existing device safety/feedback/transport and formal-read paths are reused.
+  Optional PEM is the reference branch's protocol, without lock-in coupling.
+  Temperature/field dwell belongs to axis entry; all inner samples remain fresh.
+  Dark subtraction is matched to the complete non-power coordinate and visit.
+- Configurable 2182A NPLC/analog/digital filters/AZ/FAZ, per-condition moving
+  history evidence, conservative timeout and nonconsuming settled-state checks.
+  Defaults retain the existing query budget. No tolerance/safety relaxation.
+- Public run/simulate/monitor and unified plotting support modular records and
+  legacy files. Original configuration and expanded plan are archived. Raw
+  failed windows, primary/cleanup errors and unknown-state evidence are kept.
+- Final local full regression **918/918 in 131.509 s**; LK_setup isolated full
+  regression **918/918 in 106.666 s**. All 220 packaged files retain their SHA-256
+  hashes; active NKT is still clean at a1e823f, Jupyter services untouched.
+- Public optics simulation completed 8/8 with cleanup and CLI exit 0; electrical
+  3/3 and environment 4/4, monitor/export/unified plots are covered. SMU-only and
+  optics+SMU records preserve genuine measurements and matching dark differences.
+  Reproduced null monitor mapping, Windows path overflow and failed moving-filter
+  evidence gaps are fixed and tested; their original evidence remains available.
+- Unified the default daily run/validation/monitor configuration at
+  config/hardware.local.toml; explicit --config stays supported and run never
+  falls back to the previous trial file. Default regression 52/52 and stable
+  photoresponse describe compatibility 1/1 passed. Requested takeover profile:
+  630 nm / 10 nm, dark+20..90 uW in 10 uW steps (9 conditions), CH2/10 V/NPLC1,
+  three reads, no excitation; 5% tuning and 25% acceptance retained from scan90.
+- Status: code plus local/target offline acceptance complete. Source-snapshot
+  manifest, bundle hash and results are in the handoff; authorized Git delivery
+  and active synchronization are recorded separately. No real device
+  connection or real scan was performed in this implementation. Hardware
+  response, filter behavior and commissioning of new combinations remain separate.
+  See MODULAR_COMBINATION_GUIDE.md and NANOVOLTMETER_SETTINGS.md.
+
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
 ## Unified plotting: feedback source setting is not a required grouping axis

@@ -4,6 +4,84 @@ Last updated: 2026-10-16
 
 ## Current stage
 
+Modular Combination / optics (2026-10-16): operator approved the detailed plan
+and local implementation. New [combination_scan].order selects independent
+temperature, magnetic, optics, current_source, smu and nanovoltmeter modules.
+The reference branch's AxisPoint/ScanAxis/CombinationPlan and axis-entry lifecycle
+are reused in a hardware-free plan. Lists/linear/log ranges, paired/Cartesian
+coordinates, duplicate identities and original/expanded provenance are retained.
+Optics owns existing NKT/CLD, optional reference PEM protocol, and this branch's
+PM100D tuning/stability/recovery. Direct operation never fabricates measured W.
+The coordinator reuses PhotoresponseRunner's formal acquisition window and
+verification boundaries; source enable follows optical qualification, electrical
+verification and fresh power. Independent T/B axes share one cryostat connection,
+qualify once per visit, and keep fresh inner guards and the 3 T invariant.
+No-optics/no-detector module combinations collect only their actual capabilities.
+Single-dark references match repeated/environment/spectral/electrical identities;
+typed drift retries retain complete rejected windows and the matching baseline.
+2182A exposes NPLC, analog lowpass, digital filter configuration, autozero and
+front autozero. Moving-filter transition conversions are retained separately;
+formal reads cannot inherit the preceding dark/light condition's filter history.
+Legacy defaults preserve the 23-query full check and seven checks per three-read
+point. Selected filters add their documented readbacks/status and timing budget.
+Existing TOMLs, including paired environment and legacy dark/light/dark, retain
+their public compatibility execution path and snapshot semantics. New module
+TOMLs use the common modular service through both existing CLI names. Historical
+raw data are not rewritten. Monitor and unified plotting use the same file-only
+adapters and preserve measured power plane, raw mean and matched difference.
+Final local full regression: 918/918 in 131.509 s; final LK_setup isolated full
+regression: 918/918 in 106.666 s (14:10:41-14:12:30 UTC). All 220 packaged files
+retain their before/after SHA-256 hashes. Active NKT remains a1e823f with clean
+Git status; the two existing Jupyter services were left untouched. No acquisition
+was observed before/after the isolated acceptance, and no instrument was opened.
+Independent 14:13:04 UTC verification confirms unchanged Jupyter identities and
+latest-run index; all 143 current local source/test/config files match the tested
+package. Final acceptance documentation was updated after packaging.
+The package is an uncommitted source snapshot over base a1e823f, not a new Git
+delivery. Its manifest provides per-file identity; bundle SHA-256 is
+cbe554dfbc97c5fd6d13c2e78028701e09f008e3e4f237aa737f52f8a407e5b1.
+Public optics simulation run 27364f5d02244ee3b7aa25a73b994363 completed 8/8,
+CLI exit 0 and verified cleanup. Electrical-only (3/3) and environment (4/4),
+monitor, analysis/export and unified plotting are covered by public-path tests.
+JSON/SQLite projections agree, including module-only SMU measurements/differences.
+The earlier completed run ff1bbee3a47440f58aa708a7e67151b5 exposed a post-save
+null actual-state monitor bug, now fixed. Earlier Windows output-name overflow
+and partial moving-filter failure-evidence gaps were reproduced and repaired.
+The final suite covers path rejection before resource creation, partial warmup
+overload/communication/guard failures, and independent histories after retry.
+Original completed/rejected JSON/SQLite/journal and failing test logs remain.
+Detailed usage: docs/MODULAR_COMBINATION_GUIDE.md and
+docs/NANOVOLTMETER_SETTINGS.md. New complete synthetic profiles cover optics,
+electrical-only and independent environment scans; hardware example remains
+deliberately incomplete. Evidence stays ignored under run_data/modular_development,
+run_data/modular_target_offline_20261016T140710Z and
+run_data/optics_module_review. Target evidence is under
+NKT/run_data/modular-offline-20261016T140710Z. Initial target-wrapper quoting and
+existing-temp errors occurred before Python started; their logs are retained
+separately from the successful native test result. Audit compaction preserves all
+raw PM transactions while reducing identical synthetic optics/cleanup payloads
+55.71%; this is a size result, not a hardware speedup. See MEASUREMENT_PERFORMANCE.
+No real instrument access, active target deployment or real scan in this work.
+Real NKT/CLD/PEM/PM response, filter behavior and physical speed remain unvalidated
+for these new module combinations. That source-snapshot acceptance preceded
+the subsequently authorized Git delivery and active-station synchronization.
+Unrelated PM100D documentation/figure edits and debug.log remain preserved.
+
+Daily entry unification (operator approved 2026-10-16): Combination and compatible
+photoresponse run/validate use config/hardware.local.toml by default, as do modular
+service and monitor. Explicit --config still selects another file; a missing run
+configuration never falls back to the old 11_nkt profile. The stable photoresponse
+describe capability response is preserved; Combination describe validates the
+selected plan. Default-entry regression 52/52 plus describe-specific 1/1 passed.
+Requested station profile is NKT 630 nm / 10 nm, dark then 20-90 uW in 10 uW steps,
+nine conditions, three CH2/10 V/NPLC1 readings each, no excitation. All device and
+quality policies come from the last valid scan90 configuration (5% tuning / 25%
+formal acceptance); no instrument limits or quality criteria are widened.
+The existing hardware.local file is an old CLD/DC profile; the old 11_nkt file
+also has an invalid // comment. Original files and hashes are retained by the
+delivery evidence; the NKT profile is migrated to the modular contract rather
+than parsing or overwriting that old trial file. No real scan is part of delivery.
+
 Unified plotting source-setting fix (2026-10-16): local implementation and
 offline acceptance complete, 57/57 shared plotting/operator tests in 28.384 s.
 Pre-deployment full local regression: 789/789 in 90.938 s (2026-10-16).

@@ -12,7 +12,7 @@ import tomllib
 
 from .combination_store import open_readonly
 
-DEFAULT_RUN_CONFIG = "config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml"
+DEFAULT_RUN_CONFIG = "config/hardware.local.toml"
 
 
 def index_path(config_path):
@@ -99,7 +99,11 @@ def resolve_monitor(config_path, database=None, run_id=None):
     config_path = Path(config_path).resolve()
     with config_path.open("rb") as file:
         document = tomllib.load(file)
-    value = document.get("photoresponse_storage", document.get("project", {})).get("database_path")
+    value = document.get("combination_scan", {}).get("database_path")
+    if value is None:
+        value = document.get("photoresponse_storage", document.get("project", {})).get("database_path")
+    if value is None and document.get("combination_scan", {}).get("output_directory"):
+        value = str(Path(document["combination_scan"]["output_directory"]) / "audit.sqlite")
     if not isinstance(value, str) or not value.strip() or "CHANGE_ME" in value:
         raise ValueError("No registered run: set photoresponse_storage.database_path or provide monitor --database")
     selected = Path(value)

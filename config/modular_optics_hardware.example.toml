@@ -1,0 +1,129 @@
+# INCOMPLETE HARDWARE TEMPLATE. Copy to an ignored local TOML and fill only
+# operator-confirmed station identities, wiring, sample limits and optical bounds.
+# validate-config opens no resources. CHANGE_ME deliberately fails closed.
+[combination_scan]
+backend = "hardware"
+order = ["optics", "nanovoltmeter"] # No current_source module: excitation remains OFF.
+samples_per_condition = 3
+repeats = 1
+run_name = "CHANGE_ME_RUN_NAME"
+note = ""
+output_directory = "../run_data/modular_optics"
+database_path = "../run_data/modular_optics/audit.sqlite"
+
+[measurement]
+max_abs_voltage_v = "CHANGE_ME_SAMPLE_LIMIT_V"
+sample_interval_s = "CHANGE_ME_SECONDS"
+settle_s = "CHANGE_ME_SECONDS"
+dark_recovery_s = "CHANGE_ME_SECONDS"
+
+[optics]
+laser = "nkt"
+use_pem = false # To enable: add the confirmed [pem] table and peak_retardance_waves.
+use_power_meter = true
+mode = "power_stabilized"
+initial_source_level_pct = "CHANGE_ME_APPROVED_INITIAL_PERCENT"
+
+[optics_scan]
+order = ["wavelength", "bandwidth", "power"]
+wavelength_points_nm = [594.4]
+bandwidth_points_nm = [10.0]
+power_points_w = [55e-6, 65e-6, 75e-6] # Requested comparison points; bounds still required.
+dark_first = true
+# Replace power_points_w with power_ranges_w=[{min=10e-6,max=90e-6,scale="linear",points=9}]
+# Replace wavelength_points_nm with wavelength_ranges_nm=[{min=530.0,max=820.0,scale="linear",points=10}]
+
+[nanovoltmeter]
+model = "keithley2182a"
+expected_idn = "CHANGE_ME_FULL_2182A_IDN"
+channel = 2
+voltage_range_v = "CHANGE_ME_CONFIRMED_RANGE_V"
+nplc = "CHANGE_ME"
+analog_lowpass_enabled = false
+autozero = true
+front_autozero = true
+# Direct VISA additionally requires address here; via_6221 forbids that address.
+
+[nanovoltmeter.digital_filter]
+enabled = false
+type = "repeating"
+count = 10
+window_percent = 1.0
+
+[photoresponse_hardware]
+timeout_ms = "CHANGE_ME_MILLISECONDS"
+wiring_confirmed = false
+no_excitation_isolated = false
+detector_transport = "via_6221"
+
+[current_source]
+# Relay host only with this order. Its source output must remain verified OFF/zero.
+model = "keithley6221"
+address = "CHANGE_ME_VISA_ADDRESS"
+expected_idn = "CHANGE_ME_FULL_6221_IDN"
+compliance_v = "CHANGE_ME_APPROVED_COMPLIANCE_V"
+max_step_a = "CHANGE_ME_APPROVED_STEP_A"
+settle_s = "CHANGE_ME_SECONDS"
+tolerance_a = "CHANGE_ME_AMPERES"
+
+[nkt_source]
+control = "current"
+max_level_pct = "CHANGE_ME_APPROVED_PERCENT_LIMIT"
+allowed_pp_ratios = []
+dll_path = "CHANGE_ME_X64_NKTPDLL_PATH"
+port = "CHANGE_ME_PORT"
+address = "CHANGE_ME_SOURCE_MODULE_ADDRESS"
+expected_serial = "CHANGE_ME_SOURCE_SERIAL"
+
+[nkt_varia]
+address = "CHANGE_ME_VARIA_MODULE_ADDRESS"
+expected_serial = "CHANGE_ME_VARIA_SERIAL"
+monitor_present = false
+
+[nkt_run]
+backend = "nkt_sdk"
+mode = "varia_bandpass"
+manual_route = "CHANGE_ME_PHYSICAL_OPTICAL_ROUTE"
+emit = true
+timeout_s = "CHANGE_ME_SECONDS"
+poll_interval_s = "CHANGE_ME_SECONDS"
+dwell_s = 0.0
+output_directory = "../run_data/modular_optics"
+run_name = "CHANGE_ME_RUN_NAME"
+note = ""
+
+[pm100d]
+backend = "visa"
+resource = "CHANGE_ME_PM100D_VISA"
+expected_serial = "CHANGE_ME_CONSOLE_SERIAL"
+expected_sensor_serial = "CHANGE_ME_SENSOR_SERIAL"
+io_timeout_s = "CHANGE_ME_SECONDS"
+wavelength_tolerance_nm = "CHANGE_ME_NM"
+average_count = "CHANGE_ME"
+auto_range = true
+max_power_w = "CHANGE_ME_CONFIRMED_HARD_LIMIT_W"
+measurement_plane = "CHANGE_ME_MEASUREMENT_POSITION_AND_CALIBRATION_STATUS"
+
+[power_feedback]
+actuator = "source_current"
+initial_actuator_mode = "previous"
+tuning_tolerance_fraction = 0.05 # Trial precision, not a guaranteed instrument specification.
+target_tolerance_fraction = 0.25 # User-selected formal tolerance; no automatic expansion.
+max_power_w = "CHANGE_ME_CONFIRMED_HARD_LIMIT_W"
+minimum_signal_power_w = "CHANGE_ME_CONFIRMED_NO_SIGNAL_GUARD_W"
+source_current_min_pct = "CHANGE_ME_APPROVED_PERCENT"
+source_current_max_pct = "CHANGE_ME_APPROVED_PERCENT"
+source_current_step_pct = "CHANGE_ME_APPROVED_MAX_STEP_PERCENTAGE_POINTS"
+timeout_s = "CHANGE_ME_SECONDS"
+hold_s = "CHANGE_ME_SECONDS"
+max_retries = 2
+point_timeout_s = "CHANGE_ME_SECONDS"
+
+[power_feedback.window]
+duration_s = "CHANGE_ME_SECONDS"
+min_samples = "CHANGE_ME"
+sample_interval_s = "CHANGE_ME_SECONDS"
+max_peak_to_peak_w = "CHANGE_ME_WATTS"
+max_peak_to_peak_fraction = "CHANGE_ME_FRACTION"
+noise_floor_w = "CHANGE_ME_MEASURED_NOISE_FLOOR_W"
+max_drift_fraction_per_s = "CHANGE_ME_TARGET_FRACTION_PER_SECOND"

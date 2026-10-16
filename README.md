@@ -16,6 +16,15 @@ PM100D 反馈稳定实际光功率，同时保存 2182A 电压及 6221 激励设
 源百分比和 LD 电流是调节量，PM100D 的 W 读数才是其标定测量面的实际光功率。
 6221 电流设定不是实测样品电流，2182A 不直接测电流。
 
+2026-10-16 新增自由模块化 Combination：`combination_scan.order` 选择独立
+`temperature`、`magnetic`、`optics`、`current_source`、`smu` 和 `nanovoltmeter`，
+各模块点表做笛卡尔组合；`optics` 统一 NKT/CLD、可选 PEM 和 PM100D 反馈。
+支持列表、线性／对数区间、固定单点及匹配暗态。2182A 可配置 NPLC、数字滤波、
+模拟低通、autozero 和 front autozero。参见
+[模块化使用指南](docs/MODULAR_COMBINATION_GUIDE.md)及
+[纳伏表设置与采集时序](docs/NANOVOLTMETER_SETTINGS.md)。
+已完成本地离线实现和合成端到端验证；新组合的实机响应另行验收。
+
 2026-10-13 核对确认：此前完成的是较窄的开环光响应流程，未接入 PM100D 功率闭环，
 也未提供完整的组合计划入口；此前“软件完成”不表示上述完整目标已经实现。
 闭环与组合入口现已补齐并通过 568 项离线回归，硬件联合验收尚未完成。流程已接入 NKT、CLD1010LP、
@@ -48,7 +57,8 @@ python -m attodry_control.combination_cli monitor
 所有模块开发都需执行 [测量速度检查与验收规范](docs/MEASUREMENT_PERFORMANCE.md)，
 同时检查命令预算、重复核对、判稳和等待，区分离线证据与实机提速。
 旧 `photoresponse_cli run` 调用同一采集服务，保持兼容。
-默认读取 `config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml`；
+两个运行入口及 Combination monitor 统一默认使用 NKT 项目根目录下的
+`config/hardware.local.toml`；运行和配置检查遇到文件缺失即报错，不会退回旧试验文件。
 执行 `run` 就是确认使用该配置的光路，并启动其中选中的仪器，不再需要授权参数或新增
 TOML 授权字段。`--config` 可指定其他测量文件，旧授权参数仍兼容。项目目录入口直接加载
 本 checkout 的 `src`，无需改动共享环境中的其他项目安装。功率/电学/磁场边界、身份/接线

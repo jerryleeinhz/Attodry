@@ -269,7 +269,7 @@ class PhotoresponseRunner:
             if not source["output_enabled"] or not math.isclose(source["setpoint"], bias, abs_tol=tolerance, rel_tol=1e-7):
                 raise NktError("Source output or setpoint changed")
 
-    def _window(self, condition, phase, bias, *, manage_optics=True):
+    def _window(self, condition, phase, bias, *, manage_optics=True, prepare_detector=True):
         illuminated = phase == "light"
         window = {"phase": phase, "samples": []}
         condition["windows"].append(window)
@@ -295,6 +295,15 @@ class PhotoresponseRunner:
                 self.power.qualify(guard, on_emission_changed=emission_changed)
                 self._check_state(self._state(), bias)
             self._settle(last_change, self.config.settle_s, window)
+        if prepare_detector:
+            prepare = getattr(self.electrical, "prepare_condition", None)
+            if prepare:
+                try:
+                    window["filter_transition"] = prepare(guard=guard)
+                except (Exception, KeyboardInterrupt):
+                    detector = getattr(self.electrical, "detector", None)
+                    window["filter_transition"] = deepcopy(getattr(detector, "filter_transition", None))
+                    raise
         for _ in range(self.config.samples_per_window):
             # The interval also keeps one-sample windows strictly ordered with fake clocks.
             self.sleep(self.config.sample_interval_s)

@@ -20,7 +20,7 @@ from test_photoresponse_smu import configuration
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT = "config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml"
+DEFAULT = "config/hardware.local.toml"
 
 
 def completed(config, args, event, attempt):
@@ -96,9 +96,9 @@ class RunCommandTests(unittest.TestCase):
             args = acquisition.call_args.args[1]
             self.assertTrue(args.authorize_environment and args.authorize_smu)
 
-    def test_missing_default_never_falls_back_to_hardware_local(self):
+    def test_missing_default_never_falls_back_to_old_trial_profile(self):
         with tempfile.TemporaryDirectory() as directory:
-            _, config = self.fixture(directory, "config/hardware.local.toml")
+            _, config = self.fixture(directory, "config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml")
             status, _, acquisition = self.invoke(directory, config, ["run"])
             self.assertEqual(status, 2)
             acquisition.assert_not_called()

@@ -12,8 +12,9 @@ python -m attodry_control.combination_cli run
 python -m attodry_control.combination_cli monitor
 ```
 
-默认读取 config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml。
-文件名不代表当前参数；启动摘要和归档快照描述实际配置。切换实验使用 --config。
+运行、配置检查和 monitor 统一默认读取项目根目录下的 config/hardware.local.toml。
+运行和配置检查遇到文件缺失即报错，不会退回旧试验文件；monitor 可读取已经登记的运行。
+启动摘要和归档快照描述实际配置；切换实验使用 --config。
 旧 photoresponse_cli run 调用同一服务，仍兼容旧参数。执行 run 即确认选中模块和光路；
 内部限值、身份、接线/隔离、读回、状态与清理保持。部署及离线测试不包含实机启动授权。
 

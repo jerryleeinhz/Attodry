@@ -253,6 +253,10 @@ def snapshot_text(snapshot, width=None):
             target = attempt.get("target_power_w")
             lines.append("Optical: " + str(attempt["optical_state"]) +
                          (" | Target: " + _number(target, "W") if target is not None else ""))
+    stage = snapshot.get("module_stage")
+    if stage:
+        lines.append("Module: " + str(stage.get("module")) + " | " + str(stage.get("state"))
+                     + " | Visit: " + str(stage.get("scope")))
     event = snapshot.get("last_event")
     control = snapshot.get("power_control")
     if control:
@@ -278,7 +282,7 @@ def snapshot_text(snapshot, width=None):
             + " | " + recovery["created_at_utc"])
     readings = []
     for module, reading in snapshot.get("last_recorded_readings", {}).items():
-        values = {**reading.get("actual", {}), **reading.get("measurements", {})}
+        values = {**(reading.get("actual") or {}), **(reading.get("measurements") or {})}
         if module == "optical":
             status = reading.get("status") or {}
             if status.get("power_target_w") is not None:
@@ -313,6 +317,8 @@ def snapshot_text(snapshot, width=None):
 def _photoresponse_launch_text(summary, width):
     config = summary["measurement_config"]
     plan = config["combination"]
+    if config.get("modular"):
+        return _modular_launch_text(summary, width)
     power = config.get("power")
     detector = (config.get("hardware") or {}).get("detector") or {}
     points = config["nkt"]["points"]
@@ -342,6 +348,57 @@ def _photoresponse_launch_text(summary, width):
         "Run ID: " + summary["run_id"], "Database: " + summary["database"],
         "Config: " + summary["config"], "Config SHA256: " + summary["config_sha256"],
         "Authorization: run command | selected modules and configured route"]
+    return "\n".join(lines)
+
+
+def _modular_launch_text(summary, width):
+    """Use archived module plans; no selected laser or electrical source assumed."""
+    config = summary["measurement_config"]
+    plan = config["combination"]
+    mode = "SIMULATION" if summary.get("simulated") else "REAL"
+    lines = [f"{mode} combination scan | {plan.get('run_name', 'combination')}",
+        "Order: " + " -> ".join(plan["order"]),
+        f"Conditions: {plan['condition_count']} | Samples/condition: {plan['samples_per_condition']}"
+        + f" | Repeats: {plan['repeats']}",
+        "Selected modules: " + ", ".join(plan["selected_modules"])]
+    rows = []
+    for axis in plan["axes"]:
+        coordinates = {}
+        states = set()
+        for point in axis["points"]:
+            states.add(point.get("metadata", {}).get("optical_state"))
+            for key, value in point["values"].items():
+                if value not in coordinates.setdefault(key, []):
+                    coordinates[key].append(value)
+        details = "; ".join(_coordinate(key, values) for key, values in coordinates.items())
+        if "dark" in states:
+            details += "; dark first within each optical group"
+        rows.append((axis["module"], len(axis["points"]), details or "measurement/readback"))
+    lines += _table(("Module", "Points", "Requested coordinates"), rows, width)
+    doc = config["modular"].get("original_config", {})
+    detector = (config.get("hardware") or {}).get("detector") or doc.get("nanovoltmeter", {})
+    if "nanovoltmeter" in plan["order"]:
+        lines.append(f"Detector: {config.get('detector')} | Channel: {detector.get('channel', 'n/a')}"
+                     f" | Range: {detector.get('voltage_range_v', 'n/a')} V | NPLC: {detector.get('nplc', 'n/a')}")
+        for key in ("analog_lowpass_enabled", "autozero", "front_autozero", "digital_filter"):
+            if key in detector:
+                lines.append("Detector " + key + ": " + str(detector[key]))
+    optics = config["modular"].get("optics")
+    if optics:
+        lines.append(f"Optics: {optics['laser']} | PEM: {optics['use_pem']}"
+                     f" | PM feedback: {optics['use_power_meter']} | Mode: {optics['mode']}")
+    power = config.get("power")
+    if power:
+        lines.append("Power measurement plane: " + power["meter"]["measurement_plane"])
+    limits = []
+    for key, unit in (("max_abs_voltage_v", "V"), ("max_abs_current_a", "A")):
+        if config.get(key) is not None:
+            limits.append(_number(config[key], unit))
+    if limits:
+        lines.append("Limits: " + " / ".join(limits))
+    lines += ["Run ID: " + summary["run_id"], "Database: " + summary["database"],
+              "Config: " + summary["config"], "Config SHA256: " + summary["config_sha256"],
+              "Authorization: " + ("simulation" if summary.get("simulated") else "run command | selected modules and configured route")]
     return "\n".join(lines)
 
 
@@ -394,7 +451,7 @@ class PhotoresponseProgressPrinter:
                         error=sample.get("valid") is not True)
         elif kind == "condition_complete":
             result = event["condition"].get("result") or {}
-            delta = result.get("delta_" + result.get("quantity", ""))
+            delta = result.get("delta_" + (result.get("quantity") or ""))
             self._write(f"Collected {self.progress['collected_conditions']}/{self.progress['total_conditions']}"
                         + (" | Light - dark: " + _number(delta, "V" if result["quantity"] == "voltage_v" else "A")
                            if delta is not None else "") + " | final acceptance pending")

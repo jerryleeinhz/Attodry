@@ -177,10 +177,13 @@ class NktConfig:
         return result
 
 
-def load_nkt_config(path: str | Path) -> NktConfig:
+def load_nkt_config(path: str | Path, *, document=None) -> NktConfig:
     path = Path(path).resolve()
-    with path.open("rb") as stream:
-        doc = tomllib.load(stream)
+    if document is None:
+        with path.open("rb") as stream:
+            doc = tomllib.load(stream)
+    else:
+        doc = document
     keys(doc, "top level", {"nkt_source", "nkt_run"}, OTHER_TABLES | NKT_TABLES)
     run, source = doc["nkt_run"], doc["nkt_source"]
     keys(run, "nkt_run", {"backend", "mode", "emit", "manual_route", "timeout_s",

@@ -123,6 +123,14 @@ TOML
 
 ### 3.2 新模块的最小文件边界
 
+2026-10-16 模块化 Combination 使用 `combination_plan.py` 的纯点表/访问身份、
+`modular_config.py` 的所选模块展开、`modular_runtime.py` 的既有设备契约桥接，
+以及 `modular_runner.py` 的公共采样/保护编排。`optics_points.py` 统一激光、
+可选 PEM 和功率反馈；不复制调功或 Three-SMU 安全控制器。新增模块应接入此
+生命周期，提供坐标、设置、轴点资格、实际读回和独立清理，不再增加专用的嵌套
+扫描循环。旧配置继续按原配对/暗态/快照语义兼容执行，不能默默改变旧点表。
+具体配置和验证矩阵见 [MODULAR_COMBINATION_GUIDE.md](MODULAR_COMBINATION_GUIDE.md)。
+
 只在实际需要时增加文件，不为未来可能性预先建立通用框架：
 
 ```text

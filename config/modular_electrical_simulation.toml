@@ -1,0 +1,34 @@
+# OFFLINE ONLY. No laser or PM configuration is needed for this combination.
+[combination_scan]
+backend = "simulation"
+order = ["current_source", "nanovoltmeter"]
+samples_per_condition = 3
+repeats = 1
+run_name = "modular_electrical_offline"
+note = "Synthetic 6221 excitation and 2182A voltage; no optical instrument."
+output_directory = "../run_data/modular_electrical_simulation"
+
+[measurement]
+max_abs_voltage_v = 0.01
+max_abs_current_a = 1e-8
+sample_interval_s = 0.01
+settle_s = 0.01
+
+[current_source_scan]
+points_a = [-1e-9, 0.0, 1e-9]
+# Alternative: ranges_a = [{min=-1e-9,max=1e-9,scale="linear",points=3}]
+
+[nanovoltmeter]
+model = "keithley2182a"
+channel = 2
+voltage_range_v = 10.0
+nplc = 1.0
+analog_lowpass_enabled = false
+autozero = true
+front_autozero = true
+
+[nanovoltmeter.digital_filter]
+enabled = false
+type = "repeating"
+count = 10
+window_percent = 1.0
