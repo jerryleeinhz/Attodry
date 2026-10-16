@@ -1,4 +1,4 @@
-"""Plan, simulate, diagnose and explicitly authorize DC photoresponse acquisition."""
+"""Plan, simulate, diagnose and run configured DC photoresponse acquisition."""
 from __future__ import annotations
 
 import argparse
@@ -16,6 +16,9 @@ from .nkt_config import NktError
 from .nkt_control import NktController, SimulatedNkt
 from .photoresponse import PhotoresponseRunner, SimulatedElectrical
 from .photoresponse_config import load_photoresponse_config
+
+
+DEFAULT_RUN_CONFIG = "config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml"
 
 
 def audit_safe(value):
@@ -148,16 +151,18 @@ def _diagnose(config, event, authorize_connection):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("describe", "validate-config", "simulate", "run", "diagnose", "test-6221", "analyze", "export"))
-    parser.add_argument("--config", default="config/hardware.local.toml")
+    parser.add_argument("--config", help=f"Measurement TOML; run defaults to {DEFAULT_RUN_CONFIG}; other commands use config/hardware.local.toml")
     parser.add_argument("--record", help="JSON record for read-only analysis")
     parser.add_argument("--output", help="Export CSV path")
     parser.add_argument("--resume-run", help="SQLite run_id to retry with a fresh preflight and new attempt")
-    parser.add_argument("--authorize-connect", action="store_true")
-    parser.add_argument("--authorize-writes", action="store_true", help="Includes source/laser/measurement settings, triggers and error-queue reads")
-    parser.add_argument("--confirm-route", action="store_true")
-    parser.add_argument("--authorize-environment", action="store_true")
-    parser.add_argument("--authorize-smu", action="store_true", help="Explicitly authorize selected SMU connections, settings, fresh READs and consuming status queries")
+    parser.add_argument("--authorize-connect", action="store_true", help="For diagnose/test-6221; optional legacy flag for run")
+    parser.add_argument("--authorize-writes", action="store_true", help="For test-6221; optional legacy flag for run")
+    parser.add_argument("--confirm-route", action="store_true", help="Optional legacy flag; run confirms use of the configured optical route")
+    parser.add_argument("--authorize-environment", action="store_true", help="Optional legacy flag; run includes selected environment control")
+    parser.add_argument("--authorize-smu", action="store_true", help="Optional legacy flag; run includes selected SMU roles")
     args = parser.parse_args(argv)
+    if args.config is None:
+        args.config = DEFAULT_RUN_CONFIG if args.command == "run" else "config/hardware.local.toml"
     try:
         if args.command == "describe":
             print(json.dumps({"stage":"offline-tested drivers; real commissioning is device-specific",
@@ -168,7 +173,8 @@ def main(argv=None):
                 "environment":"optional paired attoDRY temperature/vector-field points",
                 "combination":"ordered optical / target_power_w / bias / smu / environment / repeat axes",
                 "smu":"opt-in pinned Three-SMU point engine; gate leakage separate from detector; one sample source",
-                "power_w":"optional PM100D bounded feedback; actual W at configured measurement_plane"},indent=2))
+                "power_w":"optional PM100D bounded feedback; actual W at configured measurement_plane",
+                "run":{"default_config":DEFAULT_RUN_CONFIG,"authorization":"Executing run confirms configured selected-module acquisition; no authorization flags required"}},indent=2))
             return 0
         if args.command in ("analyze","export"):
             from .photoresponse_analysis import load_results, export_results
@@ -179,6 +185,10 @@ def main(argv=None):
                 print(args.output)
             else: print(json.dumps(load_results(args.record),indent=2,allow_nan=False))
             return 0
+        invocation = None
+        if args.command == "run":
+            args.config = str(Path(args.config).resolve())
+            config_sha256 = hashlib.sha256(Path(args.config).read_bytes()).hexdigest()
         if args.command == "test-6221":
             if not args.authorize_connect or not args.authorize_writes:
                 raise NktError("6221 test needs --authorize-connect --authorize-writes")
@@ -189,6 +199,8 @@ def main(argv=None):
             config=None
         else:
             config=load_photoresponse_config(args.config)
+            if args.command == "run" and hashlib.sha256(Path(args.config).read_bytes()).hexdigest() != config_sha256:
+                raise NktError("Measurement TOML changed while loading; review and start a new run")
             if args.command == "validate-config":
                 print(json.dumps(config.snapshot(),indent=2,allow_nan=False))
                 return 0
@@ -196,18 +208,22 @@ def main(argv=None):
             if args.command == "simulate" and hardware: raise NktError("simulate rejects hardware backends")
             if args.command == "run":
                 if not hardware: raise NktError("Use simulate for simulation configuration")
-                if not args.authorize_connect or not args.authorize_writes or not args.confirm_route:
-                    raise NktError("run requires --authorize-connect --authorize-writes --confirm-route")
-                if config.environment and not args.authorize_environment:
-                    raise NktError("Environment writes require --authorize-environment")
                 config.hardware.require_run(config)
                 config.nkt.require_hardware(writes=True)
                 if config.power:
                     config.power.meter.require_hardware(writes=True)
                 if config.smu:
                     config.smu.require_hardware()
-                    if not args.authorize_smu:
-                        raise NktError("Selected SMU hardware requires --authorize-smu")
+                # Explicit run is the execution confirmation for selected modules.
+                # Internal driver gates and every physical/configuration check remain.
+                args.authorize_connect = args.authorize_writes = args.confirm_route = True
+                args.authorize_environment = config.environment is not None
+                args.authorize_smu = config.smu is not None
+                invocation = {"command":"run", "authorization_source":"run_command",
+                    "config_path":args.config, "config_sha256":config_sha256,
+                    "selected_modules":config.snapshot()["combination"]["selected_modules"]}
+                print(f"RUN config: {args.config} (sha256={config_sha256})")
+                print("Selected modules: " + ", ".join(invocation["selected_modules"]))
             if args.command == "diagnose" and not args.authorize_connect:
                 raise NktError("diagnose requires --authorize-connect")
             if args.resume_run and (not config.database_path or args.command not in ("simulate","run")):
@@ -232,12 +248,14 @@ def main(argv=None):
                     if store: store.event(value)
                 software=provenance()
                 event({"phase":"software",**software})
+                if invocation: event({"phase":"invocation", **invocation})
                 if args.command == "test-6221":
                     from .photoresponse_commission import test_6221
                     record=test_6221(args.config,authorize_connection=True,authorize_writes=True,on_event=event)
                 elif args.command == "diagnose": record=_diagnose(config,event,True)
                 else: record=_run(config,args,event,attempt)
                 record["software"],record["journal_path"] = software,str(journal_path)
+                if invocation: record["invocation"] = invocation
                 if store: store.finalize(record)
                 outcome=record.get("outcome", "rejected" if record.get("error") else "completed")
                 path=directory/f"{stem}_{outcome}.json"

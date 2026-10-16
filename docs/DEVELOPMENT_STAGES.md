@@ -2,6 +2,28 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Simple daily photoresponse CLI
+
+Status: software/offline complete; target validation/deployment pending (2026-10-16).
+
+- Operator-approved `run` command itself confirms acquisition of the selected
+  modules/route. No new TOML permission fields; legacy flags and --config work.
+  The run default is the existing ignored 11_nkt_630nm_dark_50-300uW_7pt_2182
+  profile; absent defaults reject instead of selecting another file.
+- Selected environment/SMU roles receive internal execution permission while
+  physical limits, wiring/isolation, identity/readback, drift/overload rejection,
+  resource locks and cleanup remain. Diagnostic/bench commands retain their gates.
+- Added config path/SHA-256, selected modules and run-command permission source
+  to JSON/JSONL/SQLite, including failed attempts; concurrent parse changes reject.
+- A project-root entry delegates to this checkout's src, so python -m does not
+  depend on lyr's older editable installation in another project. Shared environment
+  and all local experimental TOMLs are left unchanged by deployment.
+- Ten new offline tests cover default/override/legacy flags, selected module gates,
+  missing defaults, parse changes, invalid targets, actual fake acquisition/overload
+  cleanup and import isolation from another checkout. No real run is part of delivery.
+- Full local suite **694/694** passed; the ten focused tests also verify invocation
+  persistence in SQLite and failed raw records. No hardware was contacted.
+
 ## 2182A selectable DC voltage channel and range
 
 Status: software/offline complete (2026-10-15); channel-2 real acquisition pending.

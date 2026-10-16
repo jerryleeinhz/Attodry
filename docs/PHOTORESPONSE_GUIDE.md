@@ -256,7 +256,10 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 新版 NKT 配置可省略 `nd_pct` 和未选择的 pulse picker：程序保持实际值，
 不写这些寄存器，并在每次正式核对中检测外部改动。
 
-默认本地文件是被忽略的 `config/hardware.local.toml`。合并需要的表，保留已有站点配置。
+日常 `run` 默认读取被忽略的
+`config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml`；
+其他命令的默认本地文件仍是 `config/hardware.local.toml`。默认扫描文件不存在时直接报错，
+不会回退到其他配置。`--config` 可覆盖当前命令的路径。合并需要的表，保留已有站点配置。
 也可把临时配置放在被忽略的 `run_data/` 下。所有相对输出/数据库路径相对该 TOML 文件解析。
 
 | 模板 | 用途 |
@@ -315,9 +318,23 @@ python -m attodry_control.photoresponse_cli diagnose --config config/hardware.lo
 # 仅 6221 空载测试。使用独立五点测试表；不会打开 2182A、2400 或光源。
 python -m attodry_control.photoresponse_cli test-6221 --config config/hardware.local.toml --authorize-connect --authorize-writes
 
-# 完整光响应；真实量测、源/激光设置及错误队列读取均属写授权范围。
-python -m attodry_control.photoresponse_cli run --config config/hardware.local.toml --authorize-connect --authorize-writes --confirm-route
+# 在 NKT 项目目录和 lyr 环境中，执行 run 即确认按默认 TOML 启动所选仪器和光路。
+python -m attodry_control.photoresponse_cli run
+
+# 需要其他测量配置时：
+python -m attodry_control.photoresponse_cli run --config config/hardware.local.toml
 ```
+
+`run` 不再要求 `--authorize-connect`、`--authorize-writes`、`--confirm-route`、
+`--authorize-environment` 或 `--authorize-smu`，也不新增 TOML 授权开关。旧参数可继续传入。
+执行 `run` 包含配置中选中的源/激光设置、触发/新鲜 READ、必要的错误队列读取，以及所选
+温磁场/SMU 控制；未选模块不连接。硬件边界、接线与隔离确认、状态检查和 cleanup 不变。
+`diagnose` 和 `test-6221` 保持原有权限语义。Agent 的部署/离线测试授权不包含实际启动扫描。
+
+启动前打印实际配置路径和选中模块，并在 JSON、JSONL、SQLite 记录 `invocation`：实际路径、
+配置 SHA-256、`authorization_source="run_command"` 和选中模块。解析期间文件变化会拒绝。
+在项目根目录执行 `python -m` 会加载本 checkout 的 `src`，不依赖其他目录的 editable 安装。
+前台扫描用 Ctrl+C 请求正常停止和清理；进程退出不等于硬件已关闭，须核对清理读回。
 
 VISA 使用显式地址和资源独占锁，但这不能防止其他程序使用同一控制器的其他地址。
 实际测试前仍须协调共享 GPIB 总线。通信超时后不盲目重试可能滞留的响应；本会话只尝试安全关闭，
@@ -327,7 +344,7 @@ VISA 使用显式地址和资源独占锁，但这不能防止其他程序使用
 
 使用现有 `[cryostat]`、`[magnet]`、`[temperature_stability]`，另加
 `[photoresponse_environment]` 的明确温度/Bx/Bz 点、最大温度步长、最大超调及磁场步长。
-真实 run 还必须加 `--authorize-environment`。不配置该表就不创建 attoDRY 驱动。
+执行 `run` 已包含所选温磁场控制，无需额外参数。不配置该表就不创建 attoDRY 驱动。
 
 变温/变场前关闭光与电学源；温控沿用先启用反馈、后写温度目标的验收顺序。
 等温磁场稳定后再准备电学采集。保留 `sqrt(Bx²+Bz²) <= 3 T` 的路径与读回检查。

@@ -1,8 +1,30 @@
 # Project handoff
 
-Last updated: 2026-10-15
+Last updated: 2026-10-16
 
 ## Current stage
+
+Simple daily photoresponse run (2026-10-16): the operator approved executing
+`python -m attodry_control.photoresponse_cli run` as the confirmation to acquire
+with the selected TOML/modules/route, without repeated authorization flags or
+new TOML authorization switches. `run` defaults to the existing ignored
+`config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml`;
+`--config` and old flags remain accepted. Missing default never falls back.
+CLI passes execution permission only to selected modules; internal safety gates,
+bounds, physical confirmations, cleanup and diagnostic/bench permissions remain.
+Run JSON/JSONL/SQLite record config path/hash, selected modules and run-command
+permission source. A project-root package entry loads this checkout's src even
+when lyr's existing editable install points at another project; shared installation
+is untouched. Offline implementation/validation/deployment does not start hardware.
+
+Latest real evidence (2026-10-15): CH2 at 1 V still returned +9.9E37. The operator
+then authorized 10 V range while retaining the 1 V sample bound: three dark READs
+were valid (2.698/2.914/2.437 mV), but the full run remained rejected after NKT
+requested 2.1% from 6% to reach 50 uW and register 0x37 readback mismatched.
+Laser OFF and electrical safe cleanup were confirmed. No bright voltage point
+was accepted; source minimum/attenuation needs separate resolution. Later operator
+edits to power targets can exceed the unchanged 500 uW cap; preserve their local
+configuration and let validation reject rather than silently change the limit.
 
 2182A channel selection correction (2026-10-15): the operator confirms the
 sample voltage is wired to channel 2. Earlier no-excitation scan attempts

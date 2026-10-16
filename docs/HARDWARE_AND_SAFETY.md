@@ -108,8 +108,13 @@ path resistance, including series components and termination/loading effects.
 This independent profile has offline-tested acquisition adapters and explicit hardware
 entry points. It does not construct SR830 or open unselected instruments. Loading and
 validating configuration perform no I/O. Real run requires complete physical limits,
-confirmed wiring/optical route and connection/write authorization; environment control
-requires its separate flag. `diagnose` is electrical-query-only; `test-6221` opens only
+confirmed wiring/optical route and explicit execution. For the daily CLI, invoking
+`photoresponse_cli run` confirms the configured route and authorizes the selected
+acquisition modules, including selected environment/SMU control; no repeated CLI
+authorization flags or TOML authorization toggles are required. Internal adapter
+gates, all physical bounds and fail-closed checks remain. Deployment/offline work
+does not authorize an agent to invoke a real run. `diagnose` is electrical-query-only;
+`test-6221` opens only
 its source. Neither operation opens a laser or unused detector.
 
 - No excitation is a physically isolated external source path, not a 0 A command.
