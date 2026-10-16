@@ -4,6 +4,29 @@ Last updated: 2026-10-16
 
 ## Current stage
 
+Real six-point operator check (2026-10-16): the explicitly authorized single run
+fbf086a490de4eab8ef6ba34160b764e completed 6/6 conditions on source 54b2375.
+NKT 630 nm / 10 nm, dark then 20/40/60/80/100 uW, 2182A CH2 / 10 V, no excitation;
+6221 remained a relay host. Launch PID 4444 was matched by parent, creation time
+08:38:00.622862 UTC and command. Final monitor arrived 08:46:16 UTC (~495 s).
+Raw completion confirms laser-OFF and electrical-safe cleanup, with no errors.
+The file-only monitor observed collected counts 1 through 6, kept acceptance at
+zero while active, then displayed completed/accepted 6/6 and exited zero; both
+stderr logs are empty. No hardware fault was deliberately injected.
+Unified plotting loaded the exact run, verified one shared dark subtraction and
+rendered two five-light-point cards through widget callbacks. PNG/PDF/SVG/CSV,
+plot setup and an independent unified_result Notebook are in ignored target
+run_data/real-six-point-20261016T083423Z; original JSON/config hashes stayed unchanged.
+Existing operator Notebook edits were not overwritten. This is one scan with
+three reads per condition, one shared baseline and no time-drift correction.
+The scan exposed stale final Attempt wording in monitor. The read-only projection
+now derives the last condition's final status from its stored accepted flag, keeping
+all raw progress and failure records intact. Full local regression passed 748/748;
+target offline acceptance/deployment of this display-only correction is pending.
+The detached cmd wrapper's exit receipt was blank (redirection syntax); retain it
+and do not claim a native acquisition exit code. Completion/cleanup are established
+by the raw application record. No second real scan is authorized or needed here.
+
 Target delivery resumed at operator request (2026-10-16). The independent scan
 d4dfbb1e completed all six conditions at 08:07:54 UTC, with recorded laser-OFF and
 electrical-safe cleanup; its process exited and both plotting kernels were idle.

@@ -2,6 +2,29 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Real six-point run and final monitor wording
+
+Status: real six-point control/recording acceptance complete (2026-10-16);
+monitor display correction passed 748/748 local tests; target acceptance pending.
+
+- Authorized one NKT 630 nm / 10 nm scan: dark then 20/40/60/80/100 uW,
+  2182A CH2 / 10 V and no excitation. Run fbf086a4 completed 6/6 with recorded
+  laser-OFF/electrical-safe cleanup and no primary/cleanup errors. Source 54b2375
+  and the reviewed TOML stayed unchanged; no unused instrument was selected.
+- Read-only common monitor tracked all collected counts 1..6, then 6/6 accepted;
+  exit code zero, stderr empty. Its final Attempt text still said pending/acquiring.
+  The correction changes only the read-only final projection, using the stored
+  per-condition accepted flag for accepted/not-accepted text. Completed/rejected
+  regressions first reproduced both stale messages; raw events remain untouched.
+- Unified plotting verified matching dark IDs/differences, two widget-loaded plot
+  cards with five valid light points each, exports and a valid result Notebook.
+  Source archives and user Notebook edits are preserved. Evidence is ignored at
+  run_data/real-six-point-20261016T083423Z. One scan/three reads per point is not
+  independent replication, and this shared-dark result does not correct drift.
+- The original detached cmd exit receipt is blank; it is retained and no native
+  acquisition exit code is claimed. Raw completion and cleanup are authoritative.
+  No real fault was injected and no second real scan is started for the display fix.
+
 ## Unified workflow — voltage-only deployment correction
 
 Status: target offline complete and deployed (2026-10-16); no new hardware run.

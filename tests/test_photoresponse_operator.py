@@ -88,6 +88,7 @@ class OperatorTests(unittest.TestCase):
         self.assertTrue(record["completed"], record["error"])
         self.assertEqual(snapshot["collected_conditions"], len(record["conditions"]))
         self.assertEqual(snapshot["accepted_conditions"], len(record["conditions"]))
+        self.assertEqual(snapshot["current_attempt"]["status"], "accepted")
         self.assertTrue(snapshot["cleanup"]["clean"])
         self.assertEqual(snapshot["last_recorded_readings"]["electrical"]["measurements"]["current_a"], None)
 
@@ -97,6 +98,7 @@ class OperatorTests(unittest.TestCase):
         self.assertIn("peak-to-peak", record["error"])
         snapshot = run_snapshot(store.path, run_id)
         self.assertEqual(snapshot["accepted_conditions"], 0)
+        self.assertEqual(snapshot["current_attempt"]["status"], "not accepted")
         self.assertGreater(snapshot["collected_conditions"], 0)
         self.assertTrue(snapshot["cleanup"]["clean"])
         self.assertEqual(snapshot["error"], record["error"])

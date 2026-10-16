@@ -111,6 +111,12 @@ def photo_run_snapshot(path, run_id):
         final = json.loads(run["record_json"]) if run["record_json"] else None
         if final:
             progress["collected_conditions"] = sum(c.get("result") is not None for c in final.get("conditions", []))
+            current = progress.get("current_attempt")
+            if current:
+                condition = connection.execute(
+                    "SELECT accepted FROM photo_conditions WHERE run_id=? AND condition_id=?",
+                    (run_id, current["condition_id"])).fetchone()
+                current["status"] = "accepted" if condition and condition[0] else "not accepted"
         cleanup = cleanup_snapshot(final["cleanup"], config) if final else None
         error = final.get("error") if final else progress.get("error")
         now = datetime.now(timezone.utc)
