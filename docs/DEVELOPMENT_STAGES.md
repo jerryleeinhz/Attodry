@@ -2,6 +2,22 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Unified workflow — voltage-only deployment correction
+
+Status: local full regression passed 748/748 (2026-10-16); target acceptance pending.
+
+- Target offline simulation reproduced a startup-summary TypeError for a valid
+  no-excitation 2182A profile without max_abs_current_a. Display only configured
+  limits; do not add a fake current setting or relax hardware validation.
+- Added a common-CLI regression proving the voltage-only profile reaches the
+  acquisition service and its human summary has no nonexistent current limit.
+- Local six-point common-CLI simulation completed: one dark reference and five
+  accepted light differences. The full fake-only suite passed with normal Windows
+  TEMP; earlier sandbox/deep-path failures and isolated target attempts are retained.
+- Operator requested idle-only deployment, direct analysis Notebook update and
+  dark/20/40/60/80/100 uW handover. Preserve all station physical settings, raw
+  failures and the locally edited SR830 Notebook; no real scan is authorized here.
+
 ## Unified Combination run, monitor and plotting
 
 Status: local software/offline acceptance complete (2026-10-16); code committed/pushed.

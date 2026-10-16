@@ -327,7 +327,10 @@ def _photoresponse_launch_text(summary, width):
         lines.append("Power stability: peak-to-peak <= " + _number(feedback["window"]["max_peak_to_peak_w"], "W")
                      + f" | Window {feedback['window']['duration_s']:g} s | Actuator: {feedback['actuator']}")
         lines.append("Power measurement plane: " + power["meter"]["measurement_plane"])
-    lines += ["Limits: " + _number(config["max_abs_voltage_v"], "V") + " / " + _number(config["max_abs_current_a"], "A"),
+    limits = [_number(config["max_abs_voltage_v"], "V")]
+    if config.get("max_abs_current_a") is not None:
+        limits.append(_number(config["max_abs_current_a"], "A"))
+    lines += ["Limits: " + " / ".join(limits),
         "Run ID: " + summary["run_id"], "Database: " + summary["database"],
         "Config: " + summary["config"], "Config SHA256: " + summary["config_sha256"],
         "Authorization: run command | selected modules and configured route"]

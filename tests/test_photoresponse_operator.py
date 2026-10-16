@@ -263,6 +263,23 @@ assert not forbidden.intersection(sys.modules), forbidden.intersection(sys.modul
         self.assertEqual(status, 0)
         self.assertEqual(json.loads(output.getvalue())["outcome"], "completed")
 
+    def test_voltage_only_launch_allows_omitted_current_bound(self):
+        config, record, _, _, _ = self.fixture()
+        config = replace(config, max_abs_current_a=None)
+        config.validate()
+        config_path = self.root / "voltage-only.toml"
+        config_path.write_text("# injected no-excitation voltage-only profile\n")
+        output, errors = io.StringIO(), io.StringIO()
+        with patch.object(photoresponse_cli, "load_photoresponse_config", return_value=config), \
+                patch.object(photoresponse_cli, "_run", return_value=copy.deepcopy(record)) as acquire, \
+                redirect_stdout(output), redirect_stderr(errors):
+            status = combination_cli.main(["simulate", "--config", str(config_path)])
+        self.assertEqual(status, 0, errors.getvalue())
+        acquire.assert_called_once()
+        limits = next(line for line in output.getvalue().splitlines() if line.startswith("Limits:"))
+        self.assertNotIn(" / ", limits)
+        self.assertNotIn("None", limits)
+
     def test_photocurrent_and_voltage_bias_keep_signed_quantities_and_units(self):
         _, record, path, _, _ = self.fixture(current=True)
         self.assertTrue(record["completed"], record["error"])

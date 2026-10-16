@@ -4,6 +4,19 @@ Last updated: 2026-10-16
 
 ## Current stage
 
+Target delivery resumed at operator request (2026-10-16). The independent scan
+d4dfbb1e completed all six conditions at 08:07:54 UTC, with recorded laser-OFF and
+electrical-safe cleanup; its process exited and both plotting kernels were idle.
+The operator profile already contains dark/20/40/60/80/100 uW, 630 nm / 10 nm,
+2182A CH2 / 10 V and no excitation. Preserve its physical settings and update stale
+comments only (plus descriptive note metadata). An isolated target run exposed a
+startup-summary error when the valid voltage-only profile omits a current bound.
+Fixed the DC summary to display only configured bounds; the new regression
+reproduced the failure then passed. Local full regression passed 748/748 and the
+six-point CLI simulation completed with one shared dark baseline. Fixed-release
+target acceptance/deployment pending.
+Failed isolated attempts remain for audit; no hardware access or new scan occurred.
+
 Unified Combination operator workflow (2026-10-16): approved by the operator.
 `combination_cli run` calls the same DC acquisition service as the compatible
 photoresponse entry, with existing default TOML/run-command permission and
