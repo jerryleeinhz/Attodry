@@ -4,7 +4,8 @@ Update this file whenever a feature is completed. A stage is complete only when 
 
 ## Unified Combination run, monitor and plotting
 
-Status: local software/offline acceptance complete (2026-10-16); target delivery pending.
+Status: local software/offline acceptance complete (2026-10-16); code committed/pushed.
+Operator explicitly defers LK_setup deployment for this round; target acceptance remains pending.
 
 - Approved common `combination_cli run` delegates to the existing DC service;
   old CLI/default TOML/flags remain compatible. Full launch summary, incremental
@@ -37,6 +38,12 @@ Status: local software/offline acceptance complete (2026-10-16); target delivery
   read the default private TOML to format its new launch summary. Corrected the
   test to provide its own explicit public simulation fixture; no production
   missing-file/configuration check was relaxed. Repeat in a fresh clone.
+- Functional commit 2ca9e20 and fixture correction 0b482d9 are pushed. A new
+  independent photoresponse run appeared before the retry; the owner guard stopped
+  target work without changing the active checkout (6d1ea2f). Operator requests
+  code-only delivery this round. No hardware access, scan interruption, target
+  deployment or successful target full-suite acceptance is claimed. Future deployment
+  may back up/update Photoresponse_Analysis and must preserve the SR830 notebook.
 
 ## Simple daily photoresponse CLI
 

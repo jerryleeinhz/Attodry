@@ -19,12 +19,19 @@ source settings, T/B and semantic gate/leakage columns. Failed/active records ne
 explicit audit selection; overload sentinels never become numeric plot values.
 Condition means are not duplicated as independent repeats (n=1 error undefined).
 Local full regression: 747/747, plus NKT/CLD public-entry simulations and monitor.
-Target validation/deployment is pending. The first isolated suite exposed an old
+Functional release `2ca9e20` and fixture correction `0b482d9` are committed/pushed
+on module/integration-photovoltage/current. Target validation/deployment is pending.
+The first isolated suite exposed an old
 mocked CLI test's dependency on uncommitted hardware.local.toml; fixed its explicit
 simulation-file fixture and retained the failed clone/logs before retrying.
-Read-only owner check found Jupyter only,
-with both kernels idle, and local edits in Photoresponse_Analysis and SR830 sweep
-notebooks; preserve these and resolve deployment handling before active update.
+The next target owner check found a newly started independent photoresponse run;
+validation stopped before cloning/updates. The operator explicitly requests code
+delivery only, NO LK_setup deployment in this round. Active target HEAD remains
+6d1ea2f; scan and local files were not changed. Earlier checks found two idle
+plotting kernels and edits in Photoresponse_Analysis/SR830 sweep notebooks.
+For a future authorized deployment, the operator permits backing up then updating
+Photoresponse_Analysis, while preserving the SR830 notebook byte-for-byte.
+Complete fresh target offline acceptance and recheck active scans before deployment.
 See `COMBINATION_PHOTORESPONSE_GUIDE.md` for usage and pinned reuse provenance.
 
 Latest read-only real-run diagnosis (2026-10-16, run 9cf67ba6): dark and 200/400 uW
