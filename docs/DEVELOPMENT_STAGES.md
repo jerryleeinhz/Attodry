@@ -4,7 +4,7 @@ Update this file whenever a feature is completed. A stage is complete only when 
 
 ## Simple daily photoresponse CLI
 
-Status: software/offline complete; target validation/deployment pending (2026-10-16).
+Status: software and isolated target offline acceptance/deployment complete (2026-10-16).
 
 - Operator-approved `run` command itself confirms acquisition of the selected
   modules/route. No new TOML permission fields; legacy flags and --config work.
@@ -23,6 +23,13 @@ Status: software/offline complete; target validation/deployment pending (2026-10
   cleanup and import isolation from another checkout. No real run is part of delivery.
 - Full local suite **694/694** passed; the ten focused tests also verify invocation
   persistence in SQLite and failed raw records. No hardware was contacted.
+- A fresh origin clone on LK_setup lyr passed **694/694**, both NKT/CLD simulations
+  and python -m describe with PYTHONPATH unset. Feature `8b33188` is pushed and
+  fast-forward deployed from `313db00`; the active tracked tree is clean and all
+  **14 local TOML hashes** are unchanged. Active-root no-PYTHONPATH describe confirms
+  the exact approved default. Shared editable installation was not modified.
+  Ignored deployment/test receipts remain local; no instrument was connected or
+  scan started, and this release does not change the operator's power limits.
 
 ## 2182A selectable DC voltage channel and range
 
