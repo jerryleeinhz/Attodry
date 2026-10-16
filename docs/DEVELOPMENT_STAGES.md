@@ -4,7 +4,7 @@ Update this file whenever a feature is completed. A stage is complete only when 
 
 ## Unified workflow — voltage-only deployment correction
 
-Status: local full regression passed 748/748 (2026-10-16); target acceptance pending.
+Status: target offline complete and deployed (2026-10-16); no new hardware run.
 
 - Target offline simulation reproduced a startup-summary TypeError for a valid
   no-excitation 2182A profile without max_abs_current_a. Display only configured
@@ -17,11 +17,26 @@ Status: local full regression passed 748/748 (2026-10-16); target acceptance pen
 - Operator requested idle-only deployment, direct analysis Notebook update and
   dark/20/40/60/80/100 uW handover. Preserve all station physical settings, raw
   failures and the locally edited SR830 Notebook; no real scan is authorized here.
+- Fixed release 696e338 passed 748/748 in a fresh LK_setup lyr clone. The exact
+  six-point simulation, monitor, matched-dark/delta assertions, PNG/PDF/SVG/CSV
+  exports, root module entry and historical rejected-record checks passed.
+  The completed six-point real archive loads six accepted rows and plots its five
+  light differences; hashes confirm source archives unchanged.
+- Fresh process/Jupyter checks verified idle before fast-forwarding active NKT
+  6d1ea2f -> 696e338. Analysis Notebook and trial TOML were backed up. The trial's
+  existing numerical settings stay unchanged; stale headers/note now describe the
+  actual six points. Other 13 local TOMLs and the SR830 Notebook retain their hashes.
+- Active default-config and monitor checks passed without PYTHONPATH; the latter
+  reports the completed d4dfbb1e run, 6/6 accepted and clean recorded cleanup.
+  Evidence/backups: run_data/deploy-unified-operator-20261016T082501Z. Failed
+  080951Z/081701Z attempts remain. The public smoke profile's 3 s simulation
+  timeout did not pass; the requested six-point profile passed instead, with its
+  explicitly synthetic actuator domain separated from all real settings.
+  No instrument connection, output command, scan launch or process interruption.
 
 ## Unified Combination run, monitor and plotting
 
-Status: local software/offline acceptance complete (2026-10-16); code committed/pushed.
-Operator explicitly defers LK_setup deployment for this round; target acceptance remains pending.
+Status: target offline complete and deployed (2026-10-16), with voltage-only correction above.
 
 - Approved common `combination_cli run` delegates to the existing DC service;
   old CLI/default TOML/flags remain compatible. Full launch summary, incremental
@@ -56,10 +71,10 @@ Operator explicitly defers LK_setup deployment for this round; target acceptance
   missing-file/configuration check was relaxed. Repeat in a fresh clone.
 - Functional commit 2ca9e20 and fixture correction 0b482d9 are pushed. A new
   independent photoresponse run appeared before the retry; the owner guard stopped
-  target work without changing the active checkout (6d1ea2f). Operator requests
-  code-only delivery this round. No hardware access, scan interruption, target
-  deployment or successful target full-suite acceptance is claimed. Future deployment
-  may back up/update Photoresponse_Analysis and must preserve the SR830 notebook.
+  target work without changing the active checkout (6d1ea2f). The operator initially
+  deferred deployment, then authorized idle-only target acceptance/update. This
+  subsequent delivery is verified above, with analysis backup/update and exact
+  preservation of the SR830 Notebook. No new hardware run is claimed.
 
 ## Simple daily photoresponse CLI
 

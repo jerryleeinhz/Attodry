@@ -13,9 +13,28 @@ comments only (plus descriptive note metadata). An isolated target run exposed a
 startup-summary error when the valid voltage-only profile omits a current bound.
 Fixed the DC summary to display only configured bounds; the new regression
 reproduced the failure then passed. Local full regression passed 748/748 and the
-six-point CLI simulation completed with one shared dark baseline. Fixed-release
-target acceptance/deployment pending.
-Failed isolated attempts remain for audit; no hardware access or new scan occurred.
+six-point CLI simulation completed with one shared dark baseline. Fixed release
+696e338 then passed 748/748 on LK_setup lyr in a fresh clone, plus the six-point
+simulation, read-only monitor, shared-baseline/plot/export checks, module entry
+with PYTHONPATH unset and historical failed-record analysis. The completed real
+six-point archive also plotted successfully without modification; this is
+file-analysis evidence, not a new hardware run.
+After a fresh idle-owner check, active NKT fast-forwarded 6d1ea2f -> 696e338.
+Photoresponse_Analysis and the prior trial TOML were backed up before update;
+the new unified_plotting Notebook matches the tested release. All 13 other local
+TOML hashes and the edited SR830 Notebook stayed byte-for-byte unchanged.
+The default trial filename/output directory retain their legacy 50-300uW/dark7
+names, but the documented authoritative array is dark/20/40/60/80/100 uW.
+Only stale comments and note metadata changed in the real TOML; its numerical
+parameters, source-current mode and physical protections were preserved.
+Active root-module/config and monitor checks passed; monitor reads the completed
+d4dfbb1e run with 6/6 accepted conditions. Records/backups/exports:
+run_data/deploy-unified-operator-20261016T082501Z. Failed isolated attempts
+080951Z/081701Z remain for audit; the first short public smoke profile exceeded
+its 3 s simulated qualification budget, and the second exposed the summary bug.
+The requested six-point offline copy explicitly uses the synthetic actuator
+domain (0.1-10%, initial 1%) instead of the real 26-100% domain; hardware values
+were not relaxed. No instrument access or real scan start occurred in this delivery.
 
 Unified Combination operator workflow (2026-10-16): approved by the operator.
 `combination_cli run` calls the same DC acquisition service as the compatible
@@ -33,18 +52,18 @@ explicit audit selection; overload sentinels never become numeric plot values.
 Condition means are not duplicated as independent repeats (n=1 error undefined).
 Local full regression: 747/747, plus NKT/CLD public-entry simulations and monitor.
 Functional release `2ca9e20` and fixture correction `0b482d9` are committed/pushed
-on module/integration-photovoltage/current. Target validation/deployment is pending.
+on module/integration-photovoltage/current. Target validation/deployment is now
+complete with the voltage-only correction recorded above.
 The first isolated suite exposed an old
 mocked CLI test's dependency on uncommitted hardware.local.toml; fixed its explicit
 simulation-file fixture and retained the failed clone/logs before retrying.
 The next target owner check found a newly started independent photoresponse run;
-validation stopped before cloning/updates. The operator explicitly requests code
-delivery only, NO LK_setup deployment in this round. Active target HEAD remains
-6d1ea2f; scan and local files were not changed. Earlier checks found two idle
+validation stopped before cloning/updates. The operator initially requested code
+delivery only and deferred deployment, so target HEAD stayed 6d1ea2f at that time.
+The later idle-only deployment request is completed above. Earlier checks found two idle
 plotting kernels and edits in Photoresponse_Analysis/SR830 sweep notebooks.
-For a future authorized deployment, the operator permits backing up then updating
-Photoresponse_Analysis, while preserving the SR830 notebook byte-for-byte.
-Complete fresh target offline acceptance and recheck active scans before deployment.
+The authorized backup/update of Photoresponse_Analysis and preservation of the
+SR830 Notebook have now been verified. Recheck active scans before future updates.
 See `COMBINATION_PHOTORESPONSE_GUIDE.md` for usage and pinned reuse provenance.
 
 Latest read-only real-run diagnosis (2026-10-16, run 9cf67ba6): dark and 200/400 uW
