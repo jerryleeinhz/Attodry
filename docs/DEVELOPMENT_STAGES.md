@@ -2,6 +2,170 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Power stability, center-seeking and bounded recovery
+
+Status (2026-10-16): code + local offline acceptance complete. Local full suite
+**784/784 in 89.179 s**; Combination public simulation completed 5/5, cleanup clean.
+Target full suite **784/784 in 73.958 s** also passed in an isolated bundle.
+Small authorized 594.4 nm / dark+5/55/65/75uW hardware attempt rejected at identity
+preflight (0/5): mixed DCL/newline/IDN serial reply. It performed no output-setting
+commands and no automatic retry. A separate read-only check confirmed NKT OFF
+and 6221 OFF/zero; original rejected cleanup flags remain unmodified.
+Real optical/speed acceptance is pending; active deployment/full scan not performed.
+This Git delivery includes the approved implementation, tests and documentation.
+
+- Separate opt-in tuning/variation/drift/formal criteria with legacy snapshot and
+  default semantics retained; explicit 5%/10%,5s/2s trial examples, no auto-widening.
+- Reuse shared PowerWindow and bounded actuator helpers, proactively refine steps,
+  constrain local measured response estimates, clear history on wavelength/band change.
+- Retain outer T/B stability and one dark baseline per scan visit. Fresh PM evidence
+  follows electrical qualification, before source enable; actuator frozen formally.
+- Typed safe power deviations only: at most configured extra attempts and total
+  visit time, whole-window rejection/retest with exact dark reference. Fail closed
+  on no signal, hard limits, protection, communication uncertainty, audit or cleanup.
+- Preserve failed attempts, accepted-only means, measured-power plotting position,
+  monitor phases/reasons/attempts/cleanup and raw timing. Retain the 15-to-7 settings
+  verification improvement; production polling remains 100 ms until commissioned.
+- Added 26 tests including real 594.4 nm trace/gap, overlapping targets, drift and
+  noise, reversal/bounds, recovery/budget, no retry on hard faults, failure retention,
+  persistence/plot/monitor, reuse invalidation and no-excitation zero-setpoint guard.
+- Public simulation/hardware handover TOMLs and docs/POWER_STABILITY_OPTIMIZATION.md
+  document the proposed parameters and their experimental provenance. No defaults
+  are advertised as hardware performance; real controlled speed A/B remains pending.
+
+## Measurement speed and persistent development review (historical, superseded above)
+
+Status: implementation and local offline acceptance complete (2026-10-16).
+Target deployment, shorter-poll response acceptance and real speed comparison
+not performed; no instrument connection or scan start in this delivery.
+
+- Reuse the existing HardwareElectrical/Voltmeter2182/PhotoresponseRunner path.
+  Keep one full detector check after optical preparation and both full checks
+  around every fresh READ. Share that READ's timestamped evidence with outer
+  sampling states, without cross-sample caching. Single-coordinate three-read
+  power points use 7 rather than 15 complete 23-query verification rounds.
+  Fresh source/relay guards, 2400 complete checks, limits and cleanup remain.
+- Serial relay uses 20/40/80/100 ms bounded polling under the original lock;
+  SEND only once, one monotonic deadline from before SEND, sleep clamped to
+  remaining budget, late nonempty replies rejected and sessions poisoned.
+  Injected 100 ms baseline remains available for offline comparison. No config
+  schema or operator TOML modification; actual shorter response requires testing.
+- Ten new tests first reproduced the budget/deadline failures and now cover
+  fake timing/results, post-optical drift, setting changes before/during READ,
+  empty replies, late replies, bounded wait and invalid polling policy.
+  Final full regression **758/758** passed in 71.216 s using normal Windows TEMP.
+  Prior sandbox TEMP permission failures remain in ignored logs.
+- Same fake dark+2-light fixture / 9 voltage reads: serial queries 1106 -> 554;
+  100 ms fake timings 111.00 -> 55.80 s; short-poll fake time 11.48 s. All
+  accepted results and separate cleanup facts preserved. Not hardware timings.
+  NKT/CLD common-entry simulations completed; readonly CLD monitor 9/9 accepted.
+  Evidence: ignored run_data/speed_optimization_20261016.
+- Added docs/MEASUREMENT_PERFORMANCE.md with measured baseline, implementation,
+  required development checks and offline/real acceptance procedure. AGENTS
+  requires it before changes; module guide, README and operator guide link it.
+  Physical limits, sample count, NPLC, tolerance, failures and data provenance
+  preserved. Drift-margin and bounded power-requalification/retry remain explicit
+  follow-up items; formal drift still stops the run. No deployment or restart.
+
+## Operator continuation from 562.2 nm with edited tolerance
+
+Status: local/target offline verified; authorized hardware continuation rejected
+after 18/90 conditions (2026-10-16), cleanup verified; complete hardware acceptance pending.
+
+- User explicitly changed target tolerance to 40% and requested continuation
+  from 562 nm. Latest saved TOML already omits 530 nm and 95 uW: nine remaining
+  wavelengths through 820 nm, 10 nm bandwidth, dark then 5–85 uW in 10 uW steps.
+  Use it unchanged: 90 conditions / 270 formal reads, initial source current 32%,
+  2182A CH2 / 10 V and no excitation. Physical safety limits/minimum signal/
+  peak-to-peak guard unchanged. Source code/deployment unchanged at 7efdc1c.
+- The initial prepared 99-condition candidate detected the operator's later
+  save and refused before installation/access. Preserve that preparation;
+  re-read and verify the final selected snapshot rather than overwrite edits.
+  Current TOML SHA-256 is 3bdb6c428ddac6ec594fe69bbc5eb3eb064a7eafb54e87b00bb4406b73772145.
+- Existing strict resume restarts an unchanged full plan. This changed-plan
+  continuation uses a new run/manifest link to rejected parent 100d4413, without
+  joining old partial windows or changing their acceptance. Every remaining
+  wavelength gets a fresh matching dark. Local and target fake-clock checks
+  passed all 90 conditions / 270 reads and dark references.
+- Idle-owner checks preceded launch. Run 54e4796fb3ad428a954d9f9a38b2d40a started
+  10:11:46 UTC (13:11 Helsinki), PID 6984 / parent 14036, identities recorded;
+  initial readonly checks show 2/90 collected (fresh 562.2 nm dark + 5 uW light),
+  progression to 15 uW and no recorded error. Formal PM checks included 3.92416
+  and 3.76846 uW within the user-selected 3–7 uW interval; full-run acceptance
+  and cleanup remain pending. Target evidence is ignored at
+  run_data/continue562-40pct-20261016T100955Z; stale preparation retained at
+  run_data/continue562-40pct-20261016T100636Z. Do not deploy over the running scan.
+- Final continuation rejection: 594.4 nm / 75 uW first formal PM 44.241187 uW
+  below selected 45 uW lower bound, after qualification's decreasing window
+  47.282163 -> 45.359873 uW. Qualification-to-formal gap 15.985 s. Native exit
+  1; separate laser-OFF and electrical-safe cleanup confirmed, no cleanup error.
+  All raw records retained; no automatic retry or further tolerance change.
+- Requested speed audit only, no implementation: first 16 completed conditions
+  average 72.062 s each. Wrapped electrical read 7.832 s vs actual READ roundtrip
+  0.212 s; full verification comprises 23 serial queries, repeated about 15 times
+  per three-read condition. Bright power qualification averages 8.561 s; explicit
+  settle sleeps total zero. Priorities are shared same-boundary verification,
+  bounded serial poll timing validation, then drift-margin/requalification policy.
+  Estimates require offline tests and authorized small hardware comparison.
+  Evidence: local run_data/resume562_20261016T100955Z/speed-breakdown.json.
+
+## Dense wavelength and dark-first power grid
+
+Status: configuration/offline verification complete; first two real attempts
+stopped on low-signal protection (2026-10-16), operator-authorized 32% retry
+stopped on formal power drift. Full-grid hardware acceptance remains pending.
+
+- Reuse existing Combination axes without production code changes (7efdc1c).
+  Wavelength outer: ten 530–820 nm centers rounded to the existing 0.1 nm grid,
+  maximum rounding error <0.045 nm, fixed 10 nm bandwidth. At each wavelength,
+  dark then ten bright targets 5/15/25/35/45/55/65/75/85/95 uW. Each group gets
+  its own matching dark baseline; no drift correction is implied.
+- Local and target fake-clock verification passed all 110 conditions and 330
+  formal reads, including ten distinct dark references and 100 matching light
+  subtractions. Synthetic power model/actuator settings are explicitly separated
+  from the real profile, whose identities, isolation and limits are unchanged.
+- Fresh owner checks found no independent scan and all three plotting kernels
+  idle. Backed up and updated only the ignored default trial TOML; other 13
+  local profiles unchanged. No code deployment or Notebook overwrite.
+- First run 9a6e968d recorded the dark, then rejected its first 530 nm / 5 uW
+  light: PM100D read 0.0546941301 uW at 26.1%, below the unchanged 0.1 uW
+  minimum-signal threshold. No feedback adjustment occurred. Raw laser-OFF and
+  electrical-safe cleanup confirmed; native exit 1, raw failures retained in
+  target run_data/dense-wave-power-20261016T092132Z.
+- Operator confirmed the beam path and requested 28% initial source current.
+  Only initial current/note/comments changed; all safety and feedback limits
+  remain unchanged. Local and target full-grid offline checks passed again.
+  Retry 42b1a3cedcd549e5819803c1ff4827ff started 09:36:26 UTC with recorded
+  acquisition PID 4956, birth time, command and configuration hash. Evidence:
+  target run_data/dense-wave-power-28pct-20261016T093434Z. Data is isolated in
+  run_data/nkt530-820_dark5-95uW_10x10. The retry also recorded only the dark,
+  then rejected its first light at 0.0519594217 uW with confirmed 28% current
+  and 525–535 nm filter readbacks. No feedback adjustment; raw laser-OFF and
+  electrical-safe cleanup confirmed, native exit 1. Both failures remain.
+- Do not infer continuous low power from single startup reads. Requested a
+  stable manual PM100D reading at 530 nm / 10 nm / 28% before further retry.
+  The operator then cancelled that standalone read and authorized a direct 32%
+  retry; no separate PM100D read was performed. Current default uses 32% initial
+  source current; limits and grid unchanged, local and target full-grid offline
+  checks passed again. Run 100d4413cc2f4f02960e5d86100a236a started 09:44:09 UTC
+  (12:44 Helsinki), PID 1684 / parent 6300, passed preflight and entered dark
+  acquisition. Initial readonly checks confirm 2/110 collected (dark + 5 uW),
+  formal light PM brackets 5.1555–5.33159 uW, no recorded error and progression
+  to 15 uW. Final acceptance and cleanup remain pending for this active run.
+  Evidence: target run_data/dense-wave-power-32pct-20261016T094237Z.
+  No threshold relaxation, automatic search or deployment over an active scan.
+- Final readonly audit: 12/110 conditions collected (530 nm dark + ten lights,
+  then 562.2 nm dark), 36 valid voltage reads. The first 562.2 nm / 5 uW light
+  failed before its first voltage read: formal PM 5.814519 uW exceeded the
+  5.5 uW upper target bound. Spread 0.781832 uW remained below 5 uW limit.
+  Last qualified window mean 5.194956 uW, range 5.032687–5.354479 uW; formal
+  PM check followed 15.989 s later, including 7.664 s electrical begin and
+  3.760 s prepare. Source current stayed 30.3%. Short-window qualification
+  did not exclude later upward drift; physical cause remains undetermined.
+  Run rejected, raw partial/failure records preserved. Native exit 1 and
+  independent laser-OFF/electrical-safe cleanup confirmed, no cleanup error.
+  Diagnosis used files only, without instrument access, restart or config edits.
+
 ## Real six-point run and final monitor wording
 
 Status: real six-point control/recording acceptance complete (2026-10-16);

@@ -1,0 +1,116 @@
+# HANDOVER TEMPLATE: reuse confirmed site identities/limits; do not replace with invented values.
+# Small 594.4 nm comparison only; not a full wavelength scan.
+# Incomplete by design. Fill physical limits and exact identities in an ignored
+# local file; validate-config does NOT open hardware. Defaults are not permission.
+[photoresponse]
+light_source = "nkt"
+mode = "open_circuit_voltage"
+detector = "keithley2182a"
+samples_per_window = 3
+repeats = 1
+sample_interval_s = 0.1
+settle_s = "CHANGE_ME"
+max_abs_voltage_v = "CHANGE_ME"
+
+[photoresponse_hardware]
+timeout_ms = 10000
+wiring_confirmed = false
+no_excitation_isolated = false
+detector_transport = "via_6221" # visa for a directly connected 2182A or 2400
+
+[photoresponse_6221]
+address = "CHANGE_ME"
+expected_idn = "CHANGE_ME_FULL_IDN"
+compliance_v = "CHANGE_ME" # At least 0.1 V; no higher than sample voltage limit.
+max_step_a = "CHANGE_ME"
+settle_s = "CHANGE_ME"
+tolerance_a = "CHANGE_ME"
+
+[photoresponse_2182]
+expected_idn = "CHANGE_ME_FULL_IDN"
+channel = 2 # 1 or 2; omitted channel defaults to 1 for older profiles.
+voltage_range_v = "CHANGE_ME" # CH1: 0.01, 0.1, 1, 10, 100 V; CH2: 0.1, 1, 10 V.
+nplc = "CHANGE_ME"
+# address is REQUIRED with detector_transport=visa and FORBIDDEN via_6221.
+
+[nkt_source]
+control = "current" # current | power (constant-power mode; pair with actuator = "source_power")
+# apply_control = true # optional: preflight switches a healthy, emission-off source to `control`
+max_level_pct = "CHANGE_ME"
+allowed_pp_ratios = []
+dll_path = "CHANGE_ME_X64_NKTPDLL_PATH"
+port = "CHANGE_ME_PORT"
+address = "CHANGE_ME_MODULE_ADDRESS"
+expected_serial = "CHANGE_ME_SERIAL"
+
+[nkt_varia]
+address = "CHANGE_ME_MODULE_ADDRESS"
+expected_serial = "CHANGE_ME_SERIAL"
+monitor_present = false
+
+[nkt_run]
+backend = "nkt_sdk"
+mode = "varia_bandpass"
+manual_route = "CHANGE_ME_PHYSICAL_ROUTE"
+emit = true # run authorizes the selected devices only after configuration/preflight checks.
+timeout_s = 10.0
+poll_interval_s = 0.1
+dwell_s = 0.0
+output_directory = "../run_data/photoresponse"
+run_name = "CHANGE_ME_RUN_NAME"
+note = ""
+
+[[nkt_run.points]]
+source_level_pct = "CHANGE_ME"
+wavelength_nm = 594.4
+bandwidth_nm = 10.0
+# nd_pct may be omitted: retain and verify the current confirmed VARIA ND.
+
+[photoresponse_storage]
+database_path = "../run_data/photoresponse/audit.sqlite"
+
+[photoresponse_combination]
+# Outer to inner; optical is one complete wavelength/bandwidth/initial-actuator row.
+order = ["repeat", "environment", "optical", "target_power_w", "bias", "smu"]
+
+[pm100d]
+backend = "visa"
+resource = "CHANGE_ME_PM100D_VISA"
+expected_serial = "CHANGE_ME_CONSOLE_SERIAL"
+expected_sensor_serial = "CHANGE_ME_SENSOR_SERIAL"
+io_timeout_s = 1.0
+wavelength_tolerance_nm = 0.1
+average_count = 1
+auto_range = true
+max_power_w = "CHANGE_ME"
+measurement_plane = "CHANGE_ME_CONFIRMED_MEASUREMENT_PLANE"
+
+[power_feedback]
+actuator = "source_current"
+power_points = ["dark", 5e-6, 5.5e-5, 6.5e-5, 7.5e-5]
+initial_actuator_mode = "previous"
+tuning_tolerance_fraction = 0.05 # trial center range, operator proposal
+max_retries = 2 # additional attempts; ordinary power deviations only
+point_timeout_s = 600.0 # s, entire bright power visit incl. inner coordinates
+target_tolerance_fraction = 0.10 # trial formal acceptance, never auto-expanded
+max_power_w = "CHANGE_ME"
+minimum_signal_power_w = "CHANGE_ME"
+timeout_s = "CHANGE_ME"
+hold_s = 2.0 # s, experimental, not guaranteed performance
+source_current_min_pct = "CHANGE_ME"
+source_current_max_pct = "CHANGE_ME"
+source_current_step_pct = "CHANGE_ME"
+# Constant-power mode instead (control = "power"): set actuator = "source_power" and
+# replace the three source_current_* keys with
+# source_power_min_pct / source_power_max_pct / source_power_step_pct (0.1 % units).
+# Each step is current * target / measured, capped at source_power_step_pct.
+
+[power_feedback.window]
+duration_s = 5.0
+min_samples = 3
+sample_interval_s = 0.5
+max_peak_to_peak_w = 5e-6 # W, combined absolute cap
+
+max_peak_to_peak_fraction = 0.05 # trial relative p2p cap
+noise_floor_w = 0.0 # W; requires measured noise evidence before increasing
+max_drift_fraction_per_s = 0.002 # target fraction/s, experimental slope limit

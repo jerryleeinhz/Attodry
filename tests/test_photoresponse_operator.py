@@ -43,7 +43,7 @@ def acquisition(directory, *, kind="nkt", reject=False, unsafe=False, current=Fa
     if reject:
         original = power.meter.resource.power_provider
         power.meter.resource.power_provider = lambda: original() + (
-            .0001 if power.row and power.row["qualified"] and
+            .0001 if power.row and power.row["qualified"] and power.row["samples"][-1]["phase"] == "light_before" and
             power.row["target_power_w"] == config.power.targets[-1] else 0)
     record = runner.run()
     if unsafe:
@@ -181,7 +181,7 @@ raise SystemExit(status)
 
     def test_invalid_raw_overload_remains_audit_text_and_never_a_numeric_plot_value(self):
         _, record, path, _, _ = self.fixture(reject=True)
-        sample = record["conditions"][-1]["windows"][0]["samples"][0]
+        sample = record["conditions"][-1]["power_attempts"][0]["windows"][0]["samples"][0]
         sample["voltage_v"], sample["detector_last_raw_reading"] = 9.9e37, "+9.9E37"
         path.write_text(json.dumps(record), encoding="utf-8")
         row = load_photo_plot_rows(path, audit=True)[-1]
@@ -249,7 +249,8 @@ assert not forbidden.intersection(sys.modules), forbidden.intersection(sys.modul
                 redirect_stdout(output), redirect_stderr(errors):
             status = combination_cli.main(["simulate", "--config", str(config_path)])
         self.assertEqual(status, 1)
-        self.assertIn("Primary error: NktError: Formal power drift", errors.getvalue())
+        self.assertIn("Primary error: PowerRecoveryExhausted:", errors.getvalue())
+        self.assertIn("Formal power drift", errors.getvalue())
         self.assertIn("Cleanup overall: clean=True", output.getvalue())
         self.assertIn("Selected modules:", output.getvalue())
         self.assertIn("Config SHA256:", output.getvalue())

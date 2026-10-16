@@ -7,6 +7,7 @@ Before changing code, read these files in order:
 3. `docs/DEVELOPMENT_STAGES.md`
 4. `README.md`
 5. `docs/PROJECT_MODULE_DEVELOPMENT_GUIDE.md`
+6. `docs/MEASUREMENT_PERFORMANCE.md`
 
 Project rules:
 
@@ -20,4 +21,5 @@ Project rules:
 - Keep raw rejected attempts for audit, but exclude them from default analysis.
 - Keep `hardware.local.toml`, local hardware addresses, experimental data, and secrets uncommitted.
 - Run the relevant tests before claiming completion.
+- Review measurement speed for every feature: query/write counts, repeated verification, axis-entry stability, remaining waits, serial response ownership, timing evidence and failure/retry cost. Follow `docs/MEASUREMENT_PERFORMANCE.md`; never trade hardware safety or raw audit for speed.
 - After every completed feature, update `docs/DEVELOPMENT_STAGES.md` and the current-stage section in `docs/PROJECT_HANDOFF.md`.

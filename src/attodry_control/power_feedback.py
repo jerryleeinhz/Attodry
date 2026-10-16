@@ -20,11 +20,14 @@ def actuator_domain(config):
 
 
 class PowerWindow:
-    def __init__(self, config, *, epoch_s, max_power_w):
+    def __init__(self, config, *, epoch_s, max_power_w, target_power_w=None):
         config.validate()
         self.config = config
         self.epoch_s = epoch_s
         self.max_power_w = max_power_w
+        self.target_power_w = target_power_w
+        if (config.max_peak_to_peak_fraction is not None or config.max_drift_fraction_per_s is not None) and target_power_w is None:
+            raise NktError("Relative stability criteria require an explicit target power")
         self.samples = deque()
         self.last_sequence = None
         self.last_finished_s = None
@@ -60,16 +63,37 @@ class PowerWindow:
         covered = end - start >= self.config.duration_s - 1e-9
         p2p = max(values) - min(values)
         enough = len(values) >= self.config.min_samples
-        stable = covered and enough and p2p <= self.config.max_peak_to_peak_w
+        mean = statistics.mean(values)
+        times = [s["finished_monotonic_s"] - start for s in self.samples]
+        mean_time = statistics.mean(times)
+        denominator = sum((t - mean_time)**2 for t in times)
+        slope = sum((t - mean_time)*(p - mean) for t, p in zip(times, values)) / denominator if denominator else 0.
+        limit = self.config.variation_limit_w(self.target_power_w)
+        drift_limit = (None if self.config.max_drift_fraction_per_s is None else
+                       self.target_power_w * self.config.max_drift_fraction_per_s)
+        reasons = []
+        if not covered or not enough:
+            reasons.append("insufficient duration/count")
+        if p2p > limit + 1e-15:
+            reasons.append("power variation")
+        if drift_limit is not None and abs(slope) > drift_limit + 1e-15:
+            reasons.append("power drift trend")
+        stable = not reasons
         return {"mean_power_w": statistics.mean(values), "std_power_w": statistics.pstdev(values),
                 "peak_to_peak_w": p2p, "count": len(values), "started_monotonic_s": start,
                 "finished_monotonic_s": end, "power_window_stable": stable,
-                "reason": "stable" if stable else "insufficient duration/count or excessive variation",
+                "reason": "stable" if stable else "; ".join(reasons),
+                "drift_w_per_s": slope, "max_drift_w_per_s": drift_limit,
+                "max_peak_to_peak_w": limit,
                 "sequences": [s["sequence"] for s in self.samples]}
 
 
 def target_in_tolerance(power_w, config):
     return abs(power_w - config.target_power_w) <= config.target_tolerance_w + 1e-15
+
+
+def tuning_in_tolerance(power_w, config):
+    return abs(power_w - config.target_power_w) <= config.tuning_tolerance_w() + 1e-15
 
 
 def next_nd_pct(current, power_w, config, *, step_pct=None):

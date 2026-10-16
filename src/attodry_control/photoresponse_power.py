@@ -6,11 +6,20 @@ sequential brackets, never a claim of continuous or hardware-synchronous power.
 from copy import deepcopy
 import statistics
 import time
+from dataclasses import replace
 
 from .nkt_config import NktError, number
 from .nkt_control import utc_now
 from .power_feedback import (PowerWindow, next_nd_pct, next_source_current_pct,
-                             next_source_power_pct, next_cld_current_a, target_in_tolerance)
+                             next_source_power_pct, next_cld_current_a, target_in_tolerance, tuning_in_tolerance)
+
+
+class PowerDeviation(NktError):
+    """Recoverable optical deviation, after all hardware/status guards passed."""
+
+
+class PowerRecoveryExhausted(NktError):
+    """The explicit point attempt/time budget was exhausted; stop the run."""
 
 
 class PhotoresponsePower:
@@ -24,6 +33,8 @@ class PhotoresponsePower:
         self.clock, self.sleep, self.on_event = clock, sleep, on_event
         self.row = self.feedback = self.wavelength = None
         self.formal_values = []
+        self.point_deadline = None
+        self._history_key, self._response_history = None, []
 
     def _event(self, phase, **values):
         if self.on_event:
@@ -36,6 +47,7 @@ class PhotoresponsePower:
                     "target_power_w": None if dark else self.feedback.target_power_w,
                     "optical_state": "dark" if dark else "light",
                     "target_tolerance_w": self.feedback.target_tolerance_w,
+                    "tuning_tolerance_w": self.feedback.tuning_tolerance_w(),
                     "measurement_plane": self.config.meter.measurement_plane,
                     "qualified": False, "formal_mean_power_w": None}
         condition["power"] = self.row
@@ -44,6 +56,11 @@ class PhotoresponsePower:
         self.wavelength = ((filt["lower_edge_nm"] + filt["upper_edge_nm"]) / 2
                            if filt and filt.get("kind") == "varia" else point.wavelength_nm)
         self.row["wavelength_nm"] = self.wavelength
+        history_key = (self.wavelength, filt.get("upper_edge_nm") if filt else None,
+                       filt.get("lower_edge_nm") if filt else None)
+        if history_key != self._history_key:
+            self._response_history = []
+        self._history_key = history_key
         self.row["wavelength_kind"] = "nominal_diode" if hasattr(point, "current_a") else "filter_readback"
         self.row["pm_preparation"] = self.meter.prepare(self.wavelength)
         self.formal_values = []
@@ -56,6 +73,7 @@ class PhotoresponsePower:
         self.row["samples"].append(entry)
         start = len(self.meter.transcript)
         try:
+            self.check_point_deadline()
             entry["optical_before"] = self.laser.verify_point(emitting=illuminated, phase=phase + "_power_before")
             if guard:
                 entry["modules_before"] = guard()
@@ -71,21 +89,33 @@ class PhotoresponsePower:
             entry["sample"] = deepcopy(sample)
             if illuminated:
                 number(sample["power_w"], "feedback measured power W", 0, self.feedback.max_power_w)
+                if self.feedback.minimum_signal_power_w is not None and sample["power_w"] < self.feedback.minimum_signal_power_w:
+                    raise NktError("Signal below minimum_signal_power_w; no search for light")
+                if self.feedback.reduce_above_power_w is not None and sample["power_w"] > self.feedback.reduce_above_power_w:
+                    raise NktError("Power exceeds reduction threshold")
             entry["optical_after"] = self.laser.verify_point(emitting=illuminated, phase=phase + "_power_after")
             if guard:
                 entry["modules_after"] = guard()
             entry["valid"] = True
+            self.check_point_deadline()
             return sample
         except (Exception, KeyboardInterrupt) as exc:
+            entry["valid"] = False
             entry["error"] = f"{type(exc).__name__}: {exc}"
             raise
         finally:
             entry["finished_monotonic_s"] = self.clock()
             entry["duration_s"] = entry["finished_monotonic_s"] - entry["started_monotonic_s"]
             entry["pm_transcript"] = deepcopy(self.meter.transcript[start:])
-            self._event("power_sample", evidence=entry)
+            self._event("power_sample", evidence=entry, target_power_w=self.row["target_power_w"],
+                        measurement_plane=self.config.meter.measurement_plane)
+
+    def check_point_deadline(self):
+        if self.point_deadline is not None and self.clock() >= self.point_deadline:
+            raise PowerRecoveryExhausted("Power point total time budget exhausted")
 
     def _deadline(self, deadline):
+        self.check_point_deadline()
         if self.clock() > deadline:
             raise NktError("Power qualification timed out")
 
@@ -94,7 +124,7 @@ class PhotoresponsePower:
         f = self.feedback
         self.row["qualified"] = False
         deadline = self.clock() + f.timeout_s
-        window = PowerWindow(f.window, epoch_s=self.clock(), max_power_w=f.max_power_w)
+        window = PowerWindow(f.window, epoch_s=self.clock(), max_power_w=f.max_power_w, target_power_w=f.target_power_w)
         stable_since = None
         previous_direction = None
         step = {"varia_nd": f.nd_step_pct, "source_current": f.source_current_step_pct,
@@ -109,18 +139,31 @@ class PhotoresponsePower:
                 raise NktError("Power exceeds reduction threshold during qualification")
             if f.minimum_signal_power_w is not None and sample["power_w"] < f.minimum_signal_power_w:
                 raise NktError("Signal below minimum_signal_power_w; no search for light")
-            in_target = all(target_in_tolerance(s["power_w"], f) for s in window.samples)
+            in_target = all(tuning_in_tolerance(s["power_w"], f) for s in window.samples)
+            self._event("power_stability", result=result, target_in_tuning_range=in_target,
+                        target_power_w=f.target_power_w, measured_power_w=sample["power_w"],
+                        reason=result["reason"] if not result["power_window_stable"] else
+                               "stable" if in_target else "target deviation",
+                        control_phase="waiting_stability")
             if result["power_window_stable"] and in_target:
                 if stable_since is None:
                     stable_since = self.clock()
                 if self.clock() - stable_since + 1e-9 >= f.hold_s:
                     self.row.update(qualified=True, qualification_result=deepcopy(result))
+                    self.row.update(qualified_monotonic_s=self.clock(), qualified_at_utc=utc_now(),
+                                    first_formal_power_gap_s=None)
                     self.formal_values = []
                     self._reference_values = [s["power_w"] for s in window.samples]
+                    self._formal_window = window
+                    if f.actuator == "source_current" and f.tuning_tolerance_fraction is not None:
+                        optical = self.laser.verify_point(emitting=True, phase="qualified_response_history")
+                        self._response_history.append((optical["source"]["level_pct"], result["mean_power_w"]))
+                        del self._response_history[:-16]
                     return result
-            elif result["power_window_stable"] and not target_in_tolerance(result["mean_power_w"], f):
+            elif result["power_window_stable"] and not tuning_in_tolerance(result["mean_power_w"], f):
                 direction = 1 if result["mean_power_w"] < f.target_power_w else -1
-                if previous_direction is not None and direction != previous_direction:
+                reversed_direction = previous_direction is not None and direction != previous_direction
+                if reversed_direction:
                     minimum = .1
                     if f.actuator == "cld_current":
                         minimum = min(f.current_step_a, max(self.laser.config.current_tolerance_a * 2, 1e-12))
@@ -129,19 +172,42 @@ class PhotoresponsePower:
                         step = round(step, 1)
                 previous_direction = direction
                 optical = self.laser.verify_point(emitting=True, phase="feedback_before_adjustment")
+                # Legacy policies retain the original bounded step. Explicit
+                # narrow tuning enables center-seeking and early fine steps.
+                tuning = replace(f, target_tolerance_w=f.tuning_tolerance_w())
+                effective_step = step
+                relative_error = abs(result["mean_power_w"] - f.target_power_w) / f.target_power_w
+                if f.tuning_tolerance_fraction is not None and relative_error < .25:
+                    effective_step = min(step, max(.1 if f.actuator != "cld_current" else
+                        min(step, self.laser.config.current_tolerance_a * 2), step * relative_error / .25))
+                    if f.actuator != "cld_current":
+                        effective_step = max(.1, round(effective_step, 1))
                 if f.actuator == "cld_current":
                     current = optical["source"]["getLdCurrSetpoint"]
-                    value = next_cld_current_a(current, result["mean_power_w"], f, step_a=step)
+                    value = next_cld_current_a(current, result["mean_power_w"], tuning, step_a=effective_step)
                 elif f.actuator == "source_current":
                     current = optical["source"]["level_pct"]
-                    value = next_source_current_pct(current, result["mean_power_w"], f, step_pct=step)
+                    history = self._response_history
+                    if f.tuning_tolerance_fraction is not None:
+                        history.append((current, result["mean_power_w"]))
+                        for old_current, old_power in reversed(history[:-1]):
+                            if abs(current - old_current) >= .1 and (current-old_current)*(result["mean_power_w"]-old_power) > 0:
+                                slope = (result["mean_power_w"] - old_power) / (current - old_current)
+                                estimate = abs((f.target_power_w - result["mean_power_w"]) / slope)
+                                effective_step = max(.1, round(min(effective_step, estimate), 1))
+                                break
+                        del history[:-16]
+                    value = next_source_current_pct(current, result["mean_power_w"], tuning, step_pct=effective_step)
                 elif f.actuator == "source_power":
                     current = optical["source"]["level_pct"]
-                    value = next_source_power_pct(current, result["mean_power_w"], f, step_pct=step)
+                    value = next_source_power_pct(current, result["mean_power_w"], tuning, step_pct=effective_step)
                 else:
                     current = optical["filter"]["nd_pct"]
-                    value = next_nd_pct(current, result["mean_power_w"], f, step_pct=step)
+                    value = next_nd_pct(current, result["mean_power_w"], tuning, step_pct=effective_step)
                 adjustment = {"actuator": f.actuator, "before": current, "requested": value,
+                              "control_phase": "fine_adjustment" if effective_step < step or reversed_direction else "coarse_adjustment",
+                              "direction_reversed": reversed_direction,
+                              "effective_step": effective_step,
                               "power_window": deepcopy(result), "finished": False}
                 self.row["adjustments"].append(adjustment)
                 try:
@@ -160,11 +226,27 @@ class PhotoresponsePower:
                     raise
                 finally:
                     self._event("power_adjustment", evidence=adjustment)
-                window = PowerWindow(f.window, epoch_s=self.clock(), max_power_w=f.max_power_w)
+                window = PowerWindow(f.window, epoch_s=self.clock(), max_power_w=f.max_power_w, target_power_w=f.target_power_w)
                 stable_since = None
             else:
                 stable_since = None
             self.sleep(f.window.sample_interval_s)
+
+    def preacquisition_check(self, guard):
+        """Fresh post-electrical evidence; no excitation or tuning inside READ."""
+        sample = self.formal_sample("preacquisition", illuminated=True, guard=guard)
+        self.row.setdefault("preacquisition_checks", []).append({"power_w": sample["power_w"],
+            "checked_monotonic_s": self.clock(), "after_qualification_s": self.clock() - self.row["qualified_monotonic_s"]})
+        if not tuning_in_tolerance(sample["power_w"], self.feedback):
+            self.row["qualified"] = False
+            self.row["samples"][-1].update(window_valid=False, rejection="preacquisition target deviation")
+            self._event("power_window_rejected", evidence=self.row["samples"][-1], assessment={
+                "reason": "preacquisition target deviation", "target_power_w": self.feedback.target_power_w,
+                "measured_power_w": sample["power_w"], "tuning_tolerance_w": self.feedback.tuning_tolerance_w()})
+            raise PowerDeviation("Preacquisition power left the tuning range")
+        self.formal_values = []
+        self.row["formal_mean_power_w"] = None
+        return sample
 
     def formal_sample(self, phase, *, illuminated, guard):
         sample = self._sample(phase, illuminated, guard)
@@ -174,25 +256,34 @@ class PhotoresponsePower:
         if illuminated:
             if not self.row["qualified"]:
                 raise NktError("Formal light sample requires qualified power")
+            if phase != "preacquisition" and self.row.get("first_formal_power_gap_s") is None:
+                self.row["first_formal_power_gap_s"] = sample["started_monotonic_s"] - self.row["qualified_monotonic_s"]
             self.formal_values.append(sample["power_w"])
             self.row["formal_mean_power_w"] = statistics.mean(self.formal_values)
             evidence = self._reference_values + self.formal_values
             spread = max(evidence) - min(evidence)
             self.row["formal_peak_to_peak_w"] = spread
+            limit = self.feedback.window.variation_limit_w(self.feedback.target_power_w)
+            trend = self._formal_window.add(sample)
+            drift_failed = ("power drift trend" in trend["reason"] and
+                            trend["count"] >= self.feedback.window.min_samples and
+                            trend["finished_monotonic_s"] - trend["started_monotonic_s"] >= self.feedback.window.duration_s - 1e-9)
+            entry["stability"] = trend
             if (not target_in_tolerance(sample["power_w"], self.feedback)
-                    or spread > self.feedback.window.max_peak_to_peak_w):
+                    or spread > limit or drift_failed):
                 self.row["qualified"] = False
                 entry["window_valid"] = False
-                entry["rejection"] = "formal target tolerance or peak-to-peak drift"
+                entry["rejection"] = ("target deviation" if not entry["target_in_tolerance"] else
+                                       "drift trend" if drift_failed else "power variation")
                 assessment = {"target_power_w": self.feedback.target_power_w,
                     "measured_power_w": sample["power_w"], "target_tolerance_w": self.feedback.target_tolerance_w,
-                    "peak_to_peak_w": spread, "max_peak_to_peak_w": self.feedback.window.max_peak_to_peak_w,
-                    "target_in_tolerance": entry["target_in_tolerance"]}
+                    "peak_to_peak_w": spread, "max_peak_to_peak_w": limit,
+                    "target_in_tolerance": entry["target_in_tolerance"], "reason": entry["rejection"],
+                    "stability": trend}
                 self._event("power_window_rejected", evidence=entry, assessment=assessment)
-                raise NktError("Formal power drift: " +
+                raise PowerDeviation("Formal power drift: " +
                     f"target={self.feedback.target_power_w:g} W, measured={sample['power_w']:g} W, " +
-                    f"peak-to-peak={spread:g} W (limit {self.feedback.window.max_peak_to_peak_w:g} W); " +
-                    "reject this acquisition without retuning")
+                    f"peak-to-peak={spread:g} W (limit {limit:g} W); reject whole acquisition window")
         return sample
 
     def close(self):

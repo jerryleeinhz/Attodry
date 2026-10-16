@@ -71,6 +71,7 @@ def _record_rows(record, path, *, audit):
         optical_state = condition.get("optical_state", "dark/light/dark")
         row = {"run_id": record.get("run_id", path.stem), "condition_id": condition["condition_id"],
             "attempt_index": condition["attempt_index"], "repeat_index": condition.get("repeat_index", 0),
+            "power_attempt": condition.get("power_attempt"),
             "sequence_index": len(rows), "sample_index": 0,
             "accepted": result.get("accepted", False), "clean": result.get("accepted", False),
             "simulated": record.get("simulated"), "run_status": record.get("outcome"),
@@ -137,4 +138,16 @@ def _record_rows(record, path, *, audit):
                 if role + "_" + suffix in result:
                     row["measured." + role + "_" + suffix] = result[role + "_" + suffix]
         rows.append(row)
+        if audit:
+            for attempt in condition.get("power_attempts", []):
+                if attempt["valid"] or not attempt["windows"]:
+                    continue
+                # Failed windows are separate audit observations, never mixed
+                # into the successful window's means, differences or statistics.
+                rejected = {**condition, "windows": attempt["windows"], "power_attempts": [],
+                            "power_attempt": attempt["point_attempt"], "accepted": False, "result": None}
+                failed_rows = _record_rows({**record, "conditions": [rejected]}, path, audit=True)
+                for failed in failed_rows:
+                    failed.update(power_retry_reason=attempt.get("error"), sequence_index=len(rows))
+                    rows.append(failed)
     return tuple(rows)

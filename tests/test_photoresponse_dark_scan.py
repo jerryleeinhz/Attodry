@@ -62,8 +62,8 @@ class DarkScanTests(unittest.TestCase):
             self.assertEqual(sum(t["phase"] == "power_qualification" for t in record["timings"]),
                              len(c.nkt.points) * (len(c.power.targets) - 1))
             if relay:
-                # .1 s per 2182 query would destroy a .02 s PM window if the
-                # full passive-detector check were still nested in each PM guard.
+                # Full serial-detector verification would destroy a .02 s PM
+                # window if it were still nested in each power guard.
                 self.assertGreater(clock.value, 100010.)
             self.assertEqual(host.values["OUTP:STAT"], "0")
             self.assertEqual(meter.values["OUTP"], "0")
@@ -332,7 +332,7 @@ class ConfigAndTimingTests(unittest.TestCase):
             self.assertAlmostEqual(row["duration_s"], .2)
         self.assertIn("error", transport.transcript[-1])
 
-    def test_relay_counts_fixed_poll_wait_and_noop_pm_prepare_captures_once(self):
+    def test_relay_counts_poll_wait_and_noop_pm_prepare_captures_once(self):
         clock, host = Clock(), Resource()
         host.downstream = Resource("2182A")
         relay = Serial2182Transport(VisaTransport(host, role="fake"), sleep=clock.sleep, clock=clock)

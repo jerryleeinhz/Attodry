@@ -85,8 +85,12 @@ class VisaTransport:
 class Serial2182Transport:
     """One shared lock spans SEND + ENTER; never retry an uncertain query."""
     def __init__(self, host: VisaTransport, *, timeout_s=10, sleep=time.sleep,
-                 clock=time.monotonic):
+                 clock=time.monotonic, poll_interval_s=.1):
+        if (not 0 < timeout_s < float("inf") or
+                not 0 < poll_interval_s <= .1):
+            raise NktError("Serial timeout must be positive and poll interval within (0, 0.1] s")
         self.host, self.timeout_s, self.sleep, self.clock = host, timeout_s, sleep, clock
+        self.poll_interval_s = poll_interval_s
         self.poisoned = False
         self.transcript = []
 
@@ -109,17 +113,23 @@ class Serial2182Transport:
             self.transcript.append(row)
             try:
                 # SEND is a transport envelope; an IDN/settings query is still read-only.
-                self.host._io(self._send(command))
                 deadline = self.clock() + self.timeout_s
+                self.host._io(self._send(command))
+                interval = self.poll_interval_s
                 while True:
-                    self.sleep(0.1)
-                    row["poll_wait_requested_s"] += 0.1
+                    remaining = deadline - self.clock()
+                    if remaining <= 0:
+                        raise TimeoutError("2182A serial response timed out")
+                    wait = min(interval, remaining)
+                    self.sleep(wait)
+                    row["poll_wait_requested_s"] += wait
                     response = self.host.query("SYST:COMM:SER:ENT?")
                     row["responses"].append(response)
+                    if self.clock() > deadline:
+                        raise TimeoutError("2182A serial response timed out")
                     if response:
                         return response
-                    if self.clock() >= deadline:
-                        raise TimeoutError("2182A serial response timed out")
+                    interval = min(.1, interval * 2)
             except (Exception, KeyboardInterrupt) as exc:
                 self.poisoned = True
                 row["error"] = f"{type(exc).__name__}: {exc}"

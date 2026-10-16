@@ -63,12 +63,25 @@ class WindowConfig:
     min_samples: int
     sample_interval_s: float
     max_peak_to_peak_w: float
+    max_peak_to_peak_fraction: float | None = None
+    noise_floor_w: float = 0.
+    max_drift_fraction_per_s: float | None = None
 
     def validate(self):
         number(self.duration_s, "duration_s", 0.001, 3600)
         integer(self.min_samples, "min_samples", 2, 100000)
         number(self.sample_interval_s, "sample_interval_s", 0.001, self.duration_s)
         number(self.max_peak_to_peak_w, "max_peak_to_peak_w", 0, 1e6)
+        number(self.noise_floor_w, "noise_floor_w", 0, self.max_peak_to_peak_w)
+        for name in ("max_peak_to_peak_fraction", "max_drift_fraction_per_s"):
+            if getattr(self, name) is not None:
+                number(getattr(self, name), name, 0, 1)
+
+    def variation_limit_w(self, target_w):
+        if self.max_peak_to_peak_fraction is None:
+            return self.max_peak_to_peak_w
+        return min(self.max_peak_to_peak_w, max(self.noise_floor_w,
+                   target_w * self.max_peak_to_peak_fraction))
 
 
 ACTUATORS = ("varia_nd", "source_current", "source_power", "cld_current")
@@ -100,6 +113,11 @@ class FeedbackConfig:
     source_power_min_pct: float | None = None
     source_power_max_pct: float | None = None
     source_power_step_pct: float | None = None
+    tuning_tolerance_fraction: float | None = None
+
+    def tuning_tolerance_w(self):
+        return (self.target_tolerance_w if self.tuning_tolerance_fraction is None
+                else self.target_power_w * self.tuning_tolerance_fraction)
 
     def _targets(self):
         if (self.target_power_w is None) == (self.target_powers_w is None):
@@ -146,6 +164,10 @@ class FeedbackConfig:
         for value in self._targets():
             target = number(value, "target_power_w", 1e-15, self.max_power_w)
             tolerance = self._tolerance(target)
+            if self.tuning_tolerance_fraction is not None:
+                tuning = target * number(self.tuning_tolerance_fraction, "tuning_tolerance_fraction", 0, 1)
+                if tuning > tolerance + 1e-15:
+                    raise NktError("Tuning tolerance must not exceed formal target tolerance")
             if target + tolerance > self.max_power_w:
                 raise NktError("Target tolerance exceeds power limit")
             if self.reduce_above_power_w is not None and target + tolerance > self.reduce_above_power_w:
@@ -209,6 +231,8 @@ class PhotoresponsePowerConfig:
     nd_control_verified: bool = False
     power_points: tuple[str | float, ...] | None = None
     initial_actuator_mode: str = "point"
+    max_retries: int = 0
+    point_timeout_s: float | None = None
 
     @property
     def targets(self):
@@ -225,6 +249,11 @@ class PhotoresponsePowerConfig:
         self.meter.validate()
         self.feedback.validate()
         boolean(self.nd_control_verified, "nd_control_verified")
+        integer(self.max_retries, "max_retries", 0, 10)
+        if self.point_timeout_s is not None:
+            number(self.point_timeout_s, "point_timeout_s", self.feedback.window.duration_s, 86400)
+        if self.max_retries and (self.point_timeout_s is None or self.power_points is None):
+            raise NktError("Power retries require dark-first power_points and point_timeout_s")
         if self.initial_actuator_mode not in ("point", "previous"):
             raise NktError("initial_actuator_mode must be point or previous")
         if self.power_points is not None:
@@ -289,6 +318,8 @@ def load_photoresponse_power(doc):
     verified = raw.pop("nd_control_verified", False)
     power_points = raw.pop("power_points", None)
     initial_mode = raw.pop("initial_actuator_mode", "point")
+    max_retries = raw.pop("max_retries", 0)
+    point_timeout_s = raw.pop("point_timeout_s", None)
     if power_points is not None:
         if (type(power_points) is not list or len(power_points) < 2 or power_points[0] != "dark"
                 or any(k in raw for k in ("target_power_w", "target_powers_w"))):
@@ -298,9 +329,11 @@ def load_photoresponse_power(doc):
                 "actuator", "nd_min_pct", "nd_max_pct", "nd_step_pct", "increasing_nd_increases_power",
                 "source_current_min_pct", "source_current_max_pct", "source_current_step_pct",
                 "minimum_signal_power_w", "reduce_above_power_w", "current_min_a", "current_max_a",
-                "current_step_a", "source_power_min_pct", "source_power_max_pct", "source_power_step_pct"}
+                "current_step_a", "source_power_min_pct", "source_power_max_pct", "source_power_step_pct",
+                "tuning_tolerance_fraction"}
     keys(raw, "power_feedback", {f.name for f in fields(FeedbackConfig)} - optional, optional)
-    keys(raw["window"], "power_feedback.window", {f.name for f in fields(WindowConfig)})
+    window_optional = {"max_peak_to_peak_fraction", "noise_floor_w", "max_drift_fraction_per_s"}
+    keys(raw["window"], "power_feedback.window", {f.name for f in fields(WindowConfig)} - window_optional, window_optional)
     values = {"target_power_w": None, "target_tolerance_w": None, "nd_min_pct": None,
               "nd_max_pct": None, "nd_step_pct": None, "increasing_nd_increases_power": None,
               **raw, "window": WindowConfig(**raw["window"])}
@@ -309,4 +342,5 @@ def load_photoresponse_power(doc):
             raise NktError("target_powers_w must be an explicit array")
         values["target_powers_w"] = tuple(values["target_powers_w"])
     return PhotoresponsePowerConfig(PmConfig(**pm), FeedbackConfig(**values), verified,
-                                    tuple(power_points) if power_points is not None else None, initial_mode)
+                                    tuple(power_points) if power_points is not None else None, initial_mode,
+                                    max_retries, point_timeout_s)

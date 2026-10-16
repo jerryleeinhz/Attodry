@@ -32,6 +32,13 @@ python -m attodry_control.combination_cli monitor --database <audit.sqlite> --ru
 核对电学设置 → 激励/采集。亮点扣除本轮相同电学坐标的暗态；回访、重复、新尝试
 重新取得暗态和稳定性证据。历史三窗口配置继续使用原插值规则。
 
+速度开发及验收遵循 [测量速度规范](MEASUREMENT_PERFORMANCE.md)。2182A 的
+完整设置核对由每次新鲜 READ 前后提供，外层复用该次采集的时间戳证据，源安全
+状态仍实时查询；2400 保留完整检查。共享暗态功率点通常由 15 轮核对降至 7 轮
+（每点三次电压读取）。串口默认保留已验证的 100 ms；20 ms 退避仅作显式离线
+试验。超时或迟到响应使会话失效；通信去重不改变采样数、NPLC或质量判据。
+这些优化须区分离线验证与实际部署／实机响应验收。
+
 ## 文件监控
 
 项目 run_data/latest-combination-run.json 原子登记已创建运行，支持嵌套 TOML 路径。
@@ -88,3 +95,11 @@ unified_plotting 及原有 31 项测试，以及 combination_store/analysis/regi
 验收覆盖命令兼容、WAL 共存、历史库、失败/清理、登记、驱动导入隔离、差分/单位/无效值、
 交互选择、统计与导出。离线通过不等于实机验收。目标机隔离验证后再快进部署，
 保留本地配置；活动扫描或不明占用时不更新活动 checkout。
+
+## 光功率中心调节与漂移恢复
+
+新参数、dark-first窗口重试、monitor及PM实测功率横轴见
+[POWER_STABILITY_OPTIMIZATION.md](POWER_STABILITY_OPTIMIZATION.md)。
+公共离线示例：`config/photoresponse_stability_nkt_simulation.toml`。
+硬件示例：`config/photoresponse_stability_nkt_hardware.example.toml`，需继承已确认站点边界。
+旧TOML不会自动变为5%调光或自动重试；启用时必须显式填写。

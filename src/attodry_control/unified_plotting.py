@@ -479,6 +479,13 @@ def column_label(key: str) -> str:
     return names.get(key, key.replace("_", " ").replace(".", " "))
 
 
+def observation_column_label(key, rows):
+    if key == "actual.optical_power_w" and any(r.get("measurement_type") == "dc_photoresponse" for r in rows):
+        planes = sorted({str(r.get("measurement_plane") or "unspecified monitor position") for r in rows})
+        return "PM100D measured power (W)\n" + "; ".join(planes) + " (not sample-calibrated)"
+    return column_label(key)
+
+
 def _known_label(name: str) -> tuple[str, str]:
     if name in _COLUMN_LABELS:
         return _COLUMN_LABELS[name]
@@ -685,7 +692,7 @@ def _draw_curve(axis, rows, spec, x, y):
                       marker=SERIES_MARKERS[index % len(SERIES_MARKERS)] if style != "line" else None,
                       linestyle="-" if style != "points" else "none", markersize=4,
                       capsize=2, linewidth=1, label=label)
-    axis.set(xlabel=column_label(x), ylabel=column_label(y))
+    axis.set(xlabel=observation_column_label(x, kept), ylabel=observation_column_label(y, kept))
     for name, key in (("x", x), ("y", y)):
         scale = spec.get(name + "_scale", "linear")
         if scale not in ("linear", "log"):
@@ -802,7 +809,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
             artist = axis.scatter([r[x] for r in valid], [r[y] for r in valid], c=[r[z] for r in valid], cmap="RdBu_r", norm=norm)
             figure.colorbar(artist, ax=axis).set_label(column_label(z))
             overlap = len(valid)-len({(r[x],r[y]) for r in valid})
-            axis.set(xlabel=column_label(x), ylabel=column_label(y), title=(spec.get("title") or "Measured XY observations") + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
+            axis.set(xlabel=observation_column_label(x, valid), ylabel=observation_column_label(y, valid), title=(spec.get("title") or "Measured XY observations") + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
             if quality['quality_policy'] == 'include' and quality['flagged_row_count']:
                 axis.set_title(axis.get_title() + " · AUDIT: flagged included")
             axis.set_title(_audit_title(selected) + axis.get_title())

@@ -1,0 +1,81 @@
+# OFFLINE ONLY. These synthetic values are not sample limits or hardware permission.
+# Synthetic current-mode feedback; all tolerances below are experimental, not instrument specifications.
+# Run with combination_cli simulate --config this file; use the separate hardware template for site limits.
+[photoresponse]
+mode = "open_circuit_voltage" # open_circuit_voltage | dc_current_voltage | voltage_bias_current
+detector = "keithley2182a" # keithley2182a | keithley2400; current requires 2400
+samples_per_window = 3
+repeats = 1
+sample_interval_s = 0.01
+settle_s = 0.01 # Minimum sample response wait since the last relevant change.
+dark_recovery_s = 0.02 # Minimum dark recovery; synthetic example only.
+max_abs_voltage_v = 0.01
+# dc_current_voltage requires bias_current_points_a = [-0.000001, 0.0, 0.000001]
+# voltage_bias_current requires bias_voltage_points_v = [-0.001, 0.0, 0.001]
+# open_circuit_voltage forbids BOTH bias arrays; none is distinct from DC 0 A.
+
+[nkt_source]
+control = "current"
+apply_control = true # preflight switches a confirmed-off source to `control`
+max_level_pct = 100.0
+allowed_pp_ratios = []
+
+[nkt_varia]
+monitor_present = false
+
+[nkt_run]
+backend = "simulation" # Real acquisition uses separate hardware templates and run flags.
+mode = "varia_bandpass"
+manual_route = "SIMULATED VARIA route"
+emit = true # Only simulated emission.
+timeout_s = 5.0
+poll_interval_s = 0.1
+dwell_s = 0.0 # Photoresponse settling is controlled by photoresponse.settle_s.
+output_directory = "../run_data/stability_nkt_sim"
+run_name = "stability_nkt_offline"
+note = "Synthetic response; no instruments, field, temperature or calibrated optical power."
+
+[[nkt_run.points]]
+source_level_pct = 2.8
+wavelength_nm = 594.4
+bandwidth_nm = 10.0
+nd_pct = 10.0
+
+[photoresponse_combination]
+# Outer to inner; optical is one complete wavelength/bandwidth/initial-actuator row.
+order = ["repeat", "environment", "optical", "target_power_w", "bias", "smu"]
+
+[pm100d]
+backend = "simulation"
+io_timeout_s = 1.0
+wavelength_tolerance_nm = 0.1
+average_count = 1
+auto_range = true
+max_power_w = 0.003
+measurement_plane = "SIMULATED reference monitor; not sample calibration"
+
+# Trial quality policy: operator proposal, pending hardware/noise validation.
+[power_feedback]
+actuator = "source_current"
+power_points = ["dark", 2e-5, 5.5e-5, 6.5e-5, 7.5e-5] # W, synthetic low point 20 uW
+initial_actuator_mode = "previous"
+tuning_tolerance_fraction = 0.05 # +/- 5% controls center-seeking, NOT acceptance
+target_tolerance_fraction = 0.10 # +/- 10% formal acceptance; never auto-expanded
+max_power_w = 0.0025 # synthetic hard bound; NOT a hardware-approved limit
+minimum_signal_power_w = 1e-7 # W, existing no-search guard
+source_current_min_pct = 0.1 # synthetic actuator range only; do not copy to hardware
+source_current_max_pct = 20.0
+source_current_step_pct = 3.0 # percentage points per change, hard step cap
+timeout_s = 180.0 # qualification budget, s
+hold_s = 2.0 # stable evidence must persist, s
+max_retries = 2 # additional attempts, dark-first only
+point_timeout_s = 600.0 # total bright power visit incl. all inner electrical coordinates, s
+
+[power_feedback.window]
+duration_s = 5.0 # trial window, s
+min_samples = 6
+sample_interval_s = 0.5 # PM checks stay serial
+max_peak_to_peak_w = 5e-6 # W, absolute cap, combined with relative criterion below
+max_peak_to_peak_fraction = 0.05 # p2p cap = min(absolute, max(noise floor, target*fraction))
+noise_floor_w = 0.0 # W; zero until a measured noise floor is established; never guessed
+max_drift_fraction_per_s = 0.002 # |least-squares slope| <= target*0.002 per s; trial only

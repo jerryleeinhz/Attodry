@@ -11,6 +11,7 @@ import time
 from .nkt_config import NktError, number
 from .nkt_control import NktController, utc_now
 from .photoresponse_config import PhotoresponseConfig
+from .photoresponse_power import PowerDeviation, PowerRecoveryExhausted
 
 
 WINDOWS = ("dark_before", "light", "dark_after")
@@ -229,10 +230,12 @@ class PhotoresponseRunner:
                 "started_monotonic_s": started, "finished_monotonic_s": self.clock(),
                 "duration_s": self.clock() - started})
 
-    def _state(self):
+    def _state(self, *, sample_boundary=False):
         self.record["electrical_state_current"] = False
         with self._timed("electrical_state"):
-            state = self.electrical.snapshot()
+            reader = (getattr(self.electrical, "sample_boundary", self.electrical.snapshot)
+                      if sample_boundary else self.electrical.snapshot)
+            state = reader()
         self._retain_state(state)
         return state
 
@@ -297,7 +300,7 @@ class PhotoresponseRunner:
             self.sleep(self.config.sample_interval_s)
             optical_before = self.laser.verify_point(emitting=illuminated, phase=phase + "_before")
             environment_before = self.environment.verify() if self.environment else None
-            before = self._state()
+            before = self._state(sample_boundary=True)
             self._check_state(before, bias)
             sample = {"valid": False, "accepted": False, "captured_at_utc": utc_now(),
                       "started_s": self.clock() - self._epoch, "finished_s": None,
@@ -318,6 +321,10 @@ class PhotoresponseRunner:
                     reading = self.electrical.read(illuminated=illuminated)
                 sample["finished_s"] = self.clock() - self._epoch
                 sample["raw_reading"] = deepcopy(reading)
+                if "detector_before" in reading:
+                    # Evidence belongs to this READ, never a cross-sample cache.
+                    sample["electrical_before"]["detector_readback"] = deepcopy(reading["detector_before"])
+                    sample["electrical_before"]["detector_verification"] = "fresh_acquisition_before"
                 if self.electrical.is_hardware:
                     sample["started_s"] = reading["acquisition_started_monotonic_s"] - self._epoch
                     sample["finished_s"] = reading["acquisition_finished_monotonic_s"] - self._epoch
@@ -337,7 +344,11 @@ class PhotoresponseRunner:
                 if self.power:
                     sample["power_after"] = self.power.formal_sample(phase + "_after", illuminated=illuminated, guard=guard)
                 sample["optical_after"] = self.laser.verify_point(emitting=illuminated, phase=phase + "_after")
-                sample["electrical_after"] = self._state()
+                sample["electrical_after"] = self._state(sample_boundary=True)
+                if "detector_after" in reading:
+                    sample["electrical_after"]["detector_readback"] = deepcopy(reading["detector_after"])
+                    sample["electrical_after"]["detector_verification"] = "fresh_acquisition_after"
+                    self._retain_state(sample["electrical_after"])
                 self._check_state(sample["electrical_after"], bias)
                 sample["environment_after"] = self.environment.verify() if self.environment else None
                 sample["module_readings"] = self._module_readings(sample)
@@ -471,6 +482,8 @@ class PhotoresponseRunner:
             first["power_visit"] = visit
             initial = previous["value"] if (previous and previous["scan_visit"] == scan_visit
                                              and self.config.power.initial_actuator_mode == "previous") else None
+            self.power.point_deadline = (self.clock() + self.config.power.point_timeout_s
+                if not dark and self.config.power.point_timeout_s is not None else None)
             with self._timed("optical_prepare", visit=visit):
                 self.laser.prepare_power_point(point, self.config.power, initial_value=initial)
                 self.power.prepare(first, point)
@@ -493,47 +506,122 @@ class PhotoresponseRunner:
                 changed()
                 with self._timed("power_qualification", visit=visit):
                     self.power.qualify(off_guard, on_emission_changed=changed)
-            # Recheck after the long optical operation, before enabling sources.
-            with self._timed("electrical_begin", visit=visit):
-                if self.electrical.is_hardware:
-                    self.electrical.begin()
-                active_zero = self.electrical.is_hardware and self.config.quantity == "current_a"
-                self._check_state(self._state(), 0. if active_zero else None, inactive=not active_zero)
-                if self.smu:
-                    self.smu.begin()
             required = (self.config.dark_recovery_s if dark and self.config.dark_recovery_s is not None
                         else self.config.settle_s)
             self._settle(last_change, required, optical_session)
-            last_electrical_change = max(last_change, getattr(self.electrical, "last_change_monotonic_s", None) or last_change)
             previous_electrical_key = None
+            last_electrical_change = last_change
+            needs_begin = True
+            retries_used = 0
             for index, leaf in enumerate(leaves):
                 row = first if index == 0 else self._condition(leaf)
                 bias, smu_point = leaf["bias"]["value"], leaf["smu"]["value"]
                 row.update(optical_state=phase, power_visit=visit,
                            baseline_key=[scan_visit, leaf["bias"]["index"], leaf["smu"]["index"]],
-                           power=optical_session)
-                with self._timed("electrical_prepare", condition_id=row["condition_id"]):
-                    self.electrical.prepare(bias)
-                    self._check_state(self._state(), bias)
-                    if self.smu:
-                        def transition_guard():
-                            self.laser.verify_point(emitting=not dark, phase="smu_transition")
-                            self._check_state(self._state(), bias)
-                            if self.environment:
-                                self.environment.verify()
-                        row["smu_prepared"] = self.smu.prepare(smu_point, transition_guard)
-                electrical_key = (bias, tuple(smu_point.coordinates.items()) if smu_point else None)
-                if (self.config.excitation != "none" or self.smu) and electrical_key != previous_electrical_key:
-                    confirmed_change = getattr(self.electrical, "last_change_monotonic_s", None)
-                    # The pinned SMU session has no setting-completion callback;
-                    # retain a conservative post-prepare timestamp for that path.
-                    last_electrical_change = (self.clock() if self.smu or confirmed_change is None
-                                              else confirmed_change)
-                previous_electrical_key = electrical_key
-                # Source/SMU drivers retain their own ramp waits. This additional
-                # sample-response wait starts after the latest electrical prepare.
-                self._settle(last_electrical_change, self.config.settle_s, row)
-                self._window(row, phase, bias, manage_optics=False)
+                           power=optical_session, power_attempts=[])
+                while True:
+                    attempt = {"point_attempt": retries_used + 1, "valid": False,
+                               "started_monotonic_s": self.clock(), "windows": []}
+                    row["power_attempts"].append(attempt)
+                    self._event("power_attempt_start", condition_id=row["condition_id"],
+                                point_attempt=retries_used + 1, max_attempts=1 + self.config.power.max_retries)
+                    try:
+                        self.power.check_point_deadline()
+                        if needs_begin:
+                            # No passive-detector cache crosses the optical or recovery boundary.
+                            with self._timed("electrical_begin", visit=visit):
+                                begun = None
+                                if self.electrical.is_hardware:
+                                    begin_checked = getattr(self.electrical, "begin_after_optical", None)
+                                    callback = (lambda: self.power.preacquisition_check(off_guard)) if not dark else None
+                                    begun = (begin_checked(callback) if begin_checked else self.electrical.begin())
+                                active_zero = self.electrical.is_hardware and self.config.quantity == "current_a"
+                                if begun is None:
+                                    begun = self._state()
+                                else:
+                                    self._retain_state(begun)
+                                self._check_state(begun, 0. if active_zero else None, inactive=not active_zero)
+                                optical_session["electrical_after_optical"] = deepcopy(begun)
+                            def begun_guard():
+                                state = getattr(self.electrical, "guard", self.electrical.snapshot)()
+                                self._check_state(state, 0. if active_zero else None, inactive=not active_zero)
+                                return {"electrical": state, "environment": self.environment.verify() if self.environment else None}
+                            if not dark:
+                                with self._timed("power_preacquisition", condition_id=row["condition_id"]):
+                                    self.power.preacquisition_check(begun_guard)
+                            if self.smu:
+                                self.smu.begin()
+                            needs_begin = False
+                            last_electrical_change = max(last_change,
+                                getattr(self.electrical, "last_change_monotonic_s", None) or last_change)
+                        elif not dark:
+                            def leaf_guard():
+                                state = getattr(self.electrical, "guard", self.electrical.snapshot)()
+                                self._check_state(state, previous_electrical_key[0])
+                                return {"electrical": state, "smu": self.smu.verify() if self.smu else None,
+                                        "environment": self.environment.verify() if self.environment else None}
+                            with self._timed("power_preacquisition", condition_id=row["condition_id"]):
+                                self.power.preacquisition_check(leaf_guard)
+                        with self._timed("electrical_prepare", condition_id=row["condition_id"]):
+                            prepared = self.electrical.prepare(bias)
+                            if prepared is None:
+                                prepared = self._state()
+                            else:
+                                self._retain_state(prepared)
+                            self._check_state(prepared, bias)
+                            if self.smu:
+                                def transition_guard():
+                                    self.laser.verify_point(emitting=not dark, phase="smu_transition")
+                                    self._check_state(self._state(), bias)
+                                    if self.environment:
+                                        self.environment.verify()
+                                row["smu_prepared"] = self.smu.prepare(smu_point, transition_guard)
+                        electrical_key = (bias, tuple(smu_point.coordinates.items()) if smu_point else None)
+                        if (self.config.excitation != "none" or self.smu) and electrical_key != previous_electrical_key:
+                            confirmed_change = getattr(self.electrical, "last_change_monotonic_s", None)
+                            last_electrical_change = (self.clock() if self.smu or confirmed_change is None else confirmed_change)
+                        previous_electrical_key = electrical_key
+                        self._settle(last_electrical_change, self.config.settle_s, row)
+                        # The first formal bracket is also a fresh check after
+                        # bias/gate settling. All actuator settings stay frozen.
+                        with self._timed("formal_acquisition", condition_id=row["condition_id"]):
+                            self._window(row, phase, bias, manage_optics=False)
+                        self.power.check_point_deadline()
+                        attempt.update(valid=True, accepted_window_indices=list(range(len(row["windows"]))),
+                                       finished_monotonic_s=self.clock())
+                        break
+                    except PowerDeviation as exc:
+                        attempt.update(error=f"{type(exc).__name__}: {exc}", windows=row["windows"][:],
+                                       finished_monotonic_s=self.clock())
+                        for window in row["windows"]:
+                            window["valid"] = False
+                            for sample in window["samples"]:
+                                sample["valid_before_window_rejection"] = sample["valid"]
+                                sample.update(valid=False, accepted=False, rejection="whole power window rejected")
+                        row["windows"] = []
+                        if self.record["cleanup"]["errors"] or any(s.get("audit_error") for w in attempt["windows"] for s in w["samples"]):
+                            raise NktError("Power recovery refused after audit failure") from exc
+                        # Do not swallow cleanup failures or uncertain hardware
+                        # state as another ordinary optical retry.
+                        self._suspend_electrical()
+                        self.laser.set_emission(False)
+                        self.laser.verify_point(emitting=False, phase="power_retry_off")
+                        attempt["cleanup"] = {"electrical_safe_confirmed": True, "laser_off_confirmed": True}
+                        self._event("power_attempt_rejected", condition_id=row["condition_id"],
+                                    point_attempt=retries_used + 1, reason=str(exc), attempt=attempt)
+                        if dark or retries_used >= self.config.power.max_retries:
+                            raise PowerRecoveryExhausted(f"Power recovery attempts exhausted: {exc}") from exc
+                        self.power.check_point_deadline()
+                        retries_used += 1
+                        self._event("power_retry", condition_id=row["condition_id"], point_attempt=retries_used + 1,
+                                    reason=str(exc), cleanup=attempt["cleanup"])
+                        self.laser.set_emission(True)
+                        changed()
+                        with self._timed("power_qualification", visit=visit, point_attempt=retries_used + 1):
+                            self.power.qualify(off_guard, on_emission_changed=changed)
+                        self._settle(last_change, self.config.settle_s, attempt)
+                        needs_begin = True
+                        previous_electrical_key = None
                 row["actual"] = row["windows"][0]["samples"][-1]["module_readings"]
                 key = (leaf["bias"]["index"], leaf["smu"]["index"])
                 if dark:
@@ -548,7 +636,10 @@ class PhotoresponseRunner:
                     row["result"].update(target_power_w=row["target_power_w"],
                         measured_power_w=fmean(s[k]["power_w"] for s in row["windows"][0]["samples"]
                                               for k in ("power_before", "power_after")),
-                        measurement_plane=self.config.power.meter.measurement_plane)
+                        measurement_plane=self.config.power.meter.measurement_plane,
+                        power_peak_to_peak_w=optical_session["formal_peak_to_peak_w"],
+                        qualification_drift_w_per_s=optical_session["qualification_result"]["drift_w_per_s"],
+                        power_attempt_count=len(row["power_attempts"]), power_window_valid=True)
                 self._event("condition_complete", condition=row)
             self._suspend_electrical()
             optical = self.laser.verify_point(emitting=not dark, phase="power_point_complete")
@@ -558,6 +649,7 @@ class PhotoresponseRunner:
                          optical["filter"]["nd_pct"] if field == "nd_pct" else optical["source"]["level_pct"])
                 previous = {"scan_visit": scan_visit, "visit": visit, "value": value}
             self.laser.set_emission(False)
+            self.power.point_deadline = None
 
     def run(self):
         if self._used:

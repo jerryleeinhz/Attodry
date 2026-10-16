@@ -7,7 +7,7 @@ import time
 
 from .nkt_config import NktError, integer, keys, number, text
 from .photoresponse_devices import CurrentSource6221, Voltmeter2182, Meter2400
-from .photoresponse_keithley import _flag, _word, Keithley6221Queries, voltage_ranges_2182
+from .photoresponse_keithley import _flag, _word, _float, Keithley6221Queries, voltage_ranges_2182
 from .photoresponse_transport import Serial2182Transport
 
 
@@ -156,7 +156,7 @@ class HardwareElectrical:
             if self.source is None:
                 self.relay_host = Keithley6221Queries(transports["6221"], expected_idn=h.source["expected_idn"])
             detector_transport = Serial2182Transport(transports["6221"], timeout_s=h.timeout_ms / 1000,
-                **options)
+                clock=clock, **options)
         values = {k: v for k, v in h.detector.items() if k != "address"}
         if config.detector == "keithley2182a":
             self.detector = Voltmeter2182(detector_transport, **values, max_voltage_v=config.max_abs_voltage_v)
@@ -191,6 +191,9 @@ class HardwareElectrical:
                 raise NktError("No-excitation serial host requires confirmed excitation-path isolation")
             if _flag(query("OUTP:STAT?")):
                 raise NktError("No-excitation serial host has active output")
+            state["source_current_setpoint_a"] = _float(query("SOUR:CURR?"))
+            if state["source_current_setpoint_a"] != 0:
+                raise NktError("No-excitation serial host current setting is not zero")
             measurement = _word(query("STAT:MEAS:COND?"))
             questionable = _word(query("STAT:QUES:COND?"))
             unsafe = bool(measurement & 5) or bool(questionable)
@@ -214,15 +217,26 @@ class HardwareElectrical:
         else:
             self.detector._identity(True)
 
-    def begin(self):
+    def begin(self, *, before_enable=None):
         self.preflight()
         self.started = True  # cleanup owns only instruments whose own begin succeeded
         if isinstance(self.detector, Voltmeter2182) and self.detector.ready:
             self.detector.verify()  # Same session after a confirmed source shutdown.
         else:
-            self.detector.begin()
+            if isinstance(self.detector, Meter2400):
+                self.detector.begin(before_enable=before_enable)
+            else:
+                self.detector.begin()
         if self.source:
             self.source.begin()
+        if isinstance(self.detector, Voltmeter2182):
+            # begin/verify just captured the full detector settings. Reuse only
+            # this boundary's evidence, with fresh source/relay safety queries.
+            return self._snapshot(lambda: deepcopy(self.detector.last_confirmed_state))
+
+    def begin_after_optical(self, before_enable):
+        return (self.begin(before_enable=before_enable) if isinstance(self.detector, Meter2400)
+                else self.begin())
 
     def snapshot(self):
         return self._snapshot(self._detector_snapshot)
@@ -234,6 +248,15 @@ class HardwareElectrical:
             state["detector_verification"] = "deferred_to_acquisition_boundary"
             return state
         return self.snapshot()  # 2400 can source: retain its complete guard.
+
+    def sample_boundary(self):
+        """2182 READ owns its full pre/post checks; source safety stays fresh.
+
+        This intentionally contains no cached detector settings. The runner
+        attaches that exact READ's timestamped detector_before/after evidence.
+        Source-capable 2400 paths still perform a complete snapshot here.
+        """
+        return self.guard()
 
     def _detector_snapshot(self):
         if self.started and self.detector.ready:
@@ -276,6 +299,10 @@ class HardwareElectrical:
             self.source.set_bias(bias)
         if isinstance(self.detector, Meter2400):
             self.detector.set_bias(bias if self.config.quantity == "current_a" else None)
+        if isinstance(self.detector, Voltmeter2182):
+            # Bias preparation does not change passive detector settings.
+            # The post-optical begin and each fresh READ verify them fully.
+            return self.guard()
 
     def read(self, *, illuminated):
         reading = self.detector.read_values() if isinstance(self.detector, Meter2400) else self.detector.read_voltage()

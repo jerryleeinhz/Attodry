@@ -53,6 +53,28 @@ def update_progress(progress, event):
             "clean": evidence.get("valid"), "measurements": {}}
     if kind == "power_window_rejected":
         progress["power_rejection"] = event.get("assessment", {})
+        progress.setdefault("power_control", {})["reason"] = progress["power_rejection"].get("reason", "power deviation")
+        progress.update(phase=kind, phase_started_at_utc=stamp)
+    if kind in {"power_stability", "power_adjustment", "power_attempt_start", "power_retry", "power_attempt_rejected"}:
+        details = event.get("evidence") or event
+        if kind == "power_attempt_rejected":
+            details = {**details, "cleanup": event.get("attempt", {}).get("cleanup")}
+        phase = details.get("control_phase", kind)
+        progress.update(phase=phase, phase_started_at_utc=stamp)
+        control = progress.setdefault("power_control", {})
+        for key in ("point_attempt", "max_attempts", "target_power_w", "measured_power_w", "reason", "cleanup",
+                    "target_in_tuning_range", "result", "actuator", "requested", "before"):
+            if key in details:
+                control[key] = details[key]
+    if kind == "power_sample":
+        control = progress.setdefault("power_control", {})
+        control.update(target_power_w=event.get("target_power_w"), measured_power_w=power,
+                       measurement_plane=event.get("measurement_plane"))
+        target = event.get("target_power_w")
+        control["deviation_fraction"] = (power / target - 1 if power is not None and target else None)
+        source = (evidence.get("optical_after") or evidence.get("optical_before") or {}).get("source", {})
+        control["source_current_pct"] = source.get("level_pct")
+        control["ld_current_a"] = source.get("getLdCurrSetpoint")
     if kind == "raw_sample":
         sample = event.get("sample", {})
         state = sample.get("electrical_after") or sample.get("electrical_before") or {}

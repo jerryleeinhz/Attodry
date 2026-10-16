@@ -252,7 +252,7 @@ class Voltmeter2182(Keithley2182Queries):
     def read_voltage(self):
         if not self.ready:
             raise NktError("2182 fresh acquisition is not configured")
-        self.verify()
+        before = self.verify()
         self.state_current = False
         started = time.perf_counter()
         raw = self._query("READ?")  # documented ABORt + INITiate + FETCh
@@ -262,7 +262,7 @@ class Voltmeter2182(Keithley2182Queries):
         no_error(self.resource)
         after = self.verify()
         return {"voltage_v": value, "current_a": None, "fresh": True, "raw_response": raw,
-                "detector_after": after,
+                "detector_before": before, "detector_after": after,
                 "acquisition_started_monotonic_s": started, "acquisition_finished_monotonic_s": finished}
 
 
@@ -346,8 +346,16 @@ class Meter2400:
             return same(response, expected) or same(response, expected * 1.05)
         return same(response, expected)
 
+    def begin(self, *, before_enable=None):
+        self._configure_off()
+        # Optical rejection is outside the device fault boundary. Instrument
+        # errors still poison the session in the two guarded operations.
+        if before_enable:
+            before_enable()
+        self._enable_prepared()
+
     @acquisition_operation
-    def begin(self):
+    def _configure_off(self):
         state = self.snapshot()
         if state["output_enabled"] or state["setpoint"] != 0:
             raise NktError("2400 preflight requires zero/off; active sample is never taken over")
@@ -371,6 +379,10 @@ class Meter2400:
             else:
                 ensure(self.resource, command, expected,
                        matches=lambda actual: self._matches(command, actual, expected))
+        self.verify(output=False)
+
+    @acquisition_operation
+    def _enable_prepared(self):
         self.verify(output=False)
         ensure(self.resource, "OUTP", True)
         self.last_change_monotonic_s = self.clock()

@@ -112,6 +112,20 @@ class PhotoresponseConfig:
 
     def snapshot(self):
         result = asdict(self)
+        # Preserve legacy snapshot hashes and the meaning of old TOMLs. New
+        # policies are opt-in; a changed policy remains visible to resume checks.
+        if result["power"]:
+            power = result["power"]
+            for key, default in (("max_retries", 0), ("point_timeout_s", None)):
+                if power[key] == default:
+                    power.pop(key)
+            feedback = power["feedback"]
+            if feedback["tuning_tolerance_fraction"] is None:
+                feedback.pop("tuning_tolerance_fraction")
+            for key, default in (("max_peak_to_peak_fraction", None), ("noise_floor_w", 0.),
+                                 ("max_drift_fraction_per_s", None)):
+                if feedback["window"][key] == default:
+                    feedback["window"].pop(key)
         if not self.shared_dark:
             # Keep the existing plan hash for legacy resume configurations.
             result.pop("dark_recovery_s")

@@ -254,6 +254,14 @@ def snapshot_text(snapshot, width=None):
             lines.append("Optical: " + str(attempt["optical_state"]) +
                          (" | Target: " + _number(target, "W") if target is not None else ""))
     event = snapshot.get("last_event")
+    control = snapshot.get("power_control")
+    if control:
+        lines.append("Power control: " + " | ".join(f"{key}={control[key]}" for key in (
+            "point_attempt", "max_attempts", "target_power_w", "measured_power_w", "deviation_fraction",
+            "source_current_pct", "ld_current_a", "reason", "cleanup") if control.get(key) is not None))
+    rejection = snapshot.get("power_rejection")
+    if rejection:
+        lines.append("Last power rejection: " + str(rejection.get("reason", "power deviation")))
     if event:
         lines.append(f"Last event: {event['created_at_utc']} | {event['event_type']}")
     if snapshot.get("error"):
@@ -373,6 +381,9 @@ class PhotoresponseProgressPrinter:
             power = self.progress["last_recorded_readings"]["pm100d"]["actual"]["power_w"]
             if power is not None:
                 self._write("PM100D: " + _number(power, "W") + " | " + event["evidence"]["phase"])
+        elif kind in {"power_adjustment", "power_retry", "power_attempt_rejected"}:
+            self._write("Power control: " + str(self.progress.get("power_control", {})),
+                        error=kind == "power_attempt_rejected")
         elif kind == "raw_sample":
             sample = event["sample"]
             values = [key + "=" + _number(sample[key], "V" if key == "voltage_v" else "A")

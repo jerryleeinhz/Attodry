@@ -45,6 +45,8 @@ python -m attodry_control.combination_cli monitor
 ```
 
 统一操作及绘图见 [Combination 光电响应指南](docs/COMBINATION_PHOTORESPONSE_GUIDE.md)。
+所有模块开发都需执行 [测量速度检查与验收规范](docs/MEASUREMENT_PERFORMANCE.md)，
+同时检查命令预算、重复核对、判稳和等待，区分离线证据与实机提速。
 旧 `photoresponse_cli run` 调用同一采集服务，保持兼容。
 默认读取 `config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml`；
 执行 `run` 就是确认使用该配置的光路，并启动其中选中的仪器，不再需要授权参数或新增
@@ -254,3 +256,5 @@ python -m attodry_control.three_smu_cli run --help
 `.[analysis]` 可选依赖。分析输入、显式电流/栅极校准和输出清单见
 [`docs/DATA_ANALYSIS.md`](docs/DATA_ANALYSIS.md)；实验室步骤见
 [`docs/LAB_COMMISSIONING.md`](docs/LAB_COMMISSIONING.md)。
+
+光功率稳定性、有限恢复及594.4 nm试验配置见 [光功率优化说明](docs/POWER_STABILITY_OPTIMIZATION.md)。
