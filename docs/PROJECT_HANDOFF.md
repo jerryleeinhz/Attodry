@@ -21,8 +21,14 @@ Existing operator Notebook edits were not overwritten. This is one scan with
 three reads per condition, one shared baseline and no time-drift correction.
 The scan exposed stale final Attempt wording in monitor. The read-only projection
 now derives the last condition's final status from its stored accepted flag, keeping
-all raw progress and failure records intact. Full local regression passed 748/748;
-target offline acceptance/deployment of this display-only correction is pending.
+all raw progress and failure records intact. Correction b5bf8a7 passed 748/748
+locally and in a fresh LK_setup clone, plus read-only checks of this completed
+run and the historical rejected run. After a fresh idle-owner check, active NKT
+fast-forwarded 54b2375 -> b5bf8a7; the active monitor now reports the final Attempt
+as accepted, with 6/6 accepted and verified recorded cleanup. All 14 local TOMLs,
+three operator Notebook files and the original JSON retained their hashes.
+No second real scan or extra instrument access occurred for the display fix.
+Its offline/deployment receipts are in run_data/deploy-unified-operator-20261016T085516Z.
 The detached cmd wrapper's exit receipt was blank (redirection syntax); retain it
 and do not claim a native acquisition exit code. Completion/cleanup are established
 by the raw application record. No second real scan is authorized or needed here.

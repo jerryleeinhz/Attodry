@@ -5,7 +5,7 @@ Update this file whenever a feature is completed. A stage is complete only when 
 ## Real six-point run and final monitor wording
 
 Status: real six-point control/recording acceptance complete (2026-10-16);
-monitor display correction passed 748/748 local tests; target acceptance pending.
+monitor display correction target offline complete and deployed.
 
 - Authorized one NKT 630 nm / 10 nm scan: dark then 20/40/60/80/100 uW,
   2182A CH2 / 10 V and no excitation. Run fbf086a4 completed 6/6 with recorded
@@ -16,6 +16,13 @@ monitor display correction passed 748/748 local tests; target acceptance pending
   The correction changes only the read-only final projection, using the stored
   per-condition accepted flag for accepted/not-accepted text. Completed/rejected
   regressions first reproduced both stale messages; raw events remain untouched.
+- Display-only correction b5bf8a7 passed 748/748 locally and on a fresh target
+  clone, with file-only verification against this completed run and a historical
+  rejection. Active NKT fast-forwarded 54b2375 -> b5bf8a7 after idle checks.
+  The active monitor reports final Attempt accepted / 6 accepted; existing error
+  and cleanup fields remain intact. All 14 TOMLs, all three edited operator
+  Notebooks and the source JSON retain their hashes. No second hardware run.
+  Evidence: run_data/deploy-unified-operator-20261016T085516Z.
 - Unified plotting verified matching dark IDs/differences, two widget-loaded plot
   cards with five valid light points each, exports and a valid result Notebook.
   Source archives and user Notebook edits are preserved. Evidence is ignored at
