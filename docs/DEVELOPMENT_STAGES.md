@@ -5,9 +5,19 @@ Update this file whenever a feature is completed. A stage is complete only when 
 ## Unified plotting: feedback source setting is not a required grouping axis
 
 Status (2026-10-16): local code, Notebook guidance and offline acceptance complete.
-Shared plotting/operator regression: **57/57 in 28.384 s**. No target deployment
-or hardware interaction in this change.
+Shared plotting/operator regression: **57/57 in 28.384 s**.
 Pre-deployment full local regression: **789/789 in 90.938 s** (2026-10-16).
+Operator-authorized target deployment completed 2026-10-16: fresh-clone full
+suite **789/789 in 80.264 s**, then NKT fast-forward 7efdc1c -> feature commit
+07571e3; active smoke **7/7 in 10.855 s** and operator TOML validation passed.
+No hardware access, kernel restart or new scan. Exact backups of all three dirty
+Notebooks preserve their runtime/metadata-only changes; cell sources were equal
+to the prior HEAD. Local config (14 files) and preserved untracked artifacts
+(333 files) retain hashes. Installers, bundles, checkpoints and an embedded old
+checkout remain in place via local Git excludes. Target Git status is clean.
+Backup/manifest/logs: NKT/run_data/notebook-deploy-20261016T125336Z. A Windows
+file-replacement wrapper error was repaired after checking the partial state;
+no notebook backup or hardware/configuration data was lost.
 
 - Reproduced the source-setting error with varying NKT initial percentages and
   the actual Notebook card failing to render without a source-setting stack.

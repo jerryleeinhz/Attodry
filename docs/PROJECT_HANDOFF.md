@@ -18,8 +18,25 @@ source-axis/group selection and original source fields are still available.
 Measured/target-power X, delta/detector-mean voltage Y and the real Notebook card
 render with no source stack. Raw rows, dark subtraction, run acceptance, rejected
 audit and the raw archive remain unchanged; no extra SQL or instrument queries,
-setting writes or waits. Notebook/operator guidance is updated. No remote
-deployment, kernel restart or scan interaction was performed for this fix.
+setting writes or waits. Notebook/operator guidance is updated.
+Operator-authorized rollout completed 2026-10-16 at 13:00 UTC (16:00 Helsinki):
+feature commit 07571e3 pushed; LK_setup fresh clone full suite 789/789 in 80.264 s,
+then active NKT checkout fast-forwarded 7efdc1c -> 07571e3. Active-checkout smoke
+7/7 in 10.855 s and existing operator TOML validation passed. No hardware access,
+kernel restart or new scan was performed. Last run 416bdd45 had already rejected
+at a source-current boundary/resolution; its saved laser/electrical cleanup was
+confirmed, independently of this offline deployment.
+Three dirty Notebooks had identical code/markdown to the previous HEAD; differences
+were Jupyter metadata/serialization/output only. Exact originals and local Git
+excludes were backed up under NKT/run_data/notebook-deploy-20261016T125336Z/backup
+before restoring public versions. Fourteen local TOMLs and 333 archive/installer/
+checkpoint/old-checkout files retain their SHA-256 hashes. Untracked artifacts
+stay in place via explicit .git/info/exclude entries, including the embedded Git
+checkout; none was deleted or committed. Target Git status is clean. A Windows
+File.Replace empty-backup-path error interrupted the first housekeeping step;
+state/hashes were rechecked and the explicit-backup-path continuation completed.
+Delivery manifest, before/after revisions and logs stay in the ignored run_data
+directory. Documentation-only delivery bookkeeping follows the validated code.
 Automatic light-only selection and per-database Run ID error messages remain
 planned, outside this source-setting-only change. Existing unrelated local edits
 to PM100D documentation/figures and other Notebook files must be preserved.
