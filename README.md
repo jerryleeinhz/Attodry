@@ -39,9 +39,13 @@ python -m attodry_control.photoresponse_cli simulate --config config/photorespon
 日常光响应扫描在 NKT 项目目录、`lyr` 环境中运行：
 
 ```powershell
-python -m attodry_control.photoresponse_cli run
+python -m attodry_control.combination_cli run
+# 第二个终端，只读监控
+python -m attodry_control.combination_cli monitor
 ```
 
+统一操作及绘图见 [Combination 光电响应指南](docs/COMBINATION_PHOTORESPONSE_GUIDE.md)。
+旧 `photoresponse_cli run` 调用同一采集服务，保持兼容。
 默认读取 `config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml`；
 执行 `run` 就是确认使用该配置的光路，并启动其中选中的仪器，不再需要授权参数或新增
 TOML 授权字段。`--config` 可指定其他测量文件，旧授权参数仍兼容。项目目录入口直接加载

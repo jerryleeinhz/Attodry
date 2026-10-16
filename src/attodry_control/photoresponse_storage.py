@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from .nkt_config import NktError
 from .nkt_control import utc_now
+from .audit_values import audit_safe
+from .photoresponse_monitor import initial_progress, update_progress
 
 
 @contextmanager
@@ -40,6 +42,8 @@ def run_lock(path):
 
 class PhotoStore:
     def __init__(self, path):
+        self.path = Path(path)
+        self.kind = "dc_photoresponse"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA journal_mode=WAL")
@@ -57,6 +61,9 @@ class PhotoStore:
                 condition_json TEXT NOT NULL, PRIMARY KEY(run_id, condition_id));
             CREATE UNIQUE INDEX IF NOT EXISTS photo_one_accepted
                 ON photo_conditions(series_id, condition_id) WHERE accepted=1;
+            CREATE INDEX IF NOT EXISTS photo_events_run ON photo_events(run_id,event_id);
+            CREATE TABLE IF NOT EXISTS photo_progress (
+                run_id TEXT PRIMARY KEY, progress_json TEXT NOT NULL);
         """)
         self.run_id = None
 
@@ -79,11 +86,12 @@ class PhotoStore:
                 self.db.execute("UPDATE photo_runs SET outcome='interrupted' WHERE series_id=? AND outcome='running'", (self.series_id,))
             self.db.execute("INSERT INTO photo_runs VALUES (?,?,?,?,?,?,?,NULL)",
                 (self.run_id,self.series_id,self.attempt_index,digest,utc_now(),"running",encoded))
+            self.progress = initial_progress(config.snapshot())
+            self.db.execute("INSERT INTO photo_progress VALUES (?,?)",
+                (self.run_id, json.dumps(self.progress, allow_nan=False)))
         return self.run_id, self.attempt_index
 
     def event(self, event):
-        # Import lazily to keep analysis free of hardware factories.
-        from .photoresponse_cli import audit_safe
         encoded = json.dumps(audit_safe(event), allow_nan=False)
         with self.db:
             self.db.execute("INSERT INTO photo_events(run_id,event_json) VALUES (?,?)", (self.run_id,encoded))
@@ -91,9 +99,11 @@ class PhotoStore:
                 row = event["condition"]
                 self.db.execute("INSERT INTO photo_conditions VALUES (?,?,?,?,0,?)",
                     (self.run_id,self.series_id,row["condition_id"],self.attempt_index,json.dumps(audit_safe(row),allow_nan=False)))
+            update_progress(self.progress, event)
+            self.db.execute("UPDATE photo_progress SET progress_json=? WHERE run_id=?",
+                (json.dumps(audit_safe(self.progress), allow_nan=False), self.run_id))
 
     def finalize(self, record):
-        from .photoresponse_cli import audit_safe
         record["run_id"], record["series_id"] = self.run_id, self.series_id
         clean = (record.get("completed") is True and record.get("outcome") == "completed"
                  and record["cleanup"].get("laser_off_confirmed") is True

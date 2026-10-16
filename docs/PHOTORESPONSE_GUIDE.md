@@ -1,5 +1,9 @@
 # 光电压 / 光电流运行指南
 
+日常统一使用 `python -m attodry_control.combination_cli run` 和 `monitor`。
+终端、只读监控及 unified plotting 操作见 [Combination 光电响应指南](COMBINATION_PHOTORESPONSE_GUIDE.md)。
+原 photoresponse_cli 入口保持兼容，下文历史配置/保护规则继续适用。
+
 本项目完整目标为 combination 组合测量：NKT 扫波长和光功率，CLD 固定波长调功率，
 PM100D 反馈稳定实际光功率，并在正式窗口保存电学读数和各仪器状态。
 此前实现为开环 NKT/CLD 光源、6221 DC、2182A 新鲜读数、

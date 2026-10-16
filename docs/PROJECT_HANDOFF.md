@@ -4,6 +4,32 @@ Last updated: 2026-10-16
 
 ## Current stage
 
+Unified Combination operator workflow (2026-10-16): approved by the operator.
+`combination_cli run` calls the same DC acquisition service as the compatible
+photoresponse entry, with existing default TOML/run-command permission and
+unchanged hardware limits, dark matching and cleanup. Launch/progress/error views,
+atomic latest-run registration, WAL-only monitor and unified plotting now use
+the reference public interfaces from Integration-photonics `39e7e9f`.
+DC adapters preserve photo_* storage and legacy archives. Monitor distinguishes
+collected points from final acceptance and reports recorded timestamps, not live
+instrument state/process liveness. New compact progress avoids full event replay.
+File tools do not import drivers; shared package exports are lazy and compatible.
+Plotting retains dark/light/delta, baseline provenance, requested/actual power,
+source settings, T/B and semantic gate/leakage columns. Failed/active records need
+explicit audit selection; overload sentinels never become numeric plot values.
+Condition means are not duplicated as independent repeats (n=1 error undefined).
+Local full regression: 747/747, plus NKT/CLD public-entry simulations and monitor.
+Target validation/deployment is pending. Read-only owner check found Jupyter only,
+with both kernels idle, and local edits in Photoresponse_Analysis and SR830 sweep
+notebooks; preserve these and resolve deployment handling before active update.
+See `COMBINATION_PHOTORESPONSE_GUIDE.md` for usage and pinned reuse provenance.
+
+Latest read-only real-run diagnosis (2026-10-16, run 9cf67ba6): dark and 200/400 uW
+windows were recorded; the 600 uW formal check read 609.405 uW within target +/-5%,
+but combined reference/formal spread 7.434 uW exceeded 5 uW. Entire run rejected,
+raw records retained, laser OFF/electrical safe cleanup confirmed. No restart or
+threshold change was performed. This is separate from the earlier register-0x37 failure.
+
 Simple daily photoresponse run (2026-10-16): the operator approved executing
 `python -m attodry_control.photoresponse_cli run` as the confirmation to acquire
 with the selected TOML/modules/route, without repeated authorization flags or

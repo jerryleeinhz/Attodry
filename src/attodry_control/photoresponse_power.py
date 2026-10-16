@@ -184,8 +184,15 @@ class PhotoresponsePower:
                 self.row["qualified"] = False
                 entry["window_valid"] = False
                 entry["rejection"] = "formal target tolerance or peak-to-peak drift"
-                self._event("power_window_rejected", evidence=entry)
-                raise NktError("Formal power drift; reject whole dark/light/dark without retuning")
+                assessment = {"target_power_w": self.feedback.target_power_w,
+                    "measured_power_w": sample["power_w"], "target_tolerance_w": self.feedback.target_tolerance_w,
+                    "peak_to_peak_w": spread, "max_peak_to_peak_w": self.feedback.window.max_peak_to_peak_w,
+                    "target_in_tolerance": entry["target_in_tolerance"]}
+                self._event("power_window_rejected", evidence=entry, assessment=assessment)
+                raise NktError("Formal power drift: " +
+                    f"target={self.feedback.target_power_w:g} W, measured={sample['power_w']:g} W, " +
+                    f"peak-to-peak={spread:g} W (limit {self.feedback.window.max_peak_to_peak_w:g} W); " +
+                    "reject this acquisition without retuning")
         return sample
 
     def close(self):

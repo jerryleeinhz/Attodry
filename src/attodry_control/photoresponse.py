@@ -189,12 +189,21 @@ class PhotoresponseRunner:
     def _timed(self, phase, **values):
         row = {"phase": phase, **values, "started_monotonic_s": self.clock(), "completed": False}
         self.record["timings"].append(row)
+        self._event("phase_start", operation_phase=phase, **values)
         try:
             yield row
             row["completed"] = True
         finally:
             row["finished_monotonic_s"] = self.clock()
             row["duration_s"] = row["finished_monotonic_s"] - row["started_monotonic_s"]
+            import sys
+            primary = sys.exc_info()[1]
+            try:
+                self._event("phase_end", operation_phase=phase, duration_s=row["duration_s"], completed=row["completed"])
+            except (Exception, KeyboardInterrupt) as exc:
+                if primary is None:
+                    raise
+                self.record["cleanup"]["errors"].append(f"audit phase_end: {type(exc).__name__}: {exc}")
 
     def _settle(self, last_change, required, destination):
         now = self.clock()
@@ -426,6 +435,9 @@ class PhotoresponseRunner:
         if smu_point and self.config.excitation in ("smu_current", "smu_voltage"):
             row["requested_current_a" if self.config.excitation == "smu_current" else "requested_voltage_v"] = smu_point.coordinates["smu_bias"]
         self.record["conditions"].append(row)
+        self._event("condition_start", condition_id=row["condition_id"], attempt_index=self.attempt_index,
+                    optical_state=("dark" if target == "dark" else "light") if self.config.shared_dark else "dark/light/dark",
+                    target_power_w=row["target_power_w"], axis_indices=row["axis_indices"])
         return row
 
     def _suspend_electrical(self):
@@ -624,6 +636,14 @@ class PhotoresponseRunner:
             self.record["outcome"] = "interrupted" if isinstance(exc, KeyboardInterrupt) else "rejected"
         finally:
             cleanup = self.record["cleanup"]
+            def report(phase, **values):
+                try:
+                    self._event(phase, **values)
+                except (Exception, KeyboardInterrupt) as exc:
+                    cleanup["errors"].append(f"audit {phase}: {type(exc).__name__}: {exc}")
+            if self.record["error"]:
+                report("run_error", error=self.record["error"])
+            report("cleanup_start")
             try:
                 optical_cleanup = self.laser.finish()
                 cleanup["laser_off_confirmed"] = optical_cleanup["off_confirmed"]
@@ -666,6 +686,9 @@ class PhotoresponseRunner:
                 except (Exception, KeyboardInterrupt) as exc:
                     cleanup["errors"].append("environment: " + str(exc))
             if cleanup["errors"] or not (cleanup["laser_off_confirmed"] and cleanup["electrical_safe_confirmed"]):
+                self.record["outcome"] = "rejected"
+            report("cleanup_complete", cleanup=deepcopy(cleanup))
+            if cleanup["errors"]:
                 self.record["outcome"] = "rejected"
             # Standalone scan outcome/points do not describe this point session.
             self.record["laser_audit"] = {

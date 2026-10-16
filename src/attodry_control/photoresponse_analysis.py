@@ -9,6 +9,11 @@ from statistics import fmean
 def load_results(path: str | Path, *, include_rejected=False, include_dark=False) -> list[dict]:
     with Path(path).open(encoding="utf-8") as stream:
         record = json.load(stream)
+    return results_from_record(record, include_rejected=include_rejected, include_dark=include_dark)
+
+
+def results_from_record(record, *, include_rejected=False, include_dark=False):
+    """The same whole-run acceptance rule for JSON and read-only SQLite views."""
     if record.get("schema_version") != 1 or record.get("measurement_type") != "dc_photoresponse":
         raise ValueError("Unsupported photoresponse record")
     cleanup = record.get("cleanup", {})

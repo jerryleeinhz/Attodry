@@ -72,7 +72,9 @@ offline
 不包含另一个模块。日常命令可以在 commissioning 完成后移除重复的
 `--authorize-writes` 型 CLI 参数，但这不取消项目对真实硬件阶段明确授权的要求。
 
-2026-10-16 本光响应分支按操作者批准的方案，将明确执行 `photoresponse_cli run`
+2026-10-16 本光响应分支统一使用 `combination_cli run`，旧 `photoresponse_cli run` 调用同一服务。
+monitor 与 unified plotting 复用 Integration-photonics 的文件接口和界面，增加 DC 数据适配，
+不额外查询仪器，不改变暗态匹配、限值和清理。按操作者批准的方案，将明确执行 run
 作为按已选 TOML 启动仪器与光路的确认，不再要求重复 CLI 授权参数，也不增加 TOML
 授权开关。这只是日常入口的执行语义：部署/离线测试不能被 Agent 当作实机启动指令；
 硬件边界、身份/接线/隔离核对、状态验证与清理继续使用原公共实现。

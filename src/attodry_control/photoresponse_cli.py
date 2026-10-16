@@ -5,31 +5,18 @@ import argparse
 import hashlib
 from datetime import datetime, timezone
 import json
-import math
 from pathlib import Path
 import re
 import subprocess
 import sys
 from uuid import uuid4
+from .audit_values import audit_safe
+from .combination_registry import DEFAULT_RUN_CONFIG
 
 from .nkt_config import NktError
 from .nkt_control import NktController, SimulatedNkt
 from .photoresponse import PhotoresponseRunner, SimulatedElectrical
 from .photoresponse_config import load_photoresponse_config
-
-
-DEFAULT_RUN_CONFIG = "config/photoresponse_trial/11_nkt_630nm_dark_50-300uW_7pt_2182.local.toml"
-
-
-def audit_safe(value):
-    """Preserve invalid raw numeric responses without emitting nonstandard JSON."""
-    if isinstance(value, float) and not math.isfinite(value):
-        return {"invalid_float": repr(value)}
-    if isinstance(value, dict):
-        return {k: audit_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [audit_safe(v) for v in value]
-    return value
 
 
 def provenance():
@@ -148,13 +135,15 @@ def _diagnose(config, event, authorize_connection):
     return result
 
 
-def main(argv=None):
+def main(argv=None, *, entrypoint="photoresponse_cli"):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("describe", "validate-config", "simulate", "run", "diagnose", "test-6221", "analyze", "export"))
     parser.add_argument("--config", help=f"Measurement TOML; run defaults to {DEFAULT_RUN_CONFIG}; other commands use config/hardware.local.toml")
     parser.add_argument("--record", help="JSON record for read-only analysis")
     parser.add_argument("--output", help="Export CSV path")
     parser.add_argument("--resume-run", help="SQLite run_id to retry with a fresh preflight and new attempt")
+    parser.add_argument("--database", type=Path, help="Override the audit database for this acquisition")
+    parser.add_argument("--json", action="store_true", help="Print the final structured record instead of progress text")
     parser.add_argument("--authorize-connect", action="store_true", help="For diagnose/test-6221; optional legacy flag for run")
     parser.add_argument("--authorize-writes", action="store_true", help="For test-6221; optional legacy flag for run")
     parser.add_argument("--confirm-route", action="store_true", help="Optional legacy flag; run confirms use of the configured optical route")
@@ -199,6 +188,9 @@ def main(argv=None):
             config=None
         else:
             config=load_photoresponse_config(args.config)
+            if args.database is not None:
+                from dataclasses import replace
+                config = replace(config, database_path=args.database.resolve())
             if args.command == "run" and hashlib.sha256(Path(args.config).read_bytes()).hexdigest() != config_sha256:
                 raise NktError("Measurement TOML changed while loading; review and start a new run")
             if args.command == "validate-config":
@@ -219,11 +211,9 @@ def main(argv=None):
                 args.authorize_connect = args.authorize_writes = args.confirm_route = True
                 args.authorize_environment = config.environment is not None
                 args.authorize_smu = config.smu is not None
-                invocation = {"command":"run", "authorization_source":"run_command",
+                invocation = {"command":"run", "entrypoint":entrypoint, "authorization_source":"run_command",
                     "config_path":args.config, "config_sha256":config_sha256,
                     "selected_modules":config.snapshot()["combination"]["selected_modules"]}
-                print(f"RUN config: {args.config} (sha256={config_sha256})")
-                print("Selected modules: " + ", ".join(invocation["selected_modules"]))
             if args.command == "diagnose" and not args.authorize_connect:
                 raise NktError("diagnose requires --authorize-connect")
             if args.resume_run and (not config.database_path or args.command not in ("simulate","run")):
@@ -239,13 +229,24 @@ def main(argv=None):
             store=None
             try:
                 attempt=1
-                if config and config.database_path and args.command in ("simulate","run"):
-                    store=PhotoStore(config.database_path)
+                if config and args.command in ("simulate","run"):
+                    store=PhotoStore(config.database_path or directory / "audit.sqlite")
                     run_id,attempt=store.start(config,resume=args.resume_run)
+                    from .combination_registry import register_run
+                    register_run(args.config, store, run_id)
+                from .combination_terminal import PhotoresponseProgressPrinter, launch_text, snapshot_text
+                progress = PhotoresponseProgressPrinter(config.snapshot(), enabled=not args.json) if config and args.command in ("run", "simulate") else None
+                if progress and not args.json:
+                    print(launch_text({"measurement_type":"dc_photoresponse", "measurement_config":config.snapshot(),
+                        "simulated":args.command == "simulate", "run_id":run_id, "database":str(store.path.resolve()),
+                        "config":str(Path(args.config).resolve()),
+                        "config_sha256":hashlib.sha256(Path(args.config).read_bytes()).hexdigest()}), flush=True)
                 def event(value):
+                    value = {"captured_at_utc": datetime.now(timezone.utc).isoformat(), **value}
                     journal.write(json.dumps(audit_safe(value),ensure_ascii=False,allow_nan=False)+"\n")
                     journal.flush()
                     if store: store.event(value)
+                    if progress: progress(value)
                 software=provenance()
                 event({"phase":"software",**software})
                 if invocation: event({"phase":"invocation", **invocation})
@@ -262,11 +263,20 @@ def main(argv=None):
                 with path.open("x",encoding="utf-8") as stream:
                     json.dump(audit_safe(record),stream,indent=2,ensure_ascii=False,allow_nan=False)
                 event({"phase":"run_end","outcome":outcome,"record_path":str(path)})
+                if store and not args.json:
+                    from .combination_store import run_snapshot
+                    print(snapshot_text(run_snapshot(store.path, run_id)), flush=True)
             finally:
                 if store: store.close()
         label="SIMULATION" if record.get("simulated") else args.command.upper()
-        print(f"{label} {outcome}: {path}")
-        if record.get("run_id"): print("run_id: "+record["run_id"])
+        if args.json:
+            print(json.dumps(audit_safe(record), ensure_ascii=False, allow_nan=False))
+        else:
+            print(f"{label} {outcome}: {path}", flush=True)
+            if record.get("run_id"): print("run_id: "+record["run_id"], flush=True)
+            if record.get("error"): print("Primary error: " + record["error"], file=sys.stderr, flush=True)
+            for error in record.get("cleanup", {}).get("errors", []):
+                print("Cleanup error: " + error, file=sys.stderr, flush=True)
         return 0 if outcome == "completed" else 1
     except (Exception, KeyboardInterrupt) as exc:
         print(f"{type(exc).__name__}: {exc}",file=sys.stderr)

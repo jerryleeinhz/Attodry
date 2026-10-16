@@ -12,9 +12,10 @@ dependencies = []
 
 [project.optional-dependencies]
 hardware = ["pyvisa==1.16.2", "qcodes>=0.47,<1"]
-analysis = ["matplotlib==3.10.9"]
+analysis = ["matplotlib==3.10.9", "ipywidgets>=8,<9"]
 
 [project.scripts]
+attodry-combination = "attodry_control.combination_cli:main"
 attodry-photoresponse = "attodry_control.photoresponse_cli:main"
 attodry-nkt-test = "attodry_control.nkt_test:main"
 attodry-lockin-test = "attodry_control.lockin_test:main"

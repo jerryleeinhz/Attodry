@@ -2,6 +2,38 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Unified Combination run, monitor and plotting
+
+Status: local software/offline acceptance complete (2026-10-16); target delivery pending.
+
+- Approved common `combination_cli run` delegates to the existing DC service;
+  old CLI/default TOML/flags remain compatible. Full launch summary, incremental
+  phases/readings, primary error and independent cleanup are visible in terminal.
+  Phase-audit failure preserves the original measurement failure. Formal drift
+  messages include target/actual/spread/limit and no longer imply three windows.
+- Reused registry, terminal, readonly store/analysis, unified plotting/statistics
+  and publication export from Integration-photonics `39e7e9f`; retained original
+  31 plotting tests. New DC adapters recognize JSON/photo_* SQLite without migration.
+- Atomic project run registration handles nested TOMLs. New photo_progress snapshots
+  support small WAL reads during acquisition; old databases remain unchanged.
+  Collected progress and final accepted counts differ explicitly. Monitor fixes one
+  run_id, reports age/staleness and unknown process liveness, and opens no instruments.
+- Plot adapter preserves signed dark/light/delta, baseline ID/age/method, measured
+  monitor power/plane, source setting readbacks, actual T/B and semantic gate leakage.
+  Default whole-run/cleanup acceptance stays shared with the existing loader.
+  Explicit audit exposes partial/invalid records with missing values and AUDIT labels;
+  +9.9E37 stays raw text. One condition mean is not promoted into independent repeats.
+- Package exports now load lazily; subprocess tests prove monitor and plotting import
+  neither acquisition services nor instrument drivers. Configuration hashes, raw
+  records and safety boundaries remain; CLI runs without explicit storage use an
+  output-local audit.sqlite for monitoring, without changing measurement snapshots.
+- Local full suite **747/747** passed: 22 new operator integration tests, 31 reused
+  plotting tests and all 694 prior tests. NKT/CLD common-entry simulations and
+  readonly monitor passed. No real instrument connection or output occurred.
+- Target owner check: Jupyter only, two idle kernels. Two Notebook working-tree
+  edits must be preserved/resolved before active deployment; isolated validation
+  can proceed. Delivery receipts will record exact commits and preserved files.
+
 ## Simple daily photoresponse CLI
 
 Status: software and isolated target offline acceptance/deployment complete (2026-10-16).
