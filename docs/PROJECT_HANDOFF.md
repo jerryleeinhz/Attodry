@@ -19,7 +19,10 @@ source settings, T/B and semantic gate/leakage columns. Failed/active records ne
 explicit audit selection; overload sentinels never become numeric plot values.
 Condition means are not duplicated as independent repeats (n=1 error undefined).
 Local full regression: 747/747, plus NKT/CLD public-entry simulations and monitor.
-Target validation/deployment is pending. Read-only owner check found Jupyter only,
+Target validation/deployment is pending. The first isolated suite exposed an old
+mocked CLI test's dependency on uncommitted hardware.local.toml; fixed its explicit
+simulation-file fixture and retained the failed clone/logs before retrying.
+Read-only owner check found Jupyter only,
 with both kernels idle, and local edits in Photoresponse_Analysis and SR830 sweep
 notebooks; preserve these and resolve deployment handling before active update.
 See `COMBINATION_PHOTORESPONSE_GUIDE.md` for usage and pinned reuse provenance.

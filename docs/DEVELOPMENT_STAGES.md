@@ -33,6 +33,10 @@ Status: local software/offline acceptance complete (2026-10-16); target delivery
 - Target owner check: Jupyter only, two idle kernels. Two Notebook working-tree
   edits must be preserved/resolved before active deployment; isolated validation
   can proceed. Delivery receipts will record exact commits and preserved files.
+- First target clone retained a failed 747-test attempt: one old mocked CLI test
+  read the default private TOML to format its new launch summary. Corrected the
+  test to provide its own explicit public simulation fixture; no production
+  missing-file/configuration check was relaxed. Repeat in a fresh clone.
 
 ## Simple daily photoresponse CLI
 

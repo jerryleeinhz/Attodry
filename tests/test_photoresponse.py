@@ -334,8 +334,10 @@ class AnalysisAndCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             config = example()
             config = replace(config, nkt=replace(config.nkt, output_directory=Path(td)))
+            config_path = Path(td) / "simulation.toml"
+            config_path.write_text(EXAMPLE.read_text(), encoding="utf-8")
             with patch("attodry_control.photoresponse_cli.load_photoresponse_config", return_value=config), redirect_stdout(io.StringIO()):
-                self.assertEqual(main(["simulate"]), 0)
+                self.assertEqual(main(["simulate", "--config", str(config_path)]), 0)
             files = list(Path(td).glob("*_completed.json"))
             self.assertEqual(len(files), 1)
             self.assertEqual(len(load_results(files[0])), 2)
