@@ -2,6 +2,14 @@
 
 ## Modular Combination / optics — 2026-10-16
 
+- Authorized Git delivery and LK_setup synchronization completed at 14:28 UTC:
+  feature ae7fafe pushed to origin; local final 921/921 in 127.363 s, fresh-origin
+  target clone 921/921 in 107.924 s. Idle active NKT fast-forwarded a1e823f ->
+  ae7fafe. Final documentation bookkeeping follows this tested code revision.
+  Default config/hardware.local.toml now holds the requested 630 nm / 10 nm,
+  dark+20..90 uW nine-point no-excitation profile, 3 CH2/10 V/NPLC1 reads each.
+  No-argument validation passed; originals backed up and unrelated TOML hashes,
+  Jupyter services and latest scan index retained. No instrument access/new scan.
 - Operator-approved free module selection and ordered Cartesian combinations:
   independent temperature/magnetic, composite optics, 6221 current source,
   reused Three-SMU and optional 2182A/voltage detector. Lists and shared range

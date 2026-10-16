@@ -4,6 +4,33 @@ Last updated: 2026-10-16
 
 ## Current stage
 
+Origin delivery and LK_setup synchronization completed 2026-10-16 at 14:28 UTC:
+feature commit ae7fafe is pushed on module/integration-photovoltage/current.
+Final local regression 921/921 in 127.363 s; a fresh origin clone on LK_setup
+passed 921/921 in 107.924 s, then the idle active NKT checkout fast-forwarded
+a1e823f -> ae7fafe. Both target Git states were clean. The two Jupyter services
+and latest scan index were preserved; no instrument access or scan launch.
+The daily default is now config/hardware.local.toml, for both run and monitor.
+Active no-argument validate-config and explicit runtime require_run validation
+confirm NKT 630 nm / 10 nm, dark then 20/30/40/50/60/70/80/90 uW, 9 conditions,
+3 fresh 2182A CH2/10 V/NPLC1 reads each (27 formal readings), one repeat,
+no excitation. Analog/digital filters are OFF, AZ/FAZ ON. The relay-only 6221
+must remain OFF/zero. Existing 5% tuning / 25% acceptance, stability/timeout/hard
+limits and PM100D measurement plane are copied from the last valid scan90.
+The station TOML remains ignored, SHA-256
+7dc60620768f19224d1716b0132166848dcc7e62657a201bc7789a60ced7843b.
+Original hardware.local and old trial/reference files are backed up in
+NKT/run_data/modular-deploy-20261016T141837Z/backup. The old trial was preserved,
+including its invalid // comment; the new default does not read it. Other local
+TOMLs retain their before/after hashes. The old inactive CLD station table is
+retained in the new file. Relative output is ../run_data/nkt630_dark20-90uW_9pt
+with audit.sqlite inside it; the operator starts the run when ready.
+Local evidence: run_data/modular_delivery_20261016T141837Z, including
+target-clone-evidence and evidence/deployment-result.json. Target evidence:
+NKT/run_data/modular-deploy-20261016T141837Z. Final delivery bookkeeping follows
+the feature commit; real optical response, filter commissioning and speed remain
+separate from this code/configuration deployment.
+
 Modular Combination / optics (2026-10-16): operator approved the detailed plan
 and local implementation. New [combination_scan].order selects independent
 temperature, magnetic, optics, current_source, smu and nanovoltmeter modules.
@@ -31,8 +58,9 @@ raw data are not rewritten. Monitor and unified plotting use the same file-only
 adapters and preserve measured power plane, raw mean and matched difference.
 Final local full regression: 918/918 in 131.509 s; final LK_setup isolated full
 regression: 918/918 in 106.666 s (14:10:41-14:12:30 UTC). All 220 packaged files
-retain their before/after SHA-256 hashes. Active NKT remains a1e823f with clean
-Git status; the two existing Jupyter services were left untouched. No acquisition
+retain their before/after SHA-256 hashes. At that source-snapshot acceptance,
+active NKT was a1e823f with clean Git status; the two existing Jupyter services
+were left untouched. No acquisition
 was observed before/after the isolated acceptance, and no instrument was opened.
 Independent 14:13:04 UTC verification confirms unchanged Jupyter identities and
 latest-run index; all 143 current local source/test/config files match the tested
