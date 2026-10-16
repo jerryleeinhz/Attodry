@@ -643,6 +643,15 @@ def _unresolved_dimensions(
             continue
         if key in covered_keys:
             continue
+        if key == "requested.optical_source_level_pct" and all(
+            row.get("measurement_type") == "dc_photoresponse"
+            and row.get("power_feedback_actuator") in {"source_current", "source_power"}
+            for row in rows if _scalar(row.get(key))
+        ):
+            # PM100D feedback owns this actuator; the archived source setting
+            # is a starting value, not another independent scan coordinate.
+            # Unknown/open-loop rows still require an explicit filter/group.
+            continue
         token = _dimension_token(key)
         module = _dimension_module(key)
         if token in tokens:

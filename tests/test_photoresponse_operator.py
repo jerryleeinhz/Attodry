@@ -155,6 +155,8 @@ raise SystemExit(status)
                     json_rows = load_photo_plot_rows(path)
                     sql_rows = load_photo_plot_rows(store.path, run_id=run_id)
                     self.assertEqual(json_rows, sql_rows)
+                    self.assertTrue(all(r["power_feedback_actuator"] == (
+                        "source_current" if kind == "nkt" else "cld_current") for r in json_rows))
                     self.assertTrue(any(r["optical_state"] == "dark" for r in json_rows))
                     for row in json_rows:
                         if row["optical_state"] == "light":
@@ -217,6 +219,88 @@ raise SystemExit(status)
         self.assertTrue(plotted["rows"])
         self.assertTrue(all(p["n"] == 1 and p["sd"] is None for p in plotted["summary_rows"]))
         self.assertIn("Light minus dark", figure.axes[0].get_ylabel())
+
+    def feedback_plot_rows(self):
+        _, _, path, _, _ = self.fixture()
+        rows = [dict(row) for row in load_plot_sources([path]) if row["optical_state"] == "light"]
+        # Different archived starting settings are actuator seeds, not separate
+        # optical conditions when the selected source is controlled by PM100D.
+        for row, level in zip(rows, (4., 6.)):
+            row["requested.optical_source_level_pct"] = level
+        return rows
+
+    def test_source_feedback_power_curves_do_not_require_source_setting_stack(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        self.addCleanup(lambda: plt.close("all"))
+        rows = self.feedback_plot_rows()
+        before = copy.deepcopy(rows)
+        for x in ("actual.optical_power_w", "requested.optical_target_power_w"):
+            for y in ("measured.delta_voltage_v", "measured.detector_mean_voltage_v"):
+                with self.subTest(x=x, y=y):
+                    figure, data = render_plot(rows, {"x":x, "y":y, "group_by":None})
+                    self.assertEqual(len(data["rows"]), 2)
+                    self.assertEqual(len(figure.axes[0].lines), 1)
+                    self.assertEqual([r["requested.optical_source_level_pct"] for r in data["rows"]], [4., 6.])
+        self.assertEqual(rows, before)
+
+    def test_source_feedback_exemption_requires_archived_matching_actuator(self):
+        rows = self.feedback_plot_rows()
+        self.assertTrue(all(row.get("power_feedback_actuator") == "source_current" for row in rows))
+        spec = {"x":"actual.optical_power_w", "y":"measured.delta_voltage_v"}
+        for actuator in (None, "varia_nd", "cld_current", "unknown"):
+            with self.subTest(actuator=actuator):
+                other = [{**row, "power_feedback_actuator":actuator} for row in rows]
+                with self.assertRaisesRegex(ValueError, "Optical source setting"):
+                    render_plot(other, spec)
+        # Mixed data must not borrow one run's feedback semantics for another.
+        rows[0].pop("power_feedback_actuator")
+        with self.assertRaisesRegex(ValueError, "Optical source setting"):
+            render_plot(rows, spec)
+
+    def test_source_feedback_keeps_other_optical_and_electrical_dimensions(self):
+        from attodry_control.unified_plotting import column_label
+        rows = self.feedback_plot_rows()
+        spec = {"x":"actual.optical_power_w", "y":"measured.delta_voltage_v"}
+        for key in ("optical_wavelength_nm", "optical_bandwidth_nm", "optical_nd_pct",
+                    "bias_current_a", "temperature_k", "field_x_t", "gate_bottom_v"):
+            with self.subTest(coordinate=key):
+                other = [{**row, "requested."+key:float(index+1)} for index, row in enumerate(rows)]
+                with self.assertRaisesRegex(ValueError, "Unresolved varying conditions") as raised:
+                    render_plot(other, spec)
+                self.assertIn(column_label("requested."+key), str(raised.exception))
+
+    def test_source_power_feedback_and_explicit_source_axis_remain_supported(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        self.addCleanup(lambda: plt.close("all"))
+        rows = [{**row, "power_feedback_actuator":"source_power"} for row in self.feedback_plot_rows()]
+        _, data = render_plot(rows, {"x":"actual.optical_power_w", "y":"measured.delta_voltage_v"})
+        self.assertEqual(len(data["rows"]), 2)
+        diagnostic = [{**row, "requested.optical_target_power_w":.001} for row in rows]
+        _, data = render_plot(diagnostic, {"x":"requested.optical_source_level_pct", "y":"measured.delta_voltage_v"})
+        self.assertEqual([p["x"] for p in data["summary_rows"]], [4., 6.])
+
+    def test_notebook_source_feedback_curve_can_render_with_no_stack(self):
+        with redirect_stdout(io.StringIO()):
+            rows = self.feedback_plot_rows()
+            dashboard = UnifiedPlotDashboard(self.root)
+            dashboard.add_plot("curve")
+            card = dashboard.cards[0]
+            source = next(s for s in dashboard.catalog if s.kind == "photoresponse")
+            card["sources"]._controls[str(source.path)].value = True
+            key = (str(source.path), None, False)
+            dashboard._cache[key] = rows
+            dashboard._update_card_options(card)
+            card["x"].value = "actual.optical_power_w"
+            card["y"].value = "measured.delta_voltage_v"
+            card["group"].value = ""
+            dashboard._render_card(card)
+            self.assertIsNotNone(card["rendered"])
+            self.assertEqual(len(card["rendered"]["data"]["rows"]), 2)
+            self.assertTrue(card["image"].value)
 
     def test_read_only_plotting_import_does_not_load_drivers(self):
         source = """

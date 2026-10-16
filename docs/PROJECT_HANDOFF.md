@@ -4,6 +4,26 @@ Last updated: 2026-10-16
 
 ## Current stage
 
+Unified plotting source-setting fix (2026-10-16): local implementation and
+offline acceptance complete, 57/57 shared plotting/operator tests in 28.384 s.
+Pre-deployment full local regression: 789/789 in 90.938 s (2026-10-16).
+The new regression first reproduced the source-setting error and Notebook render
+failure. The DC row adapter now exposes power_feedback_actuator from each archived
+measurement_config.power.feedback.actuator, identically for JSON and SQLite.
+For source_current/source_power feedback only, requested.optical_source_level_pct
+is an actuator seed rather than a required fixed/grouped coordinate. Other
+optical/electrical/environment coordinates remain protected. Open-loop, unknown,
+other-actuator and mixed unknown records keep the source-setting check; explicit
+source-axis/group selection and original source fields are still available.
+Measured/target-power X, delta/detector-mean voltage Y and the real Notebook card
+render with no source stack. Raw rows, dark subtraction, run acceptance, rejected
+audit and the raw archive remain unchanged; no extra SQL or instrument queries,
+setting writes or waits. Notebook/operator guidance is updated. No remote
+deployment, kernel restart or scan interaction was performed for this fix.
+Automatic light-only selection and per-database Run ID error messages remain
+planned, outside this source-setting-only change. Existing unrelated local edits
+to PM100D documentation/figures and other Notebook files must be preserved.
+
 Power stability / bounded recovery (2026-10-16), current delivery:
 - Implements separate opt-in tuning precision, relative/absolute fluctuation and
   timestamp-based drift slope, with existing formal tolerance meaning unchanged.

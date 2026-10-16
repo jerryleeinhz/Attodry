@@ -2,6 +2,28 @@
 
 Update this file whenever a feature is completed. A stage is complete only when its tests and documentation are complete.
 
+## Unified plotting: feedback source setting is not a required grouping axis
+
+Status (2026-10-16): local code, Notebook guidance and offline acceptance complete.
+Shared plotting/operator regression: **57/57 in 28.384 s**. No target deployment
+or hardware interaction in this change.
+Pre-deployment full local regression: **789/789 in 90.938 s** (2026-10-16).
+
+- Reproduced the source-setting error with varying NKT initial percentages and
+  the actual Notebook card failing to render without a source-setting stack.
+- Project the archived feedback actuator into JSON/SQLite analysis rows. Only
+  source_current/source_power DC feedback relaxes the source-percentage dimension;
+  no inference from power-column existence or today's station configuration.
+- Tested measured/target-power X with delta/detector-mean voltage Y, one ordinary
+  trace without stacking, preserved source values, and explicit source-axis plots.
+  Missing/unknown/mixed metadata and other actuators retain conservative checks;
+  wavelength, bandwidth, ND, bias, temperature, field and gate dimensions remain.
+- Keep raw provenance, dark matching, quality/acceptance and audit semantics.
+  No new SQL/instrument queries, writes, waits or acquisition-time overhead.
+  Notebook/operator instructions explain None grouping and analysis-kernel reload.
+- Automatic light-only filtering and Run ID selection/error UX remain separate
+  planned changes; do not deploy over an active measurement.
+
 ## Power stability, center-seeking and bounded recovery
 
 Status (2026-10-16): code + local offline acceptance complete. Local full suite

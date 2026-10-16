@@ -74,6 +74,14 @@ Data directory 推荐实验输出子目录。Refresh records → 勾选数据源
 不是实测样品电流；无激励不制造电流值。measurement_plane 保留测量位置，不自动给出
 未经样品功率标定的 A/W、V/W。
 
+PM100D 闭环使用 NKT `source_current` / `source_power` 时，归档源百分比是调光初值，
+不再要求按 `target Optical source setting (%)` 筛选或 stacked。固定波长等其他条件后，
+`Stack/group = None` 可直接画功率与差分电压或电压表均值的曲线。根据每条记录的
+原始配置识别反馈方式，不根据功率列存在或当前 TOML 猜测。开环、未知反馈以及使用
+其他执行器的数据保留源设定条件检查；源百分比仍可显式选作诊断轴、分组或导出。
+更新后需重启对应分析 Notebook 的内核并重新加载数据。运行中数据和暗态筛选沿用
+现有规则；此修复不改变采集、暗态扣除、接受条件或 Run ID 选择流程。
+
 每行是条件均值和已记录差分，共享暗态不作为独立重复复制；保存暗点 ID、baseline_age_s
 及公式版本，不跨 run/attempt 拼接。Mean ± SD/SEM 对单行结果为 n=1，误差未定义。
 detector_sample_count 和 detector_within_window_sd 单独表示窗口内采样与散布。

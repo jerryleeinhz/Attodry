@@ -58,6 +58,7 @@ def _record_rows(record, path, *, audit):
         record, include_rejected=audit, include_dark=True)}
     config = record["measurement_config"]
     quantity = config.get("quantity", "voltage_v")
+    feedback_actuator = ((config.get("power") or {}).get("feedback") or {}).get("actuator")
     rows = []
     for condition in record["conditions"]:
         result = selected.get(condition["condition_id"])
@@ -76,6 +77,7 @@ def _record_rows(record, path, *, audit):
             "accepted": result.get("accepted", False), "clean": result.get("accepted", False),
             "simulated": record.get("simulated"), "run_status": record.get("outcome"),
             "measurement_type": "dc_photoresponse", "observation_unit": "condition mean; not an independent detector sample",
+            "power_feedback_actuator": feedback_actuator,
             "optical_state": optical_state, "quantity": quantity,
             "requested.optical_state": optical_state,
             "requested.optical_target_power_w": condition.get("target_power_w"),
