@@ -15,6 +15,26 @@
   the user's20uV/50uV fixed ranges, N7/D1 and the fresh manual phase declaration;
   their isolated allowlist does not alter the global safety policy. Real
   acceptance and publication/deployment receipts remain separately recorded.
+- Pacing commit `33c3139` is published/deployed; 81 target hardware-blocked tests
+  pass in 13.387 s. First paced dark run has 179 transactions with no serial
+  error, but native frequency does not stabilize inside30s after motor/output
+  transition. All final device protections/close/audit pass; original failed
+  status and generic TimeoutError/OSError communication flag remain unchanged.
+- A new query-only observation returns ten consecutive56Hz native captures.
+  Exact fault/current-state/protection review permits one independent config
+  with readiness120s and unchanged1Hz tolerance; no hardware boundary, failed
+  data, or communication acceptance changes. Dark subsequently completes three
+  clean formal pairs and certified cleanup. The light run has zero formal
+  samples and stops on0.849766424nW < existing1nW illumination floor.
+- User confirms PM is after the chopper and the target is chopped-cycle average
+  power. Existing hardware averaging is3; hardware count1 would shorten it.
+  Longer per-reading averaging is a proposed next trial. One-mean target
+  acceptance and stop-while-tuning are not implemented or executed.
+- Final laserOFF/electrical/chopper-preserve/close/audit verification passes;
+  original light failure remains failed/unclean. Child processes exit, leases
+  release. Three paced acquisition attempts total645 complete chopper serial
+  transactions, zero errors; this is bounded real evidence, not a reliability
+  guarantee. Global safety, current/power limits and minimum illumination remain.
 
 ## 2026-10-17 masked single-opening chopper geometry
 

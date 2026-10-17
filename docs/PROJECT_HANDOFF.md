@@ -24,6 +24,41 @@ Last updated: 2026-10-17
   tests rejected it, the template location was corrected, and the failed log is
   retained. Opt-in private 20uV/50uV dark/light copies pass offline loading.
   Target verification/deployment and any real acquisition results are separate.
+- Exact pacing commit `33c3139` was published and deployed after 81 target
+  hardware-blocked cases passed (13.387 s); actual private loader/launcher
+  previews passed. Original main settings, global policy and notebook bytes
+  were preserved. Five fresh production-driver captures with pacing were healthy.
+- The first paced dark run had 179 complete, error-free chopper transactions but
+  failed its 30 s native-frequency readiness window after an owned motor/output
+  transition. Final laser OFF, electrical protection, chopper preserve, resource
+  close and audit were verified, while the original run remains failed/unclean.
+  Its generic communication_uncertain flag is retained: Python TimeoutError
+  inherits OSError; it is not rewritten to certify that failed attempt.
+- Ten subsequent new-session query-only captures all read native outer 56 Hz
+  (derived one-opening beam 8 Hz), with fresh NKT OFF. Only after exact error,
+  original child exit, every device protection and full raw communication review,
+  a separate immutable attempt increases ready timeout 30 -> 120 s. It keeps
+  the original 1 Hz tolerance and all other limits; no mixed/actual communication
+  fault is admitted by that narrow evidence check.
+- The new dark run completes with three clean formal pairs and fully certified
+  cleanup; no overload/unlock/invalid channel is recorded. Its subsequent light
+  run stops at the first target with zero formal samples on a valid but very low
+  PM reading (0.849766424 nW, below the existing 1 nW illumination floor).
+  User corrects the measurement plane to after the chopper and defines targets
+  as chopped-cycle mean power. Current PM average count is3; short individual
+  READ replies are not evidence of a full125ms modulation-cycle average.
+- All final laser-OFF/electrical/chopper-preserve/resource/audit checks pass for
+  both runs; light remains failed/unclean for audit. Both child PIDs exit and all
+  known leases release. Dark/light chopper transactions are383/83, with zero
+  serial errors; including the preceding readiness failure gives645 complete
+  transactions without corruption in the three paced acquisition attempts.
+  This does not guarantee future communication reliability. No further light
+  trial, minimum-signal relaxation or automatic chopper-stop tuning was performed.
+- User is considering longer per-reading PM averaging and a single averaged
+  target decision. Distinguish hardware `pm100d.average_count` from software
+  `power_feedback.window.min_samples`. Count1 shortens hardware averaging;
+  single-mean target acceptance is not a power-variation qualification and is
+  not yet implemented. Stopping rotation cannot prove a fully transmitting path.
 
 ### Masked single-opening chopper geometry (2026-10-17)
 
