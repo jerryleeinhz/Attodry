@@ -1,5 +1,26 @@
 # Development stages
 
+## 2026-10-17 — Explicit one-mean optical target qualification
+
+Adds opt-in `power_feedback.qualification="mean_target_only"`; default
+`stable_window` retains existing qualification. One fresh validW acquisition can
+reach the target without rolling-window/hold waits. It never certifies power
+variation stability, and records ignored criteria separately from the retained
+iteration interval. Formal actual-power brackets, bounded adjustment/reversal,
+minimum illumination, reduction, PM status/range/identity and shared deadlines
+remain. Complete READ cost increases when hardware averaging increases; the new
+mode removes qualification delay without removing required protection queries.
+
+Final focused local guarded regression:169 cases pass in29.337s, including13 new
+cases; root delivery regression passes218 cases in24.860s (overlapping coverage,
+not cumulative). Independent review reports no remaining blocker after restoring iteration
+spacing. Hardware imports and DLL entry points remain blocked in these tests.
+User authorizes candidate average_count3000 empirical low-current verification,
+then dark plus six chopped-mean targets only if pilot and cleanup evidence pass.
+This entry does not claim real duration, stability, deployment or acquisition;
+actual delivery/run receipts are retained separately and subsequent results must
+be recorded without rewriting prior failed/unclean attempts.
+
 ## 2026-10-17 opt-in serial character-pacing candidate
 
 - After explicit post-fault front-panel/USB confirmation, bulk and 100 ms

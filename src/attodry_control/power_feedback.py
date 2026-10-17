@@ -8,6 +8,47 @@ import statistics
 from .nkt_config import NktError, number, tenths
 
 
+def _checked_sample(sample, epoch_s, max_power_w, last_sequence, last_finished_s):
+    if sample.get("valid") is not True or sample.get("unit") != "W":
+        raise NktError("Window requires valid W samples")
+    number(sample["power_w"], "window power W", 0, max_power_w)
+    start, end = sample["started_monotonic_s"], sample["finished_monotonic_s"]
+    number(start, "sample start", epoch_s, 1e15)
+    number(end, "sample end", start, 1e15)
+    sequence = sample["sequence"]
+    if type(sequence) is not int or (last_sequence is not None and sequence <= last_sequence):
+        raise NktError("Duplicate/out-of-order power acquisition")
+    if last_finished_s is not None and start < last_finished_s:
+        raise NktError("Stale/overlapping power acquisition")
+    return start, end, sequence
+
+
+class MeanPowerTarget:
+    """One fresh instrument-averaged reading; never a temporal stability proof."""
+    def __init__(self, *, epoch_s, max_power_w):
+        self.epoch_s, self.max_power_w = epoch_s, max_power_w
+        self.samples = deque(maxlen=1)
+        self.last_sequence = self.last_finished_s = None
+
+    def add(self, sample):
+        start, end, sequence = _checked_sample(sample, self.epoch_s, self.max_power_w,
+                                             self.last_sequence, self.last_finished_s)
+        self.last_sequence, self.last_finished_s = sequence, end
+        self.samples.append(sample)
+        return {"mean_power_w": sample["power_w"], "count": 1,
+                "started_monotonic_s": start, "finished_monotonic_s": end,
+                "sequences": [sequence], "power_window_stable": False,
+                "qualification": "mean_target_only",
+                "reason": "single instrument-averaged reading; stability not assessed"}
+
+
+def feedback_evidence(config, *, epoch_s):
+    if config.qualification == "mean_target_only":
+        return MeanPowerTarget(epoch_s=epoch_s, max_power_w=config.max_power_w)
+    return PowerWindow(config.window, epoch_s=epoch_s, max_power_w=config.max_power_w,
+                       target_power_w=config.target_power_w)
+
+
 class PowerWindow:
     def __init__(self, config, *, epoch_s, max_power_w, target_power_w=None):
         config.validate()
@@ -22,17 +63,8 @@ class PowerWindow:
         self.last_finished_s = None
 
     def add(self, sample):
-        if sample.get("valid") is not True or sample.get("unit") != "W":
-            raise NktError("Window requires valid W samples")
-        number(sample["power_w"], "window power W", 0, self.max_power_w)
-        start, end = sample["started_monotonic_s"], sample["finished_monotonic_s"]
-        number(start, "sample start", self.epoch_s, 1e15)
-        number(end, "sample end", start, 1e15)
-        sequence = sample["sequence"]
-        if type(sequence) is not int or (self.last_sequence is not None and sequence <= self.last_sequence):
-            raise NktError("Duplicate/out-of-order power acquisition")
-        if self.last_finished_s is not None and start < self.last_finished_s:
-            raise NktError("Stale/overlapping power acquisition")
+        start, end, sequence = _checked_sample(sample, self.epoch_s, self.max_power_w,
+                                             self.last_sequence, self.last_finished_s)
         if self.last_finished_s is not None and start - self.last_finished_s > self.config.duration_s:
             # A gap longer than the requested window cannot prove continuous
             # stability. Preserve raw samples in the caller, discard the proof.

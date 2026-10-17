@@ -154,6 +154,9 @@ note = "CLD wavelength is nominal; no spectral bandwidth control"
 # 不要把此格式例当作允许忽略保护；任何其他模式仍失败。
 
 [power_feedback]
+qualification = "stable_window" # stable_window(default) | mean_target_only
+# mean_target_only：单次新鲜PM平均值达目标即可，不代表波动稳定；不等待hold_s/window。
+# PM平均次数由pm100d.average_count设置，window.min_samples仍至少2。
 actuator = "cld_current" # 单位A，不使用NKT百分数、VARIA ND或source_power
 target_mapping = "cartesian" # paired | cartesian；每个current_points_a行×全部目标
 target_powers_w = ["CHANGE_ME_TARGET_POWER_W"] # W；与单点/区间三选一

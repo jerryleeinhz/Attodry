@@ -251,9 +251,11 @@ initial_source_levels_pct = [
 target_deviation_policy = "record_continue" # abort / record_continue；省略默认abort
 ```
 
-目标功率用于初始调功；`target_tolerance_fraction`/`target_tolerance_w`、
-稳定窗口、`hold_s` 和 `timeout_s` 仍决定何时完成调节。初始目标一直不可达或
-功率窗口始终不稳定仍失败；此策略不允许无限调功或跳过初始资格。
+目标功率用于初始调功；默认 `qualification="stable_window"` 时，
+`target_tolerance_fraction`/`target_tolerance_w`、稳定窗口、`hold_s` 和 `timeout_s`
+决定何时完成调节。初始目标一直不可达或功率窗口始终不稳定仍失败；
+此策略不允许无限调功或跳过初始资格。下面的 `mean_target_only` 是另一种
+明确选择的初始资格方式，不能当作已通过功率波动判稳。
 调功成功后，在观察等待、重新资格确认、测量前/期间/后和参考恢复期间，
 仅因偏离目标则保存偏差并继续，不改电流/ND，不拒绝该组 Vxx/Vxy。
 功率硬上限、`reduce_above_power_w`、最低有效照明、功率计量程/状态、
@@ -294,6 +296,45 @@ Notebook 中 `target Optical source setting (%)` 不再是必须分组或固定�
 此策略适用于组合扫描及共用 OpticalPointSession 的 PEM 内参考诊断。独立
 `optical_cli`/`optical_test` 的旧扫描入口有自己的重新调功循环，显式拒绝
 `record_continue`，不能把它与本次点流程策略混用。日常组合运行命令保持不变。
+
+## 斩波后长平均与单值目标资格（2026-10-17）
+
+PM100D 位于斩波器之后、目标定义为斩波运行时的周期平均功率时，保持斩波器
+旋转，以仪器长平均降低单次读数随透光/挡光时段的波动。不要把停转自动当作
+全透光，也不能用未标定的占空比把全透光功率换算为平均功率。
+
+```toml
+[pm100d]
+average_count = 3000 # 示例候选，整数1..1000000；不是秒数，须实测验证本机时长和效果
+io_timeout_s = 10.0 # 要覆盖实际READ耗时；仪器超时仍失败
+
+[power_feedback]
+qualification = "mean_target_only" # stable_window(default) | mean_target_only
+# 其余目标、容差、actuator、边界、timeout_s和window有效参数继续填写。
+```
+
+这两张表合并到已有完整配置，不要重复定义。`average_count` 控制 PM100D
+内部平均次数；增加通常使每次新的 `READ?` 更慢，改为1会缩短平均。
+它和软件窗口的 `window.min_samples` 是两个参数。后者仍须至少2；本功能
+不接受把单个数当作波动为零的稳定窗口。
+
+`stable_window` 保持原流程：多个新鲜功率读数满足稳定窗口、目标容差及 hold。
+`mean_target_only` 用一个新的、有效W读数决定是否达到初始目标；不等待
+`hold_s`、不要求 `window.duration_s/min_samples`，也不使用窗口的峰峰值、
+相对波动或漂移门槛。保留这些字段的合法配置及来源，但审计明确列为未用于
+该模式的资格判断。`window.sample_interval_s` 仍是调功迭代之间的最少间隔。
+每次实际电流/ND改变后的状态确认、反馈步长/反向缩步和共享总超时继续执行。
+
+结果分别记录 `qualification`、`target_reached` 和 `power_window_stable`；
+单值模式的最后一项恒为false。正式采样仍保存新鲜的 before/formal/after
+功率读数与设置/状态核验，`target_deviation_policy` 决定普通目标偏离的处理，
+不再额外执行该模式未承诺的相对波动/漂移窗口判稳。硬功率上限、最低有效照明、
+reduce规则、PM量程/传感器/单位/波长、参考与通信保护均不放宽。
+
+单个 PM 平均值不能证明整个锁相积分窗口的光功率都恒定；功率计和锁相的
+时间戳保留各自含义。分析使用实测功率，并把波动未资格与失锁/过载标记区分。
+长平均会增加每次守护和正式采样的耗时。先用固定低电流、斩波器运行的小规模
+实测核验平均次数读回、READ耗时和分散程度，再决定是否用于完整扫描。
 
 ## 参考瞬态恢复（2026-10-05）
 

@@ -175,6 +175,7 @@ class FeedbackConfig:
     current_min_a: float | None = None
     current_max_a: float | None = None
     current_step_a: float | None = None
+    qualification: str = "stable_window"
 
     def tuning_tolerance_w(self):
         return (self._tolerance(self.target_power_w) if self.tuning_tolerance_fraction is None
@@ -314,6 +315,8 @@ class FeedbackConfig:
 
     def validate(self):
         self.targets_per_optical_point
+        if self.qualification not in ("stable_window", "mean_target_only"):
+            raise NktError("Feedback qualification must be stable_window or mean_target_only")
         if self.actuator not in ("varia_nd", "source_current", "source_power", "cld_current"):
             raise NktError("Feedback actuator must be varia_nd, source_current, source_power or cld_current")
         self.window.validate()
@@ -504,7 +507,7 @@ def load_scan_config(path, nkt):
                     "minimum_signal_power_w", "reduce_above_power_w", "target_mapping",
                     "initial_current_mode", "initial_source_levels_pct", "tuning_tolerance_fraction",
                     "source_power_min_pct", "source_power_max_pct", "source_power_step_pct",
-                    "current_min_a", "current_max_a", "current_step_a", "target_power_ranges"}
+                    "current_min_a", "current_max_a", "current_step_a", "target_power_ranges", "qualification"}
         keys(raw, "power_feedback", names - optional, optional)
         if "target_power_ranges" in raw:
             if "target_power_w" in raw or "target_powers_w" in raw:

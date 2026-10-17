@@ -488,6 +488,7 @@ class OpticalPointSession:
                 within_target = target_in_tolerance(sample["power_w"], self.feedback)
                 deviation = sample["power_w"] - self.feedback.target_power_w
                 assessment = {"policy": self.config.scan.target_deviation_policy,
+                    "qualification": self.feedback.qualification,
                     "target_power_w": self.feedback.target_power_w,
                     "actual_power_w": sample["power_w"],
                     "target_tolerance_w": self.feedback.target_tolerance_w,
@@ -498,7 +499,7 @@ class OpticalPointSession:
                         self.config.scan.target_deviation_policy == "record_continue" and
                         not sample["above_reduce_threshold"])}
                 window = self.feedback.window
-                if (self._qualified_power_window is not None and
+                if (self.feedback.qualification == "stable_window" and self._qualified_power_window is not None and
                         (window.max_peak_to_peak_fraction is not None or window.max_drift_fraction_per_s is not None)):
                     stability = self._qualified_power_window.add(sample)
                     assessment["stability_window"] = stability

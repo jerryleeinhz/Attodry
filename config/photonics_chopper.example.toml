@@ -99,6 +99,7 @@ expected_sensor_serial = "CHANGE_ME_PM100D_SENSOR_SERIAL"
 io_timeout_s = 2.0
 wavelength_tolerance_nm = 0.1 # PM波长校正设置的读回容差
 average_count = 1 # 1..1000000；平均数增加会增长每次READ耗时
+# 斩波后测周期平均功率可先实测验证3000等较长平均；它不是秒数，1会缩短平均。
 auto_range = true # false时必须另加range_w
 # range_w = 0.01 # W，仅固定量程时按探头/实际功率确认
 max_power_w = "CHANGE_ME_APPROVED_PM_MAX_POWER_W"
@@ -164,6 +165,9 @@ points = [
 # VARIA中心/带宽/边缘须满足400..840nm、10..100nm及0.1nm量化。
 
 [power_feedback]
+qualification = "stable_window" # stable_window(default) | mean_target_only
+# mean_target_only：单次新鲜PM平均值达目标即可；不判波动稳定，不等待hold_s/window。
+# 长平均用pm100d.average_count设置；window仍保留有效参数及采样间隔，不能把min_samples改为1。
 actuator = "source_current" # source_current | source_power | varia_nd；CLD另用cld_current
 # source_power时同时改nkt_source.control="power"，删除source_current_*，
 # 换成source_power_min_pct / source_power_max_pct / source_power_step_pct。

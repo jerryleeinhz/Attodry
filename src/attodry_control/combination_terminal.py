@@ -120,6 +120,10 @@ def launch_text(summary, width=None):
                       if initial_mode == "previous" else " | Each point still requires power qualification"))
         lines.append("Optical target deviation: " + optical["scan"].get("target_deviation_policy", "abort") +
                      " | Target tolerance applies to initial tuning; analysis uses measured power")
+        qualification = optical["scan"]["feedback"].get("qualification", "stable_window")
+        lines.append("Optical power qualification: " + qualification +
+                     (" | One fresh PM mean reaches target; variation is unqualified; no hold/window wait"
+                      if qualification == "mean_target_only" else " | Rolling power window and hold"))
     for role, settings in summary.get("smu", {}).items():
         hardware.append((role, settings["source_mode"], "AUTO", "-",
             _number(settings["max_abs_current_a"], "A") + " / " +

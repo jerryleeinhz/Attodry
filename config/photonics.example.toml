@@ -347,6 +347,9 @@ sample_interval_s = "CHANGE_ME_OPTICAL_SAMPLE_INTERVAL_S"
 peak_retardance_waves = "CHANGE_ME_REQUESTED_RETARDANCE_WAVES"
 
 [power_feedback]
+qualification = "stable_window" # stable_window(default) | mean_target_only
+# mean_target_only：单次新鲜PM平均值达目标即可，不代表波动稳定；不等待hold_s/window。
+# PM平均次数由pm100d.average_count设置，window.min_samples仍至少2。
 # paired / cartesian；省略默认paired。
 # paired: 数组与nkt_run.points逐行对应。cartesian: 每条光学行 x 全部目标功率。
 # 如cartesian，一行630nm + 六个功率 = 6点；两行630/650nm + 六功率 = 12点。

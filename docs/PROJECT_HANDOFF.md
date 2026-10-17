@@ -4,6 +4,31 @@ Last updated: 2026-10-17
 
 ## Current stage
 
+### Long PM average and explicit single-value target qualification (2026-10-17)
+
+- User approves keeping the chopper running, increasing PM100D averaging, and
+  accepting one fresh mean at the target before formal acquisition. Measurement
+  plane is operator-confirmed after the chopper; targets are chopped-cycle mean W.
+- Optional `power_feedback.qualification="mean_target_only"` distinguishes target
+  acceptance from power-variation qualification. Default `stable_window` remains.
+  Single-value evidence records `target_reached` and `power_window_stable=false`,
+  without invented standard deviation or peak-to-peak stability. Audit preserves
+  ignored hold/window criteria and the retained iteration interval separately.
+- New mode removes hold/window qualification waits; it retains actuator limits,
+  fresh READ and complete PM checks, illumination floor, reduction rule, shared
+  deadlines, formal before/after guards and target-deviation policy. Independent
+  review found and corrected an initially omitted inter-iteration interval.
+- Final focused local hardware-blocked regression passes169 cases in29.337s,
+  including13 new mean-target cases. Root delivery regression passes218 cases
+  in24.860s with templates/terminal included. Overlapping counts are not added;
+  target results are recorded separately.
+- No instrument settings or real illumination are certified by offline tests.
+  Authorized next stage is a fixed29% low-current pilot with average_count3000
+  and10s PM I/O timeout, followed only on healthy empirical long-average evidence
+  and certified cleanup by fresh dark plus20/136/252/368/484/600uW scans.
+  Main private TOML, global safety policy, notebook bytes and prior failures stay
+  preserved; all new profiles and results live in ignored delivery directories.
+
 ### Authorized post-reconnection character-pacing trial (2026-10-17)
 
 - User confirms the chopper front panel is normally phase locked after USB

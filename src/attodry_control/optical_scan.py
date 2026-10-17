@@ -8,7 +8,7 @@ import time
 
 from .nkt_config import NktError
 from .nkt_control import NktController, utc_now
-from .power_feedback import (PowerWindow, adaptive_feedback_step, next_cld_current_a,
+from .power_feedback import (feedback_evidence, adaptive_feedback_step, next_cld_current_a,
                              next_nd_pct, next_source_current_pct, next_source_power_pct,
                              target_in_tolerance, tuning_in_tolerance)
 
@@ -118,8 +118,8 @@ class OpticalScan:
 
     def _stabilize_point(self, row, point, wavelength, deadline, cfg, *, initial_sample=None):
         epoch = initial_sample["started_monotonic_s"] if initial_sample else self.clock()
-        window = PowerWindow(cfg.window, epoch_s=epoch, max_power_w=cfg.max_power_w,
-                             target_power_w=cfg.target_power_w)
+        window = feedback_evidence(cfg, epoch_s=epoch)
+        mean_only = cfg.qualification == "mean_target_only"
         stable_since = None
         previous_sign = None
         source_percentage = cfg.actuator in ("source_current", "source_power")
@@ -148,19 +148,27 @@ class OpticalScan:
                           source_current_pct=point.source_level_pct if cfg.actuator == "source_current" else None,
                           source_power_pct=point.source_level_pct if cfg.actuator == "source_power" else None,
                           current_a=point.current_a if cld_current else None)
+            if mean_only:
+                result.update(target_reached=tuning_target and not reduce_now,
+                              ignored_qualification_fields=["hold_s", "window.duration_s", "window.min_samples",
+                                  "window.max_peak_to_peak_w", "window.max_peak_to_peak_fraction",
+                                  "window.noise_floor_w", "window.max_drift_fraction_per_s"],
+                              iteration_interval_s=cfg.window.sample_interval_s)
             row["feedback_windows"].append(result)
             self._event("feedback_window", condition_id=row["condition_id"], result=result)
-            if result["power_window_stable"] and tuning_target and not reduce_now:
+            if (mean_only or result["power_window_stable"]) and tuning_target and not reduce_now:
                 if stable_since is None:
                     stable_since = self.clock()
-                if self.clock() - stable_since >= cfg.hold_s - 1e-9:
+                if mean_only or self.clock() - stable_since >= cfg.hold_s - 1e-9:
+                    if mean_only:
+                        self._deadline(deadline)
                     if cfg.actuator == "source_current" and cfg.tuning_tolerance_fraction is not None:
                         self._response_history.append((point.source_level_pct, result["mean_power_w"]))
                         del self._response_history[:-16]
                     return point, result, window
             else:
                 stable_since = None
-            if (result["power_window_stable"] and
+            if ((mean_only or result["power_window_stable"]) and
                     not tuning_in_tolerance(result["mean_power_w"], cfg)) or reduce_now:
                 adjustment_power = sample["power_w"] if reduce_now else result["mean_power_w"]
                 sign = adjustment_power < cfg.target_power_w
@@ -211,8 +219,7 @@ class OpticalScan:
                 self._verify(point, wavelength, False, deadline)
                 self.nkt.start_emission(point, deadline=deadline)
                 self._verify(point, wavelength, True, deadline)
-                window = PowerWindow(cfg.window, epoch_s=self.clock(), max_power_w=cfg.max_power_w,
-                                     target_power_w=cfg.target_power_w)
+                window = feedback_evidence(cfg, epoch_s=self.clock())
                 stable_since = None
             self._deadline(deadline)
             self.sleep(min(cfg.window.sample_interval_s, deadline - self.clock()))
@@ -286,7 +293,8 @@ class OpticalScan:
                         row["measured_power_w"] = sample["power_w"]
                         if window:
                             result = window.add(sample)
-                            if (sample["above_reduce_threshold"] or not result["power_window_stable"] or
+                            if (sample["above_reduce_threshold"] or
+                                    (feedback.qualification == "stable_window" and not result["power_window_stable"]) or
                                     not target_in_tolerance(result["mean_power_w"], feedback)):
                                 for old in row["power_samples"][formal_start:]:
                                     old["phase"] = "rejected_formal_drift"
