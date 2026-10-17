@@ -4,6 +4,29 @@ Last updated: 2026-10-17
 
 ## Current stage
 
+### Masked single-opening chopper geometry (2026-10-17)
+
+- Operator confirms MC2F47 inner beam with three openings masked and one left
+  transmitting per rotation, keeping external XX 8 Hz and N7/D1. New optional
+  `single_opening_per_rotation=true` separates that declaration from the intact
+  outer sensor track: native outer 56 Hz, nominal unmasked inner 32 Hz, rotor
+  and declared beam 8 Hz. Default false retains the unmasked geometry and rejects
+  its 32 Hz beam for an 8 Hz Combination measurement.
+- Serial preparation selects actual OUTER for this geometry, checks its native
+  frequency, and records raw native values separately from the derived beam.
+  The firmware 4.16 read-only comparison established `input?` after N/D (56 Hz
+  against the independent SR830 8 Hz source readback); the guard now compares
+  the corresponding expected quantity. No tolerance, motor limit, status check,
+  phase declaration, identity check or cleanup requirement is weakened.
+- Related local hardware-blocked regression: 74 tests pass in 7.748 s. An earlier
+  invocation retained a test-selection error for a nonexistent terminal module;
+  the corrected selection uses `tests.test_combination_operator`.
+- Authorized dark plus six equally spaced light targets are prepared as separate
+  immutable private configurations. Dark keeps the laser OFF without fabricating
+  a measured 0 W value; light uses fresh PM100D readback. Original main settings
+  and data remain untouched. Deployment and real-run results require separate
+  recorded evidence; this entry alone does not certify physical phase lock.
+
 ### Published and deployed dual-SR830 optical takeover (2026-10-17)
 
 - Feature commit `7dad9c60955684a803c10cdab3c6fcf2ba16a0ac` is published to

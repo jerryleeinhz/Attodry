@@ -1,5 +1,23 @@
 # Development stages
 
+## 2026-10-17 masked single-opening chopper geometry
+
+- Adds strict optional `single_opening_per_rotation` for an operator-confirmed
+  MC2F inner beam with one transmitting opening/rotation and an intact outer
+  sensor track. N7/D1 at XX 8 Hz remains 56 Hz native outer and 8 Hz beam; the
+  unmasked default remains 32 Hz and is rejected for this Combination frequency.
+- Verify actual outer output and post-N/D `input?` separately, preserve raw replies
+  and declared geometry, and report the beam frequency as derived, not a remote
+  PLL or direct optical measurement. Native mechanical limits remain enforced.
+- Local hardware-blocked chopper/template/Combination/launcher/operator regression
+  passes 74 cases in 7.748 s; preserve the earlier nonexistent-module selection
+  failure. Changes add no query/write to an ordinary readiness capture; actual
+  setting changes retain existing callbacks, shared settling and verification.
+- Real dark/light acquisition is separately authorized. Use two private config
+  copies with a continuously held default station lease; only a completed dark
+  child with independently verified final cleanup may precede illumination.
+  No acquisition success is implied by offline tests.
+
 ## 2026-10-17 dual-SR830 optical publication and LK_setup deployment
 
 - Published feature commit `7dad9c60955684a803c10cdab3c6fcf2ba16a0ac` on the

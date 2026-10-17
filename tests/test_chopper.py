@@ -83,6 +83,36 @@ class ConfigTests(unittest.TestCase):
             config(backend="serial").require_hardware()
         config(backend="serial", port="COM99", expected_idn="Thorlabs MC2000B 1.0").require_hardware()
 
+    def test_single_opening_geometry_separates_native_sensor_and_beam_frequencies(self):
+        d = config(blade="MC2F47", reference_track="inner", harmonic_n=7,
+                   single_opening_per_rotation=True)
+        self.assertEqual(d.target_frequency(8), 8)
+        self.assertEqual(d.expected_input_frequency(8), 56)
+        self.assertEqual(d.nominal_track_frequency(8), 32)
+        self.assertEqual(d.expected_refout_frequency(8), 56)
+        self.assertEqual(d.actual_output_code, 1)
+        self.assertEqual(d.beam_frequency_from_refout(56), 8)
+        native = replace(d, single_opening_per_rotation=False)
+        self.assertEqual(native.target_frequency(8), 32)
+        self.assertEqual(native.expected_refout_frequency(8), 32)
+        self.assertEqual(native.actual_output_code, 2)
+        for frequency in (1.0, 101.0):
+            with self.subTest(frequency=frequency), self.assertRaisesRegex(ValueError, "native outer"):
+                d.target_frequency(frequency)
+        loaded = load_chopper_config({"chopper": dict(enabled=True, backend="simulation",
+            blade="MC2F47", reference_track="inner", harmonic_n=7,
+            single_opening_per_rotation=True)}, Path("."))
+        self.assertEqual(loaded.target_frequency(8), 8)
+
+    def test_single_opening_requires_exact_boolean_and_confirmed_mc2f_inner_geometry(self):
+        for value in (1, "true", None):
+            with self.subTest(value=value), self.assertRaisesRegex(ChopperError, "must be boolean"):
+                config(blade="MC2F47", reference_track="inner",
+                       single_opening_per_rotation=value).validate()
+        for blade, track in (("MC1F10", "single"), ("MC1F10HP", "inner"), ("MC2F47", "outer")):
+            with self.subTest(blade=blade, track=track), self.assertRaisesRegex(ChopperError, "MC2F inner"):
+                config(blade=blade, reference_track=track, single_opening_per_rotation=True).validate()
+
 
 class SessionTests(unittest.TestCase):
     def session(self, **kwargs):
@@ -328,6 +358,58 @@ class SessionTests(unittest.TestCase):
             d.prepare(100, deadline=self.clock())
         self.assertEqual(len(d.transcript), count)
         self.assertTrue(d.cleanup()["verified"])
+
+    def test_masked_single_opening_uses_actual_outer_sensor_and_records_derived_beam(self):
+        d = self.session(blade="MC2F47", reference_track="inner", harmonic_n=7,
+                         single_opening_per_rotation=True)
+        snapshot = d.prepare(8)
+        state = snapshot["last_confirmed_state"]
+        self.assertEqual(state["output"], 1)
+        self.assertEqual(state["input_hz"], 56)
+        self.assertEqual(state["native_refout_frequency_hz"], 56)
+        self.assertEqual(state["derived_beam_frequency_hz"], 8)
+        self.assertEqual(snapshot["nominal_track_frequency_hz"], 32)
+        self.assertEqual(snapshot["expected_refout_frequency_hz"], 56)
+        self.assertEqual(snapshot["expected_beam_frequency_hz"], 8)
+        self.assertTrue(snapshot["single_opening_per_rotation"])
+        self.assertFalse(state["phase_lock_verified_by_query"])
+        self.assertTrue(d.verify_ready()["last_confirmed_state"]["frequency_verified"])
+        self.assertTrue(d.cleanup()["rotation_stopped"])
+
+    def test_simulated_frequency_replies_follow_registers_not_configured_mask_target(self):
+        d = self.session(blade="MC2F47", reference_track="inner", harmonic_n=7,
+                         single_opening_per_rotation=True)
+        d.prepare(8)
+        self.transport.values["output"] = 2
+        self.assertEqual(self.transport.exchange("refoutfreq?"), "refoutfreq?\r\n32.0\r\n>")
+        self.transport.values["nharmonic"] = 1
+        self.assertEqual(self.transport.exchange("input?"), "input?\r\n8.0\r\n>")
+        self.assertNotEqual(self.transport.exchange("refoutfreq?"), "refoutfreq?\r\n8.0\r\n>")
+
+    def test_masked_guard_rejects_inner_output_wrong_outer_frequency_and_raw_input_assumption(self):
+        for fault in ("output", "outer_frequency", "input", "unknown_enable"):
+            d = self.session(blade="MC2F47", reference_track="inner", harmonic_n=7,
+                             single_opening_per_rotation=True)
+            d.prepare(8)
+            exchange = self.transport.exchange
+            if fault == "output":
+                self.transport.values["output"] = 2
+            else:
+                command, value = {"outer_frequency": ("refoutfreq?", "32"),
+                                  "input": ("input?", "8"),
+                                  "unknown_enable": ("enable?", "2")}[fault]
+                self.transport.exchange = lambda cmd, **kw: (
+                    f"{cmd}\r\n{value}\r\n>" if cmd == command else exchange(cmd, **kw))
+            before = len(self.transport.commands)
+            with self.subTest(fault=fault), self.assertRaises(ChopperError):
+                d.verify_ready()
+            self.assertFalse(d.state_current)
+            self.assertFalse(any("=" in cmd for cmd in self.transport.commands[before:]))
+            if fault == "output":
+                self.assertIsNone(d.last_confirmed_state["derived_beam_frequency_hz"])
+            if fault == "unknown_enable":
+                self.assertTrue(d.poisoned)
+            d.close()
 
 
 class FakeSerial:

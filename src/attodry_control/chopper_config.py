@@ -35,6 +35,7 @@ class ChopperConfig:
     blade: str = ""
     reference_source: str = "external"
     reference_track: str = "single"
+    single_opening_per_rotation: bool = False
     harmonic_n: int = 1
     harmonic_d: int = 1
     phase_deg: float | None = None
@@ -67,9 +68,14 @@ class ChopperConfig:
             number(self.phase_deg, "chopper.phase_deg", 0, 360)
             if self.phase_deg != int(self.phase_deg):
                 raise ChopperError("chopper.phase_deg must be an integer degree supported by the controller")
-        for name in ("run_enabled", "manual_phase_lock_confirmed"):
+        for name in ("run_enabled", "manual_phase_lock_confirmed", "single_opening_per_rotation"):
             if type(getattr(self, name)) is not bool:
                 raise ChopperError(f"chopper.{name} must be boolean")
+        if self.single_opening_per_rotation and (
+                not self.blade.startswith("MC2F") or self.reference_track != "inner"
+                or BLADE_SPECS[self.blade][2] <= 0):
+            raise ChopperError("single_opening_per_rotation requires a confirmed MC2F inner beam "
+                               "and an unmodified outer sensor track")
         if self.finish_rotation not in ("stop", "preserve"):
             raise ChopperError("chopper.finish_rotation must be stop or preserve")
         number(self.frequency_tolerance_hz, "chopper.frequency_tolerance_hz", 0, 1000)
@@ -90,23 +96,48 @@ class ChopperConfig:
 
     @property
     def actual_output_code(self):
+        if self.single_opening_per_rotation:
+            return 1  # The unmodified outer sensor measures complete rotations.
         return 2 if self.reference_track == "inner" else 1
 
-    def target_frequency(self, reference_frequency_hz):
+    def _frequencies(self, reference_frequency_hz):
         self.validate()
         reference = number(reference_frequency_hz, "chopper reference frequency", 0.001, 1e6)
-        target = reference * self.harmonic_n / self.harmonic_d
+        control = reference * self.harmonic_n / self.harmonic_d
+        nominal = control
         # Dual-frequency blades synchronize their outer track; HP blades permit
-        # selecting either track. The declared beam track determines actual light.
-        if self.blade.startswith("MC2F") and self.reference_track == "inner":
-            _, inner, outer = BLADE_SPECS[self.blade]
-            target *= inner / outer
+        # selecting either track. The motor limits apply before any beam mask.
         _, inner, outer = BLADE_SPECS[self.blade]
+        if self.blade.startswith("MC2F"):
+            number(control, "chopper native outer frequency", outer * 2, outer * 100)
+            if self.reference_track == "inner":
+                nominal *= inner / outer
         slots = outer if self.reference_track == "outer" else inner
-        number(target, "chopper selected-track frequency", slots * 2, slots * 100)
+        number(nominal, "chopper nominal selected-track frequency", slots * 2, slots * 100)
         if self.reference_source == "internal" and reference != int(reference):
             raise ChopperError("Internal chopper reference must use integer Hz")
-        return target
+        beam = control / outer if self.single_opening_per_rotation else nominal
+        refout = control if self.single_opening_per_rotation else nominal
+        return control, nominal, refout, beam
+
+    def expected_input_frequency(self, reference_frequency_hz):
+        """MC2000B 4.16 input? reports the reference after external N/D."""
+        return self._frequencies(reference_frequency_hz)[0]
+
+    def nominal_track_frequency(self, reference_frequency_hz):
+        return self._frequencies(reference_frequency_hz)[1]
+
+    def expected_refout_frequency(self, reference_frequency_hz):
+        return self._frequencies(reference_frequency_hz)[2]
+
+    def target_frequency(self, reference_frequency_hz):
+        """Frequency at the operator-declared beam, separate from sensor slots."""
+        return self._frequencies(reference_frequency_hz)[3]
+
+    def beam_frequency_from_refout(self, refout_frequency_hz):
+        self.validate()
+        return (refout_frequency_hz / BLADE_SPECS[self.blade][2]
+                if self.single_opening_per_rotation else refout_frequency_hz)
 
     def validate_reference_frequency(self, reference_frequency_hz):
         """Pure preflight hook used by the Combination grid validator."""

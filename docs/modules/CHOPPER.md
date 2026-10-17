@@ -26,9 +26,40 @@ Combination validator checks this; it does not silently alter either harmonic.
 For high-precision blades, `reference_track` selects the synchronized inner or
 outer track. For MC2F dual-frequency blades, the controller synchronizes the
 outer track; the inner track chops at `outer frequency * inner_slots / outer_slots`.
-Software sets the reference output to the **actual beam track**, never TARGET,
+Ordinarily software selects the **actual beam track** output, never TARGET,
 so `refoutfreq?` represents the selected actual output. This is frequency evidence,
 not a remote measurement of PLL phase lock.
+
+### One transmitted opening per rotation
+
+`single_opening_per_rotation = true` is an explicit operator declaration that
+the beam passes the inner track of an MC2F blade once per complete rotation,
+with the outer sensing track unmodified. The initial implementation accepts
+only MC2F inner-track geometry; the default is `false`. It does not infer a mask
+from a frequency readback or change the blade register.
+
+For the operator-confirmed MC2F47 arrangement, three of the four inner openings
+are blocked. XX supplies 8 Hz and the controller retains N=7, D=1. The native
+outer control reference is 56 Hz, the unmasked inner track is nominally 32 Hz,
+and the single transmitted opening gives 56/7 = **8 Hz at the beam**. In this
+mode software selects actual OUTER (`output=1`) and verifies its 56 Hz sensor
+readback before dividing by seven. It does not claim that nominal INNER
+(`output=2`) measures the masked 8 Hz beam. An unmasked MC2F47 inner beam with
+these N/D settings remains 32 Hz and is rejected for an 8 Hz h1 scan.
+
+All native motor/outer-track limits still apply before the beam division. The
+mask cannot make an otherwise invalid motor speed valid. This geometry is a
+physical declaration; sensor frequency plus geometry derives the beam frequency
+and does not independently measure optical modulation or PLL phase.
+
+MC2000B firmware 4.16 station readback establishes `input?` as the reference
+after N/D: with XX=8 Hz, N=7 and D=1 it returns 56 Hz. Readiness therefore checks
+that native reference separately from actual selected sensor output. `freq?`
+returns the retained internal reference setting, which is not the active external
+reference in external mode. TARGET (`output=0`) is never accepted as actual
+sensor evidence. Raw replies retain their original names and values; snapshots
+separately record expected native input/output, nominal track, the mask
+declaration and beam frequency derived from the actual sensor.
 
 | Blade | Register | Inner/single slots | Outer slots | Chopping ranges (Hz) |
 |---|---:|---:|---:|---|
@@ -68,6 +99,7 @@ expected_idn = "CHANGE_ME_EXACT_ID_QUERY_RESPONSE"
 blade = "CHANGE_ME_CONFIRMED_INSTALLED_BLADE" # choose exact name from table
 reference_source = "external"   # external | internal
 reference_track = "inner"       # single for single blades; inner | outer otherwise
+single_opening_per_rotation = false # true only for confirmed MC2F inner single-opening beam; outer sensor intact
 harmonic_n = 1                  # integer 1..15; external multiplier
 harmonic_d = 1                  # integer 1..15; external divider
 # phase_deg = 0                 # optional integer 0..360; omission preserves/read-checks phase

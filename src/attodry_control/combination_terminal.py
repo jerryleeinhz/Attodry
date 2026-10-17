@@ -99,6 +99,9 @@ def launch_text(summary, width=None):
                 chopper["reference_source"] + " reference | " + chopper["blade"] + " " +
                 chopper["reference_track"] + f" | N/D={chopper['harmonic_n']}/{chopper['harmonic_d']}" +
                 " | Phase lock: operator declaration; no remote PLL query")
+            if chopper.get("single_opening_per_rotation"):
+                lines.append("Chopper beam: operator-declared one opening/rotation; "
+                             "frequency derived from the unmodified outer sensor track")
         background = optical.get("background")
         if background and background.get("enabled"):
             lines.append(f"Dark background: {background['samples']} fresh readings/condition; "

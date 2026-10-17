@@ -186,6 +186,30 @@ class InternalOpticalCombinationTests(unittest.TestCase):
             self.assertTrue(all(row[0] == "rejected" for row in rows))
         self.assert_closed_laser_off()
 
+    def test_single_opening_mc2f47_accepts_8hz_h1_but_native_inner_32hz_is_rejected(self):
+        self.enable_chopper()
+        self.frequency["hz"] = 8.0
+        for role in ("lockin_xx", "lockin_xy"):
+            self.document[role]["frequency_hz"] = 8.0
+        self.document["chopper"].update(blade="MC2F47", reference_track="inner",
+            harmonic_n=7, harmonic_d=1, single_opening_per_rotation=False)
+        self.write_document()
+        with self.assertRaisesRegex(ValueError, "chopp|Chopp|frequency"):
+            load_hardware_combination(self.path)
+        self.assertEqual(self.manager.opened, [])
+        self.document["chopper"]["single_opening_per_rotation"] = True
+        self.write_document()
+        result = self.execute("single-opening")
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["cleanup"]["clean"], result["cleanup"])
+        self.assertEqual(len(load_combination_rows(self.database)), 2)
+        evidence = self.chopper.snapshot()
+        self.assertEqual(evidence["expected_input_frequency_hz"], 56)
+        self.assertEqual(evidence["nominal_track_frequency_hz"], 32)
+        self.assertEqual(evidence["expected_beam_frequency_hz"], 8)
+        self.assertEqual(evidence["last_confirmed_state"]["derived_beam_frequency_hz"], 8)
+        self.assert_closed_laser_off()
+
     def test_loader_rejects_xy_sample_connection_and_impossible_chopping(self):
         original = deepcopy(self.document)
         self.document["lockin_xy"]["sine_output_connected"] = True

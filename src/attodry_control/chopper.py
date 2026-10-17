@@ -10,7 +10,7 @@ import math
 from threading import Lock
 import time
 
-from .chopper_config import BLADE_SPECS, ChopperConfig, ChopperError
+from .chopper_config import BLADE_SPECS, HIGH_PRECISION, ChopperConfig, ChopperError
 
 
 class ChopperSerialTransport:
@@ -146,11 +146,22 @@ class SimulatedChopperTransport:
         if command == "id?":
             value = self.config.expected_idn or f"Thorlabs {self.config.model} SIMULATION"
         elif command == "input?":
-            value = self.external_frequency_hz
+            value = self.external_frequency_hz * self.values["nharmonic"] / self.values["dharmonic"]
         elif command == "refoutfreq?":
-            base = (self.external_frequency_hz if self.config.reference_source == "external"
-                    else self.values["freq"])
-            value = self.config.target_frequency(base) if self.values["enable"] else 0
+            blade = next(name for name, spec in BLADE_SPECS.items()
+                         if spec[0] == self.values["blade"])
+            _, inner_slots, outer_slots = BLADE_SPECS[blade]
+            external = self.values["ref"] >= (2 if blade in HIGH_PRECISION else 1)
+            control = (self.external_frequency_hz * self.values["nharmonic"] / self.values["dharmonic"]
+                       if external else self.values["freq"])
+            if outer_slots:
+                outer = (control * outer_slots / inner_slots
+                         if blade in HIGH_PRECISION and self.values["ref"] in (1, 3) else control)
+                inner = outer * inner_slots / outer_slots
+                outputs = {0: control, 1: outer, 2: inner, 3: outer + inner, 4: abs(outer - inner)}
+            else:
+                outputs = {0: control, 1: control}
+            value = outputs.get(self.values["output"], 0) if self.values["enable"] else 0
         elif command.endswith("?") and command[:-1] in self.values:
             value = self.values[command[:-1]]
         elif "=" in command and command.split("=", 1)[0] in self.values:
@@ -271,6 +282,11 @@ class ChopperSession:
         state["refout_frequency_hz"] = self._query("refoutfreq", 0, 1e6)
         state["captured_monotonic_s"] = self.clock()
         state["phase_lock_verified_by_query"] = False
+        state["native_refout_frequency_hz"] = state["refout_frequency_hz"]
+        state["derived_beam_frequency_hz"] = (
+            self.config.beam_frequency_from_refout(state["refout_frequency_hz"])
+            if state["blade"] == BLADE_SPECS[self.config.blade][0]
+            and state["output"] == self.config.actual_output_code else None)
         self.last_confirmed_state, self.state_current = state, True
         return state
 
@@ -383,9 +399,10 @@ class ChopperSession:
             return True
         tolerance = self.config.frequency_tolerance_hz
         if self.config.reference_source == "external" and abs(
-                state["input_hz"] - self.reference_frequency_hz) > tolerance:
+                state["input_hz"] - self.config.expected_input_frequency(self.reference_frequency_hz)) > tolerance:
             return False
-        return abs(state["refout_frequency_hz"] - self.target_frequency_hz) <= tolerance
+        expected_refout = self.config.expected_refout_frequency(self.reference_frequency_hz)
+        return abs(state["refout_frequency_hz"] - expected_refout) <= tolerance
 
     def verify_ready(self):
         if self.target_frequency_hz is None or not self.opened or self.closed or self.poisoned:
@@ -445,7 +462,16 @@ class ChopperSession:
             "state_current": self.state_current, "poisoned": self.poisoned,
             "reference_frequency_hz": self.reference_frequency_hz,
             "target_frequency_hz": self.target_frequency_hz,
+            "single_opening_per_rotation": self.config.single_opening_per_rotation,
+            "beam_geometry_source": ("operator_single_opening_per_rotation"
+                if self.config.single_opening_per_rotation else "manufacturer_blade_geometry"),
             "last_confirmed_state": self.last_confirmed_state}
+        if self.reference_frequency_hz is not None:
+            control, nominal, refout, beam = self.config._frequencies(self.reference_frequency_hz)
+            state.update(expected_input_frequency_hz=control,
+                         nominal_track_frequency_hz=nominal,
+                         expected_refout_frequency_hz=refout,
+                         expected_beam_frequency_hz=beam)
         transport_transcript = getattr(self.transport, "transcript", [])
         if include_transcript:
             state.update(transcript=self.transcript, transport_transcript=transport_transcript)

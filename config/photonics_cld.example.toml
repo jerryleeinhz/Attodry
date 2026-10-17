@@ -193,8 +193,11 @@ expected_idn = "CHANGE_ME_EXACT_CHOPPER_ID_QUERY_RESPONSE" # 完整id?响应（�
 blade = "CHANGE_ME_CONFIRMED_INSTALLED_BLADE" # 只核对blade?；绝不自动写blade=冒认物理刀片
 reference_source = "external" # driver external | internal；XX同步Combination只允许external
 reference_track = "CHANGE_ME_CONFIRMED_BEAM_TRACK" # single | inner | outer；必须符合刀片
+single_opening_per_rotation = false # false默认原刀片；true仅MC2F inner，外圈完整且内圈已遮至每转只透光一次
+# 例：MC2F47内圈4槽遮3留1、外圈7槽完整；XX=8Hz时 N=7/D=1，原生外圈56Hz、转速8转/s、光束8Hz。
+# 同一 N=7/D=1 若上项false，按原内圈32Hz核对，不能当作8Hz的h1采集；软件不能测量实际遮挡。
 harmonic_n = 1 # 1..15，斩波参考倍频，独立于lockin h1/h2
-harmonic_d = 1 # 1..15，斩波参考分频；本次h1/h1采用1/1且确认光学轨道频率一致
+harmonic_d = 1 # 1..15，斩波参考分频；N/D须按刀片/轨道/遮挡计算，h1/h1不代表总用1/1
 # phase_deg = 0 # 可选整数0..360度；省略保留当前phase并核对后续漂移
 run_enabled = true # true旋转，false待机；正式光学斩波采集要求true
 finish_rotation = "stop" # stop | preserve；旋转停止不等于挡光，必须先关闭激光
