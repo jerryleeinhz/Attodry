@@ -4,6 +4,33 @@ Last updated: 2026-10-17
 
 ## Current stage
 
+### Published and deployed dual-SR830 optical takeover (2026-10-17)
+
+- Feature commit `7dad9c60955684a803c10cdab3c6fcf2ba16a0ac` is published to
+  `origin/integration-photonics-nonlinear-hall` and fast-forward deployed to the
+  existing LK_setup `Integration-photonics` checkout. No package reinstall,
+  kernel restart, instrument setting writes or acquisition was performed.
+- LK_setup isolated verification passes all 360 selected hardware-blocked cases
+  in 235.809 s. The actual installed checkout's loader and Combination launcher
+  also pass with six conditions and three samples per condition. The initial
+  360-case attempt retained one simulated CLI file-creation failure under the
+  excessively long candidate TEMP path; the same case reproduces that error
+  there and passes with normal TEMP. Only the ignored test harness TEMP location
+  changed before the complete successful rerun; source/guards were unchanged.
+- The private main TOML was backed up, then replaced with the operator-confirmed
+  NKT / internal-XX / dual-SR830 h1 profile. Numerator and denominator are explicit;
+  the operator confirms physical optics and the phase declaration remains
+  user-supplied. Prior NKT spectra, power/current boundaries and feedback settings
+  are preserved. Old data is retained; other local settings and both modified
+  notebooks retain their exact bytes. The separate old hardware.local magnetic syntax conflict
+  was recorded and left untouched; the new optical profile does not use it.
+- Config/backup/raw read-only replies, original failed tests, successful target
+  tests, guarded previews and source/ownership receipts are ignored under the
+  delivery's `.test-tmp` directory. Hardware addresses and private experimental
+  values are not part of the public commit. Real motor/ratio readiness, PLL and
+  illuminated A/B commissioning remain unperformed; the strict non-unity input?
+  frequency check is not relaxed by this delivery.
+
 ### Publication preparation and authorized read-only identity check (2026-10-17)
 
 - User requested push/deployment and private takeover TOML preparation. The

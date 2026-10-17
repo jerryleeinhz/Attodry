@@ -1,5 +1,24 @@
 # Development stages
 
+## 2026-10-17 dual-SR830 optical publication and LK_setup deployment
+
+- Published feature commit `7dad9c60955684a803c10cdab3c6fcf2ba16a0ac` on the
+  requested branch and deployed its exact source to the existing photonics
+  checkout under all known station leases, after fresh SQLite/process/Jupyter
+  idle checks. No real scan, settings write, package reinstall or kernel restart.
+- Target isolated hardware-blocked verification: 360 tests, 235.809 s, all pass;
+  original-location loader and actual checkout launcher preview also pass.
+  Preserve the first 360-test failed attempt and the long-TEMP reproducer;
+  changing only the ignored validation harness to short system TEMP resolves
+  the simulated file-creation failure. No production guard was weakened.
+- Install the backed-up private NKT/dual-SR830 h1 takeover configuration with
+  explicit numerator/denominator interfaces, user-declared optical track/phase,
+  and the prior optical power/current boundaries. Preserve both modified
+  notebooks, all other local settings and original databases byte-for-byte.
+- This is software delivery and static/isolated verification. Non-unity input?
+  semantics, motor/phase readiness and illuminated response require separate
+  real commissioning; the operator retains physical optical-head selection.
+
 ## 2026-10-17 publication preparation: explicit authorization and serial framing
 
 - User authorized publication, LK_setup deployment and private TOML preparation;
