@@ -31,6 +31,19 @@ status0 at18:22:03UTC without source writes. Long-average empirical verification
 and six-target acquisition remain pending new post-fault physical confirmation;
 successful earlier paced sessions never authorize ignoring a new communication fault.
 
+After a new operator panel confirmation, COM10 enumerates healthy and a separate
+strict query-only session passes identity/five native56Hz captures. USB reconnection
+was not reported; do not turn this into a permanent communication repair claim.
+Authorized29%/average3000 pilot completes with3 pairs;20 READs take1.000..1.016s,
+relative SD2.3%. XX3/3 overload remains invalid, XY3/3 valid. Fresh dark3/3 is valid
+on both roles. Six-target run fails before its first20uW point on the existing100%
+current boundary, with0 formal light samples. Final OFF/electrical/chopper/close/
+audit protections verify, while original failed/unclean/manual status remains.
+Post-terminal read-only PM checks find LOW already enabled. Auto-range pulse
+clipping remains a hypothesis requiring a separate fixed-range low-current
+comparison; candidate configuration is offline-previewed but not run. No power,
+current, reference or model boundary is broadened, and original profiles/data remain.
+
 ## 2026-10-17 opt-in serial character-pacing candidate
 
 - After explicit post-fault front-panel/USB confirmation, bulk and 100 ms

@@ -44,6 +44,29 @@ Last updated: 2026-10-17
   not certify chopper phase or rewrite prior failed runs. New physical confirmation
   is requested after this fault. Hardware average3000 effect and the six light
   targets remain unmeasured, despite completed offline implementation/deployment.
+- Operator later confirms the panel is fine; no USB reconnection is reported.
+  Windows detects COM10 with OK/problem0. A new strict query-only session passes
+  identity and five captures of native outer56Hz/N7/D1; previous failures remain.
+  This is current healthy evidence, not proof of a permanent communication repair.
+- Authorized average3000 fixed29% pilot completes with3 formal pairs and certified
+  cleanup. Twenty PM READ records take1.000..1.016s each, relative SD2.3% in this
+  small fixed-current trial. XX is overloaded/invalid in3/3 pairs, XY valid in3/3;
+  outer payload.clean does not certify each channel. Fresh separate dark completes
+  with3 pairs, both channels valid and no unlock/overload.
+- Six-target light run stops at its first20uW target: source reaches the unchanged
+  100% boundary while recorded average remains about2.785uW;0/6 conditions and0
+  formal light samples. No limit is widened or further scan automatically launched.
+  Original failed/unclean/manual status is retained, while final laserOFF, electrical
+  protection, chopper preserve, resource close and all audit errors independently
+  verify healthy. All children exit and known station leases release. Chopper
+  transactions in pilot/dark/light are353/383/83, each with0 recorded errors.
+- Post-terminal query-only PM diagnosis confirms LOW filter already ON, and a
+  small automatic range during tuning. Manufacturer pulse guidance requires a
+  manual range containing the peak; mean clipping is a hypothesis, not confirmed
+  by this plateau alone. Long READ duration/low dispersion do not certify absolute
+  chopped-mean accuracy. A larger fixed-native-range29% single-point comparison
+  is prepared and hardware-blocked-previewed only; separate operator confirmation
+  is pending before its first settings write/emission. Main/global profiles stay exact.
 
 ### Authorized post-reconnection character-pacing trial (2026-10-17)
 
