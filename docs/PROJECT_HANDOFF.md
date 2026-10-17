@@ -26,6 +26,26 @@ Last updated: 2026-10-17
   a measured 0 W value; light uses fresh PM100D readback. Original main settings
   and data remain untouched. Deployment and real-run results require separate
   recorded evidence; this entry alone does not certify physical phase lock.
+- Exact correction `464bd3f` was published and deployed without replacing the
+  original main profile or notebooks. Target isolated verification passes 74
+  cases (13.208 s), including actual checkout/config previews.
+- Two authorized dark attempts collected zero formal samples. The first stopped
+  on startup overload/unlock latches before settings writes; three independent
+  later captures were healthy and NKT OFF was rechecked before a separate run.
+  That run stopped on a corrupted chopper query echo (`h` 0x68 -> 0xe8), before
+  any chopper setting write or illumination. NKT OFF and electrical protection
+  were recorded, but poisoned-session chopper cleanup is not certified. A single
+  fresh query-only reconnection reproduced corruption (`p` 0x70 -> 0xf0); do not
+  automatically retry, rewrite failed cleanup, ignore echo bytes or change baud.
+- The real bad packet now has a strict rejection/raw-retention/no-further-write
+  regression. All 75 related local guarded tests pass in 7.624 s. Serial 115200/
+  8N1/no flow/CR parameters match the documented protocol; no production transport
+  fix is claimed. A current front-panel/connection check is required to proceed.
+- Operator then requested XX 20 uV / XY 50 uV. New ignored config copies with an
+  adjacent private policy add only those exact fixed ranges; original defaults,
+  autorange ladders and physical limits remain unchanged. Local and target
+  hardware-blocked previews pass. The copies require a fresh post-fault phase
+  declaration and are not launched. All known station leases are released.
 
 ### Published and deployed dual-SR830 optical takeover (2026-10-17)
 

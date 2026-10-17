@@ -17,6 +17,17 @@
   copies with a continuously held default station lease; only a completed dark
   child with independently verified final cleanup may precede illumination.
   No acquisition success is implied by offline tests.
+- Correction `464bd3f` is published/deployed; target isolated 74-case verification
+  passes in 13.208 s. Real dark acquisition never reached a formal sample:
+  initial latches rejected the first preflight, and an independently rechecked
+  new run failed on actual corrupted chopper query bytes. Fresh query-only
+  reconnection reproduced the fault. NKT OFF is recorded, while chopper cleanup
+  remains unverified; retain both failed runs and stop further illumination.
+- Adds one bad-packet regression (75 related local cases pass, 7.624 s), without
+  modifying transport acceptance or claiming communication repair. User's new
+  XX20uV/XY50uV config/policy copies pass local and target offline previews; they
+  remain blocked for current front-panel/connection verification. Global policy,
+  main config, archived settings and original failure states are preserved.
 
 ## 2026-10-17 dual-SR830 optical publication and LK_setup deployment
 

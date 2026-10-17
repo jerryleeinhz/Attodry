@@ -163,6 +163,14 @@ raw bytes recorded. It is never assigned to the next command. Before the first
 completed response, whitespace remains unowned and is rejected; any non-whitespace
 late input poisons the session before another command is written.
 
+A recorded firmware-4.16 exchange echoed `dharmonic?` with a non-ASCII byte
+(`0xe8` instead of `h`, `0x68`) and returned command-error text containing `>`.
+That damaged reply remains a failed, poisoned transaction, with every received
+byte retained in escaped raw audit. It is not a terminal-whitespace case, and
+neither automatic retries nor accepting a later prompt can certify the response.
+The offline regression reproduces this rejection; it does not claim to repair
+the underlying communication fault.
+
 Snapshots contain backend, identity, requested reference and derived optical
 frequency, last confirmed settings/frequencies, current-state validity,
 per-command monotonic timing and transcripts. `phase_lock_verified_by_query`

@@ -560,6 +560,28 @@ class SerialTests(unittest.TestCase):
             finally:
                 d.close()
 
+    def test_recorded_corrupted_dharmonic_echo_is_rejected_with_complete_raw_audit(self):
+        # Recorded 4.16 failure: expected h=0x68 was echoed as 0xe8. The '>'
+        # inside its error text must never make the response a qualified query.
+        reply = b"d\xe8armonic?\rCommand error> CMD_NOT_DEFINED\r> "
+        d = self.transport(replies={b"dharmonic?\r": reply})
+        try:
+            with self.assertRaisesRegex(ChopperError, "Unexpected bytes after chopper prompt"):
+                d.exchange("dharmonic?")
+            self.assertEqual(self.serial.writes, [b"dharmonic?\r"])
+            self.assertEqual(d.transcript[-1]["raw_response"],
+                             reply.decode("ascii", errors="backslashreplace"))
+            self.assertIn(r"\xe8", d.transcript[-1]["raw_response"])
+            self.assertIn("CMD_NOT_DEFINED", d.transcript[-1]["raw_response"])
+            self.assertTrue(d.poisoned)
+            self.assertIsNone(d._completed_entry)
+            with self.assertRaisesRegex(ChopperError, "poisoned"):
+                d.exchange("input?")
+            self.assertEqual(self.serial.writes, [b"dharmonic?\r"])
+            self.assertEqual(len(d.transcript), 1)
+        finally:
+            d.close()
+
 
 if __name__ == "__main__":
     unittest.main()
