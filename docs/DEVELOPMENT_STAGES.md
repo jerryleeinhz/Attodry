@@ -1,5 +1,21 @@
 # Development stages
 
+## 2026-10-17 opt-in serial character-pacing candidate
+
+- After explicit post-fault front-panel/USB confirmation, bulk and 100 ms
+  inter-command queries still failed. One bounded 10 ms inter-character query
+  session returned identity plus three full state captures without corruption;
+  NKT OFF was independently verified. The root cause remains a hypothesis.
+- Optional `serial_inter_character_delay_s=0..0.1` defaults to existing bulk
+  writes. No byte filtering, status skipping, retries, baud changes or new
+  commands; delays remain within command/shared deadlines with auditable byte
+  counts. Partial/late writes still poison and stop the session.
+- Local related guarded regression: 81 cases pass in 8.035 s. Preserve the
+  initial template-location rejection. Private dark/light copies use exactly
+  the user's20uV/50uV fixed ranges, N7/D1 and the fresh manual phase declaration;
+  their isolated allowlist does not alter the global safety policy. Real
+  acceptance and publication/deployment receipts remain separately recorded.
+
 ## 2026-10-17 masked single-opening chopper geometry
 
 - Adds strict optional `single_opening_per_rotation` for an operator-confirmed

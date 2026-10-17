@@ -203,6 +203,7 @@ run_enabled = true # true旋转，false待机；正式光学斩波采集要求tr
 finish_rotation = "stop" # stop | preserve；旋转停止不等于挡光，必须先关闭激光
 frequency_tolerance_hz = 1.0 # 0..1000Hz；input?/实际refoutfreq?读回容差，不是PLL相位锁定
 io_timeout_s = 2.0 # 0.01..60s
+serial_inter_character_delay_s = 0.0 # 0(default)=bulk；0..0.1s，实机验证后可用0.01；不延长超时或容忍坏包
 ready_timeout_s = 30.0 # 0.01..3600s；包括预检/设置/判稳
 poll_interval_s = 1.0 # 0.001..ready_timeout_s
 consecutive_good = 3 # 1..100次；同一已合格设置重入只新核对，不重复这一等待

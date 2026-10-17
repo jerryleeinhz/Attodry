@@ -43,6 +43,7 @@ class ChopperConfig:
     finish_rotation: str = "stop"
     frequency_tolerance_hz: float = 1.0
     io_timeout_s: float = 2.0
+    serial_inter_character_delay_s: float = 0.0
     ready_timeout_s: float = 30.0
     poll_interval_s: float = 1.0
     consecutive_good: int = 3
@@ -80,6 +81,7 @@ class ChopperConfig:
             raise ChopperError("chopper.finish_rotation must be stop or preserve")
         number(self.frequency_tolerance_hz, "chopper.frequency_tolerance_hz", 0, 1000)
         number(self.io_timeout_s, "chopper.io_timeout_s", 0.01, 60)
+        number(self.serial_inter_character_delay_s, "chopper.serial_inter_character_delay_s", 0, 0.1)
         number(self.ready_timeout_s, "chopper.ready_timeout_s", 0.01, 3600)
         number(self.poll_interval_s, "chopper.poll_interval_s", 0.001, self.ready_timeout_s)
         integer(self.consecutive_good, "chopper.consecutive_good", 1, 100)

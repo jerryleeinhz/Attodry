@@ -83,6 +83,15 @@ class ConfigTests(unittest.TestCase):
             config(backend="serial").require_hardware()
         config(backend="serial", port="COM99", expected_idn="Thorlabs MC2000B 1.0").require_hardware()
 
+    def test_character_pacing_is_explicit_finite_and_bounded(self):
+        self.assertEqual(config().serial_inter_character_delay_s, 0)
+        for value in (True, -0.01, 0.101, float("nan"), "0.01"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                config(serial_inter_character_delay_s=value).validate()
+        loaded = load_chopper_config({"chopper": dict(enabled=True, backend="simulation",
+            blade="MC1F10", serial_inter_character_delay_s=0.01)}, Path("."))
+        self.assertEqual(loaded.serial_inter_character_delay_s, 0.01)
+
     def test_single_opening_geometry_separates_native_sensor_and_beam_frequencies(self):
         d = config(blade="MC2F47", reference_track="inner", harmonic_n=7,
                    single_opening_per_rotation=True)
@@ -456,6 +465,95 @@ class SerialTests(unittest.TestCase):
             self.assertEqual(self.serial.kwargs["stopbits"], 1)
             self.assertFalse(self.serial.kwargs["xonxoff"])
             self.assertTrue(d.transcript[-1]["raw_response"].endswith("> "))
+        finally:
+            d.close()
+
+    def paced_transport(self, *, clock=None, sleep=None, reply=b"id?\rMC2000B 4.16\r> ",
+                        short_write=False):
+        clock = clock or Clock()
+        class Wire(FakeSerial):
+            def __init__(self):
+                super().__init__()
+                self.pending = bytearray()
+                self.write_times = []
+            def write(self, payload):
+                self.writes.append(payload)
+                self.write_times.append(clock())
+                if short_write:
+                    return 0
+                self.pending.extend(payload)
+                if self.pending.endswith(b"\r"):
+                    self.buffer.extend(reply)
+                return len(payload)
+        wire = Wire()
+        transport = ChopperSerialTransport(config(backend="serial", port="COM999",
+            expected_idn="MC2000B 4.16", serial_inter_character_delay_s=0.01),
+            authorized=True, factory=lambda **kwargs: wire, clock=clock,
+            sleep=sleep or clock.sleep)
+        return transport, wire, clock
+
+    def test_character_pacing_preserves_command_and_strict_response(self):
+        d, wire, clock = self.paced_transport()
+        try:
+            self.assertEqual(d.exchange("id?"), "id?\rMC2000B 4.16\r> ")
+            self.assertEqual(wire.writes, [b"i", b"d", b"?", b"\r"])
+            self.assertEqual(wire.write_times, [0, 0.01, 0.02, 0.03])
+            self.assertAlmostEqual(clock(), 0.03)
+            self.assertEqual(d.transcript[0]["bytes_written"], 4)
+            self.assertEqual(d.transcript[0]["serial_inter_character_delay_s"], 0.01)
+        finally:
+            d.close()
+
+    def test_pacing_impossible_shared_budget_sends_no_bytes(self):
+        d, wire, clock = self.paced_transport()
+        try:
+            with self.assertRaisesRegex(TimeoutError, "before write"):
+                d.exchange("id?", deadline=0.02)
+            self.assertEqual(wire.writes, [])
+            self.assertTrue(d.poisoned)
+        finally:
+            d.close()
+
+    def test_pacing_sleep_overrun_poison_stops_partial_command_and_next_write(self):
+        clock = Clock()
+        d, wire, _ = self.paced_transport(clock=clock, sleep=lambda _: clock.sleep(0.2))
+        try:
+            with self.assertRaisesRegex(TimeoutError, "during write"):
+                d.exchange("id?", deadline=0.1)
+            self.assertEqual(wire.writes, [b"i"])
+            with self.assertRaises(ChopperError):
+                d.exchange("input?")
+            self.assertEqual(wire.writes, [b"i"])
+            self.assertEqual(d.transcript[-1]["bytes_written"], 1)
+        finally:
+            d.close()
+
+    def test_pacing_short_write_poison_never_finishes_or_retries_command(self):
+        d, wire, _ = self.paced_transport(short_write=True)
+        try:
+            with self.assertRaisesRegex(ChopperError, "Incomplete"):
+                d.exchange("id?")
+            self.assertEqual(wire.writes, [b"i"])
+            self.assertEqual(d.transcript[-1]["bytes_written"], 0)
+            with self.assertRaises(ChopperError):
+                d.exchange("input?")
+            self.assertEqual(wire.writes, [b"i"])
+        finally:
+            d.close()
+
+    def test_pacing_does_not_accept_corrupt_echo_or_command_error(self):
+        reply = b"d\xe8armonic?\rCommand error> CMD_NOT_DEFINED\r> "
+        d, wire, _ = self.paced_transport(reply=reply)
+        try:
+            with self.assertRaises(ChopperError):
+                d.exchange("dharmonic?")
+            self.assertEqual(b"".join(wire.writes), b"dharmonic?\r")
+            self.assertEqual(d.transcript[-1]["raw_response"], reply.decode("ascii", errors="backslashreplace"))
+            self.assertTrue(d.poisoned)
+            count = len(wire.writes)
+            with self.assertRaises(ChopperError):
+                d.exchange("input?")
+            self.assertEqual(len(wire.writes), count)
         finally:
             d.close()
 

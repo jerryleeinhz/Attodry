@@ -107,6 +107,7 @@ run_enabled = true              # true = rotate; false = standby, no optical mod
 finish_rotation = "stop"        # stop | preserve; caller closes laser before stop
 frequency_tolerance_hz = 1.0    # absolute input/actual-output comparison, not phase lock
 io_timeout_s = 2.0              # 0.01..60 s; each exchange also honors operation deadline
+serial_inter_character_delay_s = 0.0 # 0..0.1 s; opt-in inter-byte pacing, default bulk
 ready_timeout_s = 30.0          # 0.01..3600 s; includes open/configure/poll work
 poll_interval_s = 1.0           # 0.001..ready_timeout_s
 consecutive_good = 3            # 1..100; initial frequency-ready polls
@@ -170,6 +171,20 @@ byte retained in escaped raw audit. It is not a terminal-whitespace case, and
 neither automatic retries nor accepting a later prompt can certify the response.
 The offline regression reproduces this rejection; it does not claim to repair
 the underlying communication fault.
+
+Optional `serial_inter_character_delay_s` delays between characters of one
+command, without changing baud/framing or inserting any new command. The default
+0 retains bulk writes; 0.01 s is a station-verified candidate, not a manufacturer
+timing requirement. After a user-confirmed USB reconnection, ordinary bulk and
+100 ms inter-command spacing still produced corrupted replies; one bounded
+query-only session with 10 ms inter-character pacing returned identity and three
+complete state captures without errors. This supports a transmission-pacing
+hypothesis, not proof of the underlying electrical fault or long-run reliability.
+The entire paced write and reply stay inside the original shared deadline;
+impossible pacing budgets send nothing, partial writes/overruns poison the
+session, and all original error/echo/stale-byte checks remain unchanged. Raw
+transaction audit records the delay and actual written byte count. Apply this
+option only to an explicitly verified station profile.
 
 Snapshots contain backend, identity, requested reference and derived optical
 frequency, last confirmed settings/frequencies, current-state validity,

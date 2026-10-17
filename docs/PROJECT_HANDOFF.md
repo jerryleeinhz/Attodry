@@ -4,6 +4,27 @@ Last updated: 2026-10-17
 
 ## Current stage
 
+### Authorized post-reconnection character-pacing trial (2026-10-17)
+
+- User confirms the chopper front panel is normally phase locked after USB
+  reconnection and requests continuation. A new strict query-only session still
+  failed; a separate 100 ms inter-command-spacing diagnostic also failed.
+- One bounded session with 10 ms inter-character pacing returned identity plus
+  three complete state captures without corruption, with NKT independently OFF.
+  This supports a pacing hypothesis; it does not certify long-run reliability,
+  remote PLL phase or repair the earlier failed/unclean attempts.
+- Adds optional `serial_inter_character_delay_s` (default 0, range 0..0.1 s).
+  It preserves bytes/command ownership and all strict error checks. Entire
+  paced writes/replies honor the original shared deadline; impossible budgets
+  send no byte, partial writes or oversleep poison the session without retry.
+  Audit records selected delay and actual bytes written. No hardware limit,
+  readiness tolerance, optical power stability or cleanup policy changes.
+- All 81 related local hardware-blocked cases pass in 8.035 s. The initial
+  template edit placed the new key under PM rather than chopper; strict-loader
+  tests rejected it, the template location was corrected, and the failed log is
+  retained. Opt-in private 20uV/50uV dark/light copies pass offline loading.
+  Target verification/deployment and any real acquisition results are separate.
+
 ### Masked single-opening chopper geometry (2026-10-17)
 
 - Operator confirms MC2F47 inner beam with three openings masked and one left

@@ -18,11 +18,12 @@ class ChopperSerialTransport:
     _owners = set()
     _owners_lock = Lock()
 
-    def __init__(self, config, *, authorized=False, factory=None, clock=time.monotonic):
+    def __init__(self, config, *, authorized=False, factory=None, clock=time.monotonic,
+                 sleep=time.sleep):
         config.require_hardware()
         if not authorized:
             raise ChopperError("Chopper serial connection requires explicit authorization")
-        self.config, self.clock = config, clock
+        self.config, self.clock, self.sleep = config, clock, sleep
         self.owner_key = config.port.upper()
         self.closed = self.poisoned = False
         self.transcript = []
@@ -86,10 +87,26 @@ class ChopperSerialTransport:
                 if self.clock() >= end:
                     raise TimeoutError("Chopper command deadline exhausted")
                 payload = (command + "\r").encode("ascii")
-                remaining = end - self.clock()
-                self.resource.write_timeout = remaining
-                if self.resource.write(payload) != len(payload):
-                    raise ChopperError("Incomplete chopper serial write")
+                delay = self.config.serial_inter_character_delay_s
+                entry["serial_inter_character_delay_s"] = delay
+                entry["bytes_written"] = 0
+                # Pacing is opt-in. It cannot extend the command/shared deadline,
+                # repair a bad reply or authorize retrying a partial command.
+                if delay * (len(payload) - 1) >= end - self.clock():
+                    raise TimeoutError("Chopper character pacing exceeds command deadline before write")
+                for index, part in enumerate((bytes([byte]) for byte in payload) if delay else (payload,)):
+                    if index:
+                        self.sleep(delay)
+                    remaining = end - self.clock()
+                    if remaining <= 0:
+                        raise TimeoutError("Chopper command deadline exhausted during write")
+                    self.resource.write_timeout = remaining
+                    written = self.resource.write(part)
+                    entry["bytes_written"] += written
+                    if written != len(part):
+                        raise ChopperError("Incomplete chopper serial write")
+                if self.clock() >= end:
+                    raise TimeoutError("Chopper command deadline exhausted after write")
                 while self.clock() < end and len(raw) < 4096:
                     self.resource.timeout = max(0.001, end - self.clock())
                     chunk = self.resource.read(1)
@@ -259,7 +276,7 @@ class ChopperSession:
         if self.transport is None:
             self.transport = (SimulatedChopperTransport(self.config) if self.config.backend == "simulation"
                               else ChopperSerialTransport(self.config, authorized=self.authorized,
-                                                          clock=self.clock))
+                                                          clock=self.clock, sleep=self.sleep))
         self.identity = self._exchange("id?")
         if self.config.model not in self.identity or (
                 self.config.expected_idn and self.identity != self.config.expected_idn):
