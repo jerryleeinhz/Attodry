@@ -35,7 +35,7 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
         if not isinstance(background, Mapping):
             return "unknown", ("missing_matched_dark_background",)
         channel = background.get("channels", {}).get(f"{short_role}:h{order}", {})
-        if background.get("valid_for_analysis") is not True or channel.get("valid_for_analysis") is not True:
+        if channel.get("valid_for_analysis") is not True:
             return "flagged", ("invalid_dark_background",)
         if metric == "phase_deg" and channel.get("phase_defined") is not True:
             return "flagged", ("undefined_differential_phase",)
@@ -283,9 +283,16 @@ def repeat_statistics(rows: Sequence[Mapping], *, x: str, y: str, mode="mean_sd"
             mean = statistics.fmean(values)
             sd = statistics.stdev(values) if n > 1 else None
         sem = sd / math.sqrt(n) if sd is not None else None
+        dark_variance = None
+        if "_delta_" in y:
+            from .optical_background_analysis import dark_mean_variance
+            dark_variance = dark_mean_variance(valid, y)
+            sem = (math.sqrt(sem*sem + max(0, dark_variance))
+                   if sem is not None and dark_variance is not None else None)
         points.append({"x": statistics.fmean(r[x] for r in valid), "y": mean, "n": n,
                        "x_min": min(r[x] for r in valid), "x_max": max(r[x] for r in valid),
                        "sd": sd, "sem": sem, "error": sd if mode == "mean_sd" else sem,
+                       "dark_mean_variance": dark_variance,
                        "phase_statistics": "circular mean; wrapped residual sample SD" if circular else None,
                        "sample_ids": [observation_id(r) for r in valid]})
     return tuple(points)

@@ -2,10 +2,11 @@
 
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
-多个工作树共用 Python 环境时，使用 `python -s tools/run_combination.py` 代替
-`python -m attodry_control.combination_cli`，确保单次命令加载当前工作树的源码。
-参数和硬件授权检查保持；不更改全局安装。光电示例见
-[当前工作树启动入口](docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
+在项目根目录统一使用 `python -m attodry_control.combination_cli run --config config/photonics.local.toml`。
+根目录入口优先加载本工作树的 src，不改变共享 Python 安装。run 命令授权 TOML 所选
+模块的运行，光学无需额外授权参数；设备身份、接线声明、保护及清理检查仍执行。
+监控使用同一入口的 monitor，只读取数据库。一次 dark 与绘图扣背景选项见
+[光电联合指南](docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
 
 2026-10-17 本地离线更新：光学 Combination 支持两台 SR830，XX 内参考的 TTL OUT
 同时接 XY REF IN 和 Thorlabs 斩波器 EXT REF IN，两路均测 h1。XX SINE OUT 是否
@@ -20,8 +21,8 @@
 PM 及相同 PEM 设置核验去重、双 SR830 剩余等待复用和单份原始审计的边界见
 [速度与验证规则](docs/MEASUREMENT_PERFORMANCE.md)及
 [本分支耗时证据](docs/PHOTONICS_SPEED_OPTIMIZATION.md)。
-本轮仅本地修改和硬件阻断离线验证，未 SSH、未部署 LK_setup、未操作实机；完整
-回归结果在交接记录最终补齐。下面带早期日期的段落记录此前交付，不代表本轮已部署。
+该实现最初完成本地修改和硬件阻断离线验证，后续部署和实机记录见交接文档。
+当前一次 dark／绘图更新仍为本地离线开发；同时执行的3–63µW扫描使用LK_setup旧版本。
 
 2026-10-06：光电点流程新增 `optical_scan.target_deviation_policy = "record_continue"`。
 初始按容差和稳定窗口调功；之后仅功率偏离目标时记录实测值并继续，硬故障检查

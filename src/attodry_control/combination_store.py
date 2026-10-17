@@ -243,6 +243,10 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "'reference_recovery_poll', 'reference_recovery_recovered', "
             "'reference_recovery_failed') ORDER BY event_id DESC LIMIT 1", (run_id,),
         ).fetchone()
+        background = connection.execute(
+            "SELECT created_at_utc, payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type='optical_background_status' ORDER BY event_id DESC LIMIT 1", (run_id,)
+        ).fetchone()
         last_confirmed = {}
         for raw in connection.execute(
             "SELECT payload_json FROM combination_events WHERE run_id=? "
@@ -257,6 +261,8 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "cleanup": json.loads(row["cleanup_json"]) if row["cleanup_json"] else None,
             "error": row["error"], "process_liveness": "unknown",
             "last_recorded_readings": last_confirmed,
+            "dark_background": ({"created_at_utc": background["created_at_utc"],
+                                 **json.loads(background["payload_json"])} if background else None),
             "reference_recovery": ({"created_at_utc": recovery["created_at_utc"],
                 "event_type": recovery["event_type"], "payload": json.loads(recovery["payload_json"])}
                 if recovery else None),

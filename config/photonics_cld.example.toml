@@ -116,10 +116,12 @@ max_power_retries = 0 # 0..3；0不自动恢复，>0仅普通功率偏差重调�
 power_retry_timeout_s = 300.0 # s；一次失败操作的恢复共用总预算，不允许每次重试重置
 
 [optical_background]
-enabled = false # true=每条件采匹配暗背景；当前仅internal_xx_xy支持
+# per_condition(default when omitted) | once_before_scan
+capture_mode = "once_before_scan" # 一次扫描仅开头采一组 dark；每组次数由 samples 指定
+enabled = false # true=按capture_mode采暗背景；当前仅internal_xx_xy支持
 samples = 3 # 1..10000个独立完整锁相读数
-max_age_s = 600.0 # 0.001..86400；超龄/上下文变化不能继续套用旧背景
-# 连续gate开背景会在每个gate条件额外关光/采暗/开光再调功；不再组内始终亮。
+max_age_s = 600.0 # once模式超龄标记差分不可用、保留原始照光； 0.001..86400；超龄/上下文变化不能继续套用旧背景
+# per_condition在每个gate重新采暗；once_before_scan不补测，不同gate的背景差分会标为不匹配。
 
 [cld1010]
 # nkt_source.allow_control_mode_change仅适用于NKT（默认false）；CLD不添加该表/字段。

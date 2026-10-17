@@ -74,9 +74,9 @@ def run(argv: list[str] | None = None) -> int:
                               help="Legacy authorization flag; run already authorizes selected axes")
     hardware_run.add_argument("--confirm-xy-sine-disconnected", action="store_true")
     hardware_run.add_argument("--authorize-optical", action="store_true",
-                              help="Authorize optical connections, settings and configured emission")
+                              help="Legacy optional flag; run authorizes configured optical operation")
     hardware_run.add_argument("--confirm-optical-route", action="store_true",
-                              help="Confirm the configured manual optical route and sample limits")
+                              help="Legacy optional flag; run uses the declared TOML optical route")
     hardware_run.add_argument("--json", action="store_true", help="Full structured summary/result")
     monitor = commands.add_parser("monitor", help="Read SQLite; never query instruments")
     monitor.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
@@ -92,8 +92,6 @@ def run(argv: list[str] | None = None) -> int:
             print(json.dumps({"plan": config.snapshot, "conditions": config.plan.conditions()},
                              ensure_ascii=False, indent=2))
             return 0
-        if config.optical is not None and not (args.authorize_optical and args.confirm_optical_route):
-            raise ValueError("Optical runs require --authorize-optical and --confirm-optical-route")
         from .combination_launch import resolve_launch, check_run_destination, launch_summary
         database, run_id = resolve_launch(config, args.database, args.run_id)
         check_run_destination(database, run_id)
@@ -129,8 +127,8 @@ def run(argv: list[str] | None = None) -> int:
                     and not config.lockin.lockin_xy.sine_output_connected),
                 authorize_cryostat=config.cryostat is not None,
                 on_registered=lambda store, selected: register_run(config.path, store, selected),
-                authorize_optical=args.authorize_optical,
-                confirm_optical_route=args.confirm_optical_route)
+                authorize_optical=config.optical is not None,
+                confirm_optical_route=config.optical is not None)
         if args.json:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:

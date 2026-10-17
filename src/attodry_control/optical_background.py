@@ -23,17 +23,20 @@ class BackgroundConfig:
     enabled: bool = False
     samples: int = 3
     max_age_s: float = 600.0
+    capture_mode: str = "per_condition"
 
     def validate(self):
         if type(self.enabled) is not bool:
             raise NktError("optical_background.enabled must be boolean")
         integer(self.samples, "optical_background.samples", 1, 10000)
         number(self.max_age_s, "optical_background.max_age_s", 0.001, 86400)
+        if self.capture_mode not in ("per_condition", "once_before_scan"):
+            raise NktError("optical_background.capture_mode must be per_condition or once_before_scan")
 
 
 def load_background_config(doc):
     table = doc.get("optical_background", {})
-    keys(table, "optical_background", set(), {"enabled", "samples", "max_age_s"})
+    keys(table, "optical_background", set(), {"enabled", "samples", "max_age_s", "capture_mode"})
     config = BackgroundConfig(**table)
     config.validate()
     return config
@@ -110,6 +113,13 @@ def _quality(reading, channel):
             role_evidence.append({"valid_for_analysis": flags[role_key],
                 "problems": deepcopy(entry.get("problems_by_role", {}).get(role_key, []))})
             valid = valid and flags[role_key] is True
+    # A companion channel's overload must not contaminate this channel. Require
+    # complete formal status evidence before overriding a global aggregate flag.
+    from .analysis_observations import channel_quality
+    row = {"status.lockin": status, **{"measured." + k: v for k, v in reading.get("measurements", {}).items()}}
+    state, _ = channel_quality(row, f"measured.{role_key}_h{channel['harmonic']}_x_v")
+    if state != "unknown":
+        valid = state == "clear"
     return {"clean": clean, "valid_for_analysis": valid,
             "problems": deepcopy(reading.get("problems", [])), "role_evidence": role_evidence}
 
@@ -120,6 +130,11 @@ class MatchedLockinBackground:
         self.config, self.clock = config, clock
         self.baseline = None
         self.invalidation_reason = None
+        self.capture_attempted = False
+
+    @property
+    def needs_capture(self):
+        return self.config.capture_mode == "per_condition" or not self.capture_attempted
 
     def invalidate(self, reason):
         if type(reason) is not str or not reason.strip():
@@ -130,6 +145,7 @@ class MatchedLockinBackground:
     def capture(self, readings, context):
         if not self.config.enabled:
             raise NktError("Optical background is disabled")
+        self.capture_attempted = True
         # A failed capture cannot leave an older baseline silently available.
         self.baseline = None
         self.invalidation_reason = "new baseline capture incomplete"
@@ -148,10 +164,15 @@ class MatchedLockinBackground:
             y = _finite(statistics.mean(item["y_v"] for item in raw), "Mean dark Y")
             amplitude = _finite(math.hypot(x, y), "Mean dark complex amplitude")
             phase_defined = x != 0 or y != 0
+            n = len(raw)
+            covariance_mean = ([[sum((item[a]-mean_a)*(item[b]-mean_b) for item in raw)/(n*(n-1))
+                                 for b, mean_b in (("x_v", x), ("y_v", y))]
+                                for a, mean_a in (("x_v", x), ("y_v", y))] if n > 1 else None)
             channels[name] = {"role": raw[0]["role"], "harmonic": raw[0]["harmonic"],
                 "x_v": x, "y_v": y, "amplitude_v": amplitude,
                 "phase_deg": math.degrees(math.atan2(y, x)) if phase_defined else None,
                 "phase_defined": phase_defined, "count": len(raw), "samples": raw,
+                "covariance_mean_xy_v2": covariance_mean,
                 "valid_for_analysis": all(item["valid_for_analysis"] for item in raw)}
         now = _finite(self.clock(), "Dark baseline monotonic time")
         result = {"schema_version": 1, "context": saved_context, "context_sha256": fingerprint,
@@ -170,33 +191,48 @@ class MatchedLockinBackground:
         if not self.config.enabled:
             return deepcopy(light_reading)
         if self.baseline is None:
+            if self.config.capture_mode == "once_before_scan" and self.capture_attempted:
+                result = deepcopy(light_reading)
+                result["background"] = {"capture_mode": self.config.capture_mode,
+                    "valid_for_analysis": False, "channels": {},
+                    "reason": self.invalidation_reason or "background unavailable"}
+                return result
             raise NktError("No matched dark baseline: " + (self.invalidation_reason or "not captured"))
         _, fingerprint = _context(context)
-        if fingerprint != self.baseline["context_sha256"]:
+        mismatch = fingerprint != self.baseline["context_sha256"]
+        if mismatch and self.config.capture_mode == "per_condition":
             raise NktError("Dark baseline context mismatch; recapture for this condition/reference/phase")
         age = _finite(self.clock(), "Light reading monotonic time") - self.baseline["captured_monotonic_s"]
-        if age < 0 or age > self.config.max_age_s:
+        if age < 0 or (age > self.config.max_age_s and self.config.capture_mode == "per_condition"):
             raise NktError("Dark baseline expired or monotonic clock reversed")
         channels = _channels(light_reading)
-        if set(channels) != set(self.baseline["channels"]):
+        if set(channels) != set(self.baseline["channels"]) and self.config.capture_mode == "per_condition":
             raise NktError("Dark/light role/harmonic channel mismatch; missing matched baseline channel")
         result = deepcopy(light_reading)
         assessment = {"baseline_id": self.baseline["baseline_id"],
             "context_sha256": fingerprint, "age_s": age, "max_age_s": self.config.max_age_s,
+            "capture_mode": self.config.capture_mode,
+            "context_matches": not mismatch, "expired": age > self.config.max_age_s,
             "method": "(light X+iY) - mean(dark X+iY)", "channels": {},
             "valid_for_analysis": self.baseline["valid_for_analysis"],
             "original_quality": {name: deepcopy(light_reading.get(name))
                                  for name in ("clean", "valid_for_analysis", "problems")}}
         for name, channel in channels.items():
-            dark = self.baseline["channels"][name]
-            valid = dark["valid_for_analysis"] and _quality(light_reading, channel)["valid_for_analysis"]
+            dark = self.baseline["channels"].get(name, {})
+            valid = (not mismatch and age <= self.config.max_age_s
+                     and dark.get("valid_for_analysis") is True
+                     and _quality(light_reading, channel)["valid_for_analysis"])
             assessment["channels"][name] = {"valid_for_analysis": valid,
+                                            "dark_mean_x_v": dark.get("x_v"),
+                                            "dark_mean_y_v": dark.get("y_v"),
+                                            "dark_count": dark.get("count"),
+                                            "dark_covariance_mean_xy_v2": dark.get("covariance_mean_xy_v2"),
                                             "phase_defined": None, "difference_emitted": False}
             assessment["valid_for_analysis"] = assessment["valid_for_analysis"] and valid
-        # No difference is promoted if any dark/light channel is invalid. Raw
-        # light values and the original dark capture remain independently saved.
-        if assessment["valid_for_analysis"]:
-            for name, channel in channels.items():
+        # Emit only independently qualified channels. Background quality is not
+        # a hardware fault and does not rewrite the original light quality.
+        for name, channel in channels.items():
+            if assessment["channels"][name]["valid_for_analysis"]:
                 dark = self.baseline["channels"][name]
                 x = _finite(channel["x_v"] - dark["x_v"], "Differential X")
                 y = _finite(channel["y_v"] - dark["y_v"], "Differential Y")
@@ -208,8 +244,5 @@ class MatchedLockinBackground:
                 if phase_defined:
                     result["measurements"][prefix + "phase_deg"] = math.degrees(math.atan2(y, x))
                 assessment["channels"][name].update(phase_defined=phase_defined, difference_emitted=True)
-        else:
-            result["clean"] = result["valid_for_analysis"] = False
-            result.setdefault("problems", []).append("Invalid dark/light observations prevent optical background subtraction")
         result["background"] = assessment
         return result

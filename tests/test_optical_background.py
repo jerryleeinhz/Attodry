@@ -106,8 +106,8 @@ class BackgroundTests(unittest.TestCase):
             background, _, context = self.make()
             baseline = background.capture([reading(clean=not invalid_dark), reading()], context)
             result = background.apply(reading(clean=invalid_dark), context)
-            self.assertFalse(result["clean"])
-            self.assertFalse(result["valid_for_analysis"])
+            self.assertEqual(result["clean"], invalid_dark)  # original light quality is unchanged
+            self.assertEqual(result["valid_for_analysis"], invalid_dark)
             self.assertFalse(result["background"]["valid_for_analysis"])
             self.assertFalse(any("delta_" in key for key in result["measurements"]))
             self.assertEqual(baseline["raw_readings"][0]["valid_for_analysis"], not invalid_dark)
@@ -122,7 +122,10 @@ class BackgroundTests(unittest.TestCase):
         self.assertTrue(baseline["channels"]["xx:h1"]["valid_for_analysis"])
         self.assertEqual(baseline["channels"]["xy:h1"]["samples"][0]["role_evidence"][0]["problems"],
                          ["input overload"])
-        self.assertFalse(background.apply(reading(), context)["valid_for_analysis"])
+        result = background.apply(reading(), context)
+        self.assertTrue(result["valid_for_analysis"])
+        self.assertIn("lockin_xx_h1_delta_x_v", result["measurements"])
+        self.assertNotIn("lockin_xy_h1_delta_x_v", result["measurements"])
 
     def test_mixed_harmonic_raw_quality_uses_each_selected_role(self):
         background, _, context = self.make()

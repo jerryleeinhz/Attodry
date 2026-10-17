@@ -44,6 +44,11 @@ The shared deadline covers retuning and the final READ; a late final reply canno
 promote the window. Rejected/partial windows and original primary/cleanup errors
 remain available independently from accepted data.
 
+Combination `run` authorizes only the modules selected in the validated TOML.
+Optical authorization/route CLI flags are optional legacy arguments; the backend
+API still requires explicit authorization. File hash, station ownership, identity,
+route declarations, physical limits and independent cleanup checks remain.
+
 Dark acquisition turns the laser off (or uses separately verified shutter control)
 while preserving reference/modulator timing. A stationary chopper may leave the
 beam open; motor stop is never certified optical darkness. Matched darks bind
@@ -53,6 +58,15 @@ differences. Subtract X+iY and then derive delta magnitude/phase; zero complex
 difference has undefined phase and must not become a fabricated angle or NaN.
 Enabling per-gate matched backgrounds adds explicit dark visits even under the
 otherwise continuously illuminated gate policy.
+Optional `capture_mode="once_before_scan"` captures one group before the first
+formal illuminated sample. Optical coordinates may change, while electrical,
+environment and reference/phase conditions still match. Expired/mismatched
+backgrounds suppress qualified differences without changing raw light quality
+or causing a hardware retry. A new run constructs a fresh background owner.
+Differences are qualified per channel; companion overload cannot qualify an
+invalid channel or exclude a separately proven healthy one. Independent dark-run
+analysis requires archived OFF/settings evidence and an operator declaration of
+unchanged wiring and phase continuity; missing phase readback is not inferred.
 
 The active photonics profile preserves `sqrt(Bx^2+Bz^2) <= 3 T` for requested,
 commanded and accepted actual fields. Historical single-axis limits/margins

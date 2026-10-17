@@ -566,7 +566,7 @@ class HardwareCombinationStation:
     def qualify(self, modules):
         if self.config.illumination_policy == "continuous_gate_scan":
             self._guard_continuous_optical()
-            if self.background is not None:
+            if self.background is not None and self.background.needs_capture:
                 self._capture_dark_background()
                 self.optical.qualify()
             self.lockin.qualify()
@@ -590,7 +590,7 @@ class HardwareCombinationStation:
         if self.cryo is not None:
             self.cryo.qualify()
         if self.optical is not None:
-            if self.background is not None:
+            if self.background is not None and self.background.needs_capture:
                 self._capture_dark_background()
             self.optical.qualify()
             if self.lockin is not None:
@@ -601,7 +601,7 @@ class HardwareCombinationStation:
         return {"ready": True, "mode": "hardware", "active_modules": modules}
 
     def _background_context(self):
-        return {"requested_conditions": self._applied, "axis_visits": self._axis_scopes,
+        context = {"requested_conditions": self._applied, "axis_visits": self._axis_scopes,
             "background_visit": self._background_visit,
             "reference_topology": self.config.reference_topology,
             "frequency_hz": self.lockin.target_frequency_hz,
@@ -611,8 +611,19 @@ class HardwareCombinationStation:
                  for key in ("phase", "ref", "nharmonic", "dharmonic", "blade", "enable")}
                 if self.optical.chopper else None),
             "xx_sample_connected": self.config.lockin.lockin_xx.sine_output_connected}
+        if self.background.config.capture_mode == "once_before_scan":
+            # Optical settings may vary; electrical/environment conditions may
+            # not inherit a different condition's dark. Visit counters are not
+            # physical settings and do not invalidate a run-wide baseline.
+            context["requested_conditions"] = {key: value for key, value in self._applied.items()
+                                                if key != "optical"}
+            context.pop("axis_visits")
+            context.pop("background_visit")
+        return context
 
     def _capture_dark_background(self):
+        self.events.event("optical_background_status", {"stage": "dark_acquisition",
+            "capture_mode": self.background.config.capture_mode, "samples": self.background.config.samples})
         self.optical.suspend()
         self._background_visit += 1
         self.background.invalidate("new dark/illuminated condition visit")
@@ -637,6 +648,9 @@ class HardwareCombinationStation:
                     raise ValueError("Reference/phase changed during dark baseline acquisition")
             baseline = self.background.capture(readings, context)
             self.events.event("optical_dark_background", baseline)
+            self.events.event("optical_background_status", {"stage": "dark_captured",
+                "baseline_id": baseline["baseline_id"], "valid_for_analysis": baseline["valid_for_analysis"],
+                "capture_mode": self.background.config.capture_mode})
         finally:
             self.events.measurement_stage = None
 
@@ -710,7 +724,7 @@ class HardwareCombinationStation:
                     if self.lockin is not None and self.config.reference_topology == "internal_xx_xy":
                         self.lockin.wait_deadline = deadline
                     self.optical.suspend()
-                    if self.background is not None:
+                    if self.background is not None and self.background.needs_capture:
                         self._capture_dark_background()
                     self.optical.qualify()
                     if self.lockin is not None:
@@ -797,6 +811,9 @@ class HardwareCombinationStation:
             if self.background is not None:
                 reading = self.background.apply(reading, self._background_context())
                 reading["status"]["background"] = reading["background"]
+                self.events.event("optical_background_status", {"stage": "light_sampling",
+                    **{key: reading["background"].get(key) for key in
+                       ("baseline_id", "age_s", "capture_mode", "valid_for_analysis", "expired", "context_matches")}})
             return _json(reading)
         sample = self.smu.sample_point({k[:-2]: v for k, v in self.point.values.items()},
                                        segment=self.point.segment)

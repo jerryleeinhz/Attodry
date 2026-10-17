@@ -691,6 +691,10 @@ def _draw_curve(axis, rows, spec, x, y):
                 raise ValueError("Log Y would clip an error interval crossing zero; use a linear axis.")
             getattr(axis, "set_" + name + "scale")("log")
     note = "Raw observations" if mode == "raw" else "Mean ± " + ("SD" if mode == "mean_sd" else "SEM") + " (within condition)"
+    if "_delta_" in y:
+        note += " · light − dark"
+        if mode == "mean_sem":
+            note += " (shared dark error included)"
     ns = [p["n"] for p in summaries if p["n"] > 0]
     if mode != "raw" and ns:
         note += f" · n={min(ns)}" + (f"–{max(ns)}" if min(ns) != max(ns) else "")
@@ -712,8 +716,9 @@ def _draw_curve(axis, rows, spec, x, y):
               "omitted_missing_or_nonfinite_count": len(kept)-len(valid),
               "displayed_point_count": sum(_is_numeric(p["y"]) for p in summaries),
               "statistics": mode, "replication_unit": "formal repeats within the same source/run/condition/attempt",
-              "uncertainty": "sample SD (ddof=1); SEM=SD/sqrt(n), independence assumed; undefined for n<2",
-              "undefined_error_point_count": sum(p['n'] == 1 for p in summaries) if mode != 'raw' else 0,
+              "uncertainty": ("SD: scatter after subtraction; SEM: repeat SEM plus shared dark covariance; magnitude/phase first-order; drift excluded"
+                              if "_delta_" in y else "sample SD (ddof=1); SEM=SD/sqrt(n), independence assumed; undefined for n<2"),
+              "undefined_error_point_count": sum(p['n'] > 0 and p['error'] is None for p in summaries) if mode != 'raw' else 0,
               "source_paths": sorted({str(r.get("source_path")) for r in rows if r.get("source_path")})}
     return {"rows": tuple(valid), "summary_rows": summaries, "report": report}
 
@@ -721,6 +726,20 @@ def _draw_curve(axis, rows, spec, x, y):
 def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     """Render qualified observations; preserve raw provenance and explicit gaps."""
     from .analysis_observations import qualify_observations
+    from .optical_background_analysis import subtract_dark
+    spec = dict(spec)
+    response_mode = spec.get("photoresponse", "raw")
+    if response_mode != "raw":
+        excluded = set(spec.get("excluded_sample_ids", ()))
+        marked = tuple({**r, "_manual_excluded": _sample_token(r) in excluded} for r in rows)
+        rows = subtract_dark(marked, mode=response_mode, dark_run_id=spec.get("dark_run_id", ""),
+                             phase_confirmed=spec.get("dark_phase_confirmed", False),
+                             max_age_s=spec.get("dark_max_age_s", 600.0))
+        for axis in ("y", "z"):
+            key = spec.get(axis) or ""
+            spec[axis] = re.sub(r"^(measured\.lockin_(?:xx|xy)_h\d+_)(?!delta_)", r"\1delta_", key)
+        component = spec.get("field_component", "amplitude_v")
+        spec["field_component"] = component if component.startswith("delta_") else "delta_" + component
     mode = spec.get("mode", "curve")
     if mode not in ("curve", "xy_z", "field"):
         raise ValueError("Plot mode must be curve, xy_z or field")
@@ -738,7 +757,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     plot_keys = [k for k in (x, y, z) if k]
     if mode == "field":
         field = spec.get("field_component", "amplitude_v")
-        if field not in ("amplitude_v", "x_v", "y_v", "phase_deg"):
+        if field.removeprefix("delta_") not in ("amplitude_v", "x_v", "y_v", "phase_deg"):
             raise ValueError("Unsupported channel component")
         plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in ("xx", "xy") for h in (1, 2)]
     group_keys = [spec["group_by"]] if spec.get("group_by") else []
@@ -1119,6 +1138,14 @@ class UnifiedPlotDashboard:
             disabled=mode == "xy_z")
         quality = widgets.Dropdown(options=[("Exclude flagged channels", "exclude"), ("AUDIT: include flagged", "include")],
                                   value=default_spec.get("quality_policy", "exclude"), description="Quality:", layout=widgets.Layout(width="360px"))
+        photoresponse = widgets.Dropdown(options=[("Raw light", "raw"), ("Light − recorded dark", "matched"),
+            ("Light − selected dark run", "separate")], value=default_spec.get("photoresponse", "raw"),
+            description="Response:", layout=widgets.Layout(width="100%"))
+        dark_run = widgets.Text(value=default_spec.get("dark_run_id", ""), description="Dark run ID:",
+                                layout=widgets.Layout(width="100%"))
+        dark_phase = widgets.Checkbox(value=default_spec.get("dark_phase_confirmed", False),
+            description="Independent dark: unchanged wiring and continuous reference/phase confirmed")
+        dark_age = widgets.FloatText(value=default_spec.get("dark_max_age_s", 600.0), description="Max age (s):")
         component = widgets.Dropdown(options=[("R (V RMS)", "amplitude_v"), ("X (V)", "x_v"), ("Y (V)", "y_v"), ("Phase (deg)", "phase_deg")],
                                      value=default_spec.get("field_component", "amplitude_v"), description="Component:")
         excluded = widgets.SelectMultiple(options=[], description="Exclude IDs:", rows=4, layout=widgets.Layout(width="100%"))
@@ -1137,6 +1164,7 @@ class UnifiedPlotDashboard:
             "filter_box": filter_box, "filters": [], "output": output,
             "figure": None, "rendered": None, "updating": False,
             "statistics": statistics, "quality": quality, "component": component, "excluded": excluded,
+            "photoresponse": photoresponse, "dark_run": dark_run, "dark_phase": dark_phase, "dark_age": dark_age,
             "image": figure_image,
         }
         card["widget"] = widgets.VBox([
@@ -1146,6 +1174,8 @@ class UnifiedPlotDashboard:
             checklist.widget,
             runs,
             widgets.HBox([load_runs, load_status]),
+            photoresponse, dark_run, dark_phase, dark_age,
+            widgets.HTML("For an independent dark, load both light and dark run IDs above. OFF evidence, matching settings and channel quality are required. Select raw lock-in axes; Response applies subtraction."),
             widgets.HBox([x_axis, component if mode == "field" else y_axis], layout=widgets.Layout(width="100%")),
             group_axis if mode != "xy_z" else z_axis,
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
@@ -1164,7 +1194,8 @@ class UnifiedPlotDashboard:
         add_filter_button.on_click(lambda _button, target=card: self._add_filter(target))
         load_runs.on_click(lambda _button, target=card: self._load_selected_runs(target))
         runs.observe(lambda _change, target=card: self._card_changed(target), names="value")
-        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded):
+        photoresponse.observe(lambda _change, target=card: self._response_changed(target), names="value")
+        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded, dark_run, dark_phase, dark_age):
             control.observe(lambda _change, target=card: self._card_changed(target), names="value")
         self.cards.append(card)
         self.card_box.children = tuple(item["widget"] for item in self.cards)
@@ -1335,6 +1366,8 @@ class UnifiedPlotDashboard:
             return
         card["updating"] = True
         try:
+            for name in ("dark_run", "dark_phase", "dark_age"):
+                card[name].layout.display = "" if card["photoresponse"].value == "separate" else "none"
             rows = self._selected_rows(card)
             pending = sum(key not in self._cache for key, _source in self._cache_keys(card))
             card["load_status"].value = (f"{pending} run(s) awaiting Load / refresh runs." if pending
@@ -1367,6 +1400,23 @@ class UnifiedPlotDashboard:
                 print(f"Could not load selected data: {exc}")
         finally:
             card["updating"] = False
+
+    def _response_changed(self, card: dict[str, Any]) -> None:
+        if card.get("updating"):
+            return
+        card["updating"] = True
+        try:
+            if card["photoresponse"].value != "raw":
+                if "measured.optical_power_w" in {v for _, v in card["x"].options}:
+                    card["x"].value = "measured.optical_power_w"
+                if card["mode"] == "curve" and not str(card["y"].value).startswith("measured.lockin_"):
+                    for candidate in ("measured.lockin_xy_h1_x_v", "measured.lockin_xx_h1_x_v"):
+                        if candidate in {v for _, v in card["y"].options}:
+                            card["y"].value = candidate
+                            break
+        finally:
+            card["updating"] = False
+        self._card_changed(card)
 
     def _card_changed(self, card: dict[str, Any]) -> None:
         if card.get("updating"):
@@ -1442,6 +1492,10 @@ class UnifiedPlotDashboard:
             "filters": filters,
             "statistics": card["statistics"].value, "quality_policy": card["quality"].value,
             "field_component": card["component"].value,
+            "photoresponse": card["photoresponse"].value,
+            "dark_run_id": card["dark_run"].value.strip(),
+            "dark_phase_confirmed": card["dark_phase"].value,
+            "dark_max_age_s": card["dark_age"].value,
             "excluded_sample_ids": list(card["excluded"].value),
             "include_audit": bool(self.include_audit.value),
             "run_ids": self._selected_run_ids(card),

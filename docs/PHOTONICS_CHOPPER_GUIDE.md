@@ -71,22 +71,22 @@ allowlist。真实地址、设备序列号、实验参数和数据保持本机�
 混入本次进程。先只读解析和预览，确认选中的源、h1/h1、接线声明、目标数与清理策略：
 
 ```powershell
-python -s tools/run_combination.py describe-hardware --config config/photonics.local.toml
+python -m attodry_control.combination_cli describe-hardware --config config/photonics.local.toml
 ```
 
 完成独立实机验收并确认光路后，正式运行仍是 Combination：
 
 ```powershell
-python -s tools/run_combination.py run --config config/photonics.local.toml --authorize-optical --confirm-optical-route
+python -m attodry_control.combination_cli run --config config/photonics.local.toml
 ```
 
-没有新增独立斩波扫描命令。`run` 及两个光学标记授权本次所选仪器的连接、设置和发光，
+没有新增独立斩波扫描命令。`run` 本身授权配置所选仪器的连接、设置和发光，
 不授权并发接管其他扫描。一个运行拥有对应资源；运行期间监控只读 SQLite／文件，
 不另开串口或消费锁相 LIAS。命令返回后，退出码、数据库终态、真实进程是否退出和
 清理证据分别查看，不能仅凭旧 PID 或最后一条日志断言仪器状态。
 
 ```powershell
-python -s tools/run_combination.py monitor --config config/photonics.local.toml
+python -m attodry_control.combination_cli monitor --config config/photonics.local.toml
 git status --short --branch
 git log -1 --oneline
 ```
@@ -189,13 +189,15 @@ TL4000 SDK 即使以 `reset=false` 初始化，仍会隐式发送
 
 ## 匹配暗背景
 
-`optical_background.enabled=true` 当前只支持 internal-XX 双 SR830。每个条件先在参考
-链和斩波器继续运行时关闭激光，采 `samples` 个完整读数；随后重新开光／调功／等待。
-它会增加时间；特别是连续 gate 模式，启用暗背景后每个 gate 条件都会增加关光和重新
-准备照光，不能同时承诺整组始终亮。
+`optical_background.enabled=true` 当前只支持 internal-XX 双 SR830。
+`capture_mode="per_condition"`（省略默认）在每个条件先关闭激光、保留参考／斩波，
+采 `samples` 个完整读数，再开光／调功／等待；连续 gate 模式也逐条件增加这项开销。
+`capture_mode="once_before_scan"` 仅在首个条件正式照光采样前采一组，后续复用。
+背景超龄或 gate／温场／激励／参考条件变化时，该差分标记无效，继续保存原始光照。
+不会自动补测 dark。新 run 重新采集，不能凭一次背景保证整个扫描没有漂移。
 
 暗背景记录 role、harmonic、频率、相位上下文、gate／T／B 条件与访问、样品连接声明、
-采集时间及原始有效性。上下文不同、过龄或任一路无效时不生成可信差分。
+采集时间及原始有效性。按各通道判断，单路无效不排除另一路合格差分。
 计算为 `ΔX+iΔY=(Xlight+iYlight)-mean(Xdark+iYdark)`，再推导 ΔR 和 Δphase；
 不会直接相减 R 或角度。原始光／暗读数独立保留。相位／参考／访问上下文变化需要
 新背景，不能复用旧值遮盖漂移。

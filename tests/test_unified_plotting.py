@@ -269,6 +269,12 @@ class PlotTests(unittest.TestCase):
             card['filters'][0]['choices'].value = ()
             d.include_audit.value = True
             card['quality'].value = 'include'
+            self.assertEqual(card['dark_run'].layout.display, 'none')
+            card['photoresponse'].value = 'separate'
+            card['dark_run'].value = 'recorded-dark'
+            card['dark_phase'].value = True
+            card['dark_age'].value = 900.
+            self.assertEqual(card['dark_run'].layout.display, '')
             d.configuration_path.value = str(self.directory / 'setup.json')
             d._save_setup()
             card['y'].value = 'csv.W'
@@ -277,6 +283,10 @@ class PlotTests(unittest.TestCase):
             self.assertEqual(loaded['y'].value, 'csv.V')
             self.assertEqual(loaded['filters'][0]['choices'].value, ())
             self.assertEqual(loaded['quality'].value, 'include')
+            self.assertEqual(loaded['photoresponse'].value, 'separate')
+            self.assertEqual(loaded['dark_run'].value, 'recorded-dark')
+            self.assertTrue(loaded['dark_phase'].value)
+            self.assertEqual(loaded['dark_age'].value, 900.)
             self.assertTrue(d.include_audit.value)
 
     def test_stale_export_refused_and_missing_setup_preserves_cards(self):

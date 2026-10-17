@@ -6,6 +6,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 import re
 import itertools
+import hashlib
 from pathlib import Path
 
 from .combination_store import open_readonly
@@ -85,6 +86,10 @@ def launch_summary(config, database, run_id):
         "samples_per_condition": config.plan.samples_per_condition,
         "total_samples": count * config.plan.samples_per_condition,
         "cleanup": config.snapshot["cleanup_policy"], "hardware_resume": False}
+    summary["source_path"] = str(Path(__file__).resolve().parent)
+    from . import __version__
+    summary["source_version"] = __version__
+    summary["source_entry_sha256"] = hashlib.sha256(Path(__file__).with_name("combination_cli.py").read_bytes()).hexdigest()
     summary["illumination_policy"] = config.illumination_policy
     if config.magnetic is not None:
         summary["field_transition_policy"] = config.magnetic.run.transition_policy.value

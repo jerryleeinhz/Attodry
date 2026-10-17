@@ -104,7 +104,8 @@ def launch_text(summary, width=None):
                              "frequency derived from the unmodified outer sensor track")
         background = optical.get("background")
         if background and background.get("enabled"):
-            lines.append(f"Dark background: {background['samples']} fresh readings/condition; "
+            lines.append(f"Dark background: {background.get('capture_mode', 'per_condition')}; "
+                         f"{background['samples']} fresh readings/baseline; "
                          f"max age {background['max_age_s']:g} s; complex X+iY subtraction")
         if optical["scan"].get("max_power_retries", 0):
             lines.append(f"Power recovery: {optical['scan']['max_power_retries']} whole-window retries; "
@@ -252,9 +253,12 @@ def launch_text(summary, width=None):
     if summary["note"]:
         lines.append("Note: " + summary["note"])
     lines += ["Run ID: " + summary["run_id"], "Database: " + summary["database"],
+              "Source: " + summary.get("source_path", "unrecorded")
+              + " | version " + summary.get("source_version", "unrecorded")
+              + " | CLI SHA256 " + summary.get("source_entry_sha256", "unrecorded"),
               "Config: " + summary["config"],
               "Authorization: run command | XY disconnection declared in TOML when selected"
-              + (" | optical emission/route explicitly confirmed" if "optical" in summary["outer_to_inner"] else "")]
+              + (" | configured optical operation authorized by run command" if "optical" in summary["outer_to_inner"] else "")]
     return "\n".join(part for line in lines for part in (textwrap.wrap(line, width=width,
         replace_whitespace=False, break_on_hyphens=False) or [""]))
 
@@ -272,6 +276,11 @@ def snapshot_text(snapshot, width=None):
         lines.append(f"Last event: {event['created_at_utc']} | {event['event_type']}")
     if snapshot.get("error"):
         lines.append("Primary error: " + snapshot["error"])
+    if snapshot.get("dark_background"):
+        background = snapshot["dark_background"]
+        lines.append("Dark stage (recorded): " + str(background.get("stage"))
+                     + " | " + str(background.get("capture_mode"))
+                     + " | valid=" + str(background.get("valid_for_analysis", "pending")))
     recovery = snapshot.get("reference_recovery")
     if recovery:
         payload = recovery["payload"]
@@ -285,6 +294,13 @@ def snapshot_text(snapshot, width=None):
     readings = []
     for module, reading in snapshot.get("last_recorded_readings", {}).items():
         values = {**reading.get("actual", {}), **reading.get("measurements", {})}
+        if module == "lockin":
+            background = (reading.get("status") or {}).get("background")
+            if background:
+                lines.append("Dark background (recorded): " + str(background.get("baseline_id"))
+                    + f" | age {background.get('age_s', '?')} s"
+                    + f" | valid={background.get('valid_for_analysis')}"
+                    + f" | expired={background.get('expired', False)}")
         if module == "optical":
             status = reading.get("status") or {}
             if status.get("power_target_w") is not None:

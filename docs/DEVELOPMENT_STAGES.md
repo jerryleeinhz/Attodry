@@ -1,5 +1,83 @@
 # Development stages
 
+## 2026-10-17 — Unified CLI and once-before-scan dark (local offline)
+
+User-authorized current runtime acquires dark3 +seven light conditions21 pairs
+before isolated local development. Both runs complete with verified laserOFF,
+electrical/close/audit cleanup and released ownership. Actual power means are
+2.700..64.803uW; XX21/21 OUTPT invalid,XY19/21 valid,neither role unlocked.
+No running source or main config changes; private immutable profiles/evidence
+remain ignored. Production runtime remains6019b7f7.
+
+Implement unified python -m Combination run without required optical flags,
+project-root source bootstrap and launch provenance. Add optional dark
+capture_mode=once_before_scan with per_condition legacy default. A single
+background group is reused only for compatible conditions/age; mismatch/expiry
+marks differential analysis unavailable while raw light acquisition continues.
+Hard faults and all physical protections remain unchanged. New runs start fresh;
+hardware resume is still unsupported.
+
+Add recorded/independent-dark choices to unified plotting, complex subtraction,
+per-channel qualification, shared-background covariance and explicit matching
+provenance. Independent dark requires archived OFF/settings and operator phase
+continuity declaration. Real archived data replay matches raw qualification and
+rejects unconfirmed subtraction. Monitor remains file-only with small dark stage
+summary. Templates/notebook/usage/safety/performance docs updated. Final complete
+hardware-blocked regression passes1,804 tests in631.346s, after88 core/128 analysis
+checks. Synthetic21-row/seven-point rendering passes numerical and visual QA;
+diff whitespace checks pass. This feature is local,
+not deployed/pushed or commissioned by the preceding old-version scan.
+
+
+## 2026-10-17 — Authorized averaging/range empirical comparison
+
+At fixed29% current, four independent630nm/10nm runs complete with certified
+final protection/close/audit. Last10 fresh READs: auto3000=1.321863uW (SD0.004764),
+auto15000=1.337351uW (SD0.002437), fixed11.25863mW/15000=1.451809uW (SD0.007829),
+fixed1.125863mW/15000=1.380881uW (SD0.003479). READ wall cost rises1.009 ->5.006s;
+automatic relative SD falls0.360% ->0.182%. All earlier readings are retained.
+Manual ranges agree within the predeclared5% gate (4.885%), but manual/auto
+means differ8.558%; neither absolute accuracy nor peak/duty calibration is proved.
+No maximum-range optional E trial is needed. Native optical captures preserve
+ND25%, PP1, current mode,625/635nm edges and29% emitting setpoint throughout.
+
+Comparison XX12/12 is overloaded/invalid; XY4/12 invalid,8/12 valid. This does
+not invalidate the separate PM timing/range observation or qualify invalid
+photovoltage. User's record_continue and all hardware limits remain unchanged.
+After fresh sourceOFF/chopper query evidence, an independent new dark completes
+3 valid pairs on both roles and the conditional20–600uW six-point light run
+starts with15000 averages/fixed11.25863mW. It completes3/6 conditions and9 pairs:
+formal means20.0121/132.894/245.404uW at45.5/73.5/97.5% current. Fourth368uW
+target stops at the original100% current boundary with actual254.226uW;
+484/600uW are unrun and no automatic retry occurs. XX9/9 light pairs remain
+overload-invalid; XY8/9 valid,1 overload-invalid; both have0 formal unlock.
+Final laserOFF/electrical/chopper-preserve/close/audit protections verify with
+no errors. Original light failed/unclean/manual status is retained. All tracked
+processes exit, all known ownership locks release, no DB is active; preserved
+main/global/notebook hashes match. Raw failed/partial observations remain.
+Current query-only PD inspection at19:43:53UTC confirms LO/low-pass1,15000
+averages,fixed11.25863mW; no settings/READ or other device operation. Private
+X/Y/R figures retain raw overload observations separately from valid XY points,
+use per-role paired power/voltage statistics and show dark as an independent
+reference rather than an imputed0W point or matched subtraction. All formats,
+raw tables,source hashes and plotting code are saved with the experiment.
+Subsequent operator review identifies a trial-config selection mismatch:
+preserved mainXX20mV/XY2mV differs from inherited trialXX20uV/XY50uV. All9
+formal before/after readbacks verify the narrow trial ranges. Acknowledge this
+explicitly and inherit current main settings for future trials. Formal recorded
+overload is solely LIAS4/OUTPT (XX9/9,XY1/9); both input/reserve and filter bits
+remain0. Preserve original invalid flags and latch semantics; no new real action.
+Operator then authorizes copying the light trial to the main TOML for review.
+Back up main/policy, retain equivalent relative output location and synchronize
+only the required two narrow fixed-range choices into the policy; other limits
+remain identical. Hardware-blocked candidate/actual-main previews both pass6
+conditions after rejecting an absolute output path before any deployment.
+Main adopts15000 averages/fixed11.25863mW,mean_target_only and20–600uW six targets.
+Private receipt records new main/policy hashes and original backups; no real
+device connection/settings write or new scan, and known overload/failures remain.
+Only ignored profiles/helpers change; production source stays6019b7f. Original
+main/global profiles, local notebooks, failed data and raw audits remain exact.
+
 ## 2026-10-17 — Explicit one-mean optical target qualification
 
 Adds opt-in `power_feedback.qualification="mean_target_only"`; default

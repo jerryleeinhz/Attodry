@@ -45,7 +45,7 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         connection.execute("BEGIN")
         # Cleanup transcripts can be large. Decode each once, within the same
         # read transaction as its samples, rather than joining it onto every row.
-        run_query = "SELECT run_id, schema_version, status, cleanup_json FROM combination_runs"
+        run_query = "SELECT run_id, schema_version, status, cleanup_json, plan_json FROM combination_runs"
         parameters = () if run_id is None else (run_id,)
         if run_id is not None:
             run_query += " WHERE run_id=?"
@@ -53,7 +53,12 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         for run in connection.execute(run_query, parameters):
             if run["schema_version"] != SCHEMA_VERSION:
                 raise ValueError("Unsupported combination schema")
-            runs[run["run_id"]] = (run["status"], json.loads(run["cleanup_json"] or "{}"))
+            plan = json.loads(run["plan_json"])
+            runs[run["run_id"]] = (run["status"], json.loads(run["cleanup_json"] or "{}"),
+                                  {"config_sha256": plan.get("config_sha256"),
+                                   "lockin": plan.get("hardware", {}).get("lockin"),
+                                   "optical": {key: plan.get("hardware", {}).get("optical", {}).get(key)
+                                               for key in ("chopper", "pem")}})
         rows = connection.execute("""
             SELECT r.status AS run_status,
                    c.context_json, a.status AS attempt_status, s.*
@@ -87,6 +92,7 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             continue
         context = json.loads(row["context_json"])
         record = {
+            "analysis_context": runs[row["run_id"]][2],
             "schema_version": SCHEMA_VERSION, "source_path": str(Path(path).resolve()),
             "run_id": row["run_id"], "condition_id": row["condition_id"],
             "attempt_index": row["attempt_index"], "sample_index": row["sample_index"],

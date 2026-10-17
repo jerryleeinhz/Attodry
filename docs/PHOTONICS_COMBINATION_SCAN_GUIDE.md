@@ -1,26 +1,73 @@
 # Photonics / nonlinear Hall combination scan
 
-## 从当前工作树启动（2026-10-15）
+## 统一运行与监控入口（2026-10-17）
 
-LK_setup 的 `lyr` 默认 editable 安装解析到另一份 `Attodry_control` 目录。
-在本工作树使用以下入口，确保本次命令和它的子进程加载这里的 `src`；
-它不修改 conda 环境、全局安装或其他终端，原 CLI 参数和硬件授权检查保持。
+从当前项目根目录启动，根目录引导包使 python -m 加载本工作树 src，
+避免共享环境的 editable 安装指向其他 checkout。已安装包在项目目录之外仍按其
+安装来源运行；启动摘要显示 Source 路径和配置来源。无需改全局 conda 安装。
 
 ```powershell
 Set-Location 'C:\Users\LK_Setup\Yuanrong Li\Integration-photonics'
-python -s tools/run_combination.py describe-hardware --config config/photonics.local.toml
+python -m attodry_control.combination_cli describe-hardware --config config/photonics.local.toml
+python -m attodry_control.combination_cli run --config config/photonics.local.toml
+python -m attodry_control.combination_cli monitor --config config/photonics.local.toml --once
 ```
 
-正式运行仍需光路/发光授权。以下命令供操作者确认后使用，部署阶段不执行：
+run 命令本身授权配置选定的模块，不再要求 --authorize-optical 或
+--confirm-optical-route，也不增加交互确认。两参数兼容旧脚本；底层 API 独立授权
+检查、实际接线声明、限值、文件哈希核验、互斥及清理仍保留。默认配置仍为
+config/hardware.local.toml；光电请明确指定 config/photonics.local.toml。
+monitor 可带 --run-id 固定目标，运行期间不会改跟踪对象，只读 SQLite。
 
-```powershell
-python -s tools/run_combination.py run --config config/photonics.local.toml --authorize-optical --confirm-optical-route
-python -s tools/run_combination.py monitor --config config/photonics.local.toml --once
+## 扫描开始时一次 dark 与光生电压
+
+```toml
+[optical_background]
+enabled = true
+capture_mode = "once_before_scan" # per_condition | once_before_scan；省略默认 per_condition
+samples = 3 # 一组包含3次完整锁相读数，并非只读一次
+max_age_s = 600.0 # 0.001..86400 s；须按实验时长与背景漂移选择
 ```
 
-只有已明确配置正确 `PYTHONPATH` 或安装来源时，原来的 `python -m
-attodry_control.combination_cli` 才能保证使用预期版本。若某个 Python 进程已经
-载入其他工作树的包，新入口会停止并要求新开进程，不混用两份源码。
+仅 internal_xx_xy 双 SR830 支持自动背景。per_condition 保留逐条件重新采暗态的
+流程；once_before_scan 在首个测量条件正式照光采样前采一组，后续功率点和 repeats
+复用，不因普通目标功率窗口重试而额外采暗。新 run 构造新背景；
+硬件断点恢复当前仍不支持，不会读取旧进程的单调时钟作为新背景。
+
+dark 用激光 OFF 证据，保持参考/斩波器工作；停止电机不是暗态。一次模式不会为了
+背景重测关开光；原有 off_before_axis_change 规则仍可在切换轴点时关光。
+continuous_gate_scan 仍先完成其光学准备，首次 dark 在第一个 gate 条件资格阶段，
+正式照光测量前采集；不能声称初始调光过程从未发光。
+
+一次背景允许光功率/光谱坐标变化，但 gate、温度、磁场、激励、参考频率/谐波和
+相位仍须匹配。过期、条件不匹配或暗态通道无效只使对应差分不可用，继续记录原始
+光照；不自动补测、不假定背景无漂移。per_condition 保留原先超龄/错配拒绝行为。
+真实仪器、通信、设置、光学安全和清理故障仍停止。后台状态记录 baseline_id、
+年龄、capture_mode、context_matches、expired 及逐通道质量；monitor 显示暗态阶段。
+单路无效不排除另一路合格差分，原始 clean/continuation 语义保持。
+
+unified_plotting 的 Response 提供：
+- Raw light：原始数据；
+- Light − recorded dark：使用运行内背景；
+- Light − selected dark run：同时加载照光与一个独立暗态 run，填 Dark run ID，
+  确认接线未变且参考/相位连续，并设置最大年龄。
+
+独立 dark 必须有激光 OFF 记录、归档硬件设置与正式设置匹配、合格逐通道样本；
+不按 run 名称或缺失/零功率猜暗态。相位确认是操作者声明，不冒充软件读回证据。
+不匹配/过期的条件保留原因与原始数值，默认不画合格差分。手动排除的 dark 样本
+不会参与均值。明确开启审计才能查看失败 run，其来源标记保留。
+
+曲线选择原始 lock-in Y（或XY–Z的Z），Response 自动转换到 delta 通道；
+四通道卡片按分量自动转换。横轴建议 measured.optical_power_w，仍须固定/分组波长、
+gate 等其他变化条件。不要把未测功率的 dark 点绘为实测0 W。
+先平均 dark X+iY，再计算 ΔX/ΔY 及 hypot(ΔX,ΔY)、atan2(ΔY,ΔX)，零向量相位未定义。
+R_photo 不是 R_light−R_dark；本分支差分表示端电压，无自动电流/增益换算。
+
+SD 是正式重复的差分散布；SEM 合并照光重复 SEM 与共享暗态均值协方差，
+共享暗态误差不除以照光点数。R/phase 的协方差传播为一阶近似，零幅值或 n<2
+时误差未定义；旧背景无协方差时不伪造 SEM。不包含未测的时间漂移，多个光点
+共用背景的误差相关性保留 baseline_id，不应作为独立误差做后续拟合。
+导出保留原始/差分值、背景均值/样本ID/时间年龄/质量和来源，原始数据库不修改。
 
 ## 组合扫描等待优化（2026-10-15）
 
@@ -837,14 +884,14 @@ Vxx/Vxy 仍是顺序采样，共同 condition 不表示硬件同时采样；每�
 安全文件后，以下命令仅解析、检查边界和列出条件，不打开硬件：
 
 ```powershell
-python -s tools/run_combination.py describe-hardware --config config/hardware.local.toml
+python -m attodry_control.combination_cli describe-hardware --config config/hardware.local.toml
 ```
 
 若使用独立 `config/photonics.local.toml`，显式把 `--config` 换成该路径。
 真实运行要求当次明确授权、确认光路/样品电光边界及对应 commissioning；语法为：
 
 ```powershell
-python -s tools/run_combination.py run --config config/hardware.local.toml --authorize-optical --confirm-optical-route
+python -m attodry_control.combination_cli run --config config/hardware.local.toml
 ```
 
 `run` 命令本身授权配置中选择的模块，光学另外要求上述两个标志；本文没有执行
@@ -854,7 +901,7 @@ python -s tools/run_combination.py run --config config/hardware.local.toml --aut
 监控仅读取登记的 SQLite/文件，不另开仪器连接：
 
 ```powershell
-python -s tools/run_combination.py monitor --config config/hardware.local.toml --once
+python -m attodry_control.combination_cli monitor --config config/hardware.local.toml --once
 ```
 
 本轮只读查询取得各模块身份、锁相耦合/量程/相位/源设置，及 NKT/VARIA 当前状态。

@@ -4,6 +4,123 @@ Last updated: 2026-10-17
 
 ## Current stage
 
+### Unified run, once-per-scan dark and offline photoresponse (2026-10-17)
+
+- User authorizes the current-version dark +3/13/23/33/43/53/63uW acquisition
+  first, then isolated local implementation/offline verification. LK_setup runtime
+  stays6019b7f7; its source/tools and current main hashes remain unchanged.
+- Dark20261017T202149356286Z_3-63uW_dark completes3 valid pairs on both roles.
+  Light20261017T202330933335Z_3-63uW_light completes7/7 conditions,21 pairs.
+  Actual all-sample power means2.700/12.609/22.591/32.911/43.725/50.647/64.803uW.
+  Both runs certify laserOFF/electrical protection/resource close/audit and exit0;
+  final metadata has no active DB runs, all known leases free and no errors.
+- Current main uses PM3000 averages,XX20uV/XY50uV,630nm/10nm,h1/h1 at8Hz;
+  no new gain, waveform, current/power or optical-route settings are inferred.
+  XX21/21 OUTPT-overloaded/invalid; XY2/21 OUTPT-overloaded,19/21 valid.
+  Neither role has an unlock. Raw failures/invalid values and the unmeasured
+  dark-power field remain intact. Small private reports/source snapshots ignored.
+- Local Combination run treats the explicit run command as authorization for
+  TOML-selected optics; legacy flags remain accepted and backend API gates stay.
+  A project-root package bootstrap makes python -m use this checkout, preserving
+  setuptools src installs and other environments. Launch records source path,
+  package version and the CLI entry file SHA256 (not a complete source manifest).
+- Background capture_mode defaults per_condition; optional once_before_scan
+  captures one dark group before the first formal illuminated condition, reuses
+  it across compatible optical points/repeats/window retries, and starts fresh
+  for a new owner/run. Existing hardware resume remains unsupported.
+  Age/context mismatch suppresses differences only in once mode, without
+  retaking dark or changing original light quality. Actual hard faults stop.
+- Channel qualification is independent: a companion overload no longer erases
+  a separately qualified difference. Preserve originals and attach background
+  ID, means/covariance, age and small monitor status. Original per-condition
+  context/expiry errors remain strict.
+- Unified plotting offers raw, recorded-dark and selected-independent-dark
+  response. Independent selection requires archived laserOFF/settings/context
+  and an operator declaration of unchanged wiring/phase continuity, never run
+  name/zero-power inference. Real-source offline replay agrees with21/21 context
+  matches and0/21 XX,19/21 XY qualification; unconfirmed phase blocks subtraction.
+  Shared dark uncertainty is not divided by light sample count; R/phase are
+  first-order propagation with undefined zero-vector phase and unknown-error gaps.
+- Final complete hardware-blocked regression passes1,804 tests in631.346s;
+  earlier88-test core and128-test analysis runs also pass. The final suite covers
+  one-time capture across repeats/new owners, gate mismatch, expiry, bounded
+  whole-window retry, per-channel complex subtraction, provenance, shared dark
+  covariance, setup roundtrip, module entry and file-only monitor behavior.
+  Synthetic21-observation/seven-point SEM rendering is numerically checked and
+  visually inspected; it is explicitly labelled synthetic, not experiment data.
+  Git diff whitespace checks pass. No deployment, push, target code tests or
+  new-code illuminated test in this development stage.
+
+
+
+### Authorized PM averaging/range comparison and conditional optical scan (2026-10-17)
+
+- Operator authorizes comparison at29% current:3000/15000 hardware averages,
+  then automatic/manual PM ranges; only after healthy evidence may a fresh dark
+  and20/136/252/368/484/600uW chopped-cycle mean scan proceed. Main private TOML,
+  global safety, notebook bytes and prior failures remain preserved.
+- Four independent completed runs use630nm/10nm and unchanged optical context
+  (ND25%, PP1). Last10 fresh READ means/SD: auto3000=1.321863/0.004764uW;
+  auto15000=1.337351/0.002437uW; fixed11.25863mW=1.451809/0.007829uW;
+  fixed1.125863mW=1.380881/0.003479uW. All raw early/transient readings remain.
+- READ wall times average1.009s and5.006s respectively. Automatic-range tail
+  relative SD falls0.360% ->0.182%; this measures short-term repeatability,
+  not absolute accuracy, PD noise alone or a general power-stability certificate.
+- The two fixed ranges differ4.885%, inside the predeclared5% comparison gate;
+  fixed11.25863mW differs8.558% from auto15000. Sequential source/beam drift,
+  range offsets and clipping cannot be separated by this small trial. Optional
+  maximum-range E is not run. Nominal1/8 duty remains operator-declared, not
+  calibrated, and no measured W is multiplied by8.
+- All four comparisons complete3 pairs and certify laserOFF/electrical/chopper
+  preserve/resource close/audit. XX is overloaded/invalid in all12 light pairs;
+  XY is invalid2/3 in each automatic trial and valid3/3 in both fixed trials.
+  Channel validity is separate from successful PM comparison and run completion.
+- Fresh query-only readiness after parent exit verifies native outer56Hz,
+  derived one-opening beam8Hz and sourceOFF/status0. New dark completes3 pairs
+  valid on both roles. Conditional light scan is launched with15000 averages,
+  fixed11.25863mW, mean_target_only and unchanged limits/record_continue.
+  Final light run completes only3/6 conditions and9 formal pairs:20uW target
+  reads20.0121uW at45.5%;136uW reads132.894uW at73.5%;252uW reads245.404uW
+  at97.5%. At368uW target,100% reads254.226uW and the unchanged source boundary
+  stops the run;484/600uW remain unrun. No automatic retry or limit change.
+- All9 light XX pairs are overloaded/invalid; XY8/9 valid,1 overload-invalid.
+  Neither role has a formal unlock record. Raw values remain, invalid channels
+  stay excluded by default; XX overload cannot support a no-signal conclusion.
+  Original light failed/unclean/manual status remains, separately from verified
+  laserOFF/source protection/chopper preserve/resource close/audit with no errors.
+  Dark/light chopper transactions383/863 contain0 recorded errors. All tracked
+  parents/children exit, known leases release, no DB remains active, and all
+  main/global/notebook hashes match. No cryostat/magnet/SMU operation or production
+  source change. Private Chinese report and full evidence remain ignored.
+- Subsequent authorized current-PD query at19:43:53UTC, after a fresh owner/process
+  check and under all station leases, reads LO/low-pass1,15000 averages and native
+  range11.25863mW. No setting writes or READ acquisition. Saved six-panel X/Y/R
+  vs measured-power figure shows valid XY8/9 separately from raw overload XX9/9;
+  dark is a separate reference band, without imputed0W or matched subtraction.
+  PNG/PDF/SVG,24 channel rows,statistics and provenance remain ignored locally
+  and in the target experiment directory; production code is unchanged.
+- Operator then points out the preserved main profile is XX20mV/XY2mV. Read-only
+  source/provenance review confirms this; trial preparation inherited the older
+  XX20uV/XY50uV copies instead. All9 formal before/after settings verify those
+  narrow ranges (SENS12/13), high_reserve,1s,h1. This configuration selection
+  mismatch is explicitly acknowledged; future trials must inherit the current
+  main settings and review differences, not silently reinstate historical ranges.
+  Formal overload is only LIAS4/OUTPT: XX9/9 and XY1/9; both input/reserve and
+  filter bits are0 throughout formal records. Latches do not prove continuous
+  current overload. No new scan/settings write; raw invalid flags remain.
+- Operator explicitly requests replacing the main TOML with the light trial
+  configuration for review. After fresh idle/ownership checks, back up both
+  main/global-policy files and synchronize the light profile. Policy adds only
+  the previously used XX20uV/XY50uV fixed choices; all other limits are identical.
+  Relocate commissioning output to equivalent ../run_data/commissioning.
+  Initial absolute-path candidate is rejected before deployment; the corrected
+  candidate and actual main both pass hardware-blocked load/6-condition previews.
+  New main SHA2566aadd613492b1901e2b3783c713b2f65a69b20ae9c95fd9447f852e75e5239e5,
+  policy SHA256e26613b0de7ea8d2a7c16f02f1e978197a7e209d6ee06f4fb47a1d917a984aba.
+  Saved backups/receipts remain ignored. Source trial remains immutable; no
+  instrument connection/write or scan. Narrow-range overload and unachieved
+  higher power targets remain explicitly annotated for operator review.
+
 ### Long PM average and explicit single-value target qualification (2026-10-17)
 
 - User approves keeping the chopper running, increasing PM100D averaging, and
