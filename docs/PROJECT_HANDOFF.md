@@ -28,6 +28,22 @@ Last updated: 2026-10-17
   and certified cleanup by fresh dark plus20/136/252/368/484/600uW scans.
   Main private TOML, global safety policy, notebook bytes and prior failures stay
   preserved; all new profiles and results live in ignored delivery directories.
+- Commit6019b7f is published and deployed. Target isolated verification passes
+  the same218 cases in40.241s, plus real light-profile loader/launcher preview.
+  An earlier long-path extraction failure and a rejected direct pilot profile
+  (`record_continue` is invalid without power feedback) are retained. The corrected
+  pilot uses direct/abort; all three final profiles pass guarded deployed previews.
+  Main config, global safety and both locally changed target notebooks remain exact.
+- Real preflight then fails before any settings or emission: paced `id?` returns
+  `id?\rCommand error> CMD_NOT_DEFINED\r> `, reported as unexpected bytes after the
+  first prompt. No pilot/dark/light child is started and no new formal sample is
+  taken. Strict communication handling is retained;645 earlier clean transactions
+  do not certify this new session. The chopper was not reopened automatically.
+- Independent authorized query-only NKT verification at18:22:03UTC confirms
+  emission0/status0, current mode35.3%, PP1, with no source setting writes. It does
+  not certify chopper phase or rewrite prior failed runs. New physical confirmation
+  is requested after this fault. Hardware average3000 effect and the six light
+  targets remain unmeasured, despite completed offline implementation/deployment.
 
 ### Authorized post-reconnection character-pacing trial (2026-10-17)
 

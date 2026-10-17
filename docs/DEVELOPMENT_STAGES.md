@@ -21,6 +21,16 @@ This entry does not claim real duration, stability, deployment or acquisition;
 actual delivery/run receipts are retained separately and subsequent results must
 be recorded without rewriting prior failed/unclean attempts.
 
+Commit6019b7f target isolated regression passes218 cases in40.241s and all final
+dark/pilot/light guarded deployment previews pass. Main config/global policy and
+notebook bytes remain preserved. Initial extraction/path and invalid direct-pilot
+configuration rejections are retained separately. Fresh real chopper `id?`
+preflight returns CMD_NOT_DEFINED and stops before settings/emission; no new real
+acquisition child is launched. Independent NKT readback confirms actual OFF and
+status0 at18:22:03UTC without source writes. Long-average empirical verification
+and six-target acquisition remain pending new post-fault physical confirmation;
+successful earlier paced sessions never authorize ignoring a new communication fault.
+
 ## 2026-10-17 opt-in serial character-pacing candidate
 
 - After explicit post-fault front-panel/USB confirmation, bulk and 100 ms
