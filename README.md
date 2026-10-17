@@ -22,7 +22,8 @@ PM 及相同 PEM 设置核验去重、双 SR830 剩余等待复用和单份原�
 [速度与验证规则](docs/MEASUREMENT_PERFORMANCE.md)及
 [本分支耗时证据](docs/PHOTONICS_SPEED_OPTIMIZATION.md)。
 该实现最初完成本地修改和硬件阻断离线验证，后续部署和实机记录见交接文档。
-当前一次 dark／绘图更新仍为本地离线开发；同时执行的3–63µW扫描使用LK_setup旧版本。
+一次 dark／绘图更新于2026-10-18获授权发布并部署到LK_setup；本地1,804项、目标机176项离线测试通过。
+此前3–63µW扫描使用旧版本；新版尚未实机开光验收。目标机主TOML保持原值，自动dark需明确启用。
 
 2026-10-06：光电点流程新增 `optical_scan.target_deviation_policy = "record_continue"`。
 初始按容差和稳定窗口调功；之后仅功率偏离目标时记录实测值并继续，硬故障检查

@@ -1,5 +1,19 @@
 # Development stages
 
+## 2026-10-18 — Published and deployed unified optical CLI/dark analysis
+
+User authorizes publication and LK_setup deployment of feature d0b0bc3. Local
+full1,804-test regression passes; target isolated archive passes176 relevant
+hardware-blocked tests and7-condition private-profile preview. Under fresh
+idle/active-run checks and all station aliases, runtime fast-forwards from6019b7f7.
+Local main/policy/commissioning notebook bytes are preserved. Unified notebook
+retains its local cells/outputs/metadata with only reviewed instruction lines
+appended. Backup and original diff remain recoverable in the ignored delivery
+directory. Actual runtime profile revalidates offline; no instrument I/O or scan.
+Private optical_background.enabled remainsfalse, requiring explicit opt-in to
+once_before_scan. Documentation delivery changes no additional runtime source.
+
+
 ## 2026-10-17 — Unified CLI and once-before-scan dark (local offline)
 
 User-authorized current runtime acquires dark3 +seven light conditions21 pairs

@@ -1,8 +1,39 @@
 # Project handoff
 
-Last updated: 2026-10-17
+Last updated: 2026-10-18
 
 ## Current stage
+
+### Publication and LK_setup deployment (2026-10-18)
+
+- User explicitly authorizes push and deployment. Feature commit d0b0bc3 is
+  published on origin/integration-photonics-nonlinear-hall. Local1,804-test
+  hardware-blocked regression remains the implementation validation; only two
+  extra EOF blank lines are removed before commit, with identical Python AST.
+- LK_setup stages that exact Git archive in an ignored candidate directory and
+  passes176 relevant hardware-blocked tests in136.889s. Current private main
+  config loads/previews7 conditions; the root python -m entry resolves this
+  candidate's source despite the shared environment's older editable install.
+- Fresh process/Jupyter/active-DB checks and all known station leases protect
+  deployment. Runtime fast-forwards6019b7f7 ->d0b0bc3. Nine local config/notebook
+  files and the original diff are backed up in the ignored delivery directory.
+  Main TOML, local policy and commissioning notebook remain byte-identical.
+  Unified plotting keeps all local notebook cells/outputs/metadata, appending
+  only the reviewed upstream first-cell instructions; semantic preservation is
+  checked before and after. The same three preexisting dirty paths remain.
+- Actual runtime main passes another hardware-blocked7-condition preview; source
+  tree matches the published commit. Package launch needs no global installation
+  changes. No instrument connection/write, status consumption, new scan, live
+  performance trial or Jupyter-kernel restart. Restart/reload the analysis kernel
+  when opening this checkout's updated notebook to use the new Python module.
+- The private main is deliberately unchanged: optical_background.enabled=false
+  remains. To opt into automatic once-per-scan dark, set enabled=true and
+  capture_mode="once_before_scan" in that profile; samples/max_age remain explicit.
+  Offline results do not certify background drift or the overloaded XX data.
+- Deployment/target-test receipts and recoverable backups are ignored, copied
+  locally for audit. The subsequent documentation-only commit records delivery;
+  it contains no additional runtime-source or hardware-configuration changes.
+
 
 ### Unified run, once-per-scan dark and offline photoresponse (2026-10-17)
 
