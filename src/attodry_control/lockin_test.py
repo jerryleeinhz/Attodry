@@ -3461,6 +3461,7 @@ def _apply_sweep_segment_ranges(
     harmonic: int | Mapping[str, int] = 1,
     on_input_overload: Callable[[dict[str, object]], None] | None = None,
     overload_policy=None,
+    settling=None,
 ) -> None:
     """Apply an optional fixed-range override at a named range segment.
 
@@ -3518,7 +3519,8 @@ def _apply_sweep_segment_ranges(
             "target_full_scale_v": sensitivity_full_scale_v(target_code),
         }
         instruments[role].set_sensitivity(target_code)
-    time.sleep(settle_s)
+    if settling is None:
+        time.sleep(settle_s)
     for role, instrument in instruments.items():
         range_record = ranges[role]
         if not isinstance(range_record, dict):
@@ -3540,6 +3542,10 @@ def _apply_sweep_segment_ranges(
             "readback_sensitivity_code": readback,
             "readback_full_scale_v": sensitivity_full_scale_v(readback),
         }
+    if settling is not None:
+        from .lockin_settling import SETTLING_POLICY
+        transition_record["settling_policy"] = SETTLING_POLICY
+        return  # Batch final HARM/SENS/RMOD changes into one owned window.
     transition, problems = _consume_sensitivity_transition(
         lockin_xx,
         lockin_xy,
@@ -3619,6 +3625,7 @@ def _apply_sweep_autorange(
     verify_settings: Callable[[], object] | None = None,
     on_input_overload: Callable[[dict[str, object]], None] | None = None,
     overload_policy=None,
+    settling=None,
 ) -> None:
     """Apply adjacent range changes, repeating widening within one point.
 
@@ -3665,7 +3672,7 @@ def _apply_sweep_autorange(
         assert isinstance(probes, list)
         probes.append(probe_record)
         if _sweep_overload_recheck_eligible(xx, xy, probe_problems):
-            time.sleep(settle_s)
+            (time.sleep if settling is None else settling.pause)(settle_s)
             verification_xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
             verification_xy = lockin_xy.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xy"))
             verification_problems = _autorange_probe_problems(
@@ -3769,7 +3776,8 @@ def _apply_sweep_autorange(
             )
             instruments[role].set_sensitivity(target_code)
             transitions[-1]["returned"] = True
-        time.sleep(settle_s)
+        if settling is None:
+            time.sleep(settle_s)
         for role, instrument in instruments.items():
             range_record = ranges.get(role)
             if not isinstance(range_record, dict):
@@ -3789,12 +3797,13 @@ def _apply_sweep_autorange(
 
         if verify_settings is not None:
             verify_settings()
-        transition, transition_problems = _consume_sensitivity_transition(
-            lockin_xx,
-            lockin_xy,
-            settle_s=settle_s,
-            harmonic=harmonic,
-        )
+        if settling is None:
+            transition, transition_problems = _consume_sensitivity_transition(
+                lockin_xx, lockin_xy, settle_s=settle_s, harmonic=harmonic)
+        else:
+            settling.ensure_settled(lockin_xx, lockin_xy, settle_s, record)
+            transition, transition_problems = _consume_harmonic_transition(
+                lockin_xx, lockin_xy, harmonic=harmonic)
         transition["autorange_actions"] = {
             role: decision.action.value for role, decision in changes.items()
         }
@@ -3810,7 +3819,8 @@ def _apply_sweep_autorange(
             raise Sr830Error(
                 "Unsafe autorange transition: " + "; ".join(transition_problems)
             )
-        time.sleep(settle_s)
+        if settling is None:
+            time.sleep(settle_s)
         if verify_settings is not None:
             verify_settings()
         verification_xx = lockin_xx.read_harmonic_sample(_expected_harmonic(harmonic, "lockin_xx"))
@@ -4424,6 +4434,7 @@ def _capture_sweep_point(
     on_formal_sample_recorded: Callable[[Mapping[str, object]], None] | None = None,
     harmonic_control: HarmonicSensitivitySession | None = None,
 ) -> None:
+    pause = time.sleep if harmonic_control is None else harmonic_control.pause
     raw_samples = record["samples"]
     if not isinstance(raw_samples, list):
         raise TypeError("Sweep point samples must be a list.")
@@ -4457,7 +4468,7 @@ def _capture_sweep_point(
                               else dict(harmonic_control.current_harmonics))
         for sample_index in range(samples):
             if sample_index:
-                time.sleep(sample_interval_s)
+                pause(sample_interval_s)
             context_before = (
                 None
                 if measurement_context is None
@@ -4495,7 +4506,7 @@ def _capture_sweep_point(
                     "after": context_after,
                 }
             if _sweep_overload_recheck_eligible(xx, xy, problems):
-                time.sleep(harmonic_settle_s)
+                pause(harmonic_settle_s)
                 verification_context_before = (
                     None
                     if measurement_context is None

@@ -15,6 +15,8 @@ from pathlib import Path
 
 from .combination_store import CombinationStore, utc_now
 from .models import VectorField
+from .measurement_timing import MeasurementTiming
+from .optical_recovery import OpticalPowerDeviation
 from .reference_transients import ReferenceTransientError
 from .safety import FieldReadbackPolicy, MagnetLimits
 
@@ -27,10 +29,11 @@ MODULE_KEYS = {
     "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
     "optical": {"optical_source_level_pct", "optical_wavelength_nm",
                 "optical_bandwidth_nm", "optical_nd_pct", "optical_pulse_picker_ratio",
-                "optical_target_power_w"},
+                "optical_target_power_w", "optical_current_a"},
 }
 SMU_ROLES = ("smu_bias", "gate_top", "gate_bottom")
 COMBINATION_FIELD_LIMIT_POLICY = "planned-axis-configured-v2"
+RETRYABLE_SAMPLE_ERRORS = (ReferenceTransientError, OpticalPowerDeviation)
 
 
 def _audit_value(value: object) -> object:
@@ -130,8 +133,12 @@ class CombinationPlan:
                         raise ValueError("Lock-in reference frequency is outside the configured limits")
                 if axis.module == "optical":
                     v = point.values
-                    if "optical_source_level_pct" not in v or not 0 <= v["optical_source_level_pct"] <= 100:
+                    if ("optical_source_level_pct" in v) == ("optical_current_a" in v):
+                        raise ValueError("Specify exactly one NKT percent or CLD ampere source coordinate")
+                    if "optical_source_level_pct" in v and not 0 <= v["optical_source_level_pct"] <= 100:
                         raise ValueError("Optical source setting must be within 0..100 percent")
+                    if "optical_current_a" in v and not 0 <= v["optical_current_a"] <= 1:
+                        raise ValueError("CLD optical current must be within its hardware capability")
                     for key in ("optical_wavelength_nm", "optical_bandwidth_nm", "optical_target_power_w"):
                         if key in v and v[key] <= 0:
                             raise ValueError(f"{key} must be positive")
@@ -316,10 +323,13 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
     cleanup_errors: list[str] = []
     cleanup_actions: list[dict] = []
 
-    def emit(kind: str, payload: dict) -> None:
+    def store_event(kind: str, payload: dict) -> None:
         context = {} if current is None else {
             "condition_id": current["condition_id"], "attempt_index": attempt}
         store.event(run_id, kind, {**context, **payload})
+
+    timing = MeasurementTiming(store_event, monotonic=getattr(station, "monotonic", None))
+    emit = timing.emit
 
     try:
         # Only a successfully committed run may become the monitor default.
@@ -329,7 +339,8 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
         if on_registered is not None:
             emit("launch_registered", on_registered(store, run_id))
         emit("run_started", {"resume": resume, "plan": snapshot})
-        emit("preflight", station.open(modules))
+        with timing.timed_stage("preflight"):
+            emit("preflight", station.open(modules))
         previous_indices: tuple | None = None
         for condition in conditions:
             if condition["condition_id"] in completed:
@@ -344,136 +355,161 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 if previous_indices is None or indices[:depth + 2] != previous_indices[:depth + 2]:
                     point = axis.points[condition["axes"][axis.module]["index"]]
                     emit("axis_setting", {"module": axis.module, "requested": point.values})
-                    emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
+                    with timing.timed_stage("axis_apply", module=axis.module):
+                        emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
                     if hasattr(station, "qualify_axis"):
                         scope = {"repeat_index": condition["repeat_index"],
                                  "axis_indices": list(indices[1:depth + 2]),
                                  "condition_id": condition["condition_id"]}
-                        axis_qualification = station.qualify_axis(axis.module, point, scope)
-                        emit("axis_qualification", {"module": axis.module, **axis_qualification})
-                        if axis_qualification.get("ready") is not True:
-                            raise ValueError("Axis did not qualify: " + axis.module)
-            qualification = station.qualify(modules)
-            emit("condition_qualification", qualification)
-            if qualification.get("ready") is not True:
-                raise ValueError("Condition did not qualify")
+                        with timing.timed_stage("axis_qualification", module=axis.module):
+                            axis_qualification = station.qualify_axis(axis.module, point, scope)
+                            emit("axis_qualification", {"module": axis.module, **axis_qualification})
+                            if axis_qualification.get("ready") is not True:
+                                raise ValueError("Axis did not qualify: " + axis.module)
+            with timing.timed_stage("condition_qualification"):
+                qualification = station.qualify(modules)
+                emit("condition_qualification", qualification)
+                if qualification.get("ready") is not True:
+                    raise ValueError("Condition did not qualify")
             for sample_index in range(plan.samples_per_condition):
-                start = utc_now()
-                candidate_index = 0
-
-                def acquire_window():
-                    nonlocal candidate_index, start
+                with timing.timed_stage("sample", sample_index=sample_index):
                     start = utc_now()
-                    candidate_index += 1
-                    reads = []
-                    try:
-                        if hasattr(station, "begin_sample"):
-                            station.begin_sample()
-                        # Every retry starts fresh optical/environment brackets
-                        # and repeats ALL modules, never joining old/new roles.
-                        read_error = None
-                        try:
-                            for module in modules:
-                                reading = station.read(module)
-                                emit("raw_reading", {"sample_index": sample_index,
-                                    "candidate_index": candidate_index,
-                                    "reading": _audit_value(reading)})
-                                if reading.get("module") != module:
-                                    raise ValueError("Reading belongs to the wrong module")
-                                reads.append(reading)
-                                if not reading_allows_continuation(reading):
-                                    break
-                        except BaseException as exc:
-                            read_error = exc
-                            raise
-                        finally:
-                            if hasattr(station, "end_sample"):
-                                try:
-                                    station.end_sample(reads)
-                                except BaseException as exc:
-                                    if (isinstance(exc, ReferenceTransientError)
-                                            and any(not reading_allows_continuation(r) for r in reads)):
-                                        raise ValueError("Noncontinuable formal readback before reference anomaly") from exc
-                                    if read_error is None:
-                                        raise
-                                    # A power/environment fault must not be hidden
-                                    # behind a retryable reference observation.
-                                    if (isinstance(read_error, ReferenceTransientError)
-                                            and not isinstance(exc, ReferenceTransientError)):
-                                        raise exc from read_error
-                                    read_error.add_note(f"Environmental after-read failed: {exc}")
-                                    try:
-                                        emit("environment_after_read_failed", {"error": str(exc)})
-                                    except BaseException as audit_error:
-                                        if isinstance(read_error, ReferenceTransientError):
-                                            raise audit_error from read_error
-                                        cleanup_errors.append(
-                                            f"environment after-read: {exc}; audit: {audit_error}")
-                    except ReferenceTransientError as exc:
-                        emit("reference_sample_rejected", {"sample_index": sample_index,
-                            "candidate_index": candidate_index, "accepted": False,
-                            "valid_for_analysis": False, "reason": str(exc),
-                            "kind": exc.kind, "evidence": exc.evidence,
-                            "partial_reads": _audit_value(reads)})
-                        raise
-                    return reads
+                    candidate_index = 0
 
-                reads = (station.run_sample_operation(acquire_window)
-                         if hasattr(station, "run_sample_operation") else acquire_window())
-                actual: dict = {}
-                measurements: dict = {}
-                for reading in reads:
-                    actual.update(reading["actual"])
-                    measurements.update(reading["measurements"])
-                finite = all(type(v) in (int, float) and math.isfinite(v)
-                             for v in (*actual.values(), *measurements.values()))
-                expected_keys = set(condition["requested"])
-                expected_measured = station.expected_measurements(condition)
-                finish = utc_now()
-                fresh = all(datetime.fromisoformat(start) <=
-                            datetime.fromisoformat(r["captured_at_utc"]) <=
-                            datetime.fromisoformat(finish) for r in reads)
-                acquisition_accepted = (finite and set(actual) == expected_keys and all(
-                    reading_allows_continuation(r) for r in reads)
-                    and expected_measured <= set(measurements) and fresh)
-                if "magnetic" in modules and finite and set(actual) == expected_keys:
-                    try:
-                        if field_policy is None:
-                            # Historical snapshots retain their strict 3 T rule.
-                            if math.hypot(actual["field_x_t"], actual["field_z_t"]) > 3:
-                                raise ValueError("Historical formal field exceeds 3 T")
-                        else:
-                            field_policy.validate_readback(VectorField(actual["field_x_t"], actual["field_z_t"]))
-                    except (ValueError, KeyError, TypeError):
-                        acquisition_accepted = False
-                if finite and set(actual) == expected_keys:
-                    try:
-                        other_axes = tuple(ScanAxis(module, (AxisPoint({
-                            key: value for key, value in actual.items() if key in MODULE_KEYS[module]
-                        }),)) for module in modules if module != "magnetic")
-                        if other_axes:
-                            CombinationPlan(other_axes,
-                                lockin_coordinate_limits=plan.lockin_coordinate_limits).validate()
-                    except ValueError:
-                        acquisition_accepted = False
-                if not finite:
-                    # Raw problematic values are already auditable via emit; JSON
-                    # rejects non-finite numbers, so a malformed backend fails closed.
-                    raise ValueError("Non-finite formal readback")
-                clean = acquisition_accepted and all(r.get("clean") is True for r in reads)
-                sample = {
-                    "acquisition_accepted": acquisition_accepted,
-                    "started_at_utc": start, "finished_at_utc": finish,
-                    "actual": actual, "measurements": measurements, "reads": reads,
-                    "clean": clean, "simulated": snapshot["mode"] == "simulation",
-                }
-                if field_policy is not None and {"field_x_t", "field_z_t"} <= actual.keys():
-                    sample["field_readback_assessment"] = field_policy.assessment(
-                        VectorField(actual["field_x_t"], actual["field_z_t"]))
-                store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
-                emit("formal_sample", {"sample_index": sample_index, "clean": clean})
-                if not acquisition_accepted:
-                    raise ValueError("Formal sample is incomplete or unclean")
+                    def acquire_window():
+                        nonlocal candidate_index, start
+                        with timing.timed_stage("sample_window", sample_index=sample_index,
+                                candidate_index=candidate_index + 1):
+                            start = utc_now()
+                            candidate_index += 1
+                            reads = []
+                            try:
+                                if hasattr(station, "begin_sample"):
+                                    station.begin_sample()
+                                # Every retry starts fresh optical/environment brackets
+                                # and repeats ALL modules, never joining old/new roles.
+                                read_error = None
+                                try:
+                                    for module in modules:
+                                        with timing.timed_stage("module_read", module=module,
+                                                sample_index=sample_index, candidate_index=candidate_index):
+                                            reading = station.read(module)
+                                            emit("raw_reading", {"sample_index": sample_index,
+                                                "candidate_index": candidate_index,
+                                                "reading": _audit_value(reading)})
+                                        if reading.get("module") != module:
+                                            raise ValueError("Reading belongs to the wrong module")
+                                        reads.append(reading)
+                                        if not reading_allows_continuation(reading):
+                                            break
+                                except BaseException as exc:
+                                    read_error = exc
+                                    raise
+                                finally:
+                                    if hasattr(station, "end_sample"):
+                                        try:
+                                            station.end_sample(reads)
+                                        except BaseException as exc:
+                                            if (isinstance(exc, RETRYABLE_SAMPLE_ERRORS)
+                                                    and any(not reading_allows_continuation(r) for r in reads)):
+                                                raise ValueError("Noncontinuable formal readback before retryable sample anomaly") from exc
+                                            if read_error is None:
+                                                raise
+                                            # Only the same recovery category may retain
+                                            # the original retryable exception. A hard
+                                            # after-read fault must stop either recovery.
+                                            if isinstance(read_error, RETRYABLE_SAMPLE_ERRORS):
+                                                if not isinstance(exc, RETRYABLE_SAMPLE_ERRORS):
+                                                    raise exc from read_error
+                                                if isinstance(read_error, ReferenceTransientError) != isinstance(exc, ReferenceTransientError):
+                                                    raise ValueError("Mixed reference and optical power anomalies; recovery is not permitted: "
+                                                        f"read {type(read_error).__name__}: {read_error}; "
+                                                        f"after {type(exc).__name__}: {exc}") from exc
+                                            read_error.add_note(f"Environmental after-read failed: {exc}")
+                                            try:
+                                                emit("environment_after_read_failed", {"error": str(exc)})
+                                            except BaseException as audit_error:
+                                                if isinstance(read_error, RETRYABLE_SAMPLE_ERRORS):
+                                                    raise audit_error from read_error
+                                                cleanup_errors.append(
+                                                    f"environment after-read: {exc}; audit: {audit_error}")
+                            except RETRYABLE_SAMPLE_ERRORS as exc:
+                                reference = isinstance(exc, ReferenceTransientError)
+                                emit("reference_sample_rejected" if reference else "optical_power_sample_rejected", {"sample_index": sample_index,
+                                    "candidate_index": candidate_index, "accepted": False,
+                                    "valid_for_analysis": False, "reason": str(exc),
+                                    "kind": exc.kind if reference else "optical_power_deviation", "evidence": exc.evidence,
+                                    "partial_reads": _audit_value(reads)})
+                                raise
+                            return reads
+
+                    def acquire_audited_window():
+                        try:
+                            return acquire_window()
+                        except RETRYABLE_SAMPLE_ERRORS as exc:
+                            if timing.audit_errors:
+                                # Includes the timing event emitted after the
+                                # window exits: audit failure is never retried.
+                                raise ValueError("Measurement timing audit failed during sample recovery") from exc
+                            raise
+
+                    reads = (station.run_sample_operation(acquire_audited_window)
+                             if hasattr(station, "run_sample_operation") else acquire_audited_window())
+                    actual: dict = {}
+                    measurements: dict = {}
+                    for reading in reads:
+                        actual.update(reading["actual"])
+                        measurements.update(reading["measurements"])
+                    finite = all(type(v) in (int, float) and math.isfinite(v)
+                                 for v in (*actual.values(), *measurements.values()))
+                    expected_keys = set(condition["requested"])
+                    expected_measured = station.expected_measurements(condition)
+                    finish = utc_now()
+                    fresh = all(datetime.fromisoformat(start) <=
+                                datetime.fromisoformat(r["captured_at_utc"]) <=
+                                datetime.fromisoformat(finish) for r in reads)
+                    acquisition_accepted = (finite and set(actual) == expected_keys and all(
+                        reading_allows_continuation(r) for r in reads)
+                        and expected_measured <= set(measurements) and fresh)
+                    if "magnetic" in modules and finite and set(actual) == expected_keys:
+                        try:
+                            if field_policy is None:
+                                # Historical snapshots retain their strict 3 T rule.
+                                if math.hypot(actual["field_x_t"], actual["field_z_t"]) > 3:
+                                    raise ValueError("Historical formal field exceeds 3 T")
+                            else:
+                                field_policy.validate_readback(VectorField(actual["field_x_t"], actual["field_z_t"]))
+                        except (ValueError, KeyError, TypeError):
+                            acquisition_accepted = False
+                    if finite and set(actual) == expected_keys:
+                        try:
+                            other_axes = tuple(ScanAxis(module, (AxisPoint({
+                                key: value for key, value in actual.items() if key in MODULE_KEYS[module]
+                            }),)) for module in modules if module != "magnetic")
+                            if other_axes:
+                                CombinationPlan(other_axes,
+                                    lockin_coordinate_limits=plan.lockin_coordinate_limits).validate()
+                        except ValueError:
+                            acquisition_accepted = False
+                    if not finite:
+                        # Raw problematic values are already auditable via emit; JSON
+                        # rejects non-finite numbers, so a malformed backend fails closed.
+                        raise ValueError("Non-finite formal readback")
+                    clean = acquisition_accepted and all(r.get("clean") is True for r in reads)
+                    sample = {
+                        "acquisition_accepted": acquisition_accepted,
+                        "started_at_utc": start, "finished_at_utc": finish,
+                        "actual": actual, "measurements": measurements, "reads": reads,
+                        "clean": clean, "simulated": snapshot["mode"] == "simulation",
+                    }
+                    if field_policy is not None and {"field_x_t", "field_z_t"} <= actual.keys():
+                        sample["field_readback_assessment"] = field_policy.assessment(
+                            VectorField(actual["field_x_t"], actual["field_z_t"]))
+                    with timing.timed_stage("sample_store", sample_index=sample_index):
+                        store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
+                    emit("formal_sample", {"sample_index": sample_index, "clean": clean})
+                    if not acquisition_accepted:
+                        raise ValueError("Formal sample is incomplete or unclean")
             store.finish_attempt(run_id, condition["condition_id"], attempt,
                                  expected_samples=plan.samples_per_condition)
             emit("condition_accepted", {})
@@ -499,17 +535,25 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             except BaseException as exc:
                 cleanup_errors.append(f"cleanup audit: {exc}")
             try:
-                action = _audit_value(station.cleanup(module, primary is not None or bool(cleanup_errors)))
-                cleanup_actions.append(action)
-                if action.get("clean") is not True:
-                    cleanup_errors.append(f"{module}: cleanup not certified; review recorded actions")
-                emit("cleanup_result", action)
+                with timing.timed_stage("cleanup", module=module) as stage:
+                    action = _audit_value(station.cleanup(module, primary is not None or bool(cleanup_errors)))
+                    cleanup_actions.append(action)
+                    stage["verified"] = action.get("clean") is True
+                    if action.get("clean") is not True:
+                        cleanup_errors.append(f"{module}: cleanup not certified; review recorded actions")
+                    emit("cleanup_result", action)
             except BaseException as exc:
                 cleanup_errors.append(f"{module}: {type(exc).__name__}: {exc}")
         try:
-            station.close()
+            with timing.timed_stage("close"):
+                station.close()
         except BaseException as exc:
             cleanup_errors.append(f"close: {exc}")
+        try:
+            emit("measurement_timing_summary", timing.summary())
+        except BaseException as exc:
+            cleanup_errors.append(f"timing summary audit: {exc}")
+        cleanup_errors.extend("timing audit: " + error for error in timing.audit_errors)
     communication_uncertain = isinstance(primary, OSError)
     cleanup = {"clean": not cleanup_errors and not communication_uncertain,
                "actions": cleanup_actions, "errors": cleanup_errors,

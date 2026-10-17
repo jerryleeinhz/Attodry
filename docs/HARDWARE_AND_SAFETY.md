@@ -1,5 +1,71 @@
 # Hardware and safety guide
 
+## Current dual-SR830 optical profile and offline boundary (2026-10-17)
+
+The current operator-selected profile uses two SR830 units: XX internal reference
+TTL OUT -> XY REF IN and Thorlabs optical chopper EXT REF IN. Both detectors
+measure h1; chopper numerator/denominator are 1/1 for this planned topology.
+The chopper's multiplication/division is distinct from the detector's harmonic.
+Verify the controller identity, exact blade/illuminated track, allowed mechanical
+frequency and actual reference selection before real writes. The nominal PEM
+50 kHz setting is not a chopper-frequency default. No real chopper commissioning
+or control is performed by this software delivery.
+
+XX SINE OUT may excite the sample or be physically disconnected. The declaration
+is separate from TTL clock distribution; a retained instrument setpoint is not
+proof of sample excitation or sample zero. XY SINE OUT remains disconnected.
+PEM is optional in optics; existing explicit PEM-source profiles and their
+different model/wiring/cleanup semantics remain historical supported paths.
+
+NKT source percentages retain current/power mode meaning. Mode changes require
+explicit `nkt_source.allow_control_mode_change=true`, confirmed healthy OFF
+state and the configuration stage after all preflights; preflight itself writes
+nothing. Unknown/active source state blocks switching. Existing ND write
+qualification remains independent. CLD uses amperes and the diode's declared
+nominal wavelength; it cannot tune wavelength or imitate a VARIA bandwidth.
+Connection diagnostics, TEC/interlock/current protections and OFF/zero/TEC
+cleanup verification remain required. Operator acknowledgments apply only to
+their exact recorded pattern and never generalize an unknown connection state.
+The native TL4000 SDK is an exception to read-only discovery: even reset=false
+initialization writes status configuration/clear commands, and some getters
+consume the error queue. It requires explicit write authorization before DLL
+load/init; use a separately authorized VISA identity path for read-only diagnosis.
+
+Fresh power acquisition keeps complete PM settings/status captures immediately
+before and after each READ. Only duplicate outer captures for that same READ
+are removed. Source/modulator/gate/environment guards remain fresh and serial.
+Matching a previous setting does not authorize skipping a status check.
+
+Formal windows freeze optical/electrical actuators. Optional bounded recovery
+applies only to an ordinary measured-power deviation and repeats every module
+with new before/after brackets. Mixed faults, hard limits, settings/identity,
+communication/unknown state, audit failures and unverified cleanup stop recovery.
+The shared deadline covers retuning and the final READ; a late final reply cannot
+promote the window. Rejected/partial windows and original primary/cleanup errors
+remain available independently from accepted data.
+
+Dark acquisition turns the laser off (or uses separately verified shutter control)
+while preserving reference/modulator timing. A stationary chopper may leave the
+beam open; motor stop is never certified optical darkness. Matched darks bind
+condition visit, gate/environment, excitation, reference/harmonic and phase
+context plus finite age. Invalid dark/light channels cannot produce qualified
+differences. Subtract X+iY and then derive delta magnitude/phase; zero complex
+difference has undefined phase and must not become a fabricated angle or NaN.
+Enabling per-gate matched backgrounds adds explicit dark visits even under the
+otherwise continuously illuminated gate policy.
+
+The active photonics profile preserves `sqrt(Bx^2+Bz^2) <= 3 T` for requested,
+commanded and accepted actual fields. Historical single-axis limits/margins
+below describe other profiles/archives and do not expand this boundary. Unknown
+field/voltage/output after communication loss requires the existing manual
+verification; OFF/source-zero alone is not proof of actual gate discharge.
+
+The original 2026-10-17 implementation stage was local, offline and hardware-blocked.
+Subsequent publication, deployment and authorized read-only identity checks are
+recorded separately in PROJECT_HANDOFF.md; they do not authorize an illuminated
+scan or settings writes. No running acquisition may be altered by deployment.
+Real read-only checks and illuminated A/B remain separately authorized stages.
+
 ## Photonics timing optimization boundary (2026-10-15)
 
 The approved offline optimization reuses per-role monotonic settling deadlines.

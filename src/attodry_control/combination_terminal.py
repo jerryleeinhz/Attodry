@@ -41,6 +41,7 @@ def _coordinate(key, values, route=None):
     names.update({"optical_wavelength_nm": ("lambda", "nm"),
                   "optical_bandwidth_nm": ("bandwidth", "nm"),
                   "optical_source_level_pct": ("source", "%"),
+                  "optical_current_a": ("LD current", "A"),
                   "optical_nd_pct": ("ND", "%"),
                   "optical_target_power_w": ("power target", "W"),
                   "optical_pulse_picker_ratio": ("pulse picker", "")})
@@ -90,6 +91,21 @@ def launch_text(summary, width=None):
     lines += ["", *_table(("Axis", "Segment/direction", "Requested scan", "Points"), axes, width)]
     hardware = []
     optical = summary.get("optical")
+    if optical is not None:
+        lines.append("Laser source: " + optical["scan"].get("laser_source", "nkt"))
+        chopper = optical.get("chopper")
+        if chopper:
+            lines.append("Chopper: " + chopper["model"] + " / " + chopper["backend"] + " | " +
+                chopper["reference_source"] + " reference | " + chopper["blade"] + " " +
+                chopper["reference_track"] + f" | N/D={chopper['harmonic_n']}/{chopper['harmonic_d']}" +
+                " | Phase lock: operator declaration; no remote PLL query")
+        background = optical.get("background")
+        if background and background.get("enabled"):
+            lines.append(f"Dark background: {background['samples']} fresh readings/condition; "
+                         f"max age {background['max_age_s']:g} s; complex X+iY subtraction")
+        if optical["scan"].get("max_power_retries", 0):
+            lines.append(f"Power recovery: {optical['scan']['max_power_retries']} whole-window retries; "
+                         f"{optical['scan']['power_retry_timeout_s']:g} s shared budget")
     if optical is not None and optical["scan"].get("feedback"):
         grid = optical.get("point_grid")
         if grid:
@@ -140,6 +156,11 @@ def launch_text(summary, width=None):
         lines += ["", *_table(("Instrument", "Measurement", "Sensitivity", "Reserve", "Protection/timing"),
                               hardware, width)]
     if lockin:
+        if lockin.get("reference_topology") == "internal_xx_xy":
+            lines.append("Reference: XX internal -> TTL OUT -> XY REF IN" +
+                         (" + chopper EXT REF INPUT" if optical and optical.get("chopper") else ""))
+            lines.append("XX SINE OUT: " + ("connected to sample" if lockin.get("sample_excitation_connected", True)
+                                           else "physically disconnected from sample; displayed voltage is instrument setting"))
         lines.append("Lock-in: " + lockin["mode"] + " | Inner order: " +
                      " -> ".join(lockin["internal_order"]) +
                      f" | Settle: {lockin['settle_time_constants']} TC | Overload: {lockin['overload_policy']}")

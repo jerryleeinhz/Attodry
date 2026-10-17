@@ -1,8 +1,85 @@
 # Project handoff
 
-Last updated: 2026-10-15
+Last updated: 2026-10-17
 
 ## Current stage
+
+### Publication preparation and authorized read-only identity check (2026-10-17)
+
+- User requested push/deployment and private takeover TOML preparation. The
+  original local verification below remains a separate completed stage.
+- Before publication, TL4000 initialization now requires explicit write
+  authorization before DLL loading because reset=false still changes/clears
+  status configuration. The 27-case related guarded regression passes.
+- MC2000B read-only identity/settings queries established firmware 4.16 and
+  exposed delayed whitespace after a complete terminal prompt. The transport
+  now attaches only CR/LF/space/TAB to the preceding complete raw reply with
+  timing evidence; other stale data still poisons the session before a write.
+  All 40 chopper/template guarded cases pass. These focused runs are not a new
+  complete-suite count. No source, motor, laser or lock-in settings were written.
+- The user owns blade/beam-path confirmation. Numerator/denominator remain
+  explicit TOML interfaces. Frequency semantics of firmware `input?` after a
+  non-unity ratio are not commissioned; the conservative existing guard remains.
+  Identity checking does not certify phase lock or illumination readiness.
+- LK_setup has no recorded active run or occupied known station lease; its
+  Jupyter plotting kernel belongs to a separate NKT checkout and is idle.
+  Preserve target notebook edits and private configuration backups during the
+  subsequent deployment. Actual publication/target verification is recorded
+  separately after it succeeds.
+
+### Dual-SR830/chopper optics integration — local offline implementation (2026-10-17)
+
+- Implements the user-approved plan on `integration-photonics-nonlinear-hall`.
+  The new active profile uses internal-reference XX SR830 TTL OUT -> XY SR830
+  REF IN and Thorlabs chopper EXT REF IN; XX and XY both measure h1. XX SINE
+  OUT has an explicit connected/disconnected sample declaration. XY SINE OUT
+  remains disconnected. PEM is optional; historical PEM reference profiles
+  retain their separate contracts and archives.
+- Reuses the published optics work from
+  `module/integration-photovoltage/current@f6dfc45e1982b3e5a3e5c138258a4e63c9765d2a`
+  and the existing public settling implementation from four-module `accacb0`.
+  Extends the internal-XX engine with shared remaining waits, actual-change
+  notifications and common formal boundaries. Temperature/magnetic qualification
+  remains scoped to each axis visit; this photonics branch keeps resultant <=3 T.
+- Adds optional MC2000B manual/serial lifecycle, NKT current/power and CLD
+  ampere-based optics, ordered spectral/source grids and power ranges, explicit
+  center-seeking tolerance, relative/noise-floor/drift stability, matched complex
+  dark subtraction and bounded whole-window optical recovery. The original
+  power-target `record_continue`, failed/invalid data and hard guards remain.
+  Ordinary deviations may repeat a complete candidate; mixed hard faults and
+  late final reads cannot be promoted or authorize another illumination.
+- Removes duplicate PM captures only around the same new READ. Fake budgets:
+  unchanged prepare is 13 transactions per call (previously 26); the complete
+  formal boundary is 27 (previously 66), including both 13-query PM captures and
+  one READ. Same-wavelength PEM reuse uses five queries with no setting write
+  (previous preparation used 15 communications). These are command budgets,
+  not measured physical speed or detector-response improvements.
+- Optical points and complete raw transcripts are stored once in `optical_audit`;
+  events/cleanup carry resolvable references and counts. Standalone callers
+  without an event sink retain an inline audit. Delta analysis checks matched
+  background quality; feedback starting currents cease to be mandatory grouping
+  dimensions only when archived target/actuator evidence establishes feedback.
+- Verification is local and hardware-blocked: focused fake driver, state-machine,
+  SQLite, configuration, quality and rendering regressions have been executed.
+  Final full discovery passes all 1,734 tests in 608.157 s with no skips.
+  SHA256 checks confirm all 225 source/test/template/tool files stayed unchanged
+  during this final run. Focused results are not summed as distinct suite cases.
+  The initial full run exposed a stale fixture deletion and a Notebook test's
+  leaked grouping override; both test isolation/import problems were repaired,
+  the 34-case ordered recheck passed, then the full suite was rerun successfully.
+  Receipts remain ignored under `.test-tmp/feedback-speed-20261017/` and the
+  `.test-tmp/chopper-optics-delivery-20261017/` directory, including original
+  failed/partial logs and the tested source manifest.
+- CLD protection and resource closure are staged separately, including partial
+  opens: shared VISA managers remain available until electrical protection has
+  been attempted. Unknown source ownership never creates an OFF assertion.
+  Native TL4000 rejected identities, output values and requested writes retain
+  their original audit evidence without extra device transactions.
+- No SSH, target deployment, instrument connection, status consumption, output
+  write or real acquisition is performed for this delivery. Running scans and
+  station TOMLs are untouched. Hardware commissioning and real A/B remain
+  pending explicit authorization; chopper model/identity, blade/beam track and
+  base frequency still require confirmation before real control.
 
 ### LK_setup timing optimization deployment verified (2026-10-15)
 

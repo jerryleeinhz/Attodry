@@ -74,6 +74,13 @@ class SimulatedNkt:
         self.source["emission_state"] = 3 if enabled else 0
         self.source["status_bits"] = (self.source["status_bits"] & ~1) | int(enabled)
 
+    def set_control(self, control):
+        if control not in ("current", "power") or self.source["emission_state"] != 0:
+            raise NktError("Control changes require a supported mode and emission OFF")
+        if self.source["control"] != control:
+            self.commands.append(("control", control))
+            self.source["control"] = control
+
     def configure(self, point):
         point.validate(self.config.mode, self.config.max_level_pct, self.config.allowed_pp_ratios)
         if self.source["emission_state"] != 0:
@@ -137,10 +144,10 @@ class NktController:
         self.record["state_current"] = not source_only or self.config.mode == "broadband"
         return source, filt
 
-    def _healthy(self, source, filt):
+    def _healthy(self, source, filt, *, check_control=True):
         if source["interlock"] != 2 or source["status_bits"] & SOURCE_FAULT_MASK:
             raise NktError("EXTREME interlock/status prevents operation")
-        if source["control"] != self.config.source_control:
+        if check_control and source["control"] != self.config.source_control:
             raise NktError("Source control mode changed or unsupported")
         if not math.isfinite(source["level_pct"]) or not 0 <= source["level_pct"] <= 100:
             raise NktError("Invalid source level readback")
@@ -208,11 +215,28 @@ class NktController:
             if not authorize_writes or not confirm_manual_route:
                 raise NktError("Writes and the selected manual optical route require explicit authorization")
         source, filt = self.capture("preflight")
-        self._healthy(source, filt)
+        pending_mode_change = source["control"] != self.config.source_control and self.config.allow_control_mode_change
+        if pending_mode_change and source["control"] not in ("current", "power"):
+            raise NktError("Cannot change an unsupported NKT control mode")
+        self._healthy(source, filt, check_control=not pending_mode_change)
         if not self._emission_matches(source, False):
             raise NktError("Preflight requires confirmed emission off; no automatic takeover")
         self.session_owned = True
         return source, filt
+
+    def configure_session(self):
+        """Apply an explicitly opted-in mode only after all module preflights."""
+        self._require_session()
+        if not self.config.allow_control_mode_change:
+            return
+        source, filt = self.capture("before_control_mode")
+        self._healthy(source, filt, check_control=False)
+        if source["control"] not in ("current", "power") or not self._emission_matches(source, False):
+            raise NktError("Cannot change an unsupported/active NKT control mode")
+        if source["control"] != self.config.source_control:
+            self.backend.set_control(self.config.source_control)
+            source, filt = self.capture("control_mode_verified")
+        self._healthy(source, filt)
 
     def turn_off(self, *, deadline=None):
         self._require_session()
@@ -287,6 +311,7 @@ class NktController:
                 raise NktError("Writes and the selected manual optical route require explicit authorization")
         try:
             self.begin_session(authorize_writes=authorize_writes, confirm_manual_route=confirm_manual_route)
+            self.configure_session()
             for i, point in enumerate(self.config.points):
                 row = {"condition_id": f"nkt-{i:06d}", "attempt_index": 1,
                        "requested": asdict(point), "accepted": False,

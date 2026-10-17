@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, replace
 from . import lockin_test as daily
 from .combination_store import utc_now
 from .sr830 import DualSr830Controller
+from .lockin_settling import LockinSettling
 
 
 @dataclass(frozen=True)
@@ -57,13 +58,18 @@ class _AuditedInstrument:
 
 class LockinPointSession:
     def __init__(self, config_path, config, event, *, manager_factory=None,
-                 mode="excitation"):
+                 mode="excitation", monotonic=None, sleep=None):
         self.config = config
         self.mode = mode
         self.args, self.settings, self.points, self.safety = (
             daily.prepare_configured_lockin_sweep(config_path, config, scan=mode)
         )
         self.event = event
+        self.clock = monotonic or daily.time.monotonic
+        self.sleep = sleep or daily.time.sleep
+        self.wait_guard = None
+        self.wait_deadline = None
+        self.settling = LockinSettling(monotonic=self.clock, sleep=self._wait)
         self.manager_factory = manager_factory
         self.context = None
         self.pair = None
@@ -99,6 +105,63 @@ class LockinPointSession:
                                                        skip_unsupported=self.skip_unsupported)
             self.skipped_by_frequency[str(frequency.value)] = skipped
         self.point_harmonics = self.harmonics
+
+    def _check_wait(self):
+        if self.wait_deadline is not None and self.clock() >= self.wait_deadline:
+            raise TimeoutError("Lock-in settling exhausted the operation deadline")
+        if self.wait_guard is not None:
+            self.wait_guard()
+        if self.wait_deadline is not None and self.clock() >= self.wait_deadline:
+            raise TimeoutError("Lock-in settling exhausted the operation deadline")
+
+    def _wait(self, seconds):
+        """Allow the optical owner to supervise every second of detector wait."""
+        until = self.clock() + seconds
+        self._check_wait()
+        if self.wait_guard is None and self.wait_deadline is None:
+            self.sleep(seconds)
+            return
+        budget = seconds
+        while budget > 0:
+            remaining = min(budget, max(0.0, until - self.clock()))
+            if remaining <= 0:
+                break
+            if self.wait_deadline is not None:
+                remaining = min(remaining, self.wait_deadline - self.clock())
+                if remaining <= 0:
+                    raise TimeoutError("Lock-in settling exhausted the operation deadline")
+            chunk = min(1.0, remaining)
+            self.sleep(chunk)
+            budget -= chunk
+            self._check_wait()
+
+    def disturbed(self, reason, *, roles=("lockin_xx", "lockin_xy")):
+        self.settling.changed(reason, roles)
+        self.event("lockin_settling_changed", dict(self.settling.changes[-1]))
+
+    def _audit_transition_failure(self, error):
+        self.point_record["error"] = str(error) or type(error).__name__
+        try:
+            self.event("lockin_point_transition", self.point_record)
+        except BaseException as audit_error:
+            error.add_note(f"Transition audit failed: {audit_error}")
+
+    def _ensure_settled(self, record):
+        start = len(record.get("settling_waits", ()))
+        audit = {"point_index": record.get("point_index"), "sample_index": self.sample_count}
+        try:
+            self._check_wait()
+            self.harmonic_control.ensure_settled(*self.pair, self.args.settle_s, record)
+        except BaseException as error:
+            audit.update(error=str(error) or type(error).__name__,
+                         settling_waits=record.get("settling_waits", [])[start:])
+            try:
+                self.event("lockin_settling_wait", audit)
+            except BaseException as audit_error:
+                error.add_note(f"Settling audit failed: {audit_error}")
+            raise
+        audit["settling_waits"] = record.get("settling_waits", [])[start:]
+        self.event("lockin_settling_wait", audit)
 
     def open(self):
         factory = self.manager_factory or daily._load_resource_manager_factory()
@@ -149,6 +212,9 @@ class LockinPointSession:
             self.config.lockin_xx, self.config.lockin_xy, self.sensitivity_setup, self.reserve_setup, self.harmonics_by_role,
             overload_policy=self.config.lockin_sweep.overload_policy)
         if self.harmonic_control is not None:
+            self.harmonic_control.settling = self.settling
+            self.settling.changed("acquisition_initialization")
+            self.pair = xx, xy = self.harmonic_control.track_pair(xx, xy)
             self.harmonic_control.enter(
                 xx, xy, harmonic=self.harmonic_control.initial_harmonics(self.config.lockin_xx.frequency_hz), settle_s=self.args.settle_s,
                 record=self.sensitivity_setup.setdefault("harmonic_initialization", {}))
@@ -181,8 +247,9 @@ class LockinPointSession:
                 rel_tolerance=1e-5,
                 absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
             if target_hz != self.target_frequency_hz:
-                xx.set_minimum_sine_output()
-                daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
+                if not daily.math.isclose(xx.read_sine_output(), daily.MINIMUM_SINE_OUTPUT_V,
+                                         rel_tol=0, abs_tol=1e-12):
+                    xx.set_minimum_sine_output()
                 minimum = xx.read_sine_output()
                 self.point_record["source_before_frequency_v_rms"] = minimum
                 if abs(minimum - daily.MINIMUM_SINE_OUTPUT_V) > 1e-9:
@@ -191,61 +258,114 @@ class LockinPointSession:
                                                         self.args.settle_s, self.point_record)
                 self.point_record["frequency_write_attempted"] = True
                 xx.set_internal_reference_frequency(target_hz)
-                daily.time.sleep(self.args.settle_s)
-                transition, problems = daily._consume_frequency_transition(
-                    xx, xy, harmonic=self.harmonic_control.current_harmonics)
-                self.point_record["frequency_transition_status"] = transition
-                if problems:
-                    raise daily.Sr830Error("Unsafe frequency transition: " + "; ".join(problems))
                 self.target_frequency_hz = target_hz
-                daily.time.sleep(self.args.settle_s)
-            # Verify frequency before restoring the requested source amplitude.
-            self._read_coordinates()
-            xx.set_sine_output(source_v)
-            daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
-        except BaseException:
-            self.event("lockin_point_transition", self.point_record)
+            # Internal FREQ/source registers read back immediately; qualify XY
+            # after the final-setting deadline rather than before it can lock.
+            if not daily.math.isclose(xx.read_sine_output(), source_v, rel_tol=0, abs_tol=1e-12):
+                xx.set_sine_output(source_v)
+        except BaseException as error:
+            self._audit_transition_failure(error)
             raise
-        daily._apply_sweep_segment_ranges(
-            xx, xy, sensitivity_setup=self.sensitivity_setup,
-            point_spec=point.range_spec, lockin_xx_config=self.config.lockin_xx,
-            lockin_xy_config=self.config.lockin_xy, settle_s=self.args.settle_s,
-            record=self.point_record, harmonic=self.harmonic_control.current_harmonics,
-            overload_policy=self.harmonic_control.overload,
-            on_input_overload=lambda status: self.harmonic_control.diagnose_overload(
-                xx, xy, status, self.args.settle_s, self.point_record),
-        )
-        self.sample_count = 0
-        return self._read_coordinates()
+        try:
+            daily._apply_sweep_segment_ranges(
+                xx, xy, sensitivity_setup=self.sensitivity_setup,
+                point_spec=point.range_spec, lockin_xx_config=self.config.lockin_xx,
+                lockin_xy_config=self.config.lockin_xy, settle_s=self.args.settle_s,
+                record=self.point_record, harmonic=self.harmonic_control.current_harmonics,
+                overload_policy=self.harmonic_control.overload,
+                on_input_overload=lambda status: self.harmonic_control.diagnose_overload(
+                    xx, xy, status, self.args.settle_s, self.point_record),
+                settling=self.harmonic_control,
+            )
+            self.harmonic_control.enter(xx, xy,
+                harmonic=self.harmonic_control.initial_harmonics(target_hz),
+                settle_s=self.args.settle_s, record=self.point_record)
+            self.sample_count = 0
+            return self._read_coordinates(verify_companion=False)
+        except BaseException as error:
+            self._audit_transition_failure(error)
+            raise
 
-    def _read_coordinates(self):
+    def _read_coordinates(self, *, verify_companion=True):
         xx, xy = self.pair
         source = xx.read_sine_output()
         safety = daily._validate_excitation_safety(self.args, (source,))
         frequency, companion = xx.read_reference_frequency(), xy.read_reference_frequency()
-        daily._verify_frequency_readbacks(
-            self.target_frequency_hz, frequency, companion,
-            rel_tolerance=1e-5, absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
-        self.point_record.update(source_readback_v_rms=source,
+        if verify_companion:
+            daily._verify_frequency_readbacks(
+                self.target_frequency_hz, frequency, companion,
+                rel_tolerance=1e-5, absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+        else:
+            if (not daily.math.isfinite(frequency) or not 0 < frequency <= daily.MAXIMUM_REFERENCE_FREQUENCY_HZ
+                    or not daily.math.isfinite(companion) or not 0 <= companion <= daily.MAXIMUM_REFERENCE_FREQUENCY_HZ):
+                raise daily.Sr830Error("Invalid reference frequency during transition")
+            daily._verify_frequency_readbacks(self.target_frequency_hz, frequency, frequency,
+                rel_tolerance=1e-5, absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+        record = self.point_record if self.point_record is not None else self.frequency_setup
+        record.update(source_readback_v_rms=source,
                                  actual_frequency_hz=frequency,
                                  frequency_readback_hz={"lockin_xx": frequency, "lockin_xy": companion},
+                                 companion_reference_qualified=verify_companion,
+                                 formal_check_deferred=not verify_companion,
                                  source_readback_safety=safety)
         self.point_harmonics, skipped = daily._harmonics_for_frequency(
-            max(self.target_frequency_hz, frequency, companion), self.harmonics,
+            max(self.target_frequency_hz, frequency, companion if verify_companion else frequency), self.harmonics,
             skip_unsupported=self.skip_unsupported)
-        self.point_record["skipped_harmonics"] = skipped
+        record["skipped_harmonics"] = skipped
         return {"lockin_excitation_v_rms": source, "lockin_frequency_hz": frequency}
 
+    def read_coordinates(self, *, verify_companion=True):
+        """Fresh coordinates; preparation may explicitly defer the XY pair check."""
+        return self._read_coordinates(verify_companion=verify_companion)
+
+    def verify_ready(self):
+        """Check dark preparation without claiming that the response is settled.
+
+        No setter, LIAS read or settling-clock change occurs here. The optical
+        owner still verifies its reference/chopper before illumination. Only XX's
+        source clock is qualified here; illuminated qualification/formal entry
+        fills the remaining settle and strictly checks the XY frequency pair.
+        """
+        if self.harmonic_control is None:
+            raise ValueError("Lock-in readiness requires completed configuration")
+        audit = {"ready": False, "captured_at_utc": utc_now(),
+                 "settling_performed": False, "status_latches_consumed": False,
+                 "companion_reference_qualified": False, "formal_check_deferred": True}
+        try:
+            if self.wait_deadline is not None and self.clock() >= self.wait_deadline:
+                raise TimeoutError("Lock-in readiness exhausted the operation deadline")
+            audit["settings"] = self.harmonic_control.verify(*self.pair,
+                self.harmonic_control.current_harmonics, audit)
+            audit.pop("harmonic_setting_checks", None)  # Same complete readback is stored once.
+            audit["actual"] = self._read_coordinates(verify_companion=False)
+            point = self.point_record if self.point_record is not None else self.frequency_setup
+            audit["reference_hz"] = dict(point["frequency_readback_hz"])
+            if self.wait_deadline is not None and self.clock() >= self.wait_deadline:
+                raise TimeoutError("Lock-in readiness exhausted the operation deadline")
+            audit["ready"] = True
+        except BaseException as error:
+            audit["error"] = str(error) or type(error).__name__
+            try:
+                self.event("lockin_readiness", audit)
+            except BaseException as audit_error:
+                error.add_note(f"Readiness audit failed: {audit_error}")
+            raise
+        self.event("lockin_readiness", audit)
+        return audit
+
     def qualify(self):
-        # Also when SMU is the inner axis: response/range may have changed.
-        daily.time.sleep(daily.EXCITATION_SOURCE_STEP_SETTLE_INTERVALS * self.args.settle_s)
+        self.harmonic_control.enter(*self.pair,
+            harmonic=self.harmonic_control.initial_harmonics(self.target_frequency_hz),
+            settle_s=self.args.settle_s, record=self.point_record)
+        self._ensure_settled(self.point_record)
         actual = self._read_coordinates()
         self.event("lockin_point_qualification", self.point_record)
         self.sample_count = 0
 
     def sample_point(self, *, measurement_context=None):
         if self.sample_count:
-            daily.time.sleep(self.args.sample_interval_s)
+            self._wait(self.args.sample_interval_s)
+        self._ensure_settled(self.point_record)
         actual = self._read_coordinates()
         record = {**self.point_record, "samples": [], "harmonic_transition_status": []}
         try:
@@ -305,7 +425,39 @@ class LockinPointSession:
                 and self.frequency_setup and self.frequency_setup.get("verified")
                 and self.sensitivity_setup and self.reserve_setup):
             daily._verify_sweep_configured_cleanup(cleanup, self.config)
+        final = cleanup.get("final", {}).get("lockin_xx", {})
+        source = final.get("sine_output_v")
+        cleanup["source_protection_verified"] = (isinstance(source, (float, int))
+            and daily.math.isfinite(source)
+            and daily.math.isclose(source, daily.MINIMUM_SINE_OUTPUT_V, rel_tol=0, abs_tol=1e-9))
         return cleanup
+
+    def protect_source(self):
+        """Protect XX with actual instrument readback, independent of wiring."""
+        xx, _ = self.pair
+        record = {"attempted": True, "write_attempted": False,
+                  "source_protection_verified": False, "verified": False}
+        try:
+            before = xx.read_sine_output()
+            record["before_v_rms"] = before
+            if not daily.math.isclose(before, daily.MINIMUM_SINE_OUTPUT_V, rel_tol=0, abs_tol=1e-12):
+                record["write_attempted"] = True
+                self.writes_started = True
+                xx.set_minimum_sine_output()
+            actual = xx.read_sine_output()
+            record["source_readback_v_rms"] = actual
+            if not daily.math.isclose(actual, daily.MINIMUM_SINE_OUTPUT_V, rel_tol=0, abs_tol=1e-9):
+                raise daily.Sr830Error("XX protection minimum output was not confirmed")
+            record.update(verified=True, source_protection_verified=True)
+            self.event("lockin_source_protection", record)
+            return record
+        except BaseException as error:
+            record["error"] = str(error) or type(error).__name__
+            try:
+                self.event("lockin_source_protection", record)
+            except BaseException as audit_error:
+                error.add_note(f"Source protection audit failed: {audit_error}")
+            raise
 
     def close(self):
         if self.context is not None:

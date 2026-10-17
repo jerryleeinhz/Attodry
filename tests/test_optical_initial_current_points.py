@@ -174,9 +174,11 @@ class OpticalInitialCurrentPointTests(unittest.TestCase):
     def test_previous_prepare_failure_does_not_leak_inherited_start_into_retry(self):
         session, backend, pem, _, _, _ = self.make()
         self.qualified(session, 0)
-        with patch.object(pem, "prepare", side_effect=OSError("synthetic PEM prepare fault")):
-            with self.assertRaisesRegex(OSError, "PEM prepare fault"):
+        with patch.object(pem, "prepare", wraps=pem.prepare) as prepare, patch.object(
+                pem, "verify_ready", side_effect=OSError("synthetic PEM reuse verification fault")):
+            with self.assertRaisesRegex(OSError, "PEM reuse verification fault"):
                 session.set_point(1)
+            prepare.assert_not_called()
         self.assertFalse(session.qualified)
         self.assertEqual(backend.source["emission_state"], 0)
         session.set_point(1)
@@ -233,7 +235,7 @@ class OpticalInitialCurrentPointTests(unittest.TestCase):
         self.assertEqual(row["status"]["feedback"]["initial_current"]["source"], "previous")
 
     def test_previous_nan_meter_fault_retains_raw_evidence_and_confirms_laser_off(self):
-        session, backend, pem, meter, _, _ = self.make()
+        session, backend, pem, meter, _, events = self.make()
         self.qualified(session, 0)
         session.set_point(1)
         session.qualify()
@@ -251,9 +253,17 @@ class OpticalInitialCurrentPointTests(unittest.TestCase):
         self.assertEqual(backend.source["emission_state"], 0)
         self.assertTrue(meter.closed)
         self.assertTrue(pem.closed)
+        audits = [payload for kind, payload in events if kind == "optical_audit"]
+        self.assertEqual(len(audits), 1)
+        transcript = audits[0]["device_transcripts"]["pm100d"]
+        self.assertEqual(result["device_transcripts"]["pm100d"]["audit_ref"],
+                         "optical_audit.device_transcripts.pm100d")
+        self.assertEqual(result["device_transcripts"]["pm100d"]["count"], len(transcript))
+        self.assertEqual(transcript, meter.transcript)
         self.assertTrue(any(value["command"] == "READ?" and value.get("reply") == "nan"
-                            for value in result["device_transcripts"]["pm100d"]))
-        self.assertTrue(result["point_evidence"])
+                            and value.get("error") for value in transcript))
+        self.assertEqual(result["point_evidence"]["count"], len(audits[0]["points"]))
+        self.assertTrue(audits[0]["points"])
         self.assertFalse(result["state_current"])
 
     def test_default_point_starts_preserve_scalar_per_row_behavior(self):

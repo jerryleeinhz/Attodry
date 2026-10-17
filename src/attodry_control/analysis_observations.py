@@ -25,6 +25,21 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
     Output overload is a conservative analysis exclusion even though acquisition
     can accept it. Missing status is explicitly unknown, not an inferred pass.
     """
+    delta = re.fullmatch(r"measured\.(lockin_(xx|xy))_h(\d+)_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
+    if delta:
+        role, short_role, order, metric = delta.groups()
+        quality = channel_quality(row, f"measured.{role}_h{order}_{metric}")
+        if quality[0] != "clear":
+            return quality
+        background = (row.get("status.lockin") or {}).get("background")
+        if not isinstance(background, Mapping):
+            return "unknown", ("missing_matched_dark_background",)
+        channel = background.get("channels", {}).get(f"{short_role}:h{order}", {})
+        if background.get("valid_for_analysis") is not True or channel.get("valid_for_analysis") is not True:
+            return "flagged", ("invalid_dark_background",)
+        if metric == "phase_deg" and channel.get("phase_defined") is not True:
+            return "flagged", ("undefined_differential_phase",)
+        return "clear", ()
     match = re.fullmatch(r"measured\.(lockin_(xx|xy))_h(\d+)_(x_v|y_v|amplitude_v|phase_deg)", column)
     if not match:
         return "unclassified", ()

@@ -14,7 +14,8 @@ from attodry_control.combination_store import CombinationStore
 from attodry_control.cryostat_points import CryostatPointSession
 from attodry_control.attodry import AttoDryError, AttoDryTimeout
 from attodry_control.attodry import AttoDryDriver
-from tests.test_attodry import FakeAttoDryDll, StepClock
+from tests.test_attodry import FakeAttoDryDll
+from tests.optical_helpers import Clock
 from tests import test_combination_hardware as fixtures
 
 
@@ -36,12 +37,15 @@ class CryostatCombinationTests(unittest.TestCase):
 
     def execute(self, run_id="test", **kwargs):
         config = load_hardware_combination(self.path)
+        # Reading a monotonic clock is not an elapsed measurement interval.
+        # Phase/audit instrumentation may read it freely; only fake waits move it.
+        clock = Clock()
         with CombinationStore(self.database) as store:
             return run_hardware_combination(config, store, run_id,
                 authorize_hardware=True, authorize_cryostat=True,
-                confirm_xy_sine_disconnected=True, dll=self.dll, monotonic=StepClock(),
+                confirm_xy_sine_disconnected=True, dll=self.dll, monotonic=clock,
                 smu_adapter_factory=self.factory, manager_factory=lambda: self.manager,
-                sleep=lambda _: None, **kwargs)
+                sleep=clock.sleep, **kwargs)
 
     def test_all_64_nonempty_orders_share_one_connection(self):
         modules = ("temperature", "magnetic", "smu", "lockin")
@@ -359,9 +363,10 @@ angle_segments = [
         self.write_config(("temperature", "magnetic"), source=source)
         config = load_hardware_combination(self.path)
         events = []
+        clock = Clock()
         session = CryostatPointSession(config.cryostat, config.temperature, config.magnetic,
             lambda kind, payload: events.append((kind, payload)), dll=self.dll,
-            monotonic=StepClock(), sleep=lambda _: None)
+            monotonic=clock, sleep=clock.sleep)
         session.open()
         self.addCleanup(session.close)
         session.touched.update(("temperature", "magnetic"))

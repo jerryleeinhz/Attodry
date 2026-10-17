@@ -20,6 +20,7 @@ OTHER_TABLES = {
     "pem", "pem_run", "pm100d", "pm100d_run", "optical_scan", "power_feedback",
     "combination_scan", "photonics_lockin", "pem_internal_diagnostic",
     "temperature_excitation_scan", "magnetic_field_run",
+    "chopper", "cld1010", "optical_background",
 }
 
 
@@ -122,6 +123,7 @@ class NktConfig:
     varia_serial: str = ""
     varia_monitor_present: bool = False
     varia_nd_control_verified: bool = False
+    allow_control_mode_change: bool = False
 
     def validate(self):
         if self.backend not in ("simulation", "nkt_sdk") or self.mode not in MODES:
@@ -138,7 +140,7 @@ class NktConfig:
         text(self.source_serial, "source_serial", empty=True)
         text(self.varia_serial, "varia_serial", empty=True)
         if any(type(value) is not bool for value in
-               (self.emit, self.varia_monitor_present, self.varia_nd_control_verified)):
+               (self.emit, self.varia_monitor_present, self.varia_nd_control_verified, self.allow_control_mode_change)):
             raise NktError("emit, monitor_present and nd_control_verified must be booleans")
         if not self.points or len(self.points) > 10000:
             raise NktError("Provide 1 to 10000 explicit scan points")
@@ -183,18 +185,48 @@ def load_nkt_config(path: str | Path) -> NktConfig:
     keys(doc, "top level", {"nkt_source", "nkt_run"}, OTHER_TABLES | NKT_TABLES)
     run, source = doc["nkt_run"], doc["nkt_source"]
     keys(run, "nkt_run", {"backend", "mode", "emit", "manual_route", "timeout_s",
-         "poll_interval_s", "dwell_s", "output_directory", "run_name", "note", "points"})
+         "poll_interval_s", "dwell_s", "output_directory", "run_name", "note", "points"}, {"grid_order"})
     keys(source, "nkt_source", {"control", "max_level_pct", "allowed_pp_ratios"},
-         {"dll_path", "port", "address", "expected_serial"})
+         {"dll_path", "port", "address", "expected_serial", "allow_control_mode_change"})
     if not isinstance(source["allowed_pp_ratios"], list):
         raise NktError("allowed_pp_ratios must be an array")
     if not isinstance(run["points"], list):
         raise NktError("points must be an array of tables")
     points = []
+    order = run.get("grid_order", ["wavelength", "bandwidth", "source"])
+    if type(order) is not list or len(order) != 3 or set(order) != {"wavelength", "bandwidth", "source"}:
+        raise NktError("nkt_run.grid_order must order wavelength, bandwidth and source exactly once")
+    from itertools import product
+    from .scan_grid import expand_ranges
     for i, item in enumerate(run["points"]):
-        keys(item, f"points[{i}]", {"source_level_pct"},
-             {"wavelength_nm", "bandwidth_nm", "nd_pct", "pulse_picker_ratio"})
-        points.append(NktPoint(**item))
+        keys(item, f"points[{i}]", set(),
+             {"source_level_pct", "wavelength_nm", "bandwidth_nm", "nd_pct", "pulse_picker_ratio",
+              "wavelength_points_nm", "wavelength_ranges", "bandwidth_points_nm", "bandwidth_ranges",
+              "source_levels_pct", "source_level_ranges"})
+        values = dict(item)
+        grids = {}
+        for axis, scalar, array, ranges in (
+                ("wavelength", "wavelength_nm", "wavelength_points_nm", "wavelength_ranges"),
+                ("bandwidth", "bandwidth_nm", "bandwidth_points_nm", "bandwidth_ranges"),
+                ("source", "source_level_pct", "source_levels_pct", "source_level_ranges")):
+            choices = [key for key in (scalar, array, ranges) if key in values]
+            if len(choices) > 1 or (axis == "source" and not choices):
+                raise NktError(f"points[{i}] requires one source and at most one source for each spectral coordinate")
+            selected = choices[0] if choices else None
+            if selected == ranges:
+                sequence = tuple(row.value for row in expand_ranges(values.pop(ranges), f"points[{i}].{ranges}"))
+            elif selected == array:
+                sequence = values.pop(array)
+                if type(sequence) is not list or not 1 <= len(sequence) <= 10000:
+                    raise NktError(f"points[{i}].{array} must contain 1..10000 values")
+            else:
+                sequence = (values.pop(scalar, None),)
+            grids[axis] = (scalar, sequence)
+        if len(points) + math.prod(len(grids[axis][1]) for axis in order) > 10000:
+            raise NktError("Expanded NKT grid exceeds 10000 points")
+        for coordinates in product(*(grids[axis][1] for axis in order)):
+            points.append(NktPoint(**values, **{
+                grids[axis][0]: value for axis, value in zip(order, coordinates)}))
     varia = {}
     if run["mode"] == "varia_bandpass":
         varia = doc.get("nkt_varia", {})
@@ -216,6 +248,7 @@ def load_nkt_config(path: str | Path) -> NktConfig:
         varia_address=varia.get("address", 2), varia_serial=varia.get("expected_serial", ""),
         varia_monitor_present=varia.get("monitor_present", False),
         varia_nd_control_verified=varia.get("nd_control_verified", False),
+        allow_control_mode_change=source.get("allow_control_mode_change", False),
     )
     if config.backend == "nkt_sdk":
         if "address" not in source or (config.mode == "varia_bandpass" and "address" not in varia):

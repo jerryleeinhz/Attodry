@@ -1,0 +1,230 @@
+# 双 SR830 光电 Combination 模板；说明见 docs/PHOTONICS_CHOPPER_GUIDE.md。
+# 复制为 ignored config/photonics.local.toml；必须替换所有启用参数的 CHANGE_ME。
+# 数字示例不是样品/激光安全授权；模板故意不能直接开仪器。
+# XX TTL OUT -> XY REF IN + 斩波器 EXT REF INPUT；XX/XY 都测 h1。
+# XX SINE OUT 物理接样品时改为 true；不接为纯光学响应，仍保留仪器4mV设置。
+# 本模板不用 PEM；历史 PEM 配置仍使用 photonics.example.toml。
+# 请保留同目录 lockin_safety.toml（现有双SR830项目安全策略），不要用PEM profile safety替换。
+
+[project]
+mode = "hardware"
+database_path = "../run_data/photonics/combination.sqlite"
+
+[combination_scan]
+backend = "hardware"
+reference_topology = "internal_xx_xy"
+lockin_mode = "excitation" # excitation | frequency | frequency_excitation
+order = ["optical", "lockin"] # 外层->内层；可补齐SMU/环境配置再加入对应轴
+illumination_policy = "off_before_axis_change" # off_before_axis_change | continuous_gate_scan
+# continuous_gate_scan仅 ["optical","smu","lockin"] + 单一激励 + voltage gate；
+# 每active gate须有ramp或明确zero_readback_tolerance_v，不能只改order。
+samples_per_condition = 3 # 1..1000；Combination拥有正式样本数
+repeats = 1 # 1..1000
+run_id = "auto" # auto | 未使用过的非空唯一ID
+run_name = "CHANGE_ME_RUN_NAME"
+note = "CHANGE_ME_SAMPLE_ROUTE_AND_SCOPE"
+
+[visa]
+backend = "default" # default | @py | 已安装VISA库的明确路径
+timeout_ms = 5000 # 正整数，通信超时，不是采样间隔
+
+[lockin_xx]
+model = "SR830"
+address = "CHANGE_ME_XX_VISA_RESOURCE"
+reference_source = "internal" # 本拓扑XX只能internal
+sine_output_connected = false # false=样品物理断开；true=接样品提供电激励
+source_voltage_v = 0.004 # 仪器RMS设置；不能推断实际样品电压
+frequency_hz = "CHANGE_ME_REFERENCE_FREQUENCY_HZ" # Hz；按实际刀片/轨道选，不沿用PEM约50kHz
+input_mode = "a_minus_b" # 当前软件只支持差分a_minus_b
+shield_grounding = "float" # 当前软件只支持float
+input_coupling = "ac" # 当前软件只支持ac；硬件dc未在此路径开放
+time_constant_s = 1.0 # SR830离散1/3系列：10us..30000s；示例tau=1s
+filter_slope_db_oct = 24 # 当前软件只支持24dB/oct；不照搬硬件其他档位
+sensitivity_mode = "fixed" # fixed | bounded_auto；auto需补完整本路allowlisted参数
+sensitivity_full_scale_v = "CHANGE_ME_XX_FULL_SCALE_V" # 见MD完整档位且须在lockin_safety allowlist
+reserve_mode = "normal" # high_reserve | normal | low_noise
+# internal_xx_xy保留并读回仪器当前相位；此表不支持phase_shift_deg。
+
+[lockin_xy]
+model = "SR830"
+address = "CHANGE_ME_XY_VISA_RESOURCE"
+reference_source = "external_ttl" # 本拓扑XY只能external_ttl
+external_reference_edge = "rising" # 当前软件只支持rising，匹配XX TTL
+sine_output_connected = false # 必须false；XY SINE OUT物理断开样品
+source_voltage_v = 0.004 # 物理断开的输出保留最低设置
+frequency_hz = "CHANGE_ME_REFERENCE_FREQUENCY_HZ" # 审批坐标；外参考实际值由XX TTL给出
+input_mode = "a_minus_b"
+shield_grounding = "float"
+input_coupling = "ac"
+time_constant_s = 1.0
+filter_slope_db_oct = 24
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = "CHANGE_ME_XY_FULL_SCALE_V"
+reserve_mode = "normal"
+
+[lockin_sweep]
+# 每种网格只选points或ranges；当前只使用单一4mV excitation点。
+frequency_points_hz = ["CHANGE_ME_REFERENCE_FREQUENCY_HZ"]
+# frequency_ranges = [{min=100.0,max=1000.0,scale="log",points=5}]
+frequency_source_voltage_v_rms = 0.004
+excitation_points_v_rms = [0.004]
+# excitation_ranges = [{min=0.004,max=0.04,scale="linear",points=10}]
+# scale=linear时step/points二选一；log只能points且两端>0。
+frequency_xx_harmonics = [1] # 每路可[]、[1]、[2]、[1,2,3]等升序唯一1..3；至少选一路
+frequency_xy_harmonics = [1]
+excitation_xx_harmonics = [1]
+excitation_xy_harmonics = [1]
+combined_xx_harmonics = [1]
+combined_xy_harmonics = [1]
+skip_unsupported_harmonics = false # true可明确记录跳过超出102kHz的检测阶数
+overload_policy = "record_continue" # abort | continue_unselected | record_continue
+# 只放行已知过载的原始记录；设置、通信、未知状态、参考故障保持原有保护。
+run_name = "CHANGE_ME_RUN_NAME"
+note = "XX/XY h1; instrument SINE setting is not inferred sample excitation"
+settle_time_constants = 15.0 # >=5；每路tau×此倍数，按最后相关变化计算剩余等待
+samples_per_point = 3 # 兼容独立扫描；Combination正式采样使用samples_per_condition
+sample_interval_time_constants = 1.0 # 同条件后续采样间隔=tau较大值×此倍数
+external_series_resistance_ohm = "CHANGE_ME_CONFIRMED_SERIES_RESISTANCE_OHM"
+approximate_device_resistance_ohm = "CHANGE_ME_ESTIMATED_SAMPLE_RESISTANCE_OHM"
+max_device_current_a_rms = "CHANGE_ME_APPROVED_SAMPLE_CURRENT_A_RMS"
+max_device_voltage_v_rms = "CHANGE_ME_APPROVED_SAMPLE_VOLTAGE_V_RMS"
+external_50_ohm_termination = false # 当前双SR830接法只支持false
+output_directory = "../run_data/commissioning"
+
+[pm100d]
+backend = "visa" # visa | simulation；simulation须与激光源一致
+resource = "CHANGE_ME_PM100D_VISA_RESOURCE"
+expected_serial = "CHANGE_ME_PM100D_CONSOLE_SERIAL"
+expected_sensor_serial = "CHANGE_ME_PM100D_SENSOR_SERIAL"
+io_timeout_s = 2.0
+wavelength_tolerance_nm = 0.1 # PM波长校正设置的读回容差
+average_count = 1 # 1..1000000；平均数增加会增长每次READ耗时
+auto_range = true # false时必须另加range_w
+# range_w = 0.01 # W，仅固定量程时按探头/实际功率确认
+max_power_w = "CHANGE_ME_APPROVED_PM_MAX_POWER_W"
+measurement_plane = "CHANGE_ME_POWER_METER_POSITION_AND_CHOPPER_RELATION"
+
+[optical_scan]
+mode = "power_stabilized" # direct | power_stabilized；direct须删除power_feedback
+laser_source = "nkt" # nkt | cld，必须与实际源配置一致
+use_pem = false
+use_power_meter = true
+sample_interval_s = 0.2 # s：光学dwell期间守护采样间隔；不同于锁相采样间隔
+target_deviation_policy = "record_continue" # abort(default) | record_continue
+# 初始调功仍须合格；正式偏离目标时记录实际W，不改写目标，也不主动调电流。
+max_power_retries = 0 # 0..3；0不自动恢复，>0仅普通功率偏差重调并重测完整窗口
+power_retry_timeout_s = 300.0 # s；一次失败操作的恢复共用总预算，不允许每次重试重置
+
+[optical_background]
+enabled = false # true=每条件采匹配暗背景；当前仅internal_xx_xy支持
+samples = 3 # 1..10000个独立完整锁相读数
+max_age_s = 600.0 # 0.001..86400；超龄/上下文变化不能继续套用旧背景
+# 连续gate开背景会在每个gate条件额外关光/采暗/开光再调功；不再组内始终亮。
+
+[nkt_source]
+control = "current" # current | power；和feedback actuator/source_*参数成套选择
+allow_control_mode_change = false # 默认只核对；true仅全部预检通过后的配置阶段、健康OFF时切current/power并读回
+max_level_pct = "CHANGE_ME_APPROVED_NKT_SOURCE_MAX_PCT" # 0..100%，电流/功率模式含义不同
+allowed_pp_ratios = [] # []=保留pulse picker；非空须填已核验整数列表
+dll_path = "CHANGE_ME_NKT_SDK_DLL_PATH"
+port = "CHANGE_ME_NKT_COM_PORT"
+address = "CHANGE_ME_NKT_SOURCE_MODULE_ADDRESS" # 整数1..255，来自已核验设备树
+expected_serial = "CHANGE_ME_NKT_SOURCE_SERIAL"
+
+[nkt_varia]
+address = "CHANGE_ME_VARIA_MODULE_ADDRESS" # 整数1..255，不是COM号
+expected_serial = "CHANGE_ME_VARIA_SERIAL"
+monitor_present = false # true仅在确认设备具备百分比monitor后
+nd_control_verified = false # source_current/source_power保持ND；ND闭环需先独立实机验收
+
+[nkt_run]
+backend = "nkt_sdk" # nkt_sdk | simulation
+mode = "varia_bandpass" # 此功率反馈采用VARIA；broadband没有单一波长不能照搬PM校正
+emit = true
+manual_route = "CHANGE_ME_CONFIRMED_LASER_CHOPPER_SAMPLE_POWER_METER_ROUTE"
+timeout_s = 30.0 # 单次NKT配置/状态等待预算；总调功另由feedback.timeout_s限定
+poll_interval_s = 0.2
+dwell_s = 1.0 # 功率合格后完整照光保持时间；随后锁相采样期间持续照光
+output_directory = "../run_data/photonics"
+run_name = "CHANGE_ME_RUN_NAME"
+note = "NKT fixed control mode and physical route require commissioning"
+grid_order = ["wavelength", "bandwidth", "source"] # 这三个名字各一次，最左最外层
+# 一条输入行可扩展波长×带宽×起始源设置；之后再乘下面target_powers_w。
+# 同一坐标scalar / points / ranges只能选一种，重复数值/顺序保留。
+points = [
+  {source_level_pct="CHANGE_ME_APPROVED_START_PCT", wavelength_points_nm=["CHANGE_ME_WAVELENGTH_NM"], bandwidth_points_nm=["CHANGE_ME_BANDWIDTH_NM"]},
+]
+# 替换整条的纯语法例（不是实际光路授权）：
+# {source_level_pct=25.0,wavelength_points_nm=[532.0,630.0],bandwidth_points_nm=[10.0,20.0]}
+# {source_levels_pct=[20.0,25.0],wavelength_nm=630.0,bandwidth_nm=10.0}
+# {source_level_ranges=[{min=20.0,max=30.0,scale="linear",points=3}],
+#  wavelength_ranges=[{min=532.0,max=632.0,scale="linear",step=50.0}],
+#  bandwidth_ranges=[{min=10.0,max=20.0,scale="linear",points=2}]}
+# 上面多行注释示意TOML inline table；真实inline table写在同一行。
+# VARIA中心/带宽/边缘须满足400..840nm、10..100nm及0.1nm量化。
+
+[power_feedback]
+actuator = "source_current" # source_current | source_power | varia_nd；CLD另用cld_current
+# source_power时同时改nkt_source.control="power"，删除source_current_*，
+# 换成source_power_min_pct / source_power_max_pct / source_power_step_pct。
+target_mapping = "cartesian" # paired(default)=逐行配对；cartesian=每输入光学行×全部目标
+# 三选一：target_power_w单点 / target_powers_w数组 / target_power_ranges区间。
+target_powers_w = ["CHANGE_ME_TARGET_POWER_W"]
+# 例如 target_powers_w=[10e-6,100e-6,500e-6,1e-3,2e-3]
+# 或 target_power_w=10e-6
+# 或 target_power_ranges=[{min=50e-6,max=3e-3,scale="linear",points=6}]
+target_tolerance_fraction = 0.10 # 与target_tolerance_w二选一；正式验收/偏差判据
+# target_tolerance_w = 1e-6 # W；替换上面fraction，不同时设置
+# tuning_tolerance_fraction = 0.02 # 可选0..1，<=验收容差；省略保持旧版调到验收范围
+max_power_w = "CHANGE_ME_APPROVED_FEEDBACK_MAX_POWER_W" # <=PM max；硬边界不因retry放宽
+minimum_signal_power_w = "CHANGE_ME_CONFIRMED_MINIMUM_VALID_ILLUMINATION_W" # >0；低于即停止，不盲目加电流寻光
+# reduce_above_power_w = 0.004 # 可选小于max_power_w；必须先确认实机策略，不是正式样本重试放行
+timeout_s = 1200.0 # 每光学点初始准备/调功总预算，秒
+hold_s = 1.0 # 初始功率窗合格后持续满足的时间
+source_current_min_pct = "CHANGE_ME_APPROVED_NKT_SOURCE_MIN_PCT"
+source_current_max_pct = "CHANGE_ME_APPROVED_NKT_SOURCE_MAX_PCT"
+source_current_step_pct = "CHANGE_ME_APPROVED_NKT_STEP_PCT" # >=0.1%，0.1%可表示；接近目标可自动缩小
+initial_current_mode = "point" # point(default) | per_target | previous | grid
+# point=每输入行的source_level_pct；previous=同输入行相邻目标沿用上一合格读回，跨行重置。
+# per_target仅一条展开后的光学输入行，数目须等于功率目标数：
+# initial_source_levels_pct=[25.0,35.0,45.0,55.0,65.0]
+# grid=行数等于展开后的光学输入行数，列数等于目标功率数；不新增扫描轴：
+# initial_source_levels_pct=[[25.0,35.0,45.0,55.0,65.0],[26.0,36.0,46.0,56.0,66.0]]
+# per_target/grid必须同时选cartesian；point/previous不能保留此数组。
+# varia_nd仅在nd_control_verified=true且设备/光学方向实机验收后：
+# 删除source_*、minimum_signal_power_w和非point起始策略，改用
+# nd_min_pct / nd_max_pct / nd_step_pct / increasing_nd_increases_power，
+# 并在每条nkt_run.points中明确nd_pct。禁止未验收ND自动放行。
+
+[power_feedback.window]
+duration_s = 2.0 # s，0.001..3600
+min_samples = 3 # 2..100000
+sample_interval_s = 0.2 # s；本调功判稳窗口内间隔，<=duration_s
+max_peak_to_peak_w = "CHANGE_ME_APPROVED_POWER_VARIATION_W" # W硬上限；0允许零波动
+# max_peak_to_peak_fraction = 0.05 # 可选0..1；limit=min(W上限,max(noise_floor,目标W×fraction))
+# noise_floor_w = 1e-9 # 可选0..max_peak_to_peak_w，默认0
+# max_drift_fraction_per_s = 0.01 # 可选0..1，每秒相对目标漂移限制
+# 上面相对/趋势参数省略时保留旧版绝对W判稳；新判稳可提高质量但不保证缩短每点时间。
+
+[chopper]
+enabled = false # 确认型号/刀片/轨道/频率/接线并填完后，改true才控制
+backend = "serial" # serial | simulation | manual；manual无仪器读回，cleanup不能软件认证
+model = "CHANGE_ME_CONFIRMED_CHOPPER_MODEL" # MC2000B | MC2000B-EC
+port = "CHANGE_ME_CHOPPER_COM_PORT"
+expected_idn = "CHANGE_ME_EXACT_CHOPPER_ID_QUERY_RESPONSE" # 完整id?响应（含型号/固件）
+# blade: MC1F2 | MC1F10 | MC1F15 | MC1F30 | MC1F60 | MC1F100 | MC1F10HP |
+# MC1F2P10 | MC1F6P10 | MC1F10A | MC2F330 | MC2F47 | MC2F57B | MC2F860 | MC2F5360
+blade = "CHANGE_ME_CONFIRMED_INSTALLED_BLADE" # 只核对blade?；绝不自动写blade=冒认物理刀片
+reference_source = "external" # driver external | internal；XX同步Combination只允许external
+reference_track = "CHANGE_ME_CONFIRMED_BEAM_TRACK" # single | inner | outer；必须符合刀片
+harmonic_n = 1 # 1..15，斩波参考倍频，独立于lockin h1/h2
+harmonic_d = 1 # 1..15，斩波参考分频；本次h1/h1采用1/1且确认光学轨道频率一致
+# phase_deg = 0 # 可选整数0..360度；省略保留当前phase并核对后续漂移
+run_enabled = true # true旋转，false待机；正式光学斩波采集要求true
+finish_rotation = "stop" # stop | preserve；旋转停止不等于挡光，必须先关闭激光
+frequency_tolerance_hz = 1.0 # 0..1000Hz；input?/实际refoutfreq?读回容差，不是PLL相位锁定
+io_timeout_s = 2.0 # 0.01..60s
+ready_timeout_s = 30.0 # 0.01..3600s；包括预检/设置/判稳
+poll_interval_s = 1.0 # 0.001..ready_timeout_s
+consecutive_good = 3 # 1..100次；同一已合格设置重入只新核对，不重复这一等待
+manual_phase_lock_confirmed = false # 真实/手动使用前确认本次前面板锁相；当前驱动尚未验收使用远程PLL读回

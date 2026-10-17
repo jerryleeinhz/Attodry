@@ -1,5 +1,68 @@
 # Development stages
 
+## 2026-10-17 publication preparation: explicit authorization and serial framing
+
+- User authorized publication, LK_setup deployment and private TOML preparation;
+  real scan/start/stop commissioning remains separate.
+- Native TL4000 initialization requires write authorization even with reset=false;
+  the SDK must not masquerade as read-only discovery (27 related guarded tests).
+- An authorized MC2000B firmware 4.16 read-only check exposed delayed terminal
+  whitespace. Only grammar-owned CR/LF/space/TAB is appended to the preceding
+  complete raw response; unknown/stale bytes still fail closed (40 chopper/template
+  guarded tests). Original command-error and stale-byte evidence is retained.
+- TOML provides explicit harmonic_n/harmonic_d interfaces; operator confirms the
+  physical blade/beam track. Non-unity input? frequency semantics remain pending
+  a separately authorized real comparison; no guard was relaxed to certify them.
+- Full implementation regression below is 1,734 tests before these narrow fixes;
+  focused counts are not added to it. Publication/deployment receipts follow
+  only after those stages complete.
+
+## Dual SR830, optional chopper and optical performance integration (2026-10-17)
+
+Status: local offline implementation and full guarded regression verified.
+Target branch: `integration-photonics-nonlinear-hall`. No target-machine or real
+hardware acceptance is implied.
+
+- The active new topology is XX SR830 internal reference, XX TTL OUT -> XY
+  SR830 REF IN and chopper external reference, both detector roles h1. The
+  sample connection of XX SINE OUT is declared separately from clock wiring;
+  XY SINE OUT stays disconnected. Existing PEM profiles remain available with
+  their own reference/safety contracts, rather than requiring PEM for all optics.
+- Reuses published `module/integration-photovoltage/current@f6dfc45` optics
+  concepts and four-module `accacb0` common settling. Internal XX now shares
+  per-role remaining waits, actual-change notifications and joint waiting with
+  sequential reads. Every true change, revisit and failed state gets the required
+  fresh qualification; magnetic resultant remains strictly <=3 T in this profile.
+- Adds optional MC2000B manual/serial preparation and guarded lifecycle; NKT
+  current/power modes and CLD native-amperes control; ordered wavelength,
+  bandwidth, source and target-power points/ranges; all existing start strategies;
+  explicit narrow tuning and relative/noise-floor/drift stability.
+- Adds matched dark complex subtraction with exact condition/reference/phase
+  context and finite age. Raw dark/light data remain; undefined zero-difference
+  phase is not invented. Optional recovery repeats the entire optical/electrical
+  window under one time budget, preserves rejected candidates and refuses hard
+  or mixed faults. Formal windows freeze actuators and never splice old/new reads.
+- PM same-setting prepare uses 13 transactions instead of 26; one formal PM
+  boundary uses 27 instead of 66, retaining two full checks plus a fresh READ.
+  Reused PEM settings use five queries without setting writes instead of 15
+  communications. Raw audits are referenced once; original failures remain.
+  These fake budgets are distinct from actual elapsed-time acceptance.
+- Focused guarded regressions include native CLD lifecycle/cleanup, grids,
+  PM-setting changes inside READ, bounded recovery, last-READ deadline overrun,
+  mixed hard faults, matched darks across gates and delta plotting/quality.
+  Final full discovery passes 1,734 tests in 608.157 s without skips, with all
+  225 source/test/template/tool hashes unchanged during the run. The first full
+  run's stale fixture deletion and leaked Notebook grouping override were fixed
+  in tests; the ordered 34-case recheck and final full run both pass. Initial
+  failures, final logs and SHA256 manifest remain under ignored
+  `.test-tmp/chopper-optics-delivery-20261017/`. Local configuration, datasets,
+  station addresses and test receipts stay uncommitted.
+- CLD shutdown retains shared VISA resources until after electrical protection,
+  including failures before the optical engine exists. OFF/zero evidence,
+  ownership, resource-close errors and native API rejected values remain distinct.
+- No SSH, deployment or instrument I/O occurred in this stage. Real read-only
+  discovery and write/illumination A/B remain separately authorized stages.
+
 ## LK_setup timing optimization deployment verified (2026-10-15)
 
 - Origin publishes `8d83f94` timing optimization and `874682d` project launcher.

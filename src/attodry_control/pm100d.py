@@ -231,7 +231,8 @@ class Pm100d:
                         if reply != "1":
                             raise NktError("PM100D setting completion not acknowledged")
                     self._parse_reply("*OPC?", complete)
-            state = self.capture()
+            if any(needed for needed, _ in changes):
+                state = self.capture()
         self._check(state, wavelength_nm)
         self.target_nm = wavelength_nm
         return state
@@ -268,7 +269,8 @@ class Pm100d:
                   "started_monotonic_s": start, "finished_monotonic_s": end,
                   "started_at_utc": started_utc, "finished_at_utc": utc_now(),
                   "measurement_plane": self.config.measurement_plane,
-                  "before": before, "after": after, "freshness": "READ? new acquisition"}
+                  "before": before, "after": after, "freshness": "READ? new acquisition",
+                  "verification_scope": "full settings/status immediately before and after this READ?"}
         self.last_sample = sample
         return sample
 

@@ -57,6 +57,7 @@ _COLUMN_LABELS = {
     "optical_wavelength_nm": ("Wavelength", "nm"),
     "optical_bandwidth_nm": ("Bandwidth", "nm"),
     "optical_source_level_pct": ("Optical source setting", "%"),
+    "optical_current_a": ("Laser diode current setting", "A"),
     "optical_nd_pct": ("ND setting", "%"),
     "optical_pulse_picker_ratio": ("Pulse picker ratio", ""),
     "pem_frequency_hz": ("PEM reference", "Hz"),
@@ -467,15 +468,15 @@ def column_label(key: str) -> str:
 def _known_label(name: str) -> tuple[str, str]:
     if name in _COLUMN_LABELS:
         return _COLUMN_LABELS[name]
-    harmonic = re.fullmatch(r"(lockin_(?:xx|xy))_h([123])_(x_v|y_v|amplitude_v|phase_deg)", name)
+    harmonic = re.fullmatch(r"(lockin_(?:xx|xy))_h([123])_(delta_)?(x_v|y_v|amplitude_v|phase_deg)", name)
     if harmonic:
-        channel, order, field = harmonic.groups()
+        channel, order, delta, field = harmonic.groups()
         channel_label = "Lock-in XX" if channel.endswith("xx") else "Lock-in XY"
         field_name, unit = {
             "x_v": ("X", "V"), "y_v": ("Y", "V"),
             "amplitude_v": ("R", "V"), "phase_deg": ("Phase", "deg"),
         }[field]
-        return f"{channel_label} h{order} {field_name}", "V RMS" if field == "amplitude_v" else unit
+        return f"{channel_label} h{order} {'Δ' if delta else ''}{field_name}", "V RMS" if field == "amplitude_v" else unit
     smu = re.fullmatch(r"(smu_bias|gate_top|gate_bottom)_(.+)", name)
     if smu:
         role, field = smu.groups()
@@ -618,6 +619,17 @@ def _unresolved_dimensions(
             continue
         if key in covered_keys:
             continue
+        if key in {"requested.optical_source_level_pct", "requested.optical_current_a"}:
+            actuators = {"cld_current"} if key.endswith("current_a") else {"source_current", "source_power"}
+            relevant = [row for row in rows if _scalar(row.get(key))]
+            if relevant and all(
+                    (row.get("status.optical") or {}).get("power_target_w") is not None and
+                    ((row.get("status.optical") or {}).get("feedback_actuator") or
+                     (((row.get("status.optical") or {}).get("feedback") or {}).get("feedback_config") or {}).get("actuator"))
+                    in actuators for row in relevant):
+                # Archived starts are feedback inputs. Direct/unknown source
+                # sweeps retain the ordinary unresolved-condition protection.
+                continue
         token = _dimension_token(key)
         module = _dimension_module(key)
         if token in tokens:

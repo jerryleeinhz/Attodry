@@ -196,6 +196,19 @@ class NktSdk:
             entry["error"] = f"{type(exc).__name__}: {exc}"
             raise
 
+    def set_control(self, control):
+        """Explicit current/power Setup change with healthy, confirmed emission OFF."""
+        setups = {"current": 0, "power": 1}
+        if control not in setups or not self.opened or not self.writable:
+            raise NktError("Control mode write not authorized or malformed")
+        source = self.read_source()
+        if source["emission_state"] != 0 or source["status_bits"] & (SOURCE_FAULT_MASK | 1) or source["interlock"] != 2:
+            raise NktError("Control mode change requires healthy confirmed emission off")
+        if source["control"] not in setups:
+            raise NktError("Refusing to overwrite unsupported NKT Setup mode")
+        if source["control"] != control:
+            self._write(self.config.source_address, 0x31, setups[control])
+
     def set_emission(self, enabled):
         if not isinstance(enabled, bool) or not self.opened or not self.writable:
             raise NktError("Emission write not authorized or malformed")

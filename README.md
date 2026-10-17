@@ -7,6 +7,22 @@
 参数和硬件授权检查保持；不更改全局安装。光电示例见
 [当前工作树启动入口](docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md)。
 
+2026-10-17 本地离线更新：光学 Combination 支持两台 SR830，XX 内参考的 TTL OUT
+同时接 XY REF IN 和 Thorlabs 斩波器 EXT REF IN，两路均测 h1。XX SINE OUT 是否
+接样品单独声明；XY SINE OUT 断开。PEM 可选，原 PEM 模式及历史记录保持各自含义。
+斩波器的启停、参考、倍频/分频和刀片选择见
+[斩波器模块](docs/modules/CHOPPER.md)。基频、控制器准确型号、刀片和光束轨道须在
+真实控制前确认；停止斩波器不能作为关光证据。
+
+同一入口新增 NKT current/power 和 CLD 原生安培控制、光谱/源/功率区间组合、
+窄调光精度、相对波动/噪声底/趋势判稳、匹配暗背景的 X+iY 差分，以及显式有限的
+完整采样窗口恢复。正式窗口不调执行器；硬故障、未知通信和清理异常不转为重试。
+PM 及相同 PEM 设置核验去重、双 SR830 剩余等待复用和单份原始审计的边界见
+[速度与验证规则](docs/MEASUREMENT_PERFORMANCE.md)及
+[本分支耗时证据](docs/PHOTONICS_SPEED_OPTIMIZATION.md)。
+本轮仅本地修改和硬件阻断离线验证，未 SSH、未部署 LK_setup、未操作实机；完整
+回归结果在交接记录最终补齐。下面带早期日期的段落记录此前交付，不代表本轮已部署。
+
 2026-10-06：光电点流程新增 `optical_scan.target_deviation_policy = "record_continue"`。
 初始按容差和稳定窗口调功；之后仅功率偏离目标时记录实测值并继续，硬故障检查
 保持。分析使用 `measured.optical_power_w`，目标、功率读数和时间分别保存。

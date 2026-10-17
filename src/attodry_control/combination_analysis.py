@@ -249,7 +249,7 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
         "smu": {r + s for r in ("smu_bias", "gate_top", "gate_bottom") for s in ("_v", "_a")},
         "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
         "optical": {"optical_source_level_pct", "optical_wavelength_nm", "optical_bandwidth_nm",
-                    "optical_nd_pct", "optical_target_power_w", "optical_pulse_picker_ratio"},
+                    "optical_nd_pct", "optical_target_power_w", "optical_pulse_picker_ratio", "optical_current_a"},
     }.items() if x_coordinate in keys), None)
     protected += sorted({key for row in selected for key in row
                          if key.startswith("axes.") and key.endswith(".index")
@@ -276,6 +276,7 @@ def _column_label(column: str) -> str:
         "optical_target_power_w": "Requested optical power (W)",
         "optical_wavelength_nm": "Wavelength (nm)", "optical_bandwidth_nm": "Bandwidth (nm)",
         "optical_source_level_pct": "Optical source setting (%)", "optical_nd_pct": "ND setting (%)",
+        "optical_current_a": "Laser diode current setting (A)",
         "optical_pulse_picker_ratio": "Pulse picker ratio", "pem_frequency_hz": "PEM reference (Hz)",
     }
     for role in ("smu_bias", "gate_top", "gate_bottom"):

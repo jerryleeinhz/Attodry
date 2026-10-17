@@ -137,6 +137,9 @@ def launch_summary(config, database, run_id):
     elif config.lockin is not None:
         hardware = config.snapshot["hardware"]["lockin"]
         summary["lockin"] = {"mode": config.lockin_mode,
+            "reference_topology": config.reference_topology,
+            "sample_excitation_connected": config.lockin.lockin_xx.sine_output_connected,
+            "excitation_definition": hardware.get("excitation_definition", "instrument_sine_rms_setting"),
             "internal_order": (["frequency", "excitation"]
                                if config.lockin_mode == "frequency_excitation" else [config.lockin_mode]),
             "harmonics_by_role": hardware["harmonics_by_role"],

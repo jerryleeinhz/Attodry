@@ -22,6 +22,20 @@ from .cryostat_points import CryostatPointSession
 from .models import VectorField
 from .safety import MagnetLimits, plan_ordered_field_transitions
 from .photonics_lockin_config import PHOTONICS_REFERENCE_TOPOLOGIES
+from .reference_transients import ReferenceTransientError
+from .optical_recovery import OpticalPowerDeviation
+
+
+def _window_error(errors):
+    """A recoverable power/reference observation cannot hide any other fault."""
+    hard = [error for error in errors if not isinstance(error, (ReferenceTransientError, OpticalPowerDeviation))]
+    primary = hard[0] if hard else errors[0]
+    if not hard and len({type(error) for error in errors}) > 1:
+        primary = ValueError("Mixed optical/reference faults require a stopped, reviewed run")
+    for error in errors:
+        if error is not primary:
+            primary.add_note(f"Additional window failure: {type(error).__name__}: {error}")
+    return primary
 
 
 def _json(value):
@@ -97,8 +111,6 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         raise ValueError("Hardware order requires distinct temperature/magnetic/smu/lockin/optical axes")
     if photonics and "lockin" not in order:
         raise ValueError("PEM reference topologies require the lockin axis")
-    if "optical" in order and "lockin" in order and not photonics:
-        raise ValueError("Optical/electrical combination requires an explicit PEM reference topology")
     axes = {}
     smu = lockin = None
     hardware = {}
@@ -188,7 +200,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         safety_path = path.with_name("lockin_safety.toml")
         safety = configuration._parse_lockin_safety(configuration._load_document(safety_path))
         xx = configuration._parse_lockin(configuration._table(document, "lockin_xx"),
-                                        LockinRole.XX, "lockin_xx", safety.lockin_xx, safety)
+                                        LockinRole.XX, "lockin_xx", safety.lockin_xx, safety,
+                                        allow_disconnected_source="optical" in order)
         xy = configuration._parse_lockin(configuration._table(document, "lockin_xy"),
                                         LockinRole.XY, "lockin_xy", safety.lockin_xy, safety)
         configuration._validate_lockin_pair(xx, xy)
@@ -208,17 +221,37 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         hardware["lockin"]["point_mode"] = mode
         hardware["lockin"]["harmonics_by_role"] = prepared.harmonics_by_role
         hardware["lockin"]["skipped_harmonics_by_frequency"] = prepared.skipped_by_frequency
+        hardware["lockin"]["sample_excitation_connected"] = xx.sine_output_connected
+        hardware["lockin"]["excitation_definition"] = (
+            "instrument_sine_rms_setting_at_sample_route" if xx.sine_output_connected
+            else "instrument_setting_only_sample_physically_disconnected")
     if "optical" in order:
         from .optical_points import load_optical_point_config
         optical = load_optical_point_config(path)
+        if optical.background.enabled and (lockin is None or photonics):
+            raise ValueError("Matched complex backgrounds require the internal-XX dual SR830 path")
         if photonics and not optical.scan.use_pem:
             raise ValueError("PEM reference optical scans require PEM enabled")
+        if not photonics and lockin is not None and optical.scan.use_pem:
+            raise ValueError("An internal-XX optical scan must disable PEM; select a PEM topology to use its reference")
+        if optical.chopper is not None:
+            if photonics or lockin is None:
+                raise ValueError("The chopper combination requires the internal-XX lock-in reference topology")
+            for point in prepared.grid:
+                modulation = optical.chopper.validate_reference_frequency(point.frequency_hz)
+                if optical.chopper.reference_source != "external":
+                    raise ValueError("XX-synchronized chopping requires external reference")
+                for harmonics in prepared.harmonics_by_role.values():
+                    for harmonic in harmonics:
+                        ratio = harmonic * point.frequency_hz / modulation
+                        if ratio < 1 or not math.isclose(ratio, round(ratio), rel_tol=0, abs_tol=1e-9):
+                            raise ValueError("Lock-in detection must be an integer harmonic of the selected optical chopping frequency")
         axes["optical"] = ScanAxis("optical", tuple(AxisPoint(values, "main", "ordered",
             {"optical_point_index": index}) for index, values in enumerate(optical.points)))
         hardware["optical"] = _json(asdict(optical))
     if illumination == "continuous_gate_scan":
-        if order != ["optical", "smu", "lockin"] or not photonics or mode != "excitation":
-            raise ValueError("continuous_gate_scan requires optical -> smu -> lockin with PEM excitation")
+        if order != ["optical", "smu", "lockin"] or mode != "excitation":
+            raise ValueError("continuous_gate_scan requires optical -> smu -> lockin with fixed excitation")
         if len(axes["lockin"].points) != 1:
             raise ValueError("continuous_gate_scan requires one fixed lock-in excitation point")
         if not optical.nkt.emit or optical.scan.mode != "power_stabilized" or optical.pm is None:
@@ -239,11 +272,15 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if cryostat is not None and cryostat.cryostat.com_port:
         addresses.append(cryostat.cryostat.com_port)
     if optical is not None:
-        addresses += [optical.nkt.port] if optical.nkt.port else []
+        addresses += [optical.nkt.port] if getattr(optical.nkt, "port", "") else []
         if optical.pem is not None and optical.pem.port:
             addresses.append(optical.pem.port)
         if optical.pm is not None and optical.pm.resource:
             addresses.append(optical.pm.resource)
+        if optical.chopper is not None and optical.chopper.port:
+            addresses.append(optical.chopper.port)
+        if optical.scan.laser_source == "cld" and optical.nkt.address:
+            addresses.append(optical.nkt.address)
     identities = [re.sub(r"^ASRL(\d+)::INSTR$", r"COM\1", value.strip().upper()) for value in addresses]
     if len(set(identities)) != len(identities):
         raise ValueError("All active resources, including optical ports and lock-in roles, must be distinct")
@@ -275,6 +312,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if optical is not None:
         snapshot["hardware_scope"] = "photonics-combination-v1"
         snapshot["cleanup_policy"]["optical"] = "laser_off_then_electrical_protection_then_pem_finish"
+        snapshot["reference_topology"] = topology
     # Include point engines and shared safety code, not just the Cartesian loop.
     snapshot["source_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in Path(__file__).parent.glob("*.py")}
@@ -290,9 +328,12 @@ class _Events:
         self.sink = sink
         self.cleaning = False
         self.errors = []
+        self.measurement_stage = None
 
     def event(self, kind, payload):
         try:
+            if self.measurement_stage is not None:
+                payload = {**payload, "measurement_stage": self.measurement_stage}
             self.sink(kind, _json(payload))
         except BaseException as exc:
             if not self.cleaning:
@@ -304,7 +345,7 @@ class _Events:
 class HardwareCombinationStation:
     def __init__(self, config, *, smu_adapter_factory=None, manager_factory=None, sleep=None,
                  dll=None, monotonic=None, optical_backend_factory=None,
-                 pem_factory=None, meter_factory=None):
+                 pem_factory=None, meter_factory=None, chopper_factory=None):
         self.config = config
         self.smu_adapter_factory = smu_adapter_factory
         self.manager_factory = manager_factory
@@ -314,12 +355,17 @@ class HardwareCombinationStation:
         self.source_cleanup_verified = False
         self.optical_backend_factory = optical_backend_factory
         self.pem_factory, self.meter_factory = pem_factory, meter_factory
+        self.chopper_factory = chopper_factory
         self.point = None
         self.open_completed = False
         self.cryo = None
         self.dll, self.monotonic = dll, monotonic
         self._optical_group_ready = False
         self._optical_group_sequence = 0
+        self._applied = {}
+        self._axis_scopes = {}
+        self._background_visit = 0
+        self.background = None
 
     def set_event_sink(self, sink):
         self.events = _Events(sink)
@@ -355,9 +401,9 @@ class HardwareCombinationStation:
             if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
                 from .photonics_lockin_points import PhotonicsLockinPointSession
                 session_type = PhotonicsLockinPointSession
-            kwargs = ({key: value for key, value in {"sleep": self.sleep,
-                "clock": self.monotonic}.items() if value is not None}
-                if session_type is not LockinPointSession else {})
+            kwargs = {key: value for key, value in {"sleep": self.sleep,
+                ("monotonic" if session_type is LockinPointSession else "clock"): self.monotonic
+                }.items() if value is not None}
             self.lockin = session_type(
                 self.config.path, self.config.lockin, self.events.event,
                 manager_factory=self.manager_factory, mode=self.config.lockin_mode, **kwargs)
@@ -366,13 +412,19 @@ class HardwareCombinationStation:
             from .optical_points import OpticalPointSession
             kwargs = {key: value for key, value in {
                 "backend_factory": self.optical_backend_factory, "pem_factory": self.pem_factory,
-                "meter_factory": self.meter_factory, "clock": self.monotonic,
+                "meter_factory": self.meter_factory, "chopper_factory": self.chopper_factory,
+                "clock": self.monotonic,
                 "sleep": self.sleep}.items() if value is not None}
             self.optical = OpticalPointSession(self.config.optical, self.events.event,
                 on_settings_applied=self._signal_change_callback("optical.tuning_completed"), **kwargs)
             preflight["optical"] = self.optical.open(authorize_writes=True, confirm_manual_route=True)
+            if self.config.optical.background.enabled:
+                from .optical_background import MatchedLockinBackground
+                self.background = MatchedLockinBackground(self.config.optical.background, clock=self.optical.clock)
         if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
             self.lockin.reference_recovery_guard = self._reference_recovery_guard
+        elif self.lockin is not None and self.optical is not None:
+            self.lockin.wait_guard = self._internal_wait_guard
         # All active preflights must succeed before any configuration writes.
         if self.optical is not None:
             if self.lockin is not None:
@@ -386,6 +438,7 @@ class HardwareCombinationStation:
             # The first lock-in axis may request high excitation before an
             # optical axis is visited. Certify the prepared external clock now.
             if self.optical is not None:
+                self._prepare_optical_reference()
                 self._verify_optical_reference()
         if self.smu is not None:
             self.smu.begin_points(self.events)
@@ -393,6 +446,7 @@ class HardwareCombinationStation:
         return _json({"mode": "hardware", "identities_and_initial_state": preflight})
 
     def apply(self, module, point):
+        self._applied[module] = dict(point.values)
         if self.config.illumination_policy == "continuous_gate_scan":
             return self._apply_continuous_gate(module, point)
         # All axis movement occurs with confirmed laser OFF, including electrical
@@ -405,7 +459,7 @@ class HardwareCombinationStation:
             if (type(index) is not int or not 0 <= index < len(axis.points)
                     or axis.points[index] != point):
                 raise ValueError("Optical point identity does not match the approved grid")
-            if self.lockin is not None:
+            if self.lockin is not None and self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
                 self.lockin.prepare_reference_transition()
             return self.optical.set_point(index)
         if module in {"temperature", "magnetic"}:
@@ -425,8 +479,10 @@ class HardwareCombinationStation:
             raise ValueError("Unknown combination module")
         lockin_axis = next(axis for axis in self.config.plan.axes if axis.module == "lockin")
         index = lockin_axis.points.index(point)
-        return {"actual": self.lockin.set_point(point.values["lockin_excitation_v_rms"],
-            point.values["lockin_frequency_hz"], point_index=index)}
+        actual = self.lockin.set_point(point.values["lockin_excitation_v_rms"],
+            point.values["lockin_frequency_hz"], point_index=index)
+        self._prepare_optical_reference()
+        return {"actual": actual}
 
     def _guard_continuous_optical(self):
         if not self._optical_group_ready:
@@ -434,9 +490,7 @@ class HardwareCombinationStation:
         return self.optical.observe_hold(phase="gate_transition")
 
     def _signal_change_callback(self, reason):
-        # The photonics adapter owns external-reference guarded settling. The
-        # legacy electrical adapter retains its separate acquisition contract.
-        if self.lockin is not None and self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
+        if self.lockin is not None:
             return lambda: self.lockin.disturbed(reason)
         return None
 
@@ -446,6 +500,7 @@ class HardwareCombinationStation:
             callback()
 
     def qualify_axis(self, module, point, scope):
+        self._axis_scopes[module] = dict(scope)
         if module in {"temperature", "magnetic"}:
             result = self.cryo.qualify(modules=(module,), scope=scope)
             if module == "temperature":
@@ -462,7 +517,8 @@ class HardwareCombinationStation:
             if (type(index) is not int or not 0 <= index < len(axis.points)
                     or axis.points[index] != point):
                 raise ValueError("Optical point identity does not match the approved grid")
-            self.lockin.prepare_reference_transition()
+            if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
+                self.lockin.prepare_reference_transition()
             prepared = self.optical.set_point(index)
             fixed = next(a for a in self.config.plan.axes if a.module == "lockin").points[0]
             # The fixed excitation is selected while dark, before any gate is
@@ -470,9 +526,14 @@ class HardwareCombinationStation:
             # verifies the held setting rather than writing or suspending light.
             self.lockin.set_point(fixed.values["lockin_excitation_v_rms"],
                 fixed.values["lockin_frequency_hz"], point_index=0)
+            self._prepare_optical_reference()
             self._verify_optical_reference()
-            self.lockin.restore_source_after_reference_transition()
-            self.lockin.qualify()
+            if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
+                self.lockin.restore_source_after_reference_transition()
+            if self.config.reference_topology == "internal_xx_xy":
+                self.lockin.verify_ready()
+            else:
+                self.lockin.qualify()
             self.optical.qualify()
             self.lockin.qualify()
             self._verify_optical_reference()
@@ -505,20 +566,32 @@ class HardwareCombinationStation:
     def qualify(self, modules):
         if self.config.illumination_policy == "continuous_gate_scan":
             self._guard_continuous_optical()
+            if self.background is not None:
+                self._capture_dark_background()
+                self.optical.qualify()
             self.lockin.qualify()
             self._verify_optical_reference()
             return {"ready": True, "mode": "hardware", "active_modules": modules,
                     "illumination_held": True, "group_sequence": self._optical_group_sequence}
-        if self.optical is not None and self.lockin is not None:
+        if (self.optical is not None and self.lockin is not None
+                and self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES):
             # Prepared PEM frequency must match the external clock while XX is
             # still protected, before restoring excitation or enabling emission.
             self._verify_optical_reference()
             self.lockin.restore_source_after_reference_transition()
         if self.lockin is not None:
-            self.lockin.qualify()
+            if self.optical is not None and self.config.reference_topology == "internal_xx_xy":
+                # Fresh configuration/source proof is required while dark.
+                # Optical preparation will disturb the detector again, so its
+                # complete filter wait belongs after illumination has settled.
+                self.lockin.verify_ready()
+            else:
+                self.lockin.qualify()
         if self.cryo is not None:
             self.cryo.qualify()
         if self.optical is not None:
+            if self.background is not None:
+                self._capture_dark_background()
             self.optical.qualify()
             if self.lockin is not None:
                 # PEM activation or power/wavelength changes may disturb the
@@ -527,15 +600,66 @@ class HardwareCombinationStation:
             self._verify_optical_reference()
         return {"ready": True, "mode": "hardware", "active_modules": modules}
 
+    def _background_context(self):
+        return {"requested_conditions": self._applied, "axis_visits": self._axis_scopes,
+            "background_visit": self._background_visit,
+            "reference_topology": self.config.reference_topology,
+            "frequency_hz": self.lockin.target_frequency_hz,
+            "harmonics_by_role": self.lockin.harmonics_by_role,
+            "phase_shift_deg": {device.role.value: device.read_phase_shift() for device in self.lockin.pair},
+            "chopper": ({key: self.optical.chopper.last_confirmed_state.get(key)
+                 for key in ("phase", "ref", "nharmonic", "dharmonic", "blade", "enable")}
+                if self.optical.chopper else None),
+            "xx_sample_connected": self.config.lockin.lockin_xx.sine_output_connected}
+
+    def _capture_dark_background(self):
+        self.optical.suspend()
+        self._background_visit += 1
+        self.background.invalidate("new dark/illuminated condition visit")
+        self._signal_changed("optical.dark_transition")
+        self.optical.observe_dark(phase="background_before")
+        self.lockin.qualify()
+        context = self._background_context()
+        readings = []
+        self.events.measurement_stage = "dark_background"
+        try:
+            for _ in range(self.background.config.samples):
+                self.optical.observe_dark(phase="background_sample_before")
+                self._background_smu_guard()
+                if self.cryo is not None:
+                    self.cryo.capture("dark_background")
+                reading = self.lockin.sample_point(
+                    measurement_context=self.cryo.capture if self.cryo is not None else None)
+                readings.append(reading)
+                self.optical.observe_dark(phase="background_sample_after")
+                self._background_smu_guard()
+                if self._background_context() != context:
+                    raise ValueError("Reference/phase changed during dark baseline acquisition")
+            baseline = self.background.capture(readings, context)
+            self.events.event("optical_dark_background", baseline)
+        finally:
+            self.events.measurement_stage = None
+
+    def _background_smu_guard(self):
+        if self.smu is not None:
+            sample = self.smu.sample_point({key[:-2]: value for key, value in self.point.values.items()},
+                                           segment=self.point.segment)
+            self.events.event("smu_dark_background_guard", asdict(sample))
+            if not sample.clean:
+                raise ValueError("SMU dark-background state failed its existing electrical protection")
+
     def begin_sample(self):
         if self.optical is not None:
             self.optical.begin_sample()
             try:
                 self._verify_optical_reference()
-            except BaseException:
+            except BaseException as primary:
                 # begin_sample may fail after the optical bracket has opened.
                 # Close/check that bracket before any whole-window retry.
-                self.optical.end_sample()
+                try:
+                    self.optical.end_sample()
+                except BaseException as secondary:
+                    raise _window_error([primary, secondary]) from primary
                 raise
         if self.cryo is not None:
             self.cryo.begin_sample()
@@ -549,16 +673,57 @@ class HardwareCombinationStation:
                 except BaseException as exc:
                     errors.append(exc)
         if errors:
-            for extra in errors[1:]:
-                errors[0].add_note(str(extra))
-            raise errors[0]
+            raise _window_error(errors)
         self._verify_optical_reference()
 
     def run_sample_operation(self, operation):
         """Retry the whole before/all-modules/after window, never a partial pair."""
-        if self.config.reference_topology not in PHOTONICS_REFERENCE_TOPOLOGIES:
-            return operation()
-        return self.lockin.run_reference_operation("combination_formal_sample", operation)
+        def capture():
+            if self.config.reference_topology not in PHOTONICS_REFERENCE_TOPOLOGIES:
+                return operation()
+            return self.lockin.run_reference_operation("combination_formal_sample", operation)
+        maximum = self.config.optical.scan.max_power_retries if self.optical else 0
+        deadline = None
+        try:
+            for retry in range(maximum + 1):
+                try:
+                    if deadline is not None and self.optical.clock() >= deadline:
+                        raise TimeoutError("Optical whole-window recovery exhausted its shared deadline")
+                    result = capture()
+                    if deadline is not None and self.optical.clock() >= deadline:
+                        raise TimeoutError("Optical recovery deadline expired during the complete sample window")
+                    return result
+                except OpticalPowerDeviation as exc:
+                    self.events.event("optical_window_rejected", {"retry_index": retry,
+                        "accepted": False, "valid_for_analysis": False,
+                        "reason": str(exc), "evidence": exc.evidence})
+                    if retry >= maximum:
+                        raise
+                    now = self.optical.clock()
+                    if deadline is None:
+                        deadline = now + self.config.optical.scan.power_retry_timeout_s
+                    if now >= deadline:
+                        raise TimeoutError("Optical whole-window recovery exhausted its shared deadline") from exc
+                    if self.optical.sample_active:
+                        raise ValueError("Cannot retune inside an unclosed optical bracket") from exc
+                    self.optical.retry_deadline = deadline
+                    if self.lockin is not None and self.config.reference_topology == "internal_xx_xy":
+                        self.lockin.wait_deadline = deadline
+                    self.optical.suspend()
+                    if self.background is not None:
+                        self._capture_dark_background()
+                    self.optical.qualify()
+                    if self.lockin is not None:
+                        self.lockin.qualify()
+                    self._verify_optical_reference()
+                    self.events.event("optical_window_retry", {"retry_index": retry + 1,
+                        "remaining_s": max(0, deadline - self.optical.clock()),
+                        "scope": "all modules and both optical brackets"})
+        finally:
+            if self.optical is not None:
+                self.optical.retry_deadline = None
+            if self.lockin is not None and self.config.reference_topology == "internal_xx_xy":
+                self.lockin.wait_deadline = None
 
     def _reference_recovery_guard(self, deadline):
         if self.optical is not None:
@@ -568,9 +733,26 @@ class HardwareCombinationStation:
         if self.cryo is not None:
             self.cryo.capture("reference_recovery")
 
+    def _internal_wait_guard(self):
+        if self.optical is not None and self.optical.point is not None:
+            self.optical.guard_reference_recovery(deadline=self.lockin.wait_deadline)
+        if self.cryo is not None:
+            self.cryo.capture("lockin_settling")
+
+    def _prepare_optical_reference(self):
+        if (self.optical is not None and self.lockin is not None
+                and self.config.reference_topology == "internal_xx_xy"):
+            # XX owns the independent internal clock. XY may still be acquiring
+            # it after a source transition; full companion matching belongs to
+            # illuminated qualification/formal entry, after remaining settling.
+            frequency = self.lockin.read_coordinates(verify_companion=False)["lockin_frequency_hz"]
+            return self.optical.prepare_reference(frequency)
+
     def _verify_optical_reference(self):
-        if self.config.reference_topology not in PHOTONICS_REFERENCE_TOPOLOGIES or self.optical is None:
+        if self.optical is None:
             return
+        if self.config.reference_topology == "internal_xx_xy":
+            return self.optical.verify_reference()
         return self.lockin.run_reference_operation("optical_reference_check", self._check_pem_reference)
 
     def _check_pem_reference(self, *, wait_for_lock=True):
@@ -610,8 +792,12 @@ class HardwareCombinationStation:
         if module in {"temperature", "magnetic"}:
             return self.cryo.read(module)
         if module == "lockin":
-            return _json(self.lockin.sample_point(
-                measurement_context=self.cryo.capture if self.cryo is not None else None))
+            reading = self.lockin.sample_point(
+                measurement_context=self.cryo.capture if self.cryo is not None else None)
+            if self.background is not None:
+                reading = self.background.apply(reading, self._background_context())
+                reading["status"]["background"] = reading["background"]
+            return _json(reading)
         sample = self.smu.sample_point({k[:-2]: v for k, v in self.point.values.items()},
                                        segment=self.point.segment)
         self.events.event("smu_formal_sample", asdict(sample))
@@ -701,7 +887,7 @@ def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
                                smu_adapter_factory=None, manager_factory=None, sleep=None,
                                on_registered=None, authorize_optical=False,
                                confirm_optical_route=False, optical_backend_factory=None,
-                               pem_factory=None, meter_factory=None):
+                               pem_factory=None, meter_factory=None, chopper_factory=None):
     if not authorize_hardware:
         raise ValueError("Explicit combined connection/write/status-consumption authorization required")
     if config.lockin is not None:
@@ -723,7 +909,8 @@ def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
                                            manager_factory=manager_factory, sleep=sleep,
                                            dll=dll, monotonic=monotonic,
                                            optical_backend_factory=optical_backend_factory,
-                                           pem_factory=pem_factory, meter_factory=meter_factory)
+                                           pem_factory=pem_factory, meter_factory=meter_factory,
+                                           chopper_factory=chopper_factory)
     snapshot = {**config.snapshot, "authorization": {
         "combined_connection_writes_status_consumption": True,
         "xy_sine_disconnected": (False if config.reference_topology == "pem_xy_xx_sine" else confirm_xy_sine_disconnected),

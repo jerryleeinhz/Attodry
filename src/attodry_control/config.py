@@ -45,6 +45,7 @@ MAXIMUM_SR830_SINE_OUTPUT_V = 5.0
 OPTICAL_CONFIG_TABLES = {
     "nkt_source", "nkt_varia", "nkt_lltf", "nkt_run", "pem", "pem_run",
     "pm100d", "pm100d_run", "optical_scan", "power_feedback", "photonics_lockin", "pem_internal_diagnostic",
+    "chopper", "cld1010", "optical_background",
 }
 
 
@@ -1412,6 +1413,7 @@ def _parse_lockin(
     name: str,
     safety_role: LockinSafetyRoleConfig,
     safety: LockinSafetyConfig,
+    *, allow_disconnected_source: bool = False,
 ) -> LockinConfig:
     expected = {
         "model",
@@ -1464,7 +1466,7 @@ def _parse_lockin(
     if role is LockinRole.XX:
         if reference_source is not ReferenceSource.INTERNAL:
             raise ConfigError("lockin_xx reference_source must be 'internal'.")
-        if not connected:
+        if not connected and not allow_disconnected_source:
             raise ConfigError("lockin_xx SINE OUT must be marked physically connected.")
     else:
         if reference_source is not ReferenceSource.EXTERNAL_TTL:

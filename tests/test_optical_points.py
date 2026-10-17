@@ -440,17 +440,26 @@ class OpticalPointSessionTests(unittest.TestCase):
         self.assertTrue(meter.closed)
 
     def test_failed_power_sample_retains_raw_transcript_in_cleanup(self):
-        session, _, _, meter, _ = self.make()
+        events = []
+        session, _, _, meter, _ = self.make(events=lambda kind, value: events.append((kind, value)))
         self.start(session)
         session.begin_sample()
         meter.resource.power_provider = lambda: float("nan")
         with self.assertRaises(NktError):
             session.read()
         result = session.cleanup()
+        self.assertEqual(result["device_transcripts"]["pm100d"]["audit_ref"],
+                         "optical_audit.device_transcripts.pm100d")
+        audits = [payload for kind, payload in events if kind == "optical_audit"]
+        self.assertEqual(len(audits), 1)
+        transcript = audits[0]["device_transcripts"]["pm100d"]
+        self.assertEqual(result["device_transcripts"]["pm100d"]["count"], len(transcript))
+        self.assertEqual(transcript, meter.transcript)
         self.assertTrue(any(row["command"] == "READ?" and row.get("reply") == "nan"
-                            for row in result["device_transcripts"]["pm100d"]))
+                            and row.get("error") for row in transcript))
         self.assertFalse(result["state_current"])
-        self.assertTrue(result["point_evidence"])
+        self.assertEqual(result["point_evidence"]["count"], len(audits[0]["points"]))
+        self.assertTrue(audits[0]["points"])
 
     def test_close_preserves_pem_reference_when_excitation_cleanup_is_unknown(self):
         session, backend, pem, _, _ = self.make()

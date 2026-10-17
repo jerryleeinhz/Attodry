@@ -467,7 +467,11 @@ class CombinationTests(unittest.TestCase):
         namespace = {}
         for source in sources:
             compile(source, "combination_analysis.ipynb", "exec")
-        with redirect_stdout(io.StringIO()), patch("IPython.display.display"):
+        # Notebook policy belongs to its kernel. Do not leak its module-level
+        # source-grouping override into unrelated package tests in this process.
+        import attodry_control.unified_plotting as plotting
+        with redirect_stdout(io.StringIO()), patch("IPython.display.display"), patch.object(
+                plotting, "_condition_columns", plotting._condition_columns):
             exec(sources[0], namespace)
             namespace["DATA_DIRECTORY"] = self.directory
             exec(sources[1], namespace)

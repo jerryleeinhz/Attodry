@@ -8,18 +8,21 @@ import time
 
 from .nkt_config import NktError
 from .nkt_control import NktController, utc_now
-from .power_feedback import PowerWindow, next_nd_pct, next_source_current_pct, target_in_tolerance
+from .power_feedback import (PowerWindow, adaptive_feedback_step, next_cld_current_a,
+                             next_nd_pct, next_source_current_pct, next_source_power_pct,
+                             target_in_tolerance, tuning_in_tolerance)
 
 
 class OpticalScan:
     def __init__(self, nkt_config, config, backend, *, pem=None, meter=None,
-                 clock=time.monotonic, sleep=time.sleep, on_event=None):
+                 clock=time.monotonic, sleep=time.sleep, on_event=None, controller=None):
         config.validate(nkt_config, pem.config if pem else None, meter.config if meter else None)
         self.config, self.nkt_config = config, nkt_config
         self.pem, self.meter = pem, meter
         self.clock, self.sleep, self.on_event = clock, sleep, on_event
         self.fixed_feedback_settings = None
-        self.nkt = NktController(nkt_config, backend, clock=clock, sleep=sleep, on_event=self._nkt_event)
+        self.nkt = controller or NktController(nkt_config, backend, clock=clock, sleep=sleep, on_event=self._nkt_event)
+        self._response_history_key, self._response_history = None, []
         self.record = {"schema_version": 1, "captured_at_utc": utc_now(), "outcome": "rejected",
                        "completed": False, "simulated": not any(x.is_hardware for x in
                            (backend, pem, meter) if x is not None),
@@ -43,12 +46,12 @@ class OpticalScan:
         if deadline is not None and self.clock() >= deadline:
             raise NktError("Optical point total timeout (includes all preparation and tuning)")
 
-    def _verify(self, point, wavelength, emitting, deadline):
+    def _verify(self, point, wavelength, emitting, deadline, *, verify_meter=True):
         self._deadline(deadline)
         self.record["state_current"] = False
         state = {"nkt": self.nkt.verify_point(point, emitting=emitting),
                  "pem": self.pem.verify_ready() if self.pem else None,
-                 "pm100d": self.meter.verify_ready(wavelength) if self.meter else None}
+                 "pm100d": self.meter.verify_ready(wavelength) if self.meter and verify_meter else None}
         # The other instrument queries take time; recheck NKT before accepting
         # the combined evidence or crossing the emission barrier.
         state["nkt"] = self.nkt.verify_point(point, emitting=emitting)
@@ -64,22 +67,31 @@ class OpticalScan:
         return state
 
     def _sample(self, row, point, wavelength, deadline, phase):
-        state = self._verify(point, wavelength, self.nkt_config.emit, deadline)
+        # read_sample itself performs full PM settings/status checks on both
+        # sides of this READ. Keep independent laser/PEM guards, without an
+        # extra outer PM capture or any cross-sample settings cache.
+        state = self._verify(point, wavelength, self.nkt_config.emit, deadline, verify_meter=False)
+        self.record["state_current"] = False
         sample = self.meter.read_sample(wavelength)
         sample.update(condition_id=row["condition_id"], attempt_index=1, accepted=False, phase=phase,
-                      nd_pct=point.nd_pct, requested_source_level_pct=point.source_level_pct,
+                      nd_pct=getattr(point, "nd_pct", None),
+                      requested_source_level_pct=getattr(point, "source_level_pct", None),
                       source_current_readback_pct=(state["nkt"]["source"]["level_pct"]
-                                                   if self.nkt_config.source_control == "current" else None))
+                          if getattr(self.nkt_config, "source_control", None) == "current" else None))
+        if hasattr(point, "current_a"):
+            sample.update(requested_current_a=point.current_a,
+                          current_readback_a=state["nkt"]["source"]["getLdCurrSetpoint"])
         feedback = row["feedback_config"]
         sample["above_reduce_threshold"] = bool(feedback and feedback.get("reduce_above_power_w") is not None
                                                  and sample["power_w"] > feedback["reduce_above_power_w"])
         # Keep raw acquisition evidence even if a later device/state check fails.
         row["power_samples"].append(sample)
         self._event("power_sample", sample=sample.copy())
+        self._deadline(deadline)
         if feedback:
             if sample["power_w"] > feedback["max_power_w"]:
                 raise NktError("Power exceeds feedback limit; no corrective retry")
-            if (feedback["actuator"] == "source_current"
+            if (feedback["actuator"] in ("source_current", "source_power", "cld_current")
                     and sample["power_w"] < feedback["minimum_signal_power_w"]):
                 raise NktError("Power below minimum valid illumination; do not increase current to search for light")
         if sample["above_reduce_threshold"]:
@@ -87,53 +99,109 @@ class OpticalScan:
             # window or perform another joint-state verification. The meter's
             # own post-READ status checks have already completed.
             return sample
-        self._verify(point, wavelength, self.nkt_config.emit, deadline)
+        state = self._verify(point, wavelength, self.nkt_config.emit, deadline, verify_meter=False)
+        state["pm100d"] = deepcopy(sample["after"])
+        state["pm_sample_sequence"] = sample["sequence"]
+        self.record["last_confirmed_state"] = state
         return sample
 
     def _stabilize(self, row, point, wavelength, deadline, cfg, *, initial_sample=None):
+        try:
+            return self._stabilize_point(row, point, wavelength, deadline, cfg, initial_sample=initial_sample)
+        except BaseException:
+            self.reset_feedback_history()
+            raise
+
+    def reset_feedback_history(self):
+        """Invalid/unknown optical state cannot provide a local response model."""
+        self._response_history_key, self._response_history = None, []
+
+    def _stabilize_point(self, row, point, wavelength, deadline, cfg, *, initial_sample=None):
         epoch = initial_sample["started_monotonic_s"] if initial_sample else self.clock()
-        window = PowerWindow(cfg.window, epoch_s=epoch, max_power_w=cfg.max_power_w)
+        window = PowerWindow(cfg.window, epoch_s=epoch, max_power_w=cfg.max_power_w,
+                             target_power_w=cfg.target_power_w)
         stable_since = None
         previous_sign = None
-        source_current = cfg.actuator == "source_current"
-        step = cfg.source_current_step_pct if source_current else cfg.nd_step_pct
+        source_percentage = cfg.actuator in ("source_current", "source_power")
+        cld_current = cfg.actuator == "cld_current"
+        step = (cfg.source_bounds()[2] if source_percentage else
+                cfg.current_step_a if cld_current else cfg.nd_step_pct)
+        history_key = (wavelength, getattr(point, "bandwidth_nm", None), cfg.actuator,
+                       getattr(point, "pulse_picker_ratio", None), getattr(point, "nd_pct", None),
+                       tuple(sorted((self.fixed_feedback_settings or {}).items())))
+        if history_key != self._response_history_key:
+            self._response_history = []
+        self._response_history_key = history_key
         while True:
             sample = initial_sample if initial_sample is not None else self._sample(row, point, wavelength, deadline, "tuning")
             initial_sample = None
             result = window.add(sample)
             reduce_now = sample["above_reduce_threshold"]
             target = target_in_tolerance(result["mean_power_w"], cfg)
+            tuning_target = (all(tuning_in_tolerance(s["power_w"], cfg) for s in window.samples)
+                             if cfg.tuning_tolerance_fraction is not None else target)
             result.update(target_in_tolerance=target, target_power_w=cfg.target_power_w,
                           target_tolerance_w=cfg.target_tolerance_w,
-                          nd_pct=point.nd_pct, actuator=cfg.actuator,
+                          target_in_tuning_tolerance=tuning_target, tuning_tolerance_w=cfg.tuning_tolerance_w(),
+                          nd_pct=getattr(point, "nd_pct", None), actuator=cfg.actuator,
                           above_reduce_threshold=reduce_now,
-                          source_current_pct=point.source_level_pct if source_current else None)
+                          source_current_pct=point.source_level_pct if cfg.actuator == "source_current" else None,
+                          source_power_pct=point.source_level_pct if cfg.actuator == "source_power" else None,
+                          current_a=point.current_a if cld_current else None)
             row["feedback_windows"].append(result)
             self._event("feedback_window", condition_id=row["condition_id"], result=result)
-            if result["power_window_stable"] and target and not reduce_now:
+            if result["power_window_stable"] and tuning_target and not reduce_now:
                 if stable_since is None:
                     stable_since = self.clock()
                 if self.clock() - stable_since >= cfg.hold_s - 1e-9:
+                    if cfg.actuator == "source_current" and cfg.tuning_tolerance_fraction is not None:
+                        self._response_history.append((point.source_level_pct, result["mean_power_w"]))
+                        del self._response_history[:-16]
                     return point, result, window
             else:
                 stable_since = None
-            if (result["power_window_stable"] and not target) or reduce_now:
+            if (result["power_window_stable"] and
+                    not tuning_in_tolerance(result["mean_power_w"], cfg)) or reduce_now:
                 adjustment_power = sample["power_w"] if reduce_now else result["mean_power_w"]
                 sign = adjustment_power < cfg.target_power_w
-                if previous_sign is not None and sign != previous_sign:
-                    step = max(0.1, round(step / 2, 1))
+                minimum_step = (min(step, max(getattr(self.nkt_config, "current_tolerance_a", 0) * 2, 1e-12))
+                                if cld_current else 0.1)
+                reversed_direction = previous_sign is not None and sign != previous_sign
+                if reversed_direction:
+                    step = max(minimum_step, step / 2)
+                    if not cld_current:
+                        step = round(step, 1)
                 previous_sign = sign
-                if source_current:
-                    revised = replace(point, source_level_pct=next_source_current_pct(
-                        point.source_level_pct, adjustment_power, cfg, step_pct=step))
-                    row["source_current_iterations"].append({"from_source_current_pct": point.source_level_pct,
-                                                             "to_source_current_pct": revised.source_level_pct,
-                                                             "window": result})
-                    self._event("source_current_revision", condition_id=row["condition_id"], effective=asdict(revised))
+                current = (point.source_level_pct if source_percentage else
+                           point.current_a if cld_current else point.nd_pct)
+                effective_step, step_evidence = adaptive_feedback_step(
+                    current, adjustment_power, cfg, step, self._response_history, minimum_step=minimum_step)
+                if cfg.actuator == "source_current" and cfg.tuning_tolerance_fraction is not None:
+                    self._response_history.append((current, adjustment_power))
+                    del self._response_history[:-16]
+                tuning = replace(cfg, target_tolerance_w=cfg.tuning_tolerance_w())
+                if source_percentage:
+                    next_value = next_source_current_pct if cfg.actuator == "source_current" else next_source_power_pct
+                    revised = replace(point, source_level_pct=next_value(
+                        point.source_level_pct, adjustment_power, tuning, step_pct=effective_step))
+                    label = "source_current" if cfg.actuator == "source_current" else "source_power"
+                    row.setdefault(label + "_iterations", []).append({"from_" + label + "_pct": point.source_level_pct,
+                        "to_" + label + "_pct": revised.source_level_pct, "window": result,
+                        "direction_reversed": reversed_direction, "step_evidence": step_evidence})
+                    self._event(label + "_revision", condition_id=row["condition_id"], effective=asdict(revised))
+                elif cld_current:
+                    revised = replace(point, current_a=next_cld_current_a(
+                        point.current_a, adjustment_power, tuning, step_a=effective_step))
+                    row.setdefault("cld_current_iterations", []).append({"from_current_a": point.current_a,
+                        "to_current_a": revised.current_a, "window": result,
+                        "direction_reversed": reversed_direction, "step_evidence": step_evidence})
+                    self._event("cld_current_revision", condition_id=row["condition_id"], effective=asdict(revised))
                 else:
-                    revised = replace(point, nd_pct=next_nd_pct(point.nd_pct, result["mean_power_w"], cfg, step_pct=step))
+                    revised = replace(point, nd_pct=next_nd_pct(point.nd_pct, adjustment_power, tuning,
+                                                               step_pct=effective_step))
                     row["nd_iterations"].append({"from_nd_pct": point.nd_pct, "to_nd_pct": revised.nd_pct,
-                                                 "window": result})
+                                                 "window": result, "direction_reversed": reversed_direction,
+                                                 "step_evidence": step_evidence})
                     self._event("nd_revision", condition_id=row["condition_id"], effective=asdict(revised))
                 self.nkt.turn_off(deadline=deadline)
                 self._verify(point, wavelength, False, deadline)
@@ -143,7 +211,8 @@ class OpticalScan:
                 self._verify(point, wavelength, False, deadline)
                 self.nkt.start_emission(point, deadline=deadline)
                 self._verify(point, wavelength, True, deadline)
-                window = PowerWindow(cfg.window, epoch_s=self.clock(), max_power_w=cfg.max_power_w)
+                window = PowerWindow(cfg.window, epoch_s=self.clock(), max_power_w=cfg.max_power_w,
+                                     target_power_w=cfg.target_power_w)
                 stable_since = None
             self._deadline(deadline)
             self.sleep(min(cfg.window.sample_interval_s, deadline - self.clock()))
@@ -164,12 +233,13 @@ class OpticalScan:
                     raise NktError("Enabled optical device permissions missing")
         try:
             source, filt = self.nkt.begin_session(authorize_writes=authorize_writes, confirm_manual_route=confirm_manual_route)
-            if self.config.feedback and self.config.feedback.actuator == "source_current":
+            if self.config.feedback and self.config.feedback.actuator in ("source_current", "source_power"):
                 self.fixed_feedback_settings = {"nd_pct": filt["nd_pct"],
                                                 "pulse_picker_ratio": source["pulse_picker_ratio"]}
                 self.record["feedback_fixed_settings"] = dict(self.fixed_feedback_settings)
             if self.pem:
                 self.pem.preflight()
+            self.nkt.configure_session()
             for i, requested in enumerate(self.nkt_config.points):
                 feedback = (self.config.feedback.for_point(i, len(self.nkt_config.points))
                             if self.config.feedback else None)
@@ -188,7 +258,7 @@ class OpticalScan:
                 readback = self.nkt.prepare_point(requested, deadline=deadline)
                 filt = readback["filter"]
                 wavelength = ((filt["lower_edge_nm"] + filt["upper_edge_nm"]) / 2
-                              if self.nkt_config.mode == "varia_bandpass" else requested.wavelength_nm)
+                              if getattr(self.nkt_config, "mode", None) == "varia_bandpass" else requested.wavelength_nm)
                 row["center_setpoint_nm"] = wavelength
                 self._deadline(deadline)
                 if self.pem:
