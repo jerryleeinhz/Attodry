@@ -73,6 +73,26 @@ SD 是正式重复的差分散布；SEM 合并照光重复 SEM 与共享暗态�
 共用背景的误差相关性保留 baseline_id，不应作为独立误差做后续拟合。
 导出保留原始/差分值、背景均值/样本ID/时间年龄/质量和来源，原始数据库不修改。
 
+## 暗态时间曲线（2026-10-18，本地只读分析）
+
+在 unified_plotting 的普通曲线卡片中，X 选 **Time since run start (s)**，
+Y 选 **Dark Lock-in XX / XY / AUX h1/h2/h3 X / Y / R / Phase**；
+Response 保持 **Raw light**，即不做相减。dark坐标自动选择原始暗态读数。
+选择所需run并Load / refresh runs；活动/失败run须显式勾选顶部审计选项。
+该入口也为正常Combination照光读数提供elapsed_s坐标。
+
+每个暗读数使用归档captured_at_utc，并从其run登记UTC计算秒数。
+缺失/无时区时间不补零，不把组完成时间当成每次读数时间。
+从optical_dark_background事件读取raw_readings，按run/baseline_id去重；
+不重建或重复统计多个light引用的dark均值，不把缺测暗功率填成0 W。
+Raw显示各次读数；SD/SEM仅合并同一背景采集的重复。dark R均值是单次R的
+算术均值，与背景扣除使用的平均复数幅值不同；phase沿用圆周统计。
+默认按该暗读数自身的逐通道质量剔除，未知状态仍标unknown，审计保留无效值。
+后续光学目标变化不阻止暗态时间曲线；gate/温场/激励变化仍需分组或过滤。
+多run各用自己的时间零点，不能据此判断绝对时间连续性。
+导出保留UTC、背景ID、原上下文/设置、配置哈希和源run，不修正或宣称消除了漂移。
+旧数据无背景事件时不生成dark选项。仅本地分析改动，未部署到活动扫描机器。
+
 ## 组合扫描等待优化（2026-10-15）
 
 PEM 外参考点引擎按每路最后相关变化的单调时间，只补足

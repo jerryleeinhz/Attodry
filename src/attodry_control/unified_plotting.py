@@ -229,11 +229,13 @@ def load_plot_sources(
     *,
     include_audit: bool = False,
     run_ids: Mapping[str, Sequence[str]] | None = None,
+    include_dark: bool = False,
 ) -> tuple[dict[str, Any], ...]:
     """Adapt selected project records and numeric CSV rows to one wide schema.
 
     Project loaders keep their accepted/clean default.  ``include_audit`` opts
     into rejected/problem records where those source formats support it.
+    ``include_dark`` adds independent stored background reads for dark axes.
     """
 
     result: list[dict[str, Any]] = []
@@ -242,12 +244,16 @@ def load_plot_sources(
         if source is None:
             raise ValueError(f"Unsupported data source: {item}")
         if source.kind == "combination_sqlite":
-            from .combination_analysis import load_combination_rows
+            from .combination_analysis import load_combination_rows, load_combination_dark_rows
 
             selected = (None,) if run_ids is None else tuple(run_ids.get(str(source.path), ()))
             rows = (row for run in selected for row in
                     load_combination_rows(source.path, run_id=run, audit=include_audit))
             result.extend(_decorate(source, rows))
+            if include_dark:
+                dark_rows = (row for run in selected for row in
+                             load_combination_dark_rows(source.path, run_id=run, audit=include_audit))
+                result.extend(_decorate(source, dark_rows))
         elif source.kind == "three_smu":
             from .combination_analysis import load_legacy_three_smu
 
@@ -443,12 +449,12 @@ def column_label(key: str) -> str:
     status = {"requested": "target", "actual": "readback", "measured": "measured"}
     if prefix == "csv" and dot:
         return f"{suffix} (unit unspecified)"
-    if prefix in {"requested", "actual", "measured", "axes"}:
+    if prefix in {"requested", "actual", "measured", "axes", "dark"}:
         if prefix == "axes":
             name = suffix.replace(".", " ").replace("_", " ")
             return name
         label, unit = _known_label(suffix)
-        qualifier = status.get(prefix, "")
+        qualifier = "Dark" if prefix == "dark" else status.get(prefix, "")
         text = f"{qualifier} {label}".strip()
         return f"{text} ({unit})" if unit else text
     names = {
@@ -457,7 +463,7 @@ def column_label(key: str) -> str:
         "repeat_index": "Repeat index",
         "sample_index": "Sample index",
         "sequence_index": "Sequence index",
-        "elapsed_s": "Elapsed time (s)",
+        "elapsed_s": "Time since run start (s)",
         "segment": "Scan segment",
         "direction": "Scan direction",
         "sample_status": "Sample status",
@@ -632,6 +638,10 @@ def _unresolved_dimensions(
                 continue
         token = _dimension_token(key)
         module = _dimension_module(key)
+        if "elapsed_s" in plot_keys and any(k.startswith("dark.lockin_") for k in plot_keys) and module == "optical":
+            # Upcoming light targets are provenance, not illumination during dark.
+            # Electrical/environment changes still require grouping or filters.
+            continue
         if token in tokens:
             continue
         if key.startswith("axes.") and module in modules:
@@ -695,6 +705,8 @@ def _draw_curve(axis, rows, spec, x, y):
         note += " · light − dark"
         if mode == "mean_sem":
             note += " (shared dark error included)"
+    if y.startswith("dark.lockin_"):
+        note += " · dark reads" + (" (mean of individual R readings)" if y.endswith("amplitude_v") and mode != "raw" else "")
     ns = [p["n"] for p in summaries if p["n"] > 0]
     if mode != "raw" and ns:
         note += f" · n={min(ns)}" + (f"–{max(ns)}" if min(ns) != max(ns) else "")
@@ -715,7 +727,7 @@ def _draw_curve(axis, rows, spec, x, y):
     report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **quality, "selected_row_count": len(rows), "plotted_row_count": len(valid),
               "omitted_missing_or_nonfinite_count": len(kept)-len(valid),
               "displayed_point_count": sum(_is_numeric(p["y"]) for p in summaries),
-              "statistics": mode, "replication_unit": "formal repeats within the same source/run/condition/attempt",
+              "statistics": mode, "replication_unit": ("dark reads within the same source/run/baseline capture" if y.startswith("dark.") else "formal repeats within the same source/run/condition/attempt"),
               "uncertainty": ("SD: scatter after subtraction; SEM: repeat SEM plus shared dark covariance; magnitude/phase first-order; drift excluded"
                               if "_delta_" in y else "sample SD (ddof=1); SEM=SD/sqrt(n), independence assumed; undefined for n<2"),
               "undefined_error_point_count": sum(p['n'] > 0 and p['error'] is None for p in summaries) if mode != 'raw' else 0,
@@ -728,7 +740,12 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     from .analysis_observations import qualify_observations
     from .optical_background_analysis import subtract_dark
     spec = dict(spec)
+    axes = ("x", "y", "z") if spec.get("mode") == "xy_z" else ("x", "y") if spec.get("mode", "curve") == "curve" else ("x",)
+    dark_plot = any(str(spec.get(key, "")).startswith("dark.lockin_") for key in axes)
+    rows = tuple(r for r in rows if (r.get("observation_kind") == "dark") == dark_plot)
     response_mode = spec.get("photoresponse", "raw")
+    if dark_plot and response_mode != "raw":
+        raise ValueError("Dark axes show original dark reads; choose Response: Raw light (no subtraction).")
     if response_mode != "raw":
         excluded = set(spec.get("excluded_sample_ids", ()))
         marked = tuple({**r, "_manual_excluded": _sample_token(r) in excluded} for r in rows)
@@ -1186,6 +1203,7 @@ class UnifiedPlotDashboard:
             widgets.HBox([load_runs, load_status]),
             photoresponse, dark_run, dark_phase, dark_age,
             widgets.HTML("For an independent dark, load both light and dark run IDs above. OFF evidence, matching settings and channel quality are required. Select raw lock-in axes; Response applies subtraction."),
+            widgets.HTML("Dark drift: choose X = Time since run start (s), Y = Dark Lock-in XX/XY/AUX X/Y/R/Phase, and Response = Raw light (no subtraction). Each dark read is loaded once; capture UTC and baseline ID are exported."),
             widgets.HBox([x_axis, component if mode in ("field", "three_channels") else y_axis], layout=widgets.Layout(width="100%")),
             group_axis if mode != "xy_z" else z_axis,
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
@@ -1328,7 +1346,7 @@ class UnifiedPlotDashboard:
         path, run, audit = key
         before = _source_signature(source.path)
         rows = load_plot_sources([source], include_audit=audit,
-                                 run_ids=None if run is None else {path: [run]})
+                                 run_ids=None if run is None else {path: [run]}, include_dark=True)
         self._cache[key] = rows
         self._snapshots[key] = {
             "source_path": path, "run_id": run, "include_audit": audit,
@@ -1380,8 +1398,9 @@ class UnifiedPlotDashboard:
                 card[name].layout.display = "" if card["photoresponse"].value == "separate" else "none"
             rows = self._selected_rows(card)
             pending = sum(key not in self._cache for key, _source in self._cache_keys(card))
+            dark_count = sum(r.get("observation_kind") == "dark" for r in rows)
             card["load_status"].value = (f"{pending} run(s) awaiting Load / refresh runs." if pending
-                else f"Loaded {len(rows)} samples. Select run IDs, then Load / refresh runs."
+                else f"Loaded {len(rows) - dark_count} formal samples + {dark_count} dark reads. Select run IDs, then Load / refresh runs."
                 + (" Active/failed runs require Include rejected/problem records." if not self.include_audit.value else ""))
             axes = numeric_columns(rows)
             scalars = scalar_columns(rows)
@@ -1401,7 +1420,7 @@ class UnifiedPlotDashboard:
             for filter_row in card["filters"]:
                 self._update_filter_row(card, filter_row, force=True)
             old_excluded = card["excluded"].value
-            card["excluded"].options = [(f"{r.get('source_name', '')} · condition {r.get('condition_id', r.get('row_index'))} · sample {r.get('sample_index', '')} {r.get('role', '')} {r.get('harmonic', '')}", _sample_token(r)) for r in rows]
+            card["excluded"].options = [(f"{r.get('source_name', '')} · {r.get('observation_kind', 'formal')} condition {r.get('condition_id', r.get('row_index'))} · sample {r.get('sample_index', '')} {r.get('role', '')} {r.get('harmonic', '')}", _sample_token(r)) for r in rows]
             available_ids = {v for _, v in card["excluded"].options}
             card["excluded"].value = tuple(v for v in old_excluded if v in available_ids)
         except Exception as exc:

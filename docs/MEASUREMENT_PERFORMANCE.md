@@ -130,6 +130,13 @@ after 候选，不拼接不同候选的 XX、XY、SMU 或功率读数。
 
 ## 5. 暗背景、审计和分析开销
 
+2026-10-18：统一绘图新增elapsed_s与逐路dark Y，只读归档时间/背景原始读数。
+每个所选run在显式Load时增加两次SELECT（事件表存在性、背景快照）及短只读
+事务；fetch后立即关连接，再解码JSON。不查询未选择run、不读取其全部通信事件，
+不在坐标/分组变化时重新读取。按run/baseline_id去重，重复照光引用不放大暗样本数。
+正式样本加载仅增加已有run时间列，无新增仪器通信/判稳/等待；旧formal-only API
+默认保持。146项硬件阻断测试及Notebook编译通过，无LK_setup部署或实机提速声明。
+
 2026-10-17：可选 `optical_background.capture_mode="once_before_scan"` 将一轮的
 dark成本从每条件一组降为开始一组；省略保持 per_condition。设条件数为C、每组S次，
 暗态锁相读数从C×S降为S，避免后续为背景重测关光、重调与再次滤波等待。原轴切换

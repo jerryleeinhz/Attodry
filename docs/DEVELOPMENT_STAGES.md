@@ -1,5 +1,32 @@
 # Development stages
 
+## Dark drift axes in unified plotting (2026-10-18, local offline)
+
+The operator requests existing UTC capture times as an X option and original
+XX/XY/AUX dark readings as Y options. Combination rows now expose recorded
+capture UTC and elapsed seconds from each run's registration UTC. The dashboard
+adds stored optical_dark_background raw reads, with run/baseline-ID deduplication;
+light references to the same mean never become independent dark observations.
+Dark axes select only dark rows and require Raw response (no subtraction).
+Statistics combine only one capture's repeats; scalar R means are explicitly
+separate from the complex mean used for subtraction. Per-sample channel quality,
+unknown status, audit opt-in, missing times, context/settings and config provenance
+remain visible. Time traces permit changing upcoming optical targets while gate,
+environment and excitation changes still require grouping/filtering. Each run has
+its own elapsed-time origin; original UTC remains in exports.
+
+146 relevant hardware-blocked local tests pass in63.839s, including nine new
+dark/time/widget/export cases; the earlier71-case pass overlaps this suite.
+Both Notebook code cells compile and git diff --check passes. Initial sandbox
+TEMP ACL failures are environment failures, not instrument or analysis evidence;
+the normal-permission hardware-blocked run passes. Logs are ignored under
+.test-tmp/dark-drift-tests. No SSH, deployment, instrument connection, settings,
+new scan or resumed monitor occurs; LK_setup's active acquisition remains unchanged.
+The old formal-only loader default is preserved. Explicit dashboard loading adds
+two read-only SELECTs (event-table presence and selected-run background snapshot)
+and a short transaction per run, closed before JSON adaptation; no axis-change
+reload, instrument communication, new wait or hardware safety change is added.
+
 ## Three-detector publication and LK_setup deployment (2026-10-18)
 
 The operator separately authorizes push/deployment and a filled handoff TOML,

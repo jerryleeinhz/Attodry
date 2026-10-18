@@ -25,6 +25,15 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
     Output overload is a conservative analysis exclusion even though acquisition
     can accept it. Missing status is explicitly unknown, not an inferred pass.
     """
+    dark = re.fullmatch(r"dark\.(lockin_(xx|xy|aux))_h(\d+)_(x_v|y_v|amplitude_v|phase_deg)", column)
+    if dark:
+        _, role, order, _ = dark.groups()
+        translated = {**row, **{"measured." + key[5:]: value
+                                for key, value in row.items() if key.startswith("dark.lockin_")}}
+        state, reasons = channel_quality(translated, "measured." + column[5:])
+        if (row.get("dark_valid_by_channel") or {}).get(f"{role}:h{order}") is False:
+            return "flagged", tuple(dict.fromkeys((*reasons, "recorded_invalid_dark_sample")))
+        return state, reasons
     delta = re.fullmatch(r"measured\.(lockin_(xx|xy|aux))_h(\d+)_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
     if delta:
         role, short_role, order, metric = delta.groups()

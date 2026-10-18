@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import closing
 import csv
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import json
 import math
@@ -33,6 +34,87 @@ def list_combination_runs(path: str | Path) -> tuple[dict, ...]:
             "ORDER BY created_at_utc DESC, run_id DESC"))
 
 
+def _sample_time(record: dict, captured_at: str | None, run_started_at: str) -> None:
+    """Expose recorded capture UTC and elapsed seconds; never invent missing time."""
+    record["captured_at_utc"] = captured_at
+    record["run_started_at_utc"] = run_started_at
+    try:
+        captured = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
+        started = datetime.fromisoformat(run_started_at.replace("Z", "+00:00"))
+        if captured.utcoffset() is not None and started.utcoffset() is not None:
+            record["elapsed_s"] = (captured - started).total_seconds()
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+
+def load_combination_dark_rows(path: str | Path, *, run_id: str | None = None,
+                               audit: bool = False) -> tuple[dict, ...]:
+    """One row per archived dark read, independent of light/background reuse.
+
+    Only complete background-capture events are adapted. Channel flags remain
+    available for the plot quality policy; active/failed runs require audit.
+    """
+    with closing(open_readonly(path)) as connection:
+        connection.execute("BEGIN")
+        if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='combination_events'").fetchone():
+            return ()
+        rows = connection.execute("""
+            SELECT e.event_id, e.run_id, e.payload_json, r.schema_version,
+                   r.status, r.created_at_utc, json_extract(r.cleanup_json, '$.clean') AS clean,
+                   json_extract(r.plan_json, '$.config_sha256') AS config_sha256
+            FROM combination_events e JOIN combination_runs r USING(run_id)
+            WHERE e.event_type='optical_dark_background'
+            """ + ("AND e.run_id=? " if run_id is not None else "") + """
+            ORDER BY r.created_at_utc, e.event_id
+        """, () if run_id is None else (run_id,)).fetchall()
+    output, seen = [], set()
+    for event in rows:
+        if event["schema_version"] != SCHEMA_VERSION:
+            raise ValueError("Unsupported combination schema")
+        accepted = event["status"] == "completed" and event["clean"] == 1
+        if not audit and not accepted:
+            continue
+        baseline = json.loads(event["payload_json"])
+        baseline_id = baseline.get("baseline_id")
+        identity = (event["run_id"], baseline_id or event["event_id"])
+        if identity in seen:
+            continue
+        seen.add(identity)
+        context = baseline.get("context") or {}
+        requested = {key: value for point in (context.get("requested_conditions") or {}).values()
+                     if isinstance(point, Mapping) for key, value in point.items()}
+        visits = context.get("axis_visits") or {}
+        # Keep visit IDs in dark_context, not as changing physical dimensions.
+        axes = {module: {"index": scope["axis_indices"][-1] if scope.get("axis_indices") else scope.get("index")}
+                for module, scope in visits.items() if isinstance(scope, Mapping)}
+        for index, reading in enumerate(baseline.get("raw_readings") or ()):
+            if reading.get("module") != "lockin":
+                continue
+            record = {
+                "source_path": str(Path(path).resolve()), "run_id": event["run_id"],
+                "run_status": event["status"], "accepted": accepted,
+                "config_sha256": event["config_sha256"],
+                "observation_kind": "dark", "baseline_id": baseline_id,
+                "dark_event_id": event["event_id"], "dark_context": context,
+                # Each capture is a distinct replication unit, even for once-per-scan reuse.
+                "condition_id": "dark-" + str(baseline_id or event["event_id"]),
+                "sample_index": index, "clean": reading.get("clean"),
+                "status.lockin": reading.get("status"),
+                **_flatten("requested", requested),
+                **_flatten("axes", axes),
+                **_flatten("actual", reading.get("actual") or {}),
+                **{"dark." + key: value for key, value in (reading.get("measurements") or {}).items()
+                   if key.startswith(("lockin_xx_h", "lockin_xy_h", "lockin_aux_h")) and "_delta_" not in key},
+            }
+            record["dark_valid_by_channel"] = {
+                name: channel["samples"][index].get("valid_for_analysis")
+                for name, channel in (baseline.get("channels") or {}).items()
+                if index < len(channel.get("samples") or ())}
+            _sample_time(record, reading.get("captured_at_utc"), event["created_at_utc"])
+            output.append(record)
+    return tuple(output)
+
+
 def load_combination_rows(path: str | Path, *, run_id: str | None = None,
                           audit: bool = False) -> tuple[dict, ...]:
     """One wide row per formal sample. Audit opt-in exposes failed run samples.
@@ -60,7 +142,7 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
                                    "optical": {key: plan.get("hardware", {}).get("optical", {}).get(key)
                                                for key in ("chopper", "pem")}})
         rows = connection.execute("""
-            SELECT r.status AS run_status,
+            SELECT r.status AS run_status, r.created_at_utc AS run_started_at_utc,
                    c.context_json, a.status AS attempt_status, s.*
             FROM combination_samples s
             JOIN combination_runs r USING(run_id)
@@ -113,6 +195,8 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
                 assessment = (reading.get("status") or {}).get("power_target_assessment")
                 if assessment:
                     record.update(_flatten("optical_power_quality", assessment))
+        _sample_time(record, record.get("timestamps.lockin") or sample.get("finished_at_utc"),
+                     row["run_started_at_utc"])
         if isinstance(lockin_status, Mapping) and lockin_status.get("schema_version") == "photonics-lockin-v1":
             from .analysis_observations import channel_quality
             channels = {key: channel_quality(record, key) for key in record
