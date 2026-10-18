@@ -468,10 +468,10 @@ def column_label(key: str) -> str:
 def _known_label(name: str) -> tuple[str, str]:
     if name in _COLUMN_LABELS:
         return _COLUMN_LABELS[name]
-    harmonic = re.fullmatch(r"(lockin_(?:xx|xy))_h([123])_(delta_)?(x_v|y_v|amplitude_v|phase_deg)", name)
+    harmonic = re.fullmatch(r"(lockin_(?:xx|xy|aux))_h([123])_(delta_)?(x_v|y_v|amplitude_v|phase_deg)", name)
     if harmonic:
         channel, order, delta, field = harmonic.groups()
-        channel_label = "Lock-in XX" if channel.endswith("xx") else "Lock-in XY"
+        channel_label = {"lockin_xx": "Lock-in XX", "lockin_xy": "Lock-in XY", "lockin_aux": "Lock-in AUX"}[channel]
         field_name, unit = {
             "x_v": ("X", "V"), "y_v": ("Y", "V"),
             "amplitude_v": ("R", "V"), "phase_deg": ("Phase", "deg"),
@@ -737,14 +737,14 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                              max_age_s=spec.get("dark_max_age_s", 600.0))
         for axis in ("y", "z"):
             key = spec.get(axis) or ""
-            spec[axis] = re.sub(r"^(measured\.lockin_(?:xx|xy)_h\d+_)(?!delta_)", r"\1delta_", key)
+            spec[axis] = re.sub(r"^(measured\.lockin_(?:xx|xy|aux)_h\d+_)(?!delta_)", r"\1delta_", key)
         component = spec.get("field_component", "amplitude_v")
         spec["field_component"] = component if component.startswith("delta_") else "delta_" + component
     mode = spec.get("mode", "curve")
-    if mode not in ("curve", "xy_z", "field"):
+    if mode not in ("curve", "xy_z", "field", "three_channels"):
         raise ValueError("Plot mode must be curve, xy_z or field")
     x, y = spec.get("x"), spec.get("y")
-    if not x or (mode != "field" and not y):
+    if not x or (mode not in ("field", "three_channels") and not y):
         raise ValueError("Choose the required axes first.")
     filters = spec.get("filters") or {}
     filtered = _filter_rows(rows, filters)
@@ -755,11 +755,12 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
         raise ValueError("No data rows remain after the selected filters.")
     z = spec.get("z") if mode == "xy_z" else None
     plot_keys = [k for k in (x, y, z) if k]
-    if mode == "field":
+    if mode in ("field", "three_channels"):
         field = spec.get("field_component", "amplitude_v")
         if field.removeprefix("delta_") not in ("amplitude_v", "x_v", "y_v", "phase_deg"):
             raise ValueError("Unsupported channel component")
-        plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in ("xx", "xy") for h in (1, 2)]
+        plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in (("xx", "xy", "aux") if mode == "three_channels" else ("xx", "xy"))
+                          for h in ((1,) if mode == "three_channels" else (1, 2))]
     group_keys = [spec["group_by"]] if spec.get("group_by") else []
     if mode != "xy_z":
         group_keys += ["source_path", "run_id", "segment", "direction", "repeat_index", "role", "harmonic", "scan_type", "source_kind"]
@@ -771,15 +772,22 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
         import matplotlib.pyplot as plt
         figure = None
         try:
-            if mode == "field":
-                figure, axes = plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
+            if mode in ("field", "three_channels"):
+                figure, axes = plt.subplots(1, 3, figsize=(15, 4.5), layout="constrained") if mode == "three_channels" else plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
                 reports, raw, summary = {}, [], []
                 for axis, key in zip(axes.flat, plot_keys[1:]):
                     panel = _draw_curve(axis, selected, {**spec, "title": column_label(key)}, x, key)
+                    if key.startswith("measured.lockin_aux_"):
+                        labels = {(r.get("status.lockin") or {}).get("channel_labels", {}).get("aux") for r in eligible}
+                        labels.discard(None)
+                        if len(labels) == 1:
+                            label = next(iter(labels))
+                            axis.set_title(axis.get_title().replace("Lock-in AUX", label))
+                            axis.set_ylabel(axis.get_ylabel().replace("Lock-in AUX", label))
                     reports[key] = panel["report"]
                     raw.extend({**r, "plot_channel": key} for r in panel["rows"])
                     summary.extend(panel["summary_rows"])
-                figure.suptitle(_audit_title(selected) + (spec.get("title") or "Vxx / Vxy · h1 / h2"))
+                figure.suptitle(_audit_title(selected) + (spec.get("title") or ("Vxx / Vxy / AUX · h1" if mode == "three_channels" else "Vxx / Vxy · h1 / h2")))
                 report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), "mode": mode, "channels": reports, "selected_row_count": len(selected),
                           "plotted_row_count": len(raw), "excluded_quality_count": sum(r['excluded_quality_count'] for r in reports.values()),
                           "omitted_missing_or_nonfinite_count": sum(r['omitted_missing_or_nonfinite_count'] for r in reports.values()),
@@ -1064,13 +1072,14 @@ class UnifiedPlotDashboard:
         self.refresh_button = widgets.Button(description="Refresh records", icon="refresh")
         self.add_curve_button = widgets.Button(description="New curve plot", icon="plus")
         self.add_field_button = widgets.Button(description="Four lock-in channels", icon="plus")
+        self.add_three_button = widgets.Button(description="Three detectors · h1", icon="plus")
         self.add_map_button = widgets.Button(description="New XY–Z plot", icon="plus")
         self.render_button = widgets.Button(description="Render all plots", button_style="primary")
         self.export_button = widgets.Button(description="Export figures + data", icon="download")
         self.save_button = widgets.Button(description="Save setup", icon="save")
         self.load_button = widgets.Button(description="Load setup", icon="upload")
         for button in (self.refresh_button, self.add_curve_button, self.add_map_button,
-                       self.add_field_button, self.render_button, self.export_button,
+                       self.add_field_button, self.add_three_button, self.render_button, self.export_button,
                        self.save_button, self.load_button):
             button.layout.width = "auto"
             button.layout.min_width = "120px"
@@ -1078,6 +1087,7 @@ class UnifiedPlotDashboard:
         self.include_audit.observe(self._audit_changed, names="value")
         self.add_curve_button.on_click(lambda _button: self.add_plot("curve"))
         self.add_field_button.on_click(lambda _button: self.add_plot("field"))
+        self.add_three_button.on_click(lambda _button: self.add_plot("three_channels"))
         self.add_map_button.on_click(lambda _button: self.add_plot("xy_z"))
         self.render_button.on_click(self._render_all)
         self.export_button.on_click(self._export)
@@ -1089,7 +1099,7 @@ class UnifiedPlotDashboard:
             widgets.HBox([self.refresh_button, self.include_audit]),
             self.status,
             self.card_box,
-            widgets.HBox([self.add_curve_button, self.add_map_button, self.add_field_button, self.render_button], layout=widgets.Layout(flex_flow="row wrap")),
+            widgets.HBox([self.add_curve_button, self.add_map_button, self.add_field_button, self.add_three_button, self.render_button], layout=widgets.Layout(flex_flow="row wrap")),
             self.output_directory,
             widgets.HBox([self.export_button]),
             self.configuration_path,
@@ -1098,7 +1108,7 @@ class UnifiedPlotDashboard:
         self._refresh()
 
     def add_plot(self, mode: str, saved: Mapping[str, Any] | None = None) -> None:
-        if mode not in {"curve", "xy_z", "field"}:
+        if mode not in {"curve", "xy_z", "field", "three_channels"}:
             raise ValueError("Plot mode must be curve, xy_z or field")
         widgets = self.widgets
         card_id = self._next_card_id
@@ -1134,7 +1144,7 @@ class UnifiedPlotDashboard:
         )
         statistics = widgets.Dropdown(
             options=[("Raw observations", "raw"), ("Mean ± SD", "mean_sd"), ("Mean ± SEM", "mean_sem")],
-            value=default_spec.get("statistics", "mean_sd" if mode == "field" else "raw"), description="Statistics:",
+            value=default_spec.get("statistics", "mean_sd" if mode in ("field", "three_channels") else "raw"), description="Statistics:",
             disabled=mode == "xy_z")
         quality = widgets.Dropdown(options=[("Exclude flagged channels", "exclude"), ("AUDIT: include flagged", "include")],
                                   value=default_spec.get("quality_policy", "exclude"), description="Quality:", layout=widgets.Layout(width="360px"))
@@ -1168,7 +1178,7 @@ class UnifiedPlotDashboard:
             "image": figure_image,
         }
         card["widget"] = widgets.VBox([
-            widgets.HTML(f"<h3>Plot {card_id}: {'Four lock-in channels' if mode == 'field' else 'Curve / stacked' if mode == 'curve' else 'XY–Z color map'}</h3>"),
+            widgets.HTML(f"<h3>Plot {card_id}: {'Three detectors · h1' if mode == 'three_channels' else 'Four lock-in channels' if mode == 'field' else 'Curve / stacked' if mode == 'curve' else 'XY–Z color map'}</h3>"),
             title,
             widgets.HTML("<b>Choose one or more data sources</b>"),
             checklist.widget,
@@ -1176,7 +1186,7 @@ class UnifiedPlotDashboard:
             widgets.HBox([load_runs, load_status]),
             photoresponse, dark_run, dark_phase, dark_age,
             widgets.HTML("For an independent dark, load both light and dark run IDs above. OFF evidence, matching settings and channel quality are required. Select raw lock-in axes; Response applies subtraction."),
-            widgets.HBox([x_axis, component if mode == "field" else y_axis], layout=widgets.Layout(width="100%")),
+            widgets.HBox([x_axis, component if mode in ("field", "three_channels") else y_axis], layout=widgets.Layout(width="100%")),
             group_axis if mode != "xy_z" else z_axis,
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
             widgets.HTML("SD: scatter of formal repeats; SEM: SD/√n assumes independent repeats. Missing status stays unknown. n and exclusions are exported."),
@@ -1380,7 +1390,7 @@ class UnifiedPlotDashboard:
                 old = control.value
                 control.options = axes
                 control.value = old if old in {value for _, value in axes} else (axes[0][1] if axes else None)
-                if old is None and card["mode"] == "field" and key == "x":
+                if old is None and card["mode"] in ("field", "three_channels") and key == "x":
                     preferred = next((k for k in ("actual.field_x_t", "actual.field_z_t", "requested.field_x_t", "requested.field_z_t") if k in {v for _, v in axes} and len(column_values(rows, k)) > 1), None)
                     if preferred:
                         control.value = preferred
@@ -1530,7 +1540,7 @@ class UnifiedPlotDashboard:
                 note = f"Displayed {report['plotted_row_count']} samples; omitted {report['omitted_missing_or_nonfinite_count']} with missing/non-finite axes."
                 if report.get("duplicate_xy_observation_count"):
                     note += f" {report['duplicate_xy_observation_count']} XY observations overlap; all are retained."
-                print(note + f" Quality exclusions: {report.get('excluded_quality_count', 0)}. Counts in four-channel mode are channel observations.")
+                print(note + f" Quality exclusions: {report.get('excluded_quality_count', 0)}. Counts in multi-channel modes are channel observations.")
                 self._close_figure(figure)
         except Exception as exc:
             with card["output"]:
@@ -1600,7 +1610,7 @@ class UnifiedPlotDashboard:
             missing = {p for spec in payload.get("plots", []) for p in spec.get("source_paths", [])} - available
             if missing:
                 raise ValueError("Setup sources are missing: " + ", ".join(sorted(missing)))
-            if any(spec.get("mode") not in ("curve", "xy_z", "field") for spec in payload.get("plots", [])):
+            if any(spec.get("mode") not in ("curve", "xy_z", "field", "three_channels") for spec in payload.get("plots", [])):
                 raise ValueError("Unsupported plot mode in setup.")
             from .combination_analysis import list_combination_runs
             for spec in payload.get("plots", []):

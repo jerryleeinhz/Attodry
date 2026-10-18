@@ -15,7 +15,7 @@ MODES = ("broadband", "varia_bandpass", "lltf_swir")
 NKT_TABLES = {"nkt_source", "nkt_varia", "nkt_lltf", "nkt_run"}
 OTHER_TABLES = {
     "project", "cryostat", "magnet", "temperature_stability", "temperature_run",
-    "temperature_scan", "cleanup", "visa", "lockin_xx", "lockin_xy",
+    "temperature_scan", "cleanup", "visa", "lockin_xx", "lockin_xy", "lockin_aux",
     "lockin_sweep", "gate_top", "gate_bottom", "smu_bias", "three_smu_run",
     "pem", "pem_run", "pm100d", "pm100d_run", "optical_scan", "power_feedback",
     "combination_scan", "photonics_lockin", "pem_internal_diagnostic",

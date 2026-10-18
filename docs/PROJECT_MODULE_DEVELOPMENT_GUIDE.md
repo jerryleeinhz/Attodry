@@ -2,6 +2,11 @@
 
 最后更新：2026-10-17
 
+2026-10-18补充：用户批准在内部XX参考拓扑中可选增加语义角色lockin_aux
+（SR865A），接样品第三电压通道，外参来自XX TTL OUT，SINE OUT断开。
+三路共用剩余等待并串行读取，分别保留时间/型号/状态/暗态质量；
+配置、边界与离线验收见[三路锁相指南](THREE_LOCKIN_GUIDE.md)。
+
 当前光电任务采用两台 SR830：XX 内参考的 TTL OUT 同步 XY REF IN 和 Thorlabs
 斩波器 EXT REF IN，两路测 h1。XX SINE OUT 到样品的接入/断开独立声明；XY
 SINE OUT 断开。光学模块的 PEM、斩波器是可选部件；参考拓扑与激光源种类分别

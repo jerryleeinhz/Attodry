@@ -1,5 +1,9 @@
 # Photonics / nonlinear Hall combination scan
 
+2026-10-18：内部XX参考可选增加第三台SR865A（lockin_aux），与XY及斩波器
+共用XX TTL OUT。配置模板、三路暗背景/绘图及当前支持范围见
+[三路锁相指南](THREE_LOCKIN_GUIDE.md)。三台时仍使用下面的统一Combination入口。
+
 ## 统一运行与监控入口（2026-10-17）
 
 从当前项目根目录启动，根目录引导包使 python -m 加载本工作树 src，

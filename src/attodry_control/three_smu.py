@@ -367,7 +367,12 @@ class ThreeSmuSession:
             raise ThreeSmuError("Could not close all SMUs: " + "; ".join(errors))
 
     def enable_guarded_direct_gates(self) -> None:
-        """Register the continuous direct cleanup policy before any configuration."""
+        """Register explicit optical gate checks/actual-zero cleanup before configuration.
+
+        Registered direct gates retain fresh before/after protection and exact
+        source acknowledgement even when a dark transition needs no light guard.
+        Unregistered standalone/legacy points keep their existing behavior.
+        """
         if self._configured or self._point_recorder is not None or self._recorder is not None:
             raise ThreeSmuError("guarded direct gates must be registered before configuration")
         for role in active_smu_roles(self.plan):
@@ -403,7 +408,7 @@ class ThreeSmuSession:
         for role, target in coordinates.items():
             self._validate_source_target(role, target)
         direct_roles = tuple(role for role in active_smu_roles(self.plan)
-                             if transition_guard is not None
+                             if (transition_guard is not None or role in self._guarded_direct_roles)
                              and role in ("gate_top", "gate_bottom")
                              and self.hardware.require_role(role).source_mode is SourceMode.VOLTAGE
                              and self.plan.by_role()[role].ramp is None)

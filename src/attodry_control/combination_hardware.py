@@ -17,7 +17,7 @@ from .lockin_points import LockinPointSession
 from .models import LockinRole
 from .config import RunMode
 from .three_smu import ThreeSmuSession
-from .three_smu_config import load_three_smu_operation_config, validate_plan_targets, SourceMode, ScanMode
+from .three_smu_config import load_three_smu_operation_config, validate_plan_targets, SourceMode, ScanMode, active_smu_roles
 from .cryostat_points import CryostatPointSession
 from .models import VectorField
 from .safety import MagnetLimits, plan_ordered_field_transitions
@@ -74,7 +74,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     document = configuration._load_document(path)
     known = {"project", "cryostat", "magnet", "temperature_stability", "temperature_run",
              "temperature_scan", "temperature_excitation_scan", "magnetic_field_run",
-             "cleanup", "visa", "lockin_xx", "lockin_xy", "lockin_sweep",
+             "cleanup", "visa", "lockin_xx", "lockin_xy", "lockin_aux", "lockin_sweep",
              "smu_bias", "gate_top", "gate_bottom", "three_smu_run", "combination_scan"}
     known |= configuration.OPTICAL_CONFIG_TABLES
     if set(document) - known:
@@ -111,6 +111,11 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         raise ValueError("Hardware order requires distinct temperature/magnetic/smu/lockin/optical axes")
     if photonics and "lockin" not in order:
         raise ValueError("PEM reference topologies require the lockin axis")
+    aux_table = document.get("lockin_aux", {})
+    if not isinstance(aux_table, dict) or (aux_table and type(aux_table.get("enabled")) is not bool):
+        raise ValueError("lockin_aux requires explicit boolean enabled")
+    if aux_table.get("enabled") and (topology != "internal_xx_xy" or "lockin" not in order):
+        raise ValueError("The third channel requires the internal XX reference and lockin axis")
     axes = {}
     smu = lockin = None
     hardware = {}
@@ -198,7 +203,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                                   skipped_harmonics_by_frequency={})
     elif "lockin" in order:
         safety_path = path.with_name("lockin_safety.toml")
-        safety = configuration._parse_lockin_safety(configuration._load_document(safety_path))
+        safety_document = configuration._load_document(safety_path)
+        safety = configuration._parse_lockin_safety({k: v for k, v in safety_document.items() if k != "lockin_aux"})
         xx = configuration._parse_lockin(configuration._table(document, "lockin_xx"),
                                         LockinRole.XX, "lockin_xx", safety.lockin_xx, safety,
                                         allow_disconnected_source="optical" in order)
@@ -210,13 +216,16 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         lockin = SimpleNamespace(
             lockin_xx=xx, lockin_xy=xy, lockin_safety=safety, lockin_sweep=sweep,
             visa=configuration._parse_visa(configuration._table(document, "visa")))
-        prepared = LockinPointSession(path, lockin, lambda *_: None, mode=mode)
+        from .internal_lockin_group import load_auxiliary_config, InternalLockinGroupSession
+        lockin.lockin_aux = load_auxiliary_config(document, safety_document, xx.frequency_hz)
+        session_type = InternalLockinGroupSession if lockin.lockin_aux is not None else LockinPointSession
+        prepared = session_type(path, lockin, lambda *_: None, mode=mode)
         axes["lockin"] = ScanAxis("lockin", tuple(AxisPoint({
             "lockin_excitation_v_rms": point.source_v_rms, "lockin_frequency_hz": point.frequency_hz},
             (f"f{point.frequency_segment}:e{point.excitation_segment}" if mode != "excitation"
              else str(point.excitation_segment) if point.excitation_segment is not None else "main"),
             "ascending", point.metadata()) for point in prepared.grid))
-        hardware["lockin"] = {name: asdict(getattr(lockin, name)) for name in vars(lockin)}
+        hardware["lockin"] = {name: asdict(value) if value is not None else None for name, value in vars(lockin).items()}
         hardware["lockin"]["safety_sha256"] = hashlib.sha256(safety_path.read_bytes()).hexdigest()
         hardware["lockin"]["point_mode"] = mode
         hardware["lockin"]["harmonics_by_role"] = prepared.harmonics_by_role
@@ -269,6 +278,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         addresses += [h.address.strip().upper() for h in smu.hardware.by_role().values()]
     if lockin is not None:
         addresses += [lockin.lockin_xx.address.strip().upper(), lockin.lockin_xy.address.strip().upper()]
+        if getattr(lockin, "lockin_aux", None) is not None:
+            addresses.append(lockin.lockin_aux.address.strip().upper())
     if cryostat is not None and cryostat.cryostat.com_port:
         addresses.append(cryostat.cryostat.com_port)
     if optical is not None:
@@ -309,6 +320,9 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         snapshot.update(hardware_scope="photonics-lockin-v1", reference_topology=topology)
         snapshot["hardware"]["lockin"]["settling_policy"] = SETTLING_POLICY
         snapshot["cleanup_policy"]["lockin"] = "explicit_source_cleanup_preserve_external_reference"
+    if lockin is not None and getattr(lockin, "lockin_aux", None) is not None:
+        snapshot["hardware"]["lockin"]["active_roles"] = ["xx", "xy", "aux"]
+        snapshot["cleanup_policy"]["lockin"] = "explicit_source_cleanup_preserve_internal_xx_ttl_receivers"
     if optical is not None:
         snapshot["hardware_scope"] = "photonics-combination-v1"
         snapshot["cleanup_policy"]["optical"] = "laser_off_then_electrical_protection_then_pem_finish"
@@ -392,17 +406,31 @@ class HardwareCombinationStation:
                 authorize_status_consumption=True,
                 on_preflight=lambda role, state: self.events.event(
                     "smu_preflight_role", {"role": role, "state": asdict(state)}), **kwargs)
-            if self.config.illumination_policy == "continuous_gate_scan":
+            active = {role: self.config.smu.hardware.require_role(role)
+                      for role in active_smu_roles(self.config.smu.plan)}
+            explicit_optical_gates = (
+                self.config.optical is not None
+                and [axis.module for axis in self.config.plan.axes] == ["optical", "smu", "lockin"]
+                and bool(active)
+                and all(role in {"gate_top", "gate_bottom"}
+                        and device.source_mode is SourceMode.VOLTAGE
+                        and (getattr(self.config.smu.plan, role).ramp is not None
+                             or getattr(self.config.smu.plan, role).zero_readback_tolerance_v is not None)
+                        for role, device in active.items()))
+            if self.config.illumination_policy == "continuous_gate_scan" or explicit_optical_gates:
                 self.smu.enable_guarded_direct_gates()
             preflight["smu"] = {r: asdict(v) for r, v in self.smu.preflight.items()}
             self.events.event("smu_preflight", preflight["smu"])
         if self.config.lockin is not None:
             session_type = LockinPointSession
+            if getattr(self.config.lockin, "lockin_aux", None) is not None:
+                from .internal_lockin_group import InternalLockinGroupSession
+                session_type = InternalLockinGroupSession
             if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
                 from .photonics_lockin_points import PhotonicsLockinPointSession
                 session_type = PhotonicsLockinPointSession
             kwargs = {key: value for key, value in {"sleep": self.sleep,
-                ("monotonic" if session_type is LockinPointSession else "clock"): self.monotonic
+                ("clock" if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES else "monotonic"): self.monotonic
                 }.items() if value is not None}
             self.lockin = session_type(
                 self.config.path, self.config.lockin, self.events.event,
@@ -611,6 +639,9 @@ class HardwareCombinationStation:
                  for key in ("phase", "ref", "nharmonic", "dharmonic", "blade", "enable")}
                 if self.optical.chopper else None),
             "xx_sample_connected": self.config.lockin.lockin_xx.sine_output_connected}
+        if getattr(self.config.lockin, "lockin_aux", None) is not None:
+            context["lockin_identities"] = dict(self.lockin.identities)
+            context["active_roles"] = [c.role.value for c in self.lockin.roles]
         if self.background.config.capture_mode == "once_before_scan":
             # Optical settings may vary; electrical/environment conditions may
             # not inherit a different condition's dark. Visit counters are not
@@ -837,7 +868,8 @@ class HardwareCombinationStation:
                 expected.update({role + "_voltage_v", role + "_current_a"})
         if self.lockin is not None:
             for role, harmonics in self.lockin.harmonics_by_role.items():
-                metrics = (("x_v", "y_v", "amplitude_v") if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES
+                metrics = (("x_v", "y_v", "amplitude_v") if (self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES
+                           or getattr(self.config.lockin, "lockin_aux", None) is not None)
                            else ("x_v", "y_v", "amplitude_v", "phase_deg"))
                 expected.update(f"lockin_{role}_h{h}_{metric}" for h in harmonics
                                 if h in self.lockin.point_harmonics for metric in metrics)

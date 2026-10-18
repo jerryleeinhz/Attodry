@@ -166,9 +166,16 @@ def launch_text(summary, width=None):
     if lockin:
         if lockin.get("reference_topology") == "internal_xx_xy":
             lines.append("Reference: XX internal -> TTL OUT -> XY REF IN" +
+                         (" + AUX SR865A REF IN" if "lockin_aux" in lockin.get("roles", {}) else "") +
                          (" + chopper EXT REF INPUT" if optical and optical.get("chopper") else ""))
             lines.append("XX SINE OUT: " + ("connected to sample" if lockin.get("sample_excitation_connected", True)
                                            else "physically disconnected from sample; displayed voltage is instrument setting"))
+            aux = lockin.get("roles", {}).get("lockin_aux")
+            if aux:
+                lines.append("AUX: " + aux["channel_label"] + " | external TTL / " + aux["external_reference_edge"] +
+                             " | IRNG " + _number(aux["input_range_v_peak"], "V peak") +
+                             " | REFZ " + _number(aux["reference_input_impedance_ohm"], "ohm") +
+                             " | SINE OUT disconnected | common settle, sequential reads")
         lines.append("Lock-in: " + lockin["mode"] + " | Inner order: " +
                      " -> ".join(lockin["internal_order"]) +
                      f" | Settle: {lockin['settle_time_constants']} TC | Overload: {lockin['overload_policy']}")

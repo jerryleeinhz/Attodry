@@ -1,4 +1,6 @@
 # 光电联合配置模板；解释见 docs/PHOTONICS_COMBINATION_SCAN_GUIDE.md。
+# 可选第三台SR865A仅用于internal_xx_xy拓扑；配置片段见
+# third_lockin.example.toml和third_lockin_safety.example.toml。
 # 本源模板不保存本机地址；复制到 ignored photonics.local.toml 后填入核验值。
 # 当前接线：PEM REF OUT -> XY(SR865A) REF IN；
 # XY SINE OUT+ -> XX(SR830) REF IN；XX SINE OUT -> 样品，无外部50Ω终端。

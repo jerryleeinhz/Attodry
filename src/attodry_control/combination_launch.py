@@ -171,6 +171,12 @@ def launch_summary(config, database, run_id):
                 "harmonic_settings": [asdict(s) for s in device.harmonic_settings]}
                 for role, device in (("lockin_xx", config.lockin.lockin_xx),
                                      ("lockin_xy", config.lockin.lockin_xy))}}
+    if config.lockin is not None and getattr(config.lockin, "lockin_aux", None) is not None:
+        device = config.lockin.lockin_aux
+        summary["lockin"]["roles"]["lockin_aux"] = {**asdict(device),
+            "reserve_mode": "not applicable", "autorange_min_full_scale_v": None,
+            "autorange_max_full_scale_v": None, "harmonic_settings": []}
+        summary["lockin"]["active_roles"] = ["xx", "xy", "aux"]
     if config.optical is not None:
         summary["optical"] = config.optical.snapshot()
     return summary

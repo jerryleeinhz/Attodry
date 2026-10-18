@@ -42,8 +42,8 @@ def load_background_config(doc):
     return config
 
 
-_CHANNEL = re.compile(r"^lockin_(xx|xy)_h([1-9][0-9]*)_(x_v|y_v|amplitude_v|phase_deg)$")
-_DELTA = re.compile(r"^lockin_(xx|xy)_h[1-9][0-9]*_delta_")
+_CHANNEL = re.compile(r"^lockin_(xx|xy|aux)_h([1-9][0-9]*)_(x_v|y_v|amplitude_v|phase_deg)$")
+_DELTA = re.compile(r"^lockin_(xx|xy|aux)_h[1-9][0-9]*_delta_")
 _METRICS = {"x_v", "y_v", "amplitude_v", "phase_deg"}
 
 

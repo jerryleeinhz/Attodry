@@ -38,6 +38,7 @@ class PhotonicsLockinRoleConfig:
     reference_input_impedance_ohm: float | None
     sync_output_mode: str | None
     current_status_supported: bool
+    channel_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +97,7 @@ class PhotonicsLockinConfig:
     reference_recovery_timeout_s: float = 45.0
     reference_recovery_consecutive_good: int = 3
     pem_reference_harmonic: int = 1
+    lockin_aux: PhotonicsLockinRoleConfig | None = None
 
     @property
     def reference_lock_wait_s(self):
@@ -104,7 +106,8 @@ class PhotonicsLockinConfig:
 
     @property
     def settle_s(self) -> float:
-        return max(self.lockin_xx.time_constant_s, self.lockin_xy.time_constant_s) * self.settle_time_constants
+        roles = (self.lockin_xx, self.lockin_xy, self.lockin_aux)
+        return max(role.time_constant_s for role in roles if role is not None) * self.settle_time_constants
 
 
 def _table(document, name):
@@ -189,7 +192,7 @@ def _role_config(table, role, allowed_scales, reference_max_hz, topology):
         _choice(input_range, INPUT_RANGES_V_PEAK, "SR865A input range")
         impedance = _number(sub["reference_input_impedance_ohm"], "reference impedance", positive=True)
         _choice(impedance, (50.0, 1_000_000.0), "reference impedance")
-        sync = _choice(sub["sync_output_mode"], ("preserve",) if topology == "pem_xy_xx_sine" else ("bipolar_sync", "unipolar_sync"), "BlazeX sync mode")
+        sync = _choice(sub["sync_output_mode"], ("preserve",) if topology in ("pem_xy_xx_sine", "internal_xx_xy") else ("bipolar_sync", "unipolar_sync"), "BlazeX sync mode")
         current_status = sub["current_status_supported"]
         if current_status is not True:
             raise ValueError("SR865A formal acquisition requires explicitly verified current-status support.")

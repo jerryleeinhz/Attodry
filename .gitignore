@@ -19,6 +19,7 @@ config/temperature_commissioning.local.toml
 config/three_smu_hardware.local.toml
 config/three_smu_scan.local.toml
 config/photonics.local.toml
+config/three-lockin.local/
 config/photonics_lockin_safety.local.toml
 config/pem_internal_diagnostic.local.toml
 *.hardware-owner.lock

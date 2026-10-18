@@ -1,0 +1,6 @@
+# Merge into the SAME lockin_safety.toml used by the internal XX/XY profile.
+# This is a detector sensitivity policy, not an excitation/current limit.
+# Existing XX source protection and XX/XY policies remain mandatory.
+[lockin_aux]
+allowed_fixed_full_scales_v = [0.002]
+

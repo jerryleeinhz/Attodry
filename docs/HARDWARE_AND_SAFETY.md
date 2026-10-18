@@ -1,5 +1,19 @@
 # Hardware and safety guide
 
+## User-approved optional third detector (2026-10-18, offline stage)
+
+The internal-XX profile may explicitly enable lockin_aux=SR865A. XX TTL OUT
+fans out to XY SR830, AUX SR865A and the chopper; AUX has a separate sample
+voltage input, high-impedance external TTL reference and disconnected SINE OUT.
+XX remains the sole source. Do not activate the historical PEM/XY-SINE cascade.
+Passive fan-out waveform/loading and actual lock need separate commissioning.
+All three identities/preflights precede writes; unknown/communication/settings
+faults stop the group. Per-role overload invalidates that role's raw/delta data;
+reference unlock remains abort. Shared guarded remaining waits, serial response
+ownership, independent source protection and complete resource close/audit apply.
+See [three-channel configuration and limits](THREE_LOCKIN_GUIDE.md).
+This user authorization covers code/offline tests, not a new real run/deployment.
+
 ## Current dual-SR830 optical profile and offline boundary (2026-10-17)
 
 The current operator-selected profile uses two SR830 units: XX internal reference

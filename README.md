@@ -1,5 +1,9 @@
 # attoDRY Transport Control
 
+本光电分支可选启用第三台SR865A：XX SR830 TTL OUT同步XY SR830、
+第三电压通道和斩波器。配置片段、支持边界及离线验收见
+[三路锁相指南](docs/THREE_LOCKIN_GUIDE.md)。
+
 用于 attoDRY2100XL、两台 SR830 和双栅 SMU 的低温输运测量项目。
 
 在项目根目录统一使用 `python -m attodry_control.combination_cli run --config config/photonics.local.toml`。

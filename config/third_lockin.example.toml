@@ -1,0 +1,39 @@
+# Optional third voltage detector. Merge these tables into an INTERNAL-XX
+# combination configuration. Keep enabled=false until the actual address,
+# wiring and matching lockin_safety.toml [lockin_aux] policy are configured.
+# XX and XY remain SR830. XX TTL OUT feeds XY, AUX and the chopper.
+# AUX never supplies sample excitation. External reference is high impedance.
+[lockin_aux]
+enabled = false                     # true | false (omitted table: dual SR830)
+model = "SR865A"                     # current third-channel model
+address = "CHANGE_ME_SR865A_AUX_VISA_ADDRESS"
+channel_label = "V3"                 # descriptive sample/electrode name
+reference_source = "external_ttl"
+external_reference_edge = "rising"   # rising | falling
+sine_output_connected = false
+input_mode = "a_minus_b"
+shield_grounding = "float"
+input_coupling = "ac"
+time_constant_s = 1.0                # discrete SR865A TC; shared wait uses longest TC
+filter_slope_db_oct = 24             # this fixed-range RC profile
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.002     # 2 mV historical SR865A starting profile
+phase_shift_deg = 0.0                # -180..180 degrees, independently calibrated
+harmonics = [1]                      # unique increasing subset of [1,2,3]
+# XX/XY harmonics still use the existing lockin_sweep role selections.
+# Only excitation points are supported with AUX; frequency remains XX's setpoint.
+# Existing bounded auto/per-harmonic/per-segment range overrides remain a dual
+# profile capability and are explicitly rejected in the fixed three-role profile.
+
+[lockin_aux.sr865a]
+input_range_v_peak = 1.0             # 1 | 0.3 | 0.1 | 0.03 | 0.01 V PEAK
+reference_input_impedance_ohm = 1000000.0 # required for passive TTL fan-out
+sync_output_mode = "preserve"        # AUX sync output is unused
+current_status_supported = true      # must be verified for the actual firmware
+# sensitivity_full_scale_v legal hardware steps (also require explicit policy):
+# 1,.5,.2,.1,.05,.02,.01,.005,.002,.001,.0005,.0002,.0001,
+# 50e-6,20e-6,10e-6,5e-6,2e-6,1e-6,500e-9,200e-9,100e-9,
+# 50e-9,20e-9,10e-9,5e-9,2e-9,1e-9.
+# TC seconds: 1e-6,3e-6,10e-6,30e-6,100e-6,300e-6,.001,.003,
+# .01,.03,.1,.3,1,3,10,30,100,300,1000,3000,10000,30000.
+

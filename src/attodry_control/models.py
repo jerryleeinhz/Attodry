@@ -8,6 +8,7 @@ import math
 class LockinRole(StrEnum):
     XX = "xx"
     XY = "xy"
+    AUX = "aux"
 
 
 @dataclass(frozen=True, slots=True)

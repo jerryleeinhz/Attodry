@@ -116,12 +116,12 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         if isinstance(lockin_status, Mapping) and lockin_status.get("schema_version") == "photonics-lockin-v1":
             from .analysis_observations import channel_quality
             channels = {key: channel_quality(record, key) for key in record
-                        if key.startswith(("measured.lockin_xx_h", "measured.lockin_xy_h"))}
+                        if key.startswith(("measured.lockin_xx_h", "measured.lockin_xy_h", "measured.lockin_aux_h"))}
             valid = record["valid_for_analysis_by_channel"] = {
                 key: quality[0] == "clear" for key, quality in channels.items()}
             record["valid_for_analysis_by_role"] = {
                 role: all(valid[key] for key in valid if key.startswith("measured." + role + "_h"))
-                for role in ("lockin_xx", "lockin_xy")
+                for role in ("lockin_xx", "lockin_xy", "lockin_aux")
                 if any(key.startswith("measured." + role + "_h") for key in valid)}
             if not audit and continued_photonics:
                 for key, usable in valid.items():

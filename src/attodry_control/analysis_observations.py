@@ -25,7 +25,7 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
     Output overload is a conservative analysis exclusion even though acquisition
     can accept it. Missing status is explicitly unknown, not an inferred pass.
     """
-    delta = re.fullmatch(r"measured\.(lockin_(xx|xy))_h(\d+)_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
+    delta = re.fullmatch(r"measured\.(lockin_(xx|xy|aux))_h(\d+)_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
     if delta:
         role, short_role, order, metric = delta.groups()
         quality = channel_quality(row, f"measured.{role}_h{order}_{metric}")
@@ -40,7 +40,7 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
         if metric == "phase_deg" and channel.get("phase_defined") is not True:
             return "flagged", ("undefined_differential_phase",)
         return "clear", ()
-    match = re.fullmatch(r"measured\.(lockin_(xx|xy))_h(\d+)_(x_v|y_v|amplitude_v|phase_deg)", column)
+    match = re.fullmatch(r"measured\.(lockin_(xx|xy|aux))_h(\d+)_(x_v|y_v|amplitude_v|phase_deg)", column)
     if not match:
         return "unclassified", ()
     role, short_role, order, metric = match.groups()
@@ -134,15 +134,17 @@ def _photonics_channel_quality(row, column, role, short_role, harmonic, metric, 
         # Both channels share the cascaded reference. A current/latched unlock
         # in either role, or one explicitly aggregated from a bracket, invalidates
         # the pair even when the selected role's final status has relocked.
-        if entry.get("continued_reference_unlock_problems") or any(
-                _photonics_reference_unlocked(item) for item in readings.values()):
+        independent = entry.get("reference_topology") == "internal_xx_xy"
+        relevant_roles = ("xx", short_role) if independent else tuple(readings)
+        if (any(p.startswith("lockin_" + r + " ") for p in entry.get("continued_reference_unlock_problems", ()) for r in relevant_roles)
+                or any(_photonics_reference_unlocked(item) for r, item in readings.items() if r in relevant_roles)):
             issues.append("reference_unlocked")
         brackets = entry.get("bracket_samples") or {}
         if isinstance(brackets, Mapping) and any(
                 _photonics_reference_unlocked(item)
                 for stage, pair in brackets.items()
                 if (stage != "transition" or entry.get("reference_unlock_policy") == "record_continue")
-                and isinstance(pair, Mapping) for item in pair.values()):
+                and isinstance(pair, Mapping) for r, item in pair.items() if r in relevant_roles):
             issues.append("reference_unlocked")
         if entry.get("valid_for_analysis_by_role", {}).get(role) is False:
             issues.append("recorded_invalid_for_analysis")

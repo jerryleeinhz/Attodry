@@ -11,8 +11,8 @@ Before changing code, read these files in order:
 
 Project rules:
 
-- Current user-approved optics profile (2026-10-17): two SR830 units, internal-reference XX TTL OUT -> XY REF IN and Thorlabs chopper EXT REF IN; XX and XY both measure h1. XX SINE OUT may be connected to or physically disconnected from the sample, with an explicit configuration declaration. XY SINE OUT stays disconnected. PEM is optional. Software implementation/offline verification does not authorize instrument connection, illumination or deployment.
-- Historical exception (2026-10-05), only when the operator explicitly selects `pem_xy_xx_sine`: PEM REF OUT -> XY SR865A REF IN; XY SINE OUT+ -> XX SR830 REF IN; XX SINE OUT -> sample. Preserve this existing profile and archives, including external sine zero crossing and preserved XY amplitude/DC. Do not activate it implicitly in the new dual-SR830/chopper profile or add a new SR865A hardware path.
+- Current user-approved optics profile (2026-10-18): two SR830 units, internal-reference XX TTL OUT -> XY REF IN and Thorlabs chopper EXT REF IN; optionally add lockin_aux=SR865A as a third TTL receiver measuring a third sample voltage channel. XY/AUX SINE OUT stay disconnected. XX SINE OUT sample connection is declared separately. See docs/THREE_LOCKIN_GUIDE.md. Software/offline authorization does not authorize deployment, new instrument connection or illumination.
+- Historical exception (2026-10-05), only when the operator explicitly selects `pem_xy_xx_sine`: PEM REF OUT -> XY SR865A REF IN; XY SINE OUT+ -> XX SR830 REF IN; XX SINE OUT -> sample. Preserve this existing profile and archives, including external sine zero crossing and preserved XY amplitude/DC. Do not activate this historical routing implicitly in the internal-XX/chopper/AUX profile.
 - Treat all hardware operations as safety critical and fail closed.
 - Do not connect to real instruments or issue write commands unless the user explicitly authorizes that stage.
 - Preserve the photonics branch invariant `sqrt(Bx^2 + Bz^2) <= 3 T` for targets, commands and accepted actual readbacks. Keep exact float32 command checks and configured axis/transition limits; no historical single-Z 9 T allowance or readback margin relaxes this active photonics profile.
@@ -20,7 +20,7 @@ Project rules:
 - Historical magnetic archives retain their recorded versioned policy and raw axes. Target/hold, setpoint ACK and actual-zero tolerances remain distinct from the strict active photonics resultant boundary. Never reinterpret old results using today's configuration.
 - Configure the two SR830 units by semantic role (`lockin_xx`, `lockin_xy`), not by model-specific numbered slots.
 - SR830 #1 provides the internal reference and measures Vxx. Its SINE OUT sample connection is declared explicitly. SR830 #2 uses the TTL reference from #1, measures Vxy, and has its SINE OUT physically disconnected.
-- Do not reintroduce PPMS, MultiPyVu, ETO, SR865A, or rotator control into the active hardware path.
+- Do not reintroduce PPMS, MultiPyVu, ETO or rotator control. SR865A is limited to the explicitly selected historical profiles and the user-approved optional AUX profile.
 - Keep raw rejected attempts for audit, but exclude them from default analysis.
 - Keep `hardware.local.toml`, local hardware addresses, experimental data, and secrets uncommitted.
 - Run the relevant tests before claiming completion.

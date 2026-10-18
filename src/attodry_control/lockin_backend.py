@@ -88,7 +88,9 @@ def _role(value: LockinRole | str) -> LockinRole:
         return LockinRole.XX
     if value == "lockin_xy":
         return LockinRole.XY
-    raise ValueError("Lock-in role must be lockin_xx, lockin_xy, or LockinRole.")
+    if value == "lockin_aux":
+        return LockinRole.AUX
+    raise ValueError("Lock-in role must be lockin_xx, lockin_xy, lockin_aux, or LockinRole.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +305,21 @@ class PhysicalLockinBackend:
         ):
             raise LockinBackendError(f"Unexpected identity for lockin_{self.role.value}: {identity!r}.")
         return identity
+
+    def read_phase_shift(self) -> float:
+        return self._query_float("PHAS?")
+
+    def configure_source_clock(self, frequency_hz: float, *, authorize_writes=False):
+        """Only the XX SR830 owns the internal clock in the three-channel profile."""
+        if self.role is not LockinRole.XX or self.capabilities.model is not LockinModel.SR830:
+            raise ValueError("Internal clock configuration requires XX SR830")
+        self.capabilities.validate_detection(frequency_hz, 1)
+        self._authorize(authorize_writes)
+        self._set_code("FMOD", 1, (0, 1))
+        if not math.isclose(self._driver.read_reference_frequency(), frequency_hz, rel_tol=1e-5, abs_tol=0.001):
+            self._driver.set_internal_reference_frequency(frequency_hz)
+        if not math.isclose(self._driver.read_reference_frequency(), frequency_hz, rel_tol=1e-5, abs_tol=0.001):
+            raise LockinBackendError("Internal source frequency readback mismatch")
 
     def _authorize(self, authorized: bool) -> None:
         if authorized is not True:

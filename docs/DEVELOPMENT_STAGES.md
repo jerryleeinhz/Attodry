@@ -1,5 +1,147 @@
 # Development stages
 
+## 2026-10-18 — Optional third SR865A; offline implementation
+
+User-requested spectral stop completes through normal SIGINT and independent
+source/protection/close/audit/owner verification; all earlier raw states remain.
+The optional AUX uses XX TTL, high-impedance REF IN and disconnected SINE OUT.
+Existing adapters, formal/bracket sampling and guarded remaining waits are reused;
+dark/analysis/plot/preview/store support covers all three semantic roles.
+Twenty-seven new guarded cases pass, including optical/chopper/SMU/dark lifecycle, per-channel
+overload handling, partial third-read audit, mismatches, close and deadline faults.
+Relevant386-case suite and final102-case profile suite pass with short TEMP;
+all87 unique failed cases from the invalid long-path1842 discovery replay pass.
+Counts overlap and are not added as distinct tests; no full-suite pass is claimed.
+Local software only; real fan-out commissioning and
+deployment are separate stages. See docs/THREE_LOCKIN_GUIDE.md for scope/templates.
+
+## 2026-10-18 —600s chopper readiness budget; spectral restart qualifies
+
+Operator freshly reports stable56Hz after the120s failure and approves longer
+readiness. New immutable profiles increase only chopper ready_timeout_s to600
+and their run names; frequency tolerance1Hz/three good polls/1s and all existing
+measurement/physical/cleanup checks remain. A currently running chopper is
+admitted for fresh identity/settings checks without deliberately restarting
+rotation; the production prepare still qualifies frequency before emission.
+Ten local/target fake helper cases and231 guarded preview conditions pass.
+Fresh sourceOFF, enable1/input56/output56, PM15000/manualMID/LOW and complete
+preflight close are observed. Real optical_reference_prepared verifies native
+56Hz/beam8Hz; the first dark completes and500nm/3uW tunes. Remaining acquisition,
+full-grid duration and terminal cleanup are pending. No gate, retry, safety
+widening, production code/main TOML edit or rewriting of old failures occurs.
+
+## 2026-10-18 — Chopper restart command verified; frequency readiness fails
+
+New operator-authorized spectral restart preserves eleven wavelengths/231
+conditions, PM15000/fixedMID/LOW,200uV dualSR830/h1/8Hz/15tau and per-condition
+3dark/3light. A dark serial precheck fails and remains archived; following fresh
+operator panel/USB confirmation, chopper identity/paused settings pass. A second
+dark check finds PM AUTO1; approved normal PM prepare restores AUTO0 and the
+known630nm11.25863mW with sourceOFF guards and strict ACK/final range checks.
+The isolated helper passes10 fake cases locally and on target and231 guarded
+preview conditions. Existing chopper code actually starts enable1; output59Hz
+versus expected56+/-1Hz fails120s readiness, so0 formal samples are accepted.
+LaserOFF/lock-in protection pass; chopper/close/communication remain manual.
+All processes/94 leases release and owned monitoring/task are removed. No
+automatic retry, scope/threshold change, gate operation or production edit.
+
+## 2026-10-18 — Operator stop of the PM15000 queue
+
+The user cancels the active scan and all future wave/gate stages. A same-runtime
+fake process confirms normal KeyboardInterrupt/finally handling before a single
+SIGINT request to the exact collector identity; no force termination is used.
+The run remains interrupted with1 accepted condition/4 light reads/2 dark groups.
+Parent/child exit and61 released leases are confirmed; the heartbeat and owned
+triggerless task are deleted. LaserOFF and electrical protection pass, while
+chopper session cleanup fails and rotation stop/complete close stay unverified.
+Preserve the original manual-review/error flags and require on-site chopper
+verification before a new run; no automatic restart or production edit occurs.
+
+## 2026-10-18 — PM15000 fixed-middle-range restart
+
+The500nm13-point run reaches the100% source boundary before42uW; original
+failed/manual data remain. A subsequent dark MAX request applies15000 averaging
+but does not change the actual middle range; it stops with complete resource
+close and no power READ/NKT setting writes. The operator supersedes MAX with
+the existing manual middle range. No failure is relabelled successful.
+
+Seventeen mapper and thirteen controller fake cases pass locally; all30 pass
+again with hardware imports/DLL loading blocked on LK_setup. Twelve real-config
+offline previews preserve231 wave and462 pending gate conditions. Parent-owned
+hardware sessions stay separate from guarded preview interpreters. Source,
+main/global safety and original private power/voltage/current limits are unchanged.
+
+Authorized dark native-range verification succeeds for500..800nm in30nm steps,
+then restores630nm, actual AVG15000/manual/LOW1 and fresh sourceOFF/status0.
+Only wavelength settings are written; no range/average rewrite, power READ or
+NKT setting write occurs in this verification. Native W ranges span8.603372--
+15.07291mW, with630nm11.25863mW; physical current-range index is not measured.
+
+A new persistent task actually launches the500nm/3uW child. Stored PM brackets
+confirm15000 averages and the expected fixed range. Formal completion, duration
+and the later630nm gate remain pending. All stages are serial and require actual
+child exit, complete terminal protection/close/audit and exact counts. New faults
+stop without retry/skip/widening; raw invalid/failure evidence and prior manual
+flags persist. Ten-minute monitoring reads only files/SQLite/process metadata.
+
+
+## 2026-10-18 — Target deployment and authorized spectral/gate continuation
+
+190 target hardware-blocked candidate tests and13 separate controller cases
+pass. Actual231/462-condition profiles preview correctly. Under fresh ownership
+and all station aliases, three narrow runtime files and docs deploy with backups;
+main/global safety/notebooks remain byte-identical. Source overlay is audited
+against baseHEAD7aa6d064; this is not a new origin publication.
+
+Following new operator confirmation, one bounded dark PM range recovery verifies
+500nm15.07291mW and restores630nm11.25863mW, with full identity/settings/LOW,
+fresh NKT OFF/status0 and independent resource-close evidence. Eleven fresh
+native ranges agree with the frozen spectral profiles. No power READ or NKT
+settings write in this preparatory recovery. Bottom2400 four-query preflight
+verifies identity/OFF/source0, not actual discharged voltage.
+
+Serial owner starts500nm formal acquisition at200uV on both roles. It queues
+eleven21-power spectral segments, then630nm21powers x22bottom-gate visits with
+10uA limit and per-condition dark3/light3. Future aliases stay locked; each child
+must exit with exact counts and verified final protection before continuation.
+Gate actual-zero evidence is independently required. Any new hard fault stops;
+no automatic retry/shrink/widening. Original failures and A/B audit stay intact.
+Full spectral/gate completion, duration and illuminated gate verification are
+pending; source/startup proof is not presented as completed measurements.
+
+## 2026-10-18 — PM wavelength/native-range fix and queued gate profile (offline)
+
+The first500nm/200uV scan fails before sampling on a fixed PM range mismatch.
+Archived SCPI confirms old630nm range was used to schedule a redundant range
+write after wavelength change; native15.07291mW becomes150.7291mW. Preserve the
+failed/manual cleanup and sourceOFF evidence. The subsequent user confirmation
+of laserOFF/chopper/physical SINE disconnection is separate from software proof.
+
+Prepare now recaptures after nonrange settings/ACK and checks complete status,
+identity and other settings before deciding whether a range write is needed.
+It shares the existing1ppm final tolerance and never compensates boundaries or
+retries a real failure.10 new guarded tests plus89 related regressions pass
+(99 cases,2.575s). Unchanged prepare still costs13 queries; natural wavelength
+range changes avoid the old extra write, while genuine range changes add one
+necessary full capture. No hardware result is inferred from these fake tests.
+
+User confirms the follow-up22 gate visits0→+30V then0→-30V,3V step and repeated0,
+after the original wavelength-power sweep. A hardware-blocked630nm profile
+previews21 powers x22 gates =462 conditions,1386 light plus1386 dark readings,
+XX/XY200uV,15tau,10uA current/compliance and50V original voltage limit. Per-gate
+dark requires laserOFF before gate changes; no continuous-light speed claim.
+Explicit gate-only optical profiles now reuse guarded direct pre/post actual
+V/I/source ACK checks even without a held-light callback. Normal cleanup verifies
+actual zero within the configured0.05V; failed/untrusted paths disable first and
+keep actual-zero manual. Active-role filtering excludes unused hardware tables;
+mixed-bias/implicit-zero/standalone legacy paths retain their original behavior.
+Adds two safety reads per opted-in gate visit, one shared delay, no new ramp.
+72 related continuous/internal/ramp tests pass75.273s, plus8 targeted dark-axis
+regressions; target validation is recorded separately before deployment.
+Target deployment, separate bounded dark range restoration and real continuation
+remain pending at this offline checkpoint. Local/target configs and failures stay
+private; no unrelated instrument axis or global safety boundary changes.
+
 ## 2026-10-18 — Published and deployed unified optical CLI/dark analysis
 
 User authorizes publication and LK_setup deployment of feature d0b0bc3. Local

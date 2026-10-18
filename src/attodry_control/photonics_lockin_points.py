@@ -54,11 +54,15 @@ class PhotonicsLockinGridPoint:
 
 class PhotonicsLockinPointSession:
     def __init__(self, config_path, config, event, *, manager_factory=None, sleep=None, clock=None, mode="excitation"):
+        if config.lockin_aux is not None and config.reference_topology != "internal_xx_xy":
+            raise ValueError("AUX is supported only by the explicit internal-XX three-channel profile")
         if mode != "excitation":
             raise ValueError("PEM owns frequency; this profile only scans excitation amplitude.")
         self.config = config
         self.status_policy = PhotonicsStatusPolicy(config.overload_policy,
-            reference_unlock_policy=config.reference_unlock_policy)
+            reference_unlock_policy=config.reference_unlock_policy,
+            selected={"lockin_" + c.role.value: c.harmonics for c in
+                (config.lockin_xx, config.lockin_xy, config.lockin_aux) if c is not None})
         self.event = event
         self.manager_factory = manager_factory
         self.sleep = time.sleep if sleep is None else sleep
@@ -68,7 +72,7 @@ class PhotonicsLockinPointSession:
         self.grid = tuple(PhotonicsLockinGridPoint(v, config.reference_expected_hz, i,
                           pem_reference_harmonic=config.pem_reference_harmonic)
                           for i, v in enumerate(config.excitation_points_v_rms))
-        self.roles = (config.lockin_xx, config.lockin_xy)
+        self.roles = tuple(c for c in (config.lockin_xx, config.lockin_xy, config.lockin_aux) if c is not None)
         self.harmonics_by_role = {c.role.value: c.harmonics for c in self.roles}
         self.point_harmonics = tuple(sorted(set(h for c in self.roles for h in c.harmonics)))
         self.skipped_by_frequency = {}
@@ -78,7 +82,7 @@ class PhotonicsLockinPointSession:
         self.preflight = None
         self.identities = {}
         self.current_harmonics = {c.role.value: c.harmonics[0] for c in self.roles}
-        self.audit_cursors = {"xx": 0, "xy": 0}
+        self.audit_cursors = {c.role.value: 0 for c in self.roles}
         self.writes_started = False
         self.configured = False
         self.failed = False
@@ -94,9 +98,9 @@ class PhotonicsLockinPointSession:
         self._reference_operation_context = None
         self._configuration_settings_applied = False
 
-    def disturbed(self, reason, *, roles=("lockin_xx", "lockin_xy")):
+    def disturbed(self, reason, *, roles=None):
         """Record a successful setting or a completed external signal change."""
-        self.settling.changed(reason, roles)
+        self.settling.changed(reason, roles or tuple("lockin_" + c.role.value for c in self.roles))
         self.event("lockin_settling_changed", dict(self.settling.changes[-1]))
 
     def _wait_settled(self, stage):
@@ -373,8 +377,8 @@ class PhotonicsLockinPointSession:
             self.pair = tuple(devices)
             # Both identities are verified before any configuration is attempted.
             self.identities = {device.role.value: device.read_identity() for device in self.pair}
-            if len(set(self.identities.values())) != 2:
-                raise ValueError("Both roles returned the same physical instrument identity.")
+            if len(set(self.identities.values())) != len(self.roles):
+                raise ValueError("Multiple roles returned the same physical instrument identity.")
             self.preflight = {device.role.value: asdict(device.read_settings()) for device in self.pair}
             self.current_harmonics = {role: settings["harmonic"] for role, settings in self.preflight.items()}
             source = self.pair[0].read_source_state()
@@ -421,7 +425,8 @@ class PhotonicsLockinPointSession:
             # Do not let a new event failure interrupt protection verification
             # during cleanup. The next wait records these changes; source I/O
             # and cleanup already have their own unconditional audit handling.
-            self.settling.changed("xx.source_protection" if protect else "xx.source_amplitude")
+            self.settling.changed("xx.source_protection" if protect else "xx.source_amplitude",
+                                  tuple("lockin_" + c.role.value for c in self.roles))
         return result
 
     def _verify_reference_output(self):
@@ -781,21 +786,24 @@ class PhotonicsLockinPointSession:
         finally:
             self._emit_audit("read_reference_frequencies", suppress=self.failed)
 
+    def _expected_reference_source(self, cfg):
+        return "external"
+
     def _verify_settings(self):
         result = {}
         for cfg, device in zip(self.roles, self.pair):
             actual = device.read_settings()
             if actual.identity != self.identities[cfg.role.value]:
                 raise ValueError("Instrument identity changed inside the owned session.")
-            if (actual.reference_source != "external" or actual.time_constant_s != cfg.time_constant_s
+            if (actual.reference_source != self._expected_reference_source(cfg) or actual.time_constant_s != cfg.time_constant_s
                     or actual.sensitivity_full_scale_v != cfg.sensitivity_full_scale_v
                     or actual.harmonic != self.current_harmonics[cfg.role.value]):
                 raise ValueError("Lock-in reference/filter/range/harmonic settings changed unexpectedly.")
             native = actual.native_settings
             if cfg.model == "SR830":
-                expected_edge = {"sine_zero_crossing": 0, "rising": 1, "falling": 2}[cfg.external_reference_edge]
+                expected_edge = {"sine_zero_crossing": 0, "rising": 1, "falling": 2}.get(cfg.external_reference_edge)
                 reserve = {"high_reserve": 0, "normal": 1, "low_noise": 2}[cfg.reserve_mode]
-                correct = (native.reference_slope == expected_edge and native.input_mode == 1
+                correct = ((expected_edge is None or native.reference_slope == expected_edge) and native.input_mode == 1
                     and native.shield_grounding == (0 if cfg.shield_grounding == "float" else 1) and native.input_coupling == 0
                     and native.line_filter == 0 and native.filter_slope == 3 and native.reserve_mode == reserve)
             else:
@@ -987,6 +995,8 @@ class PhotonicsLockinPointSession:
         if self.point_record is None:
             raise RuntimeError("A source point must be selected before sampling.")
         record = {**self.point_record, "schema_version": "photonics-lockin-v1", "samples": [],
+                  "active_roles": [c.role.value for c in self.roles],
+                  "channel_labels": {c.role.value: c.channel_label or c.role.value.upper() for c in self.roles},
                   "identities": dict(self.identities), "sequential_role_reads": True,
                   "overload_policy": self.config.overload_policy,
                   "reference_unlock_policy": self.config.reference_unlock_policy}
@@ -1051,11 +1061,21 @@ class PhotonicsLockinPointSession:
                 entry["problems_by_role"] = by_role
                 entry["problems"] = [problem for problems in by_role.values() for problem in problems]
                 self.status_policy.apply(entry, entry["problems"])
-                reference_invalid = bool(entry["continued_reference_unlock_problems"])
+                reference_invalid = bool(entry["continued_reference_unlock_problems"]) if self.config.reference_topology != "internal_xx_xy" else any(
+                    p.startswith("lockin_xx ") for p in entry["continued_reference_unlock_problems"])
                 # Both channels depend on the same cascaded external clock.
                 # A known unlock in either bracket invalidates both roles.
                 entry["valid_for_analysis_by_role"] = {role: not problems and not reference_invalid
                     for role, problems in by_role.items()}
+                entry["reference_topology"] = self.config.reference_topology
+                entry["active_roles"] = [c.role.value for c in self.roles]
+                entry["role_read_times_utc"] = {r: {
+                    "started_at_utc": sample.raw[0].started_at_utc.isoformat(),
+                    "completed_at_utc": sample.raw[-1].completed_at_utc.isoformat()}
+                    for r, sample in pair.items() if sample.raw}
+                if all(sample.raw for sample in pair.values()):
+                    starts = [sample.raw[0].started_at_utc for sample in pair.values()]
+                    entry["sequential_read_start_span_s"] = (max(starts) - min(starts)).total_seconds()
                 record["samples"].append(entry)
                 record.pop("candidate_in_progress", None)
                 self.event("lockin_formal_pair", entry)
@@ -1080,7 +1100,7 @@ class PhotonicsLockinPointSession:
             record.update(rejected_reference_candidate=True, valid_for_analysis=False,
                           transient_kind=error.kind, transient_evidence=_plain(error.evidence))
             for entry in record["samples"]:
-                entry["valid_for_analysis_by_role"] = {"lockin_xx": False, "lockin_xy": False}
+                entry["valid_for_analysis_by_role"] = {"lockin_" + c.role.value: False for c in self.roles}
             self.event("lockin_rejected_reference_candidate", record)
             self._fail(error)
             raise
@@ -1126,7 +1146,7 @@ class PhotonicsLockinPointSession:
             try:
                 state = device.read_settings()
                 result["lockin_" + device.role.value] = asdict(state)
-                if state.reference_source != "external":
+                if state.identity != self.identities[device.role.value] or state.reference_source != self._expected_reference_source(next(c for c in self.roles if c.role is device.role)):
                     raise ValueError("External-reference ownership was not preserved.")
                 if self.config.reference_topology == "pem_xy_xx_sine":
                     native = state.native_settings

@@ -11,11 +11,11 @@ from collections.abc import Mapping
 
 OVERLOAD_POLICIES = ("abort", "continue_unselected", "record_continue")
 _FAULTS = {f"lockin_{role} {fault}{stage}": f"lockin_{role}"
-           for role in ("xx", "xy")
+           for role in ("xx", "xy", "aux")
            for fault in ("input/reserve overload", "filter overload", "output-scale overload")
            for stage in ("", " during harmonic transition", " during sensitivity transition")}
 _UNLOCKS = {f"lockin_{role} reference unlocked": f"lockin_{role}"
-            for role in ("xx", "xy")}
+            for role in ("xx", "xy", "aux")}
 REFERENCE_UNLOCK_POLICIES = ("abort", "record_continue")
 
 
@@ -30,7 +30,7 @@ class OverloadPolicy:
         blocking, continued = [], []
         for problem in problems:
             role = _FAULTS.get(problem)
-            allowed = role is not None and (
+            allowed = role is not None and role in self.selected and (
                 self.mode == "record_continue" or
                 (self.mode == "continue_unselected" and not self.selected.get(role, (1,))))
             (continued if allowed else blocking).append(problem)
@@ -119,10 +119,11 @@ def overload_summary(value):
                     or (isinstance(native, Mapping) and any(native.get(key) is True for key in
                         ("input_overload_latched", "output_scale_overload_latched")))
                     or any(_FAULTS.get(problem) == role for problem in pair.get("continued_overload_problems", ())))
-        return any(pair[role].get("lia_status", {}).get(key) for key in (
+        return any(pair.get(role, {}).get("lia_status", {}).get(key) for key in (
             "input_or_reserve_overload", "filter_overload", "output_overload"))
-    counts = {role: sum(overloaded(pair, role) for pair in pairs)
-              for role in ("lockin_xx", "lockin_xy")}
+    roles = ("lockin_xx", "lockin_xy", "lockin_aux") if any(
+        "aux" in p.get("active_roles", ()) or "aux" in p.get("samples", {}) for p in pairs) else ("lockin_xx", "lockin_xy")
+    counts = {role: sum(overloaded(pair, role) for pair in pairs) for role in roles}
     def unlocked(pair, role):
         if "selected_harmonics" in pair:
             status = pair.get("samples", {}).get(role.removeprefix("lockin_"), {}).get("status", {})
@@ -132,8 +133,8 @@ def overload_summary(value):
                     or isinstance(native, (list, tuple)) and bool(native)
                     and isinstance(native[0], Mapping) and native[0].get("reference_unlocked") is True
                     or any(_UNLOCKS.get(p) == role for p in pair.get("continued_reference_unlock_problems", ())))
-        return (pair[role].get("lia_status", {}).get("reference_unlocked") is True
-                or pair[role].get("reading", {}).get("locked") is False)
+        return (pair.get(role, {}).get("lia_status", {}).get("reference_unlocked") is True
+                or pair.get(role, {}).get("reading", {}).get("locked") is False)
     unlock_counts = {role: sum(unlocked(pair, role) for pair in pairs) for role in counts}
     invalid = {role: sum(overloaded(pair, role)
                         or "selected_harmonics" in pair and any(unlocked(pair, other) for other in counts)
@@ -231,9 +232,14 @@ def reading_allows_continuation(reading):
         for sample in samples:
             if not isinstance(sample, Mapping):
                 return False
+            roles = archived_status.get("active_roles", ("xx", "xy"))
+            if (not isinstance(roles, (list, tuple)) or set(roles) not in ({"xx", "xy"}, {"xx", "xy", "aux"})
+                    or len(roles) != len(set(roles)) or sample.get("active_roles", roles) != roles):
+                return False
             try:
                 policy = PhotonicsStatusPolicy(sample.get("overload_policy", "abort"),
-                                               sample.get("reference_unlock_policy", "abort"))
+                                               sample.get("reference_unlock_policy", "abort"),
+                                               selected={"lockin_" + role: (1,) for role in roles})
             except ValueError:
                 return False
             if any(field in archived_status and archived_status[field] != getattr(policy, attribute)
@@ -258,7 +264,7 @@ def reading_allows_continuation(reading):
             valid = sample.get("valid_for_analysis_by_role", {})
             if not isinstance(valid, Mapping):
                 return False
-            if any(type(valid.get(role)) is not bool for role in ("lockin_xx", "lockin_xy")):
+            if any(type(valid.get("lockin_" + role)) is not bool for role in roles):
                 return False
             if any(valid[_FAULTS[problem]] is not False for problem in overloads):
                 return False
@@ -279,7 +285,7 @@ def reading_allows_continuation(reading):
             for transition, pair in observations:
                 if not isinstance(pair, Mapping):
                     return False
-                for role in ("xx", "xy"):
+                for role in roles:
                     native = pair.get(role, {})
                     if (not isinstance(native, Mapping) or native.get("role") != role
                             or type(native.get("harmonic")) is not int or native["harmonic"] < 1):

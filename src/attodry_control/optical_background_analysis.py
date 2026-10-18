@@ -14,7 +14,7 @@ import statistics
 
 from .analysis_observations import channel_quality, finite, observation_id
 
-_CHANNEL = re.compile(r"measured\.lockin_(xx|xy)_h(\d+)_x_v$")
+_CHANNEL = re.compile(r"measured\.lockin_(xx|xy|aux)_h(\d+)_x_v$")
 
 
 def _dark(row):
@@ -30,6 +30,27 @@ def _context(row, role, harmonic):
         raise ValueError("Dark matching needs archived lock-in configuration, not today's TOML")
     formal = []
     for sample in (row.get("status.lockin") or {}).get("samples", ()):
+        if "selected_harmonics" in sample:
+            short = role.removeprefix("lockin_")
+            if sample["selected_harmonics"].get(short) != harmonic:
+                continue
+            def signature(stage):
+                setting = (sample.get(stage) or {}).get(short)
+                if not isinstance(setting, dict):
+                    return None
+                native = setting.get("native_settings") or {}
+                keys = ("reference_mode", "reference_slope", "input_mode", "shield_grounding",
+                        "input_coupling", "line_filter", "filter_slope", "reserve_mode",
+                        "phase_shift_deg", "external_reference_edge", "reference_input_impedance_ohm",
+                        "advanced_filter", "synchronous_filter", "filter_slope_db_oct", "sync_output_mode")
+                return {**{k: setting.get(k) for k in ("role", "model", "identity", "time_constant_s",
+                    "sensitivity_full_scale_v", "harmonic", "reference_source", "input_range_v_peak")},
+                    "native": {k: native[k] for k in keys if k in native}}
+            before, after = signature("settings_before"), signature("settings_after")
+            if before is None or before != after or sample.get("settings_verified") is not True:
+                raise ValueError("Missing or changed formal settings for dark matching")
+            formal.append(before)
+            continue
         reading = (sample.get(role) or {}).get("reading", {})
         selected = reading.get("harmonic", (sample.get("harmonics_by_role") or {}).get(role, sample.get("harmonic")))
         if selected != harmonic:
@@ -85,7 +106,7 @@ def subtract_dark(rows, *, mode="raw", dark_run_id="", phase_confirmed=False, ma
         result = deepcopy(row)
         # Never leave stale deltas from a different selected background.
         for key in list(result):
-            if re.match(r"measured\.lockin_(xx|xy)_h\d+_delta_", key):
+            if re.match(r"measured\.lockin_(xx|xy|aux)_h\d+_delta_", key):
                 del result[key]
         assessment = dict(method="independent run: (light X+iY) - mean(dark X+iY)",
             dark_run_id=dark_run_id, phase_continuity_operator_confirmed=True,
@@ -163,7 +184,7 @@ def dark_mean_variance(rows, column):
     at zero amplitude these uncertainties are undefined. Samples are assumed
     independent within dark acquisition; unmeasured temporal drift is excluded.
     """
-    match = re.fullmatch(r"measured\.lockin_(xx|xy)_h(\d+)_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
+    match = re.fullmatch(r"measured\.lockin_(xx|xy|aux)_h(\d+)_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
     if not match or not rows:
         return None
     short,h,metric = match.groups()

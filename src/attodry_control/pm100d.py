@@ -179,7 +179,10 @@ class Pm100d:
         self.state_current = True
         return state
 
-    def _check(self, state, wavelength_nm, *, settings=True):
+    def _fixed_range_matches(self, range_w):
+        return math.isclose(range_w, self.config.range_w, rel_tol=1e-6, abs_tol=0)
+
+    def _check(self, state, wavelength_nm, *, settings=True, fixed_range=True):
         # Reject all questionable bits; Rev F lists this register but does not
         # specify individual masks. No undocumented "saturation bit" is invented.
         if state["questionable_condition"] != 0:
@@ -198,8 +201,7 @@ class Pm100d:
         if settings and (state["average_count"] != self.config.average_count or
                          state["auto_range"] != int(self.config.auto_range)):
             raise NktError("PM100D average/range settings mismatch")
-        if not self.config.auto_range and not math.isclose(state["range_w"], self.config.range_w,
-                                                          rel_tol=1e-6, abs_tol=0):
+        if fixed_range and not self.config.auto_range and not self._fixed_range_matches(state["range_w"]):
             raise NktError("PM100D fixed range mismatch")
 
     def prepare(self, wavelength_nm):
@@ -221,17 +223,22 @@ class Pm100d:
                         f"SENS:AVER:COUN {self.config.average_count}"),
                        (state["auto_range"] != int(self.config.auto_range),
                         f"SENS:POW:RANG:AUTO {int(self.config.auto_range)}")]
-            if not self.config.auto_range:
-                changes.append((state["range_w"] != self.config.range_w,
-                                f"SENS:POW:RANG {self.config.range_w:.10g}"))
+            def complete(reply):
+                if reply != "1":
+                    raise NktError("PM100D setting completion not acknowledged")
             for needed, command in changes:
                 if needed:
                     self._io(command, "setting")
-                    def complete(reply):
-                        if reply != "1":
-                            raise NktError("PM100D setting completion not acknowledged")
                     self._parse_reply("*OPC?", complete)
             if any(needed for needed, _ in changes):
+                state = self.capture()
+            # Wavelength correction can change the native W full scale even
+            # with a preserved frontend range. Decide from its fresh readback;
+            # rewriting a rounded full-scale boundary can select a higher range.
+            self._check(state, wavelength_nm, fixed_range=False)
+            if not self.config.auto_range and not self._fixed_range_matches(state["range_w"]):
+                self._io(f"SENS:POW:RANG {self.config.range_w:.10g}", "setting")
+                self._parse_reply("*OPC?", complete)
                 state = self.capture()
         self._check(state, wavelength_nm)
         self.target_nm = wavelength_nm
