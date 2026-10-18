@@ -1,5 +1,32 @@
 # Development stages
 
+## Dark drift publication and LK_setup deployment (2026-10-18)
+
+User explicitly prioritizes publication/deployment before the newly requested
+repeat scan. Feature54e503d is pushed to origin/integration-photonics-nonlinear-hall.
+LK_setup's isolated exact archive passes72 hardware-blocked analysis/plot tests
+in7.777s; the operator-edited three-role profile previews4conditions/12light.
+These tests overlap the146-case local suite. Under all106 station lease aliases,
+terminal DB checks and verified idle Jupyter/process metadata, runtime fast-forwards
+from a190d05 to54e503d. No instrument connection/status consumption or new scan
+occurs during delivery. The prior7-point run completed with verified cleanup.
+
+Private three-role TOML SHA4ac4ec04bf49aabac7d882aef9cddd03fff081a38519216e4be51123756e11a0
+selects4powers3/23/43/63uW with a-axis polarization in its operator-supplied run
+name; no optical polarization measurement is implied. It and its safety policy,
+shared main/global policy, hardware.local.toml and commissioning Notebook remain
+byte-identical. Unified Notebook keeps operator code, outputs, metadata and extra
+cells; only the appended dark-drift guide is merged. Deployed source matches the
+feature commit, actual checkout launcher and4-point hardware-blocked preview pass.
+Restart/reload the idle analysis Notebook kernel to expose the time/dark options;
+no automatic kernel restart or resumed recurring monitor is performed.
+
+Recoverable file/patch backups, hashes and target validation/deployment receipts
+are in ignored .test-tmp/photonics-deployment/dark-drift-deploy-20261018T165050Z
+on LK_setup, with receipts/logs downloaded locally under
+.test-tmp/dark-drift-deploy-20261018T165050Z. A new acquisition is a separate
+following step under the operator's existing run request, never part of deployment.
+
 ## Dark drift axes in unified plotting (2026-10-18, local offline)
 
 The operator requests existing UTC capture times as an X option and original
