@@ -1,5 +1,38 @@
 # Development stages
 
+## Three-detector publication and LK_setup deployment (2026-10-18)
+
+The operator separately authorizes push/deployment and a filled handoff TOML,
+with no new scan. Feature commit a75bb30 is published on
+integration-photonics-nonlinear-hall, including the previously audited PM native
+range/direct-dark-gate overlay. The isolated target archive passes 120 guarded
+tests; its three-role 630nm/21-power preview and the deployed-profile preview pass.
+These targets overlap earlier local suites, not additional independent case counts.
+All live Jupyter sessions/kernels are idle, all105 station lease aliases are
+held during the fast-forward/config deployment, and all run DBs are terminal.
+The production CLI resolves to this checkout without PYTHONPATH injection.
+
+The ignored config/three-lockin.local/photonics.local.toml and its adjacent
+private lockin_safety.toml are filled for XX/XY SR830 plus AUX SR865A V3,
+XX8Hz TTL fan-out/h1, XX/XY200uV and AUX2mV, TC1s/15tau. It selects630nm/10nm,
+21 powers3..63uW, per-condition3dark/3light, max_age86400 and PM15000/manual
+native630nm11.25863mW (PD LOW is a prior readback, not a new configuration
+write/read in this deployment); chopper N7/D1/masked-inner/600s readiness and original
+source/optical/electrical limits remain. The AUX address is from the historical
+station archive; no new identity/TTL/phase acceptance is claimed. AUX phase0 is
+explicit configuration, not a calibration. Physical fan-out/loading still needs
+real verification before interpreting third-channel data.
+
+The shared dual main, hardware.local.toml, global policy and commissioning
+Notebook are unchanged. The unified Notebook retains station outputs/metadata
+and adds the new guide cell text; raw databases, old configs and stopped queue
+remain. Backup, source/config hashes, actual test exit code, preview and handoff
+are saved under ignored .test-tmp/photonics-deployment/three-lockin-deploy-20261018
+on LK_setup and downloaded to the local .test-tmp/three-lockin-deploy-20261018.
+Only file/SQLite/process/lease checks and hardware-blocked tests were performed.
+No real instrument connection/write, scan, renewed monitor or new task occurs.
+Restart/reload an idle analysis kernel before using newly deployed Python code.
+
 ## 2026-10-18 — Optional third SR865A; offline implementation
 
 User-requested spectral stop completes through normal SIGINT and independent

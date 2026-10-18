@@ -1,6 +1,6 @@
 # Three-channel internal-reference lock-in measurements
 
-User-approved design: 2026-10-18. Software/offline stage; real commissioning pending.
+User-approved design: 2026-10-18. Software and file deployment verified; real commissioning pending.
 
 ## Wiring and roles
 

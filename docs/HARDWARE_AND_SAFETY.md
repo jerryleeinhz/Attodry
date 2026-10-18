@@ -12,7 +12,9 @@ faults stop the group. Per-role overload invalidates that role's raw/delta data;
 reference unlock remains abort. Shared guarded remaining waits, serial response
 ownership, independent source protection and complete resource close/audit apply.
 See [three-channel configuration and limits](THREE_LOCKIN_GUIDE.md).
-This user authorization covers code/offline tests, not a new real run/deployment.
+The subsequent user-authorized file deployment is recorded in PROJECT_HANDOFF.
+New instrument connection, configuration writes and illumination remain separate
+real commissioning stages; deployment does not certify the TTL distribution.
 
 ## Current dual-SR830 optical profile and offline boundary (2026-10-17)
 
