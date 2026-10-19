@@ -63,7 +63,7 @@ class CldOpticalController(CldController):
     def start_emission(self, point, *, deadline=None):
         self._deadline(deadline)
         self.verify_point(point, emitting=False)
-        result = self.set_emission(True)
+        result = self.set_emission(True, deadline=deadline)
         self._deadline(deadline)
         return result
 

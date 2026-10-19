@@ -525,7 +525,7 @@ class CldController:
         if self.on_event: self.on_event(event)
         return state
 
-    def healthy(self, state, *, require_ld_ready=False):
+    def healthy(self, state, *, require_ld_ready=False, _startup_voltage_pending=False):
         c = self.config
         if state["isTrippedLdOutputProtInterlock"] or state["getLdOutpAutoOnState"]:
             raise NktError("CLD interlock/auto-on prevents operation")
@@ -538,13 +538,16 @@ class CldController:
             raise NktError("CLD requires Celsius, constant-temperature TEC and LD temperature protection")
         number(state["getTecCurrLimit"], "TEC current limit", .001, c.max_tec_current_a)
         number(state["measTemp"], "diode temperature", c.temperature_min_c, c.temperature_max_c)
-        voltage = number(state["measLdVolt"], "diode voltage", 0, math.inf)
+        # Only the bounded post-ON recheck may observe near-zero ADC noise.
+        # This never qualifies a formal sample or a final startup readback.
+        voltage_min = -.0004 if _startup_voltage_pending else 0
+        voltage = number(state["measLdVolt"], "diode voltage", voltage_min, math.inf)
         # SCPI overflow/invalid markers remain measurement errors independently
         # of whether an extra operator-supplied voltage threshold is selected.
         if voltage >= 9e37:
             raise NktError("CLD voltage overload/invalid response marker")
         if c.max_voltage_v is not None:
-            number(voltage, "diode voltage", 0, c.max_voltage_v)
+            number(voltage, "diode voltage", voltage_min, c.max_voltage_v)
         number(state["measLdCurr"], "diode current", 0, c.max_current_a)
         window = number(state["getTempProtWindow"], "temperature protection span", .001,
                         2*(c.temperature_max_c-c.temperature_min_c))
@@ -616,22 +619,51 @@ class CldController:
         if not self.owned or self.closed or self.failed or self.point is None: raise NktError("CLD point not prepared")
         self.failed = True
         state = self.capture(phase)
-        self.healthy(state, require_ld_ready=True)
+        result = self._check_point_state(state, emitting=emitting)
+        self.failed = False
+        return result
+
+    def _check_point_state(self, state, *, emitting, startup_voltage_pending=False):
+        self.healthy(state, require_ld_ready=True, _startup_voltage_pending=startup_voltage_pending)
         if state["getLdOutputState"] != emitting or not self.stable(state): raise NktError("CLD optical/thermal state changed")
         if state["getLdOperatingMode"] != 0 or state["getLdCurrLimit"] > self.config.max_current_a:
             raise NktError("CLD current control/limit changed")
         if not math.isclose(state["getLdCurrSetpoint"], self.point.current_a, abs_tol=self.config.current_tolerance_a, rel_tol=1e-7):
             raise NktError("CLD current setting changed")
         if abs(state["getTempSetpoint"]-self.config.temperature_c) > .001: raise NktError("CLD temperature target changed")
-        self.failed = False
         return {"source": state, "filter": None, "nominal_wavelength_nm": self.point.wavelength_nm}
 
-    def set_emission(self, enabled):
+    def set_emission(self, enabled, *, deadline=None):
         if type(enabled) is not bool: raise NktError("emission must be boolean")
         if enabled: self.verify_point(emitting=False, phase="cld_before_emission")
         if not self.owned or self.closed or self.failed: raise NktError("CLD session not ready")
         self.failed = True
         self.backend.set("switchLdOutput", enabled)
+        if enabled:
+            state = self.capture("cld_formal")
+            voltage = state["measLdVolt"]
+            if -.0004 <= voltage < 0:
+                # Validate every other guard before waiting; never catch a
+                # general instrument/communication error or resend LD ON.
+                self._check_point_state(state, emitting=True, startup_voltage_pending=True)
+                until = self.clock() + 2.
+                if deadline is not None and until >= deadline:
+                    raise NktError("CLD shared optical deadline cannot accommodate startup recheck")
+                event = {"phase": "cld_startup_voltage_wait", "captured_at_utc": utc_now(),
+                         "voltage_v": voltage, "delay_s": 2., "reason": "near-zero negative voltage immediately after LD ON"}
+                self.record["events"].append(event)
+                if self.on_event: self.on_event(event)
+                while self.clock() < until:
+                    self.sleep(min(self.config.poll_interval_s, until-self.clock()))
+                    if deadline is not None and self.clock() >= deadline:
+                        raise NktError("CLD shared optical deadline exhausted during startup recheck")
+                    state = self.capture("cld_startup_voltage_recheck")
+                    self._check_point_state(state, emitting=True, startup_voltage_pending=self.clock() < until)
+                if deadline is not None and self.clock() >= deadline:
+                    raise NktError("CLD shared optical deadline exhausted during startup recheck")
+            result = self._check_point_state(state, emitting=True)
+            self.failed = False
+            return result
         self.failed = False
         return self.verify_point(emitting=enabled)
 

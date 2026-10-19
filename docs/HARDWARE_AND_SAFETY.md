@@ -1,5 +1,23 @@
 # Hardware and safety guide
 
+## User-authorized CLD startup recheck (2026-10-19, software-only)
+
+Only the first complete snapshot immediately following an owned LD ON command
+may classify a finite voltage in [-0.0004,0) V as a pending startup observation.
+After all other existing guards pass, wait once for two seconds with fresh full
+state guards at the existing poll interval; then require the original strict
+nonnegative voltage and all existing point guards. No sample/power qualification
+occurs during this wait. The classification is bounded measurement handling,
+not a permissible physical reverse-voltage rating. Normal, formal, preflight,
+OFF and cleanup guards keep their existing contracts. Larger/nonfinite voltage,
+overcurrent, temperature/interlock, settings/identity, changed diagnostics,
+communication or unknown-state failures do not become a delayed retry. Preserve
+raw values and the startup-wait event; never clamp or take absolute voltage.
+No additional LD enable write or automatic scan restart is allowed. One shared
+deadline includes the wait and its I/O; late evidence cannot qualify the point.
+Software-only tests/deployment do not claim illuminated hardware acceptance.
+
+
 ## User-approved optional third detector (2026-10-18, offline stage)
 
 The internal-XX profile may explicitly enable lockin_aux=SR865A. XX TTL OUT

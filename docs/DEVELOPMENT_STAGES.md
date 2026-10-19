@@ -1,5 +1,21 @@
 # Development stages
 
+### CLD bounded startup voltage recheck (2026-10-19)
+
+Implemented the operator-requested single two-second settled recheck for the
+first post-ON finite voltage in [-0.4mV,0). Complete independent guards precede
+the wait and run during it; a fresh final state must satisfy the old strict
+nonnegative predicate. No general exception retry, extra ON write, new TOML
+field, formal/OFF relaxation or old-record rewrite. Adapter passes the existing
+shared deadline; insufficient budget or mixed/new faults stop with original
+cleanup. Original negative snapshots and a reason/delay event remain auditable.
+150 hardware-blocked local regressions pass in30.654s, including11 new tests for
+the observed -9.205192uV/25.79391uA startup, persistence, limits, mixed faults,
+read loss, deadline and interrupt cleanup. Software-only deployment is prepared
+for an idle station; active pinned scans must retain their old source hashes.
+Real hardware acceptance is not performed or claimed, as requested by operator.
+
+
 ## Dark drift publication and LK_setup deployment (2026-10-18)
 
 User explicitly prioritizes publication/deployment before the newly requested

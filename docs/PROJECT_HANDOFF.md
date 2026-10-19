@@ -4,6 +4,32 @@ Last updated: 2026-10-18
 
 ## Current stage
 
+### CLD startup voltage recheck (2026-10-19, software-only)
+
+The operator authorizes a minimal two-second recheck, commit and deployment
+without disturbing the active experiment, and explicitly does not request real
+illumination acceptance. Only a finite first post-ON voltage in [-0.0004,0) V
+enters one guarded two-second wait. All other current/temperature/settings,
+output and exact diagnostic guards run before and during it; final voltage must
+pass the original nonnegative predicate. Larger/nonfinite negatives, formal or
+OFF negatives, mixed faults and communication failures do not get this wait.
+Raw states and the startup-wait event remain archived; no extra LD ON write,
+power retry, TOML field or analysis/validity change is introduced. The shared
+optical deadline cannot be extended. The 0.4mV transition classification is not
+a certified permissible diode reverse-bias specification.
+
+Local hardware-blocked regression:150 tests pass in30.654s, including11 new
+startup tests (overlapping subsets are not additive). No instrument acceptance
+is claimed. Current pinned run20261019T1739Z continues on its original hashes;
+production replacement is deferred until its parent/child really exit, all
+station DB runs are terminal, Jupyter is idle and every owner alias is free.
+Only the two CLD source files, this test and additive documentation are delivered;
+all other overlays, operator profiles and experimental records are preserved.
+Delivery receipts live under .test-tmp/cld-startup-recheck-20261019 locally and
+.test-tmp/photonics-deployment/cld-startup-recheck-20261019T175815Z on LK_setup.
+This entry records software/staging; the later deployment receipt owns activation.
+
+
 ### Dark drift publication and LK_setup deployment (2026-10-18)
 
 User explicitly prioritizes publication/deployment before the newly requested
