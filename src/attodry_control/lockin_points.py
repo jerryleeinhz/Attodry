@@ -115,6 +115,13 @@ class LockinPointSession:
             raise TimeoutError("Lock-in settling exhausted the operation deadline")
 
     def _wait(self, seconds):
+        monitor = getattr(self, "monitor_wait_context", None)
+        if monitor is None or seconds <= 0:
+            return LockinPointSession._wait_unmonitored(self, seconds)
+        with monitor():
+            return LockinPointSession._wait_unmonitored(self, seconds)
+
+    def _wait_unmonitored(self, seconds):
         """Allow the optical owner to supervise every second of detector wait."""
         until = self.clock() + seconds
         self._check_wait()

@@ -1,6 +1,7 @@
 """Gated four-module point execution; no I/O until explicit run authorization."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from enum import Enum
@@ -343,6 +344,12 @@ class _Events:
         self.cleaning = False
         self.errors = []
         self.measurement_stage = None
+        self.monitor_phase = None
+
+    def phase(self, name, **context):
+        payload = {"phase": name, **context}
+        self.event("scan_phase", payload)
+        self.monitor_phase = payload
 
     def event(self, kind, payload):
         try:
@@ -383,6 +390,21 @@ class HardwareCombinationStation:
 
     def set_event_sink(self, sink):
         self.events = _Events(sink)
+
+    def set_monitor_phase(self, name, **context):
+        self.events.phase(name, **context)
+
+    @contextmanager
+    def _monitor_lockin_wait(self):
+        previous = self.events.monitor_phase
+        context = ({"sample_index": previous["sample_index"]}
+                   if previous is not None and "sample_index" in previous else {})
+        self.set_monitor_phase("lockin_settling", module="lockin", **context)
+        yield
+        # Do not imply sampling resumed after an interrupted/failed wait.
+        if previous is not None:
+            self.set_monitor_phase(previous["phase"],
+                **{key: value for key, value in previous.items() if key != "phase"})
 
     def open(self, modules):
         if modules != tuple(a.module for a in self.config.plan.axes):
@@ -435,6 +457,7 @@ class HardwareCombinationStation:
             self.lockin = session_type(
                 self.config.path, self.config.lockin, self.events.event,
                 manager_factory=self.manager_factory, mode=self.config.lockin_mode, **kwargs)
+            self.lockin.monitor_wait_context = self._monitor_lockin_wait
             preflight["lockin"] = self.lockin.open()
         if self.config.optical is not None:
             from .optical_points import OpticalPointSession
@@ -562,6 +585,7 @@ class HardwareCombinationStation:
                 self.lockin.verify_ready()
             else:
                 self.lockin.qualify()
+            self.set_monitor_phase("optical_tuning", module="optical")
             self.optical.qualify()
             self.lockin.qualify()
             self._verify_optical_reference()
@@ -596,6 +620,7 @@ class HardwareCombinationStation:
             self._guard_continuous_optical()
             if self.background is not None and self.background.needs_capture:
                 self._capture_dark_background()
+                self.set_monitor_phase("optical_tuning", module="optical")
                 self.optical.qualify()
             self.lockin.qualify()
             self._verify_optical_reference()
@@ -620,6 +645,7 @@ class HardwareCombinationStation:
         if self.optical is not None:
             if self.background is not None and self.background.needs_capture:
                 self._capture_dark_background()
+            self.set_monitor_phase("optical_tuning", module="optical")
             self.optical.qualify()
             if self.lockin is not None:
                 # PEM activation or power/wavelength changes may disturb the
@@ -653,6 +679,7 @@ class HardwareCombinationStation:
         return context
 
     def _capture_dark_background(self):
+        self.set_monitor_phase("dark_acquisition", module="lockin")
         self.events.event("optical_background_status", {"stage": "dark_acquisition",
             "capture_mode": self.background.config.capture_mode, "samples": self.background.config.samples})
         self.optical.suspend()
@@ -665,7 +692,8 @@ class HardwareCombinationStation:
         readings = []
         self.events.measurement_stage = "dark_background"
         try:
-            for _ in range(self.background.config.samples):
+            for sample_index in range(self.background.config.samples):
+                self.set_monitor_phase("dark_acquisition", module="lockin", sample_index=sample_index)
                 self.optical.observe_dark(phase="background_sample_before")
                 self._background_smu_guard()
                 if self.cryo is not None:
@@ -757,6 +785,7 @@ class HardwareCombinationStation:
                     self.optical.suspend()
                     if self.background is not None and self.background.needs_capture:
                         self._capture_dark_background()
+                    self.set_monitor_phase("optical_tuning", module="optical")
                     self.optical.qualify()
                     if self.lockin is not None:
                         self.lockin.qualify()

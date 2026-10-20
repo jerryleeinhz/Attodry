@@ -1,5 +1,14 @@
 # Development stages
 
+
+2026-10-20 monitor: English axis point/fully-completed/condition/sample progress
+uses the archived plan and one readonly SQLite transaction. Explicit start markers
+cover temperature/optical/dark/lock-in/cleanup stages; terminal and legacy unknown
+phases remain explicit, without process-liveness claims. Local181 hardware-blocked
+regressions pass (24 new included). Instrument I/O/waits unchanged; added SQLite
+event cost measured offline. Commit and idle-gated target deployment are recorded
+in the monitor-progress-20261020 receipt, with no acquisition/configuration change.
+Operator guide: docs/COMBINATION_MONITOR.md.
 ### CLD bounded startup voltage recheck (2026-10-19)
 
 Implemented the operator-requested single two-second settled recheck for the

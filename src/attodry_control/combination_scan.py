@@ -331,6 +331,15 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
     timing = MeasurementTiming(store_event, monotonic=getattr(station, "monotonic", None))
     emit = timing.emit
 
+    def phase(name, **context):
+        # Explicit start markers survive unrelated raw/timing events. The
+        # hardware station also retains the enclosing dark/formal context.
+        if hasattr(station, "set_monitor_phase"):
+            station.set_monitor_phase(name, **context)
+        else:
+            emit("scan_phase", {"phase": name, **context})
+
+
     try:
         # Only a successfully committed run may become the monitor default.
         # Registration failure stops before opening any instrument.
@@ -339,6 +348,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
         if on_registered is not None:
             emit("launch_registered", on_registered(store, run_id))
         emit("run_started", {"resume": resume, "plan": snapshot})
+        phase("preflight")
         with timing.timed_stage("preflight"):
             emit("preflight", station.open(modules))
         previous_indices: tuple | None = None
@@ -355,12 +365,14 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 if previous_indices is None or indices[:depth + 2] != previous_indices[:depth + 2]:
                     point = axis.points[condition["axes"][axis.module]["index"]]
                     emit("axis_setting", {"module": axis.module, "requested": point.values})
+                    phase("axis_apply", module=axis.module)
                     with timing.timed_stage("axis_apply", module=axis.module):
                         emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
                     if hasattr(station, "qualify_axis"):
                         scope = {"repeat_index": condition["repeat_index"],
                                  "axis_indices": list(indices[1:depth + 2]),
                                  "condition_id": condition["condition_id"]}
+                        phase("axis_qualification", module=axis.module)
                         with timing.timed_stage("axis_qualification", module=axis.module):
                             axis_qualification = station.qualify_axis(axis.module, point, scope)
                             emit("axis_qualification", {"module": axis.module, **axis_qualification})
@@ -383,6 +395,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                             start = utc_now()
                             candidate_index += 1
                             reads = []
+                            phase("formal_sampling", sample_index=sample_index)
                             try:
                                 if hasattr(station, "begin_sample"):
                                     station.begin_sample()
@@ -393,6 +406,8 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                                     for module in modules:
                                         with timing.timed_stage("module_read", module=module,
                                                 sample_index=sample_index, candidate_index=candidate_index):
+                                            phase("formal_sampling", module=module,
+                                                  sample_index=sample_index)
                                             reading = station.read(module)
                                             emit("raw_reading", {"sample_index": sample_index,
                                                 "candidate_index": candidate_index,
@@ -513,6 +528,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             store.finish_attempt(run_id, condition["condition_id"], attempt,
                                  expected_samples=plan.samples_per_condition)
             emit("condition_accepted", {})
+            phase("condition_complete")
             previous_indices = indices
             attempt = None
         current = None
@@ -530,6 +546,10 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
         for module in ("optical", "lockin", "smu", "magnetic", "temperature"):
             if module not in modules:
                 continue
+            try:
+                phase("cleanup", module=module)
+            except BaseException as exc:
+                cleanup_errors.append(f"cleanup phase audit: {exc}")
             try:
                 emit("cleanup_started", {"module": module})
             except BaseException as exc:

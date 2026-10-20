@@ -142,6 +142,13 @@ class PhotonicsLockinPointSession:
         self._recovery_deadline_check()
 
     def _wait(self, seconds):
+        monitor = getattr(self, "monitor_wait_context", None)
+        if monitor is None or seconds <= 0:
+            return PhotonicsLockinPointSession._wait_unmonitored(self, seconds)
+        with monitor():
+            return PhotonicsLockinPointSession._wait_unmonitored(self, seconds)
+
+    def _wait_unmonitored(self, seconds):
         context = self._reference_operation_context
         if context is None or context["deadline"] is None:
             self.sleep(seconds)

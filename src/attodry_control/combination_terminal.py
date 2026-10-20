@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 import textwrap
+from datetime import datetime, timezone
 
 
 def _number(value, unit=""):
@@ -270,11 +271,94 @@ def launch_text(summary, width=None):
         replace_whitespace=False, break_on_hyphens=False) or [""]))
 
 
+def _monitor_targets(requested):
+    parts = []
+    for key, value in requested.items():
+        if key == "temperature_k":
+            parts.append(f"target {value:.6g} K")
+        else:
+            parts.append(_coordinate(key, [value]))
+    return "; ".join(parts)
+
+
+def _record_age(timestamp):
+    if not timestamp:
+        return None
+    try:
+        recorded = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if recorded.tzinfo is None:
+            return None
+        seconds = max(0, int((datetime.now(timezone.utc) - recorded).total_seconds()))
+    except (TypeError, ValueError):
+        return None
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _phase_name(phase):
+    names = {"preflight": "Startup checks", "axis_apply": "Applying axis target",
+             "axis_qualification": "Axis qualification", "dark_acquisition": "Dark acquisition",
+             "optical_tuning": "Optical power qualification", "lockin_settling": "Lock-in settling / sampling interval",
+             "formal_sampling": "Formal sampling", "condition_complete": "Condition complete",
+             "cleanup": "Cleanup"}
+    name = names.get(phase.get("phase"), phase.get("phase") or "Unavailable")
+    if phase.get("module"):
+        name = phase["module"] + " -> " + name
+    if phase.get("sample_index") is not None:
+        name += f" | sample {phase['sample_index'] + 1}"
+    return name
+
+
+def _monitor_progress_lines(snapshot):
+    lines = []
+    progress = snapshot.get("progress") or {}
+    axes = progress.get("axes", [])
+    if axes and axes[0].get("total_repeats", 1) > 1:
+        repeat = axes[0].get("repeat_index")
+        lines.append(f"Repeat: {repeat + 1 if repeat is not None else '-'}/{axes[0]['total_repeats']}")
+    for axis in axes:
+        module = axis["module"]
+        name = {"temperature": "Temperature", "optical": "Optical", "lockin": "Lock-in",
+                "magnetic": "Magnetic", "smu": "SMU", "rotator": "Rotator"}.get(module, module)
+        current = axis.get("current_point")
+        lines.append(f"{name} point: {current if current is not None else '-'}/{axis['total_points']}"
+                     + f" | Fully completed in scope: {axis['completed_points']}/{axis['total_points']}"
+                     + (" | " + _monitor_targets(axis["requested"]) if axis.get("requested") else ""))
+        if axis.get("scope"):
+            lines.append("Point scope: " + ", ".join(
+                f"{outer} point {index + 1}" for outer, index in axis["scope"].items()))
+    condition = progress.get("current_condition")
+    if condition:
+        lines.append(f"Formal samples in attempt: {condition['formal_samples']}/"
+                     f"{condition['expected_formal_samples']} | {condition['status']}"
+                     + (" (provisional until accepted)" if condition["status"] == "started" else ""))
+    phase = snapshot.get("phase") or {}
+    if phase.get("status") == "terminal":
+        lines.append("Current phase: " + str(phase.get("phase", snapshot["status"])) + " (terminal)")
+        if phase.get("last_recorded"):
+            lines.append("Last recorded phase: " + _phase_name(phase["last_recorded"]))
+    elif phase.get("status") == "recorded":
+        lines.append("Current phase (last recorded): " + _phase_name(phase))
+        started = phase.get("started_at_utc")
+        if started:
+            age = _record_age(started)
+            lines.append("Phase started: " + started + (" | Elapsed: " + age if age else ""))
+        updated = phase.get("last_update_at_utc")
+        if updated:
+            age = _record_age(updated)
+            lines.append("Last database event: " + updated + (" | Age: " + age if age else ""))
+    elif phase:
+        lines.append("Current phase: unavailable (no explicit phase record)")
+    return lines
+
+
 def snapshot_text(snapshot, width=None):
     width = max(40, width or shutil.get_terminal_size((110, 30)).columns)
-    lines = [f"Status: {snapshot['status']} | Accepted: {snapshot.get('accepted_conditions', '?')}/"
+    lines = [f"Status: {snapshot['status']} | Accepted conditions: {snapshot.get('accepted_conditions', '?')}/"
              f"{snapshot.get('total_conditions', '?')} | Process liveness: {snapshot.get('process_liveness', 'unknown')}",
              "Run ID: " + snapshot.get("run_id", "?")]
+    lines.extend(_monitor_progress_lines(snapshot))
     attempt = snapshot.get("current_attempt")
     if attempt:
         lines.append(f"Attempt: {attempt['condition_id']} / {attempt['attempt_index']} / {attempt['status']}")

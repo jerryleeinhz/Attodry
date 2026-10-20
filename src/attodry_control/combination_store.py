@@ -11,6 +11,8 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
+from .monitor_progress import phase_snapshot, read_progress
+
 
 SCHEMA_VERSION = 1
 
@@ -237,6 +239,12 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "SELECT condition_id, attempt_index, status FROM combination_attempts "
             "WHERE run_id=? ORDER BY started_at_utc DESC, rowid DESC LIMIT 1", (run_id,),
         ).fetchone()
+        phase = connection.execute(
+            "SELECT created_at_utc, payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type='scan_phase' ORDER BY event_id DESC LIMIT 1", (run_id,),
+        ).fetchone()
+        progress = read_progress(connection, run_id, json.loads(row["plan_json"]),
+                                 dict(attempt) if attempt else None)
         recovery = connection.execute(
             "SELECT created_at_utc, event_type, payload_json FROM combination_events "
             "WHERE run_id=? AND event_type IN ('reference_recovery_started', "
@@ -258,6 +266,9 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "run_id": run_id, "status": row["status"],
             "accepted_conditions": accepted, "total_conditions": total,
             "current_attempt": dict(attempt) if attempt else None,
+            "progress": progress,
+            "phase": phase_snapshot(dict(phase) if phase else None, row["status"],
+                                    dict(event) if event else None),
             "cleanup": json.loads(row["cleanup_json"]) if row["cleanup_json"] else None,
             "error": row["error"], "process_liveness": "unknown",
             "last_recorded_readings": last_confirmed,

@@ -1,9 +1,27 @@
 # Project handoff
 
-Last updated: 2026-10-18
+Last updated: 2026-10-20
 
 ## Current stage
 
+
+### English Combination monitor progress and phases (2026-10-20)
+
+Monitor now separates archived axis-point position, fully completed points within
+the current repeat/outer-axis scope, accepted conditions and provisional formal
+samples. Explicit scan_phase markers precede preflight, axis operations,
+dark acquisition, optical tuning, actual positive lock-in waits, formal sampling
+and cleanup. Terminal status overrides old active phases; legacy runs without
+markers report unavailable. Phase/event timestamps retain unknown process liveness.
+User-facing monitor fields are English; see docs/COMBINATION_MONITOR.md.
+
+Local hardware-blocked 181 related tests pass in92.661s, including24 new monitor
+tests. No added instrument query/write/wait; a2dark+2formal fake fixture adds26
+SQLite events with unchanged instrument traces and fakewait.3s. Local404-condition
+snapshot median6.07ms versus1.60ms before; phase-event fixture median overhead
+about.066s (offline observations only). Deployment is separately idle-gated with
+before/after hashes, backup, rollback and target offline validation; receipts in
+`.test-tmp/monitor-progress-20261020`. No configuration or scan start is included.
 ### CLD startup voltage recheck (2026-10-19, software-only)
 
 The operator authorizes a minimal two-second recheck, commit and deployment
