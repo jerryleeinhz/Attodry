@@ -1,5 +1,11 @@
 # Development stages
 
+2026-10-20 monitor deployment verified09:29:47UTC: feature f806710,11file hashes,
+138owner releases; target176 related tests and real CLI303/14-condition previews
+pass. Old interrupted run shows temperature19/101,18complete, terminal phase.
+Operator's newly edited four-power temperature grid remains untouched and its
+non-integral endpoint error is separately reported. No scan/instrument I/O.
+
 
 2026-10-20 monitor: English axis point/fully-completed/condition/sample progress
 uses the archived plan and one readonly SQLite transaction. Explicit start markers

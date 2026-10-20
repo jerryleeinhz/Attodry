@@ -7,6 +7,18 @@ Last updated: 2026-10-20
 
 ### English Combination monitor progress and phases (2026-10-20)
 
+Feature commit f806710 is deployed to LK_setup at09:29:47UTC. Target176 related
+hardware-blocked tests pass in120.478s; the clean-HEAD monitor-only commit tree
+also passes87 tests. These overlapping suites are not additive. All11 payload
+after-hashes match and138owner leases are released; production303-condition and
+14-power previews pass, and the old interrupted run correctly shows19/101 with
+18fully complete temperature points. No scan or instrument I/O is started.
+The operator renamed/edited the four-power profile; it is preserved byte-for-byte.
+Its1.7..126.7K/step11K (and later step7 segments) fails exact endpoint parsing,
+independently reported in production-preview.json. First deployment rolled back
+fully on that unrelated profile check; final deployment and both receipts remain
+in the delivery stage. Configurations and old interrupted/manual data stay intact.
+
 Monitor now separates archived axis-point position, fully completed points within
 the current repeat/outer-axis scope, accepted conditions and provisional formal
 samples. Explicit scan_phase markers precede preflight, axis operations,
