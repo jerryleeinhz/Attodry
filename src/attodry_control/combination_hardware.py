@@ -87,7 +87,16 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     configuration._strict_keys_with_optional(
         table, "combination_scan",
         {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"},
-        {"lockin_mode", "run_id", "reference_topology", "illumination_policy"})
+        {"lockin_mode", "run_id", "reference_topology", "illumination_policy",
+         "temperature_deviation_policy", "magnetic_deviation_policy", "unreachable_target_policy"})
+    if table.get("unreachable_target_policy", "abort") != "abort":
+        raise ValueError("This combination supports unreachable_target_policy=abort only")
+    temperature_policy = table.get("temperature_deviation_policy", "abort")
+    if temperature_policy not in ("abort", "record_continue"):
+        raise ValueError("combination_scan.temperature_deviation_policy must be abort or record_continue")
+    magnetic_policy = table.get("magnetic_deviation_policy", "abort")
+    if magnetic_policy not in ("abort", "record_continue"):
+        raise ValueError("combination_scan.magnetic_deviation_policy must be abort or record_continue")
     illumination = table.get("illumination_policy", "off_before_axis_change")
     if illumination not in ("off_before_axis_change", "continuous_gate_scan"):
         raise ValueError("Unsupported combination_scan.illumination_policy")
@@ -110,6 +119,10 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             or not all(isinstance(m, str) and m in {"temperature", "magnetic", "smu", "lockin", "optical"} for m in order)
             or len(set(order)) != len(order)):
         raise ValueError("Hardware order requires distinct temperature/magnetic/smu/lockin/optical axes")
+    if temperature_policy != "abort" and "temperature" not in order:
+        raise ValueError("temperature_deviation_policy requires the temperature axis")
+    if magnetic_policy != "abort" and "magnetic" not in order:
+        raise ValueError("magnetic_deviation_policy requires the magnetic axis")
     if photonics and "lockin" not in order:
         raise ValueError("PEM reference topologies require the lockin axis")
     aux_table = document.get("lockin_aux", {})
@@ -138,10 +151,10 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             AxisPoint({"temperature_k": v}, "main", "ordered") for v in points))
         hardware["temperature"] = asdict(temperature)
         hardware["temperature"].update(effective_interrupt_policy="abort",
-            qualification="fresh_dwell_per_axis_entry", formal_temperature_policy="strict_checks",
+            qualification="fresh_dwell_per_axis_entry", formal_temperature_policy=temperature_policy,
             pre_measure_wait_s_used=False)
     if "magnetic" in order:
-        magnetic = configuration.load_magnetic_field_operation_config(path)
+        magnetic = configuration.load_magnetic_field_operation_config(path, command_scoped=True)
         segments = magnetic.run.segment_plan
         axes["magnetic"] = ScanAxis("magnetic", tuple(AxisPoint(
             {"field_x_t": point.bx_t, "field_z_t": point.bz_t},
@@ -156,7 +169,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         # Temperature-only operation keeps the existing ambient 3 T envelope.
         effective = (limits if magnetic is not None else
                      replace(limits, hardware_z_max_t=min(limits.hardware_z_max_t, 3.0)))
-        if photonics or "optical" in order:
+        command_scoped_field = magnetic is not None
+        if (photonics or "optical" in order) and not command_scoped_field:
             effective = replace(effective,
                 hardware_x_max_t=min(effective.hardware_x_max_t, effective.experiment_vector_max_t, 3.0),
                 hardware_z_max_t=min(effective.hardware_z_max_t, effective.experiment_vector_max_t, 3.0))
@@ -167,7 +181,10 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             magnet=replace(selected.magnet, limits=effective),
             temperature_stability=(temperature.temperature_stability if temperature is not None
                                    else selected.magnet.stability),
-            strict_resultant=photonics or "optical" in order)
+            strict_resultant=(photonics or "optical" in order) and not command_scoped_field,
+            command_scoped_field=command_scoped_field,
+            temperature_deviation_policy=temperature_policy,
+            magnetic_deviation_policy=magnetic_policy)
         hardware["effective_cryostat"] = {name: asdict(value) if hasattr(value, "__dataclass_fields__") else value
                                          for name, value in vars(cryostat).items()}
         if magnetic is not None:
@@ -302,12 +319,14 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                                           MagnetLimits(3.0, 3.0, 3.0) if photonics or optical is not None else MagnetLimits()),
                            readback_tolerance_t=cryostat.magnet.readback_tolerance_t if cryostat else None,
                            lockin_coordinate_limits=lockin_limits,
-                           strict_resultant=photonics or optical is not None)
+                           strict_resultant=(photonics or optical is not None) and magnetic is None,
+                           command_scoped_field=magnetic is not None)
     snapshot = plan.snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     qualification_policy="axis-entry-strict-environment-v1",
                     lockin_mode=mode,
                     illumination_policy=illumination,
+                    magnetic_deviation_policy=magnetic_policy,
                     hardware=_json(hardware), config_path=str(path),
                     config_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                     cleanup_policy={"lockin": ("4mV_restore_ranges_h1" if mode == "excitation"
@@ -696,10 +715,35 @@ class HardwareCombinationStation:
                 self.set_monitor_phase("dark_acquisition", module="lockin", sample_index=sample_index)
                 self.optical.observe_dark(phase="background_sample_before")
                 self._background_smu_guard()
+                temperature_observation = None
+                magnetic_observation = None
                 if self.cryo is not None:
-                    self.cryo.capture("dark_background")
+                    environment = self.cryo.capture("dark_background")
+                    if self.config.temperature is not None:
+                        temperature_observation = {
+                            "sampling": "pre_read_not_window_mean",
+                            "captured_at_utc": environment["captured_at_utc"],
+                            "temperature_k": environment["state"]["sample_temperature_k"],
+                            "assessment": environment.get("temperature_assessment")}
+                    if self.config.magnetic is not None:
+                        magnetic_observation = {
+                            "sampling": "pre_read_not_window_mean",
+                            "captured_at_utc": environment["captured_at_utc"],
+                            "field_x_t": environment["state"]["field"]["bx_t"],
+                            "field_z_t": environment["state"]["field"]["bz_t"],
+                            "assessment": environment.get("magnetic_assessment")}
                 reading = self.lockin.sample_point(
                     measurement_context=self.cryo.capture if self.cryo is not None else None)
+                if temperature_observation is not None:
+                    reading = {**reading,
+                        "actual": {**reading["actual"], "temperature_k": temperature_observation["temperature_k"]},
+                        "status": {**reading["status"], "temperature_observation": temperature_observation}}
+                if magnetic_observation is not None:
+                    reading = {**reading,
+                        "actual": {**reading["actual"],
+                            "field_x_t": magnetic_observation["field_x_t"],
+                            "field_z_t": magnetic_observation["field_z_t"]},
+                        "status": {**reading["status"], "magnetic_observation": magnetic_observation}}
                 readings.append(reading)
                 self.optical.observe_dark(phase="background_sample_after")
                 self._background_smu_guard()

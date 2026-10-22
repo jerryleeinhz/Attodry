@@ -92,10 +92,13 @@ def launch_summary(config, database, run_id):
     summary["source_entry_sha256"] = hashlib.sha256(Path(__file__).with_name("combination_cli.py").read_bytes()).hexdigest()
     summary["illumination_policy"] = config.illumination_policy
     if config.magnetic is not None:
+        summary["magnetic_deviation_policy"] = config.cryostat.magnetic_deviation_policy
         summary["field_transition_policy"] = config.magnetic.run.transition_policy.value
         policy = config.snapshot["field_readback_policy"]
-        if policy["mode"] == "vector":
+        if policy["mode"] == "vector" or policy.get("command_scoped"):
             summary["field_resultant_limit_t"] = policy["limits"]["experiment_vector_max_t"]
+        if policy.get("command_scoped"):
+            summary["field_resultant_limit_scope"] = "simultaneous_nonzero_command_axes"
         summary["field_readback_policy"] = config.snapshot["field_readback_policy"]
         summary["field_setpoint_ack_tolerance_t"] = config.magnetic.magnet.setpoint_ack_tolerance_t
     if config.smu is not None:

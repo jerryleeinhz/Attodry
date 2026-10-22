@@ -1,5 +1,15 @@
 # Photonics / nonlinear Hall combination scan
 
+## 磁场与温度的判稳后策略（2026-10-22）
+
+`[combination_scan].magnetic_deviation_policy` 与 `temperature_deviation_policy`
+各支持 abort（省略默认）/record_continue，分别要求对应轴存在。
+先完整资格，后记录质量；硬件/通信/未知/外部设置与硬边界故障不能继续。
+参见 [磁场选项与单/双轴边界](MAGNETIC_COMBINATION_OPTIONS.md)、
+[温度选项](TEMPERATURE_COMBINATION_OPTIONS.md)。磁场新版本以当前命令分类，
+单轴使用配置轴上限，双轴同时非零时额外合场<=3T；无额外读回余量。
+本次不实施任何速度优化，保持原转场、判稳、核验、读回和等待。
+
 2026-10-18：内部XX参考可选增加第三台SR865A（lockin_aux），与XY及斩波器
 共用XX TTL OUT。配置模板、三路暗背景/绘图及当前支持范围见
 [三路锁相指南](THREE_LOCKIN_GUIDE.md)。三台时仍使用下面的统一Combination入口。
@@ -900,7 +910,7 @@ Vxx/Vxy 仍是顺序采样，共同 condition 不表示硬件同时采样；每�
 关闭通信后要求人工确认。一个设备清理失败不阻止其他设备独立清理尝试。
 
 加入环境轴时，本 profile 对目标、转场、实际读回及清理均保持
-`sqrt(Bx²+Bz²) <= 3 T`，包含纯轴目标。通信失败后保留最后确认值，绝不推断场为零。
+双轴同时非零时 `sqrt(Bx²+Bz²) <= 3 T`；单轴及实际残余按新版本配置边界。通信失败后保留最后确认值，绝不推断场为零。
 
 ## 9. 命令与当前验收边界
 

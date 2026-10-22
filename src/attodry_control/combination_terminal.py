@@ -223,7 +223,15 @@ def launch_text(summary, width=None):
                         " | Sync " + str(settings["sync_output_mode"]))
     if "field_transition_policy" in summary:
         policy = summary.get("field_readback_policy")
-        if policy is not None and policy["mode"] != "vector":
+        command_scoped = policy is not None and policy.get("command_scoped", False)
+        if command_scoped:
+            limits = policy["limits"]
+            lines.append(f"Field commands: |Bx| <= {limits['hardware_x_max_t']:g} T"
+                         f" | |Bz| <= {limits['hardware_z_max_t']:g} T"
+                         f" | Both axes nonzero: |B| <= {limits['experiment_vector_max_t']:g} T"
+                         f" | Transition: {summary['field_transition_policy']}")
+            lines.append("Magnetic quality after qualification: " + summary.get("magnetic_deviation_policy", "abort"))
+        elif policy is not None and policy["mode"] != "vector":
             axis = "X" if policy["mode"] == "single_x" else "Z"
             nominal = policy["limits"][f"hardware_{axis.lower()}_max_t"]
             lines.append(f"Field target: single {axis} | |B{axis.lower()}| <= {nominal:g} T"
@@ -235,8 +243,13 @@ def launch_text(summary, width=None):
             vector = policy["vector_readback_limit_t"]
             lines.append(f"Field readback: {policy['mode']} | |Bx| <= {axes['x']:.7g} T"
                          f" | |Bz| <= {axes['z']:.7g} T"
-                         + (f" | |B| <= {vector:.7g} T" if vector is not None else "")
+                         + (f" | Both commanded axes nonzero: |B| <= {vector:.7g} T" if command_scoped
+                            else f" | |B| <= {vector:.7g} T" if vector is not None else "")
                          + " | Nominal targets unchanged")
+            if command_scoped:
+                inactive = policy['inactive_axis_readback_limits_t']
+                lines.append(f"Inactive-axis hard residual: |Bx| <= {inactive['x']:.7g} T"
+                             f" or |Bz| <= {inactive['z']:.7g} T, according to command context")
             if "readback_tolerance_t" in policy:
                 tolerance = _number(policy["readback_tolerance_t"], "T")
                 lines.append(f"Field qualification: each axis error <= {tolerance}"

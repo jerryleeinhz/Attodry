@@ -1,5 +1,15 @@
 # attoDRY Transport Control
 
+## 当前磁场组合质量策略（2026-10-22）
+
+`[combination_scan].magnetic_deviation_policy="record_continue"`：每个磁场点先完整判稳，
+内层采集将磁场目标/范围偏差保留为质量警告；硬故障仍中止。省略默认 abort。
+新光学磁场组合按当前命令/转场上下文实施单轴配置上限与双轴<=3T合场，
+非工作轴残余仍是硬保护，无额外读回余量。以下旧整计划模式/读回余量条目
+只适用于其已归档版本或独立入口。温度/无磁场轴的严格环境保护保持原契约。
+本次速度优化未实施。详见 [磁场组合选项](docs/MAGNETIC_COMBINATION_OPTIONS.md) 和
+[温度组合选项](docs/TEMPERATURE_COMBINATION_OPTIONS.md)。
+
 本光电分支可选启用第三台SR865A：XX SR830 TTL OUT同步XY SR830、
 第三电压通道和斩波器。配置片段、支持边界及离线验收见
 [三路锁相指南](docs/THREE_LOCKIN_GUIDE.md)。

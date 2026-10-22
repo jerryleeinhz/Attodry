@@ -67,7 +67,7 @@ def group_configuration(config, prepared):
             cfg.input_coupling.value, cfg.time_constant_s, cfg.filter_slope_db_oct,
             "fixed", cfg.sensitivity_full_scale_v, 0.0,
             tuple(prepared.harmonics_by_role[cfg.role.value]), cfg.reserve_mode.value,
-            None, None, None, False, "Vxx" if cfg.role is LockinRole.XX else "Vxy"))
+            None, None, None, False, cfg.channel_label))
     if any(p.range_spec.xx_full_scale_v is not None or p.range_spec.xy_full_scale_v is not None
            for p in prepared.grid):
         raise ValueError("Three-channel profile does not accept per-point range overrides")

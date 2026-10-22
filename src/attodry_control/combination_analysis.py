@@ -191,6 +191,17 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
         for reading in sample["reads"]:
             record[f"timestamps.{reading['module']}"] = reading["captured_at_utc"]
             record[f"status.{reading['module']}"] = reading.get("status")
+            if reading["module"] == "temperature":
+                status = reading.get("status") or {}
+                for key in ("temperature_mean_k", "temperature_min_k", "temperature_max_k"):
+                    if key in status:
+                        record["actual." + key] = status[key]
+                if status.get("temperature_quality"):
+                    record.update(_flatten("temperature_quality", status["temperature_quality"]))
+            if reading["module"] == "magnetic":
+                quality = (reading.get("status") or {}).get("magnetic_quality")
+                if quality:
+                    record.update(_flatten("magnetic_quality", quality))
             if reading["module"] == "optical":
                 assessment = (reading.get("status") or {}).get("power_target_assessment")
                 if assessment:

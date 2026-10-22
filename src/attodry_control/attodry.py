@@ -232,6 +232,7 @@ class AttoDryDriver:
         # Only a complete, validated magnetic scan installs the new policy.
         # Generic diagnostics and historical entry points retain strict limits.
         self.field_readback_policy: FieldReadbackPolicy | None = None
+        self._last_nonzero_field_command: VectorField | None = None
         self.field_stability = field_stability
         self.readback_tolerance_t = readback_tolerance_t
         self.setpoint_ack_tolerance_t = setpoint_ack_tolerance_t
@@ -538,9 +539,11 @@ class AttoDryDriver:
             # before enabling a latent setpoint can be considered safe.
             self._validate_field_actual(
                 VectorField(state.field.bx_t, state.field_setpoint.bz_t),
+                command=self.field_readback_context(state),
             )
             self._validate_field_actual(
                 VectorField(state.field_setpoint.bx_t, state.field.bz_t),
+                command=self.field_readback_context(state),
             )
 
         self._ensure_control(
@@ -796,6 +799,8 @@ class AttoDryDriver:
                     VectorField(command_value, current_state.field.bz_t)
                     if axis == "x"
                     else VectorField(current_state.field.bx_t, command_value),
+                    command=(expected_setpoint if expected_setpoint.magnitude_t != 0
+                             else self.field_readback_context(current_state)),
                 )
                 command = self._begin_field_command(
                     command_kind="set_field_component",
@@ -1229,7 +1234,7 @@ class AttoDryDriver:
         self, state: CryostatState, *, require_control: bool = False
     ) -> None:
         limits = self._field_readback_limits()
-        self._validate_field_actual(state.field)
+        self._validate_field_actual(state.field, command=self.field_readback_context(state))
         policy = self._active_field_policy()
         if policy is None:
             validate_vector_field(state.field_setpoint, limits)
@@ -1246,12 +1251,30 @@ class AttoDryDriver:
     def _active_field_policy(self) -> FieldReadbackPolicy | None:
         return self.field_readback_policy
 
-    def _validate_field_actual(self, actual: VectorField) -> None:
+    def field_readback_context(self, state: CryostatState) -> VectorField:
+        """Use confirmed command axes, retaining the previous axes during zeroing.
+
+        This consumes no I/O and never classifies a mode from noisy actual axes.
+        Unknown initial zero in a mixed plan keeps the conservative vector bound.
+        """
+        policy = self._active_field_policy()
+        command = state.field_setpoint
+        if policy is not None and policy.command_scoped:
+            policy.validate_target(command)
+            if command.magnitude_t != 0:
+                self._last_nonzero_field_command = command
+            elif self._last_nonzero_field_command is not None:
+                command = self._last_nonzero_field_command
+        return command
+
+    def _validate_field_actual(self, actual: VectorField, *, command: VectorField | None = None) -> None:
         policy = self._active_field_policy()
         if policy is None:
             validate_vector_field(actual, self._field_readback_limits())
         else:
-            policy.validate_readback(actual)
+            if policy.command_scoped and command is None and self.last_confirmed_state is not None:
+                command = self.field_readback_context(self.last_confirmed_state)
+            policy.validate_readback(actual, command=command)
 
     def _validate_field_target(self, target: VectorField) -> VectorField:
         policy = self._active_field_policy()

@@ -1,5 +1,14 @@
 # Hardware and safety guide
 
+## 2026-10-22 当前磁场组合契约（操作者批准）
+
+当前光学组合中的 magnetic 轴使用 [磁场组合选项](MAGNETIC_COMBINATION_OPTIONS.md)。
+该新版本替代本页历史光学条目中“纯轴也一律合场3T”及“整轮用过X/Z就属vector”的限定。
+单轴按配置标称上限；双轴同时非零才额外合场<=3T；精确命令/转场实际场/非工作轴残余均硬保护，
+不增加旧读回余量。回零沿用前非零命令上下文并验证实际零。较低TOML上限仍有效。
+record_continue只放行完整资格后的目标/范围质量警告，故障/未知/控制或目标变化仍中止。
+原判稳、I/O、转场中间点、等待、清理不提速。以下 dated standalone/实验/光学条目保留其历史适用范围。
+
 ## User-authorized CLD startup recheck (2026-10-19, software-only)
 
 Only the first complete snapshot immediately following an owned LD ON command

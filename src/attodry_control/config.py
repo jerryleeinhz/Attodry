@@ -246,6 +246,7 @@ class LockinConfig:
     autorange_full_scales_v: tuple[float, ...] | None
     reserve_mode: ReserveMode
     harmonic_settings: tuple[HarmonicSensitivityConfig, ...] = ()
+    channel_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1091,7 +1092,7 @@ def load_temperature_excitation_operation_config(
 
 
 def _parse_magnetic_field_run(
-    table: Mapping[str, Any], limits: MagnetLimits
+    table: Mapping[str, Any], limits: MagnetLimits, *, command_scoped: bool = False
 ) -> MagneticFieldRunConfig:
     name = "magnetic_field_run"
     _strict_keys_with_optional(
@@ -1166,7 +1167,7 @@ def _parse_magnetic_field_run(
     try:
         # Requested targets keep strict nominal limits; the run-wide mode never
         # changes because of a residual readback or a later segment.
-        FieldReadbackPolicy.from_targets(points, limits)
+        FieldReadbackPolicy.from_targets(points, limits, command_scoped=command_scoped)
         # A zero start makes static validation independent of any real station
         # state while still checking every target, exact float32 waypoint, and
         # both component-write mixed corners for the selected transition policy.
@@ -1193,10 +1194,12 @@ def _parse_magnetic_field_run(
 
 
 def load_magnetic_field_operation_config(
-    path: str | Path,
+    path: str | Path, *, command_scoped: bool = False,
 ) -> MagneticFieldOperationConfig:
     """Load only the strict tables needed by standalone field operation."""
 
+    if type(command_scoped) is not bool:
+        raise ConfigError("command_scoped must be a boolean")
     document = _load_document(path)
     project = _parse_project(_table(document, "project"))
     if project.mode is not RunMode.HARDWARE:
@@ -1215,6 +1218,7 @@ def load_magnetic_field_operation_config(
         "visa",
         "lockin_xx",
         "lockin_xy",
+        "lockin_aux",
         "lockin_sweep",
         "gate_top",
         "gate_bottom",
@@ -1232,7 +1236,7 @@ def load_magnetic_field_operation_config(
         magnet = _parse_magnet(_table(document, "magnet"))
         cleanup = _parse_cleanup(_table(document, "cleanup"))
         run = _parse_magnetic_field_run(
-            _table(document, "magnetic_field_run"), magnet.limits
+            _table(document, "magnetic_field_run"), magnet.limits, command_scoped=command_scoped
         )
     except ConfigError:
         raise
@@ -1443,7 +1447,7 @@ def _parse_lockin(
             }
         )
     _strict_keys_with_optional(
-        table, name, expected, {"harmonic_settings"},
+        table, name, expected, {"harmonic_settings", "channel_label"},
     )
     model = _string(table["model"], f"{name}.model")
     if model != "SR830":
@@ -1613,6 +1617,7 @@ def _parse_lockin(
         autorange_full_scales_v=autorange_full_scales_v,
         reserve_mode=reserve_mode,
         harmonic_settings=_parse_harmonic_settings(table, role, name, safety_role, safety),
+        channel_label=_channel_label(table.get("channel_label", ""), f"{name}.channel_label"),
     )
 
 
@@ -2077,6 +2082,13 @@ def _strict_keys_with_optional(
         raise ConfigError(f"{name} is missing field(s): {', '.join(missing)}.")
     if unknown:
         raise ConfigError(f"{name} has unknown field(s): {', '.join(unknown)}.")
+
+
+def _channel_label(value: Any, name: str) -> str:
+    """Optional operator wiring metadata, never an instrument setting."""
+    if not isinstance(value, str) or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ConfigError(f"{name} must be a single-line string.")
+    return value.strip()
 
 
 def _string(value: Any, name: str) -> str:

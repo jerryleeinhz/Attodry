@@ -91,7 +91,7 @@ class CryostatCombinationTests(unittest.TestCase):
         with redirect_stdout(output):
             self.assertEqual(cli(["describe-hardware", "--config", str(self.path)]), 0)
         plan = json.loads(output.getvalue())["plan"]
-        self.assertEqual(plan["field_limit_policy"], "planned-axis-configured-v2")
+        self.assertEqual(plan["field_limit_policy"], "command-scoped-configured-v1")
         self.assertEqual(plan["hardware"]["effective_cryostat"]["magnet"]["limits"]["hardware_z_max_t"], 9)
         self.assertEqual(self.dll.events, [])
 
@@ -328,7 +328,7 @@ angle_segments = [
         self.assertEqual(self.dll.temperature_control, 0)
         self.assertTrue(result["cleanup"]["manual_verification_required"])
 
-    def test_field_envelope_trip_still_zeroes_and_disables_temperature(self):
+    def test_command_scoped_hard_trip_keeps_cleanup_uncertified_without_expanding_limits(self):
         source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
         source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
         source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
@@ -343,12 +343,14 @@ angle_segments = [
         result = self.execute()
         self.assertEqual(result["status"], "failed", result)
         self.assertIn("exceeds 0.02", result["error"])
-        self.assertIn("sweep_zero", self.dll.events)
+        self.assertNotIn("sweep_zero", self.dll.events)
         self.assertEqual(self.dll.events.count("set_field_z"), 1)
-        self.assertEqual(self.dll.temperature_control, 0)
+        # Both independent cleanup actions run, but their fresh full-state
+        # preflight cannot certify or write through an out-of-limit field.
+        self.assertEqual(self.dll.temperature_control, 1)
         actions = {a["module"]: a for a in result["cleanup"]["actions"]}
         for module in ("magnetic", "temperature"):
-            self.assertTrue(actions[module]["result"]["verified"], actions)
+            self.assertFalse(actions[module]["result"]["verified"], actions)
             self.assertFalse(actions[module]["clean"])
         self.assertTrue(result["cleanup"]["manual_verification_required"])
         self.assertEqual(load_combination_rows(self.database), ())
@@ -362,6 +364,9 @@ angle_segments = [
         source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
         self.write_config(("temperature", "magnetic"), source=source)
         config = load_hardware_combination(self.path)
+        # Preserve tests of the historical recovery contract explicitly. Newly
+        # loaded Combination plans use command-scoped limits without expansion.
+        config.cryostat.command_scoped_field = False
         events = []
         clock = Clock()
         session = CryostatPointSession(config.cryostat, config.temperature, config.magnetic,
@@ -450,7 +455,7 @@ angle_segments = [
         self.assertIsNone(session.recovery_action)
         self.assertNotIn("sweep_zero", self.dll.events)
 
-    def test_trip_during_normal_zero_rejects_run_despite_verified_recovery(self):
+    def test_trip_during_normal_zero_keeps_magnetic_cleanup_uncertified(self):
         source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
         source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
         source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
@@ -472,8 +477,10 @@ angle_segments = [
         result = self.execute()
         self.assertEqual(result["status"], "failed", result)
         actions = {a["module"]: a for a in result["cleanup"]["actions"]}
-        self.assertTrue(actions["magnetic"]["result"]["verified"])
-        self.assertTrue(actions["magnetic"]["result"]["scan_limits_violated"])
+        self.assertFalse(actions["magnetic"]["result"]["verified"])
+        self.assertIn("exceeds 0.02", actions["magnetic"]["result"]["error"])
+        self.assertEqual(self.dll.events.count("sweep_zero"), 1)
+        self.assertTrue(result["cleanup"]["manual_verification_required"])
         self.assertEqual(self.dll.temperature_control, 0)
         self.assertEqual(load_combination_rows(self.database), ())
 

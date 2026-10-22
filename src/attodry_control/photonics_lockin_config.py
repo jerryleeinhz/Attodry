@@ -8,7 +8,7 @@ from pathlib import Path
 import tomllib
 from typing import Mapping
 
-from .config import _parse_sweep_ranges
+from .config import _parse_sweep_ranges, _channel_label
 from .lockin_backend import LockinModel, capabilities_for
 from .models import LockinRole
 from .sr865a_settings import INPUT_RANGES_V_PEAK
@@ -147,7 +147,7 @@ def _role_config(table, role, allowed_scales, reference_max_hz, topology):
     }
     model = LockinModel(table.get("model"))
     subname = "sr830" if model is LockinModel.SR830 else "sr865a"
-    _keys(table, common | {subname}, name=name)
+    _keys(table, common | {subname}, optional={"channel_label"}, name=name)
     address = table["address"]
     if not isinstance(address, str) or not address.strip() or "CHANGE_ME" in address:
         raise ValueError(f"{name}.address must be an explicitly configured VISA address.")
@@ -200,6 +200,7 @@ def _role_config(table, role, allowed_scales, reference_max_hz, topology):
         role, model.value, address.strip(), source, edge, connected,
         "a_minus_b", grounding, "ac", tau, 24, "fixed", scale, phase, tuple(harmonics),
         reserve, input_range, impedance, sync, current_status,
+        channel_label=_channel_label(table.get("channel_label", ""), name + ".channel_label"),
     )
 
 

@@ -42,6 +42,14 @@ class CryostatPointSession:
     def __init__(self, config, temperature, magnetic, event, *, dll=None,
                  monotonic=None, sleep=None):
         self.config, self.temperature, self.magnetic = config, temperature, magnetic
+        self.temperature_deviation_policy = getattr(config, "temperature_deviation_policy", "abort")
+        if self.temperature_deviation_policy not in ("abort", "record_continue"):
+            raise ValueError("Unsupported temperature deviation policy")
+        self.magnetic_deviation_policy = getattr(config, "magnetic_deviation_policy", "abort")
+        if self.magnetic_deviation_policy not in ("abort", "record_continue"):
+            raise ValueError("Unsupported magnetic deviation policy")
+        if self.magnetic_deviation_policy != "abort" and magnetic is None:
+            raise ValueError("magnetic_deviation_policy requires the magnetic axis")
         self.event, self.dll = event, dll
         self.monotonic = monotonic or time.monotonic
         self.sleep = sleep or time.sleep
@@ -63,14 +71,17 @@ class CryostatPointSession:
         self.recovery_action = None
         self.recovery_scan_limits_violated = False
         self.strict_resultant = getattr(config, "strict_resultant", False)
+        self.command_scoped_field = getattr(config, "command_scoped_field", False)
         if type(self.strict_resultant) is not bool:
             raise ValueError("Cryostat strict_resultant must be a boolean")
+        if type(self.command_scoped_field) is not bool:
+            raise ValueError("Cryostat command_scoped_field must be a boolean")
         if self.strict_resultant and max(config.magnet.limits.hardware_x_max_t,
                                          config.magnet.limits.hardware_z_max_t) > config.magnet.limits.experiment_vector_max_t:
             raise ValueError("Strict-resultant cryostat command axis limits must not exceed the vector ceiling")
         self.field_policy = (FieldReadbackPolicy.from_targets(
             magnetic.run.points, config.magnet.limits, config.magnet.readback_tolerance_t,
-            strict_resultant=self.strict_resultant)
+            strict_resultant=self.strict_resultant, command_scoped=self.command_scoped_field)
             if magnetic is not None else FieldReadbackPolicy(
                 FieldScanMode.VECTOR, config.magnet.limits,
                 config.magnet.readback_tolerance_t, strict_resultant=True)
@@ -78,7 +89,7 @@ class CryostatPointSession:
 
     @property
     def active_field_policy(self):
-        if self.strict_resultant:
+        if self.strict_resultant or self.command_scoped_field:
             # The optical profile never expands its actual or setpoint envelope,
             # including zero/disable cleanup. Unknown/over-limit fields need review.
             return self.field_policy
@@ -99,7 +110,7 @@ class CryostatPointSession:
     def field_readback_limits(self):
         # A scan trip must not prevent an already-owned controller from zeroing.
         # This is only a readback envelope for zero/disable, never target permission.
-        if self.recovery_action is not None and not self.strict_resultant:
+        if self.recovery_action is not None and not (self.strict_resultant or self.command_scoped_field):
             if self.field_policy is not None and self.field_policy.mode is FieldScanMode.SINGLE_Z:
                 return MagnetLimits()
             return MagnetLimits(3.0, 3.0, 3.0)
@@ -129,7 +140,9 @@ class CryostatPointSession:
                     validate_vector_field(state.field, self.config.magnet.limits)
                     validate_vector_field(state.field_setpoint, self.config.magnet.limits)
                 else:
-                    self.field_policy.validate_readback(state.field)
+                    self.field_policy.validate_readback(state.field,
+                        **({"command": self.driver.field_readback_context(state)}
+                           if self.command_scoped_field else {}))
                     self.field_policy.validate_target(state.field_setpoint)
             except SafetyViolation as exc:
                 if not self.recovery_scan_limits_violated:
@@ -141,7 +154,9 @@ class CryostatPointSession:
             validate_vector_field(state.field, self.field_readback_limits)
             validate_vector_field(state.field_setpoint, self.field_readback_limits)
         else:
-            policy.validate_readback(state.field)
+            policy.validate_readback(state.field,
+                **({"command": self.driver.field_readback_context(state)}
+                   if self.command_scoped_field else {}))
             policy.validate_target(state.field_setpoint)
         if state.error_code:
             raise AttoDryError(f"attoDRY error code {state.error_code}")
@@ -254,8 +269,22 @@ class CryostatPointSession:
                   "captured_at_utc": utc_now(), "captured_monotonic_s": self.monotonic(),
                   "state": asdict(state)}
         if self.field_policy is not None:
-            record["field_readback_assessment"] = self.field_policy.assessment(state.field)
+            record["field_readback_assessment"] = self.field_policy.assessment(state.field,
+                **({"command": self.driver.field_readback_context(state)}
+                   if self.command_scoped_field else {}))
         record["field_qualification"] = self.field_qualification
+        if self.field_target is not None:
+            tolerance = self.config.magnet.stability.criteria.tolerance
+            error_x = state.field.bx_t - self.field_target.bx_t
+            error_z = state.field.bz_t - self.field_target.bz_t
+            outside = (abs(error_x) > tolerance or abs(error_z) > tolerance or
+                       (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance))
+            record["magnetic_assessment"] = {
+                "target": asdict(self.field_target), "target_error_x_t": error_x,
+                "target_error_z_t": error_z, "tolerance_t": tolerance,
+                "quality_flags": ["magnetic_outside_target_tolerance"] if outside else [],
+                "policy": self.magnetic_deviation_policy,
+                "qualification": self.field_qualification}
         if self.temperature_target is not None and self.baseline_temperature is not None:
             criteria = self.config.temperature_stability.criteria
             drift = state.sample_temperature_k - self.baseline_temperature
@@ -267,20 +296,22 @@ class CryostatPointSession:
                     and abs(target_error) > criteria.tolerance):
                 flags.append("temperature_outside_target_tolerance")
             record["temperature_assessment"] = {"baseline_drift_k": drift, "target_error_k": target_error,
-                "quality_flags": flags, "policy": "strict_checks", "qualification": self.temperature_qualification}
+                "quality_flags": flags, "policy": self.temperature_deviation_policy,
+                "qualification": self.temperature_qualification}
         self.event("environment_sample", record)
         if self.window is not None:
             self.window.append(record)
         if self.field_target is not None:
-            tolerance = self.config.magnet.stability.criteria.tolerance
+            if self.field_qualification is None:
+                raise AttoDryError("Magnetic axis has no completed qualification")
             if not state.field_control_enabled or not self.driver._field_matches(
                     state.field_setpoint, self.field_target):
                 raise AttoDryError("Magnetic control/setpoint changed during measurement")
-            if (abs(state.field.bx_t - self.field_target.bx_t) > tolerance or
-                    abs(state.field.bz_t - self.field_target.bz_t) > tolerance or
-                    (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance)):
+            if (self.magnetic_deviation_policy == "abort" and
+                    record["magnetic_assessment"]["quality_flags"]):
                 raise AttoDryError("Magnetic readback outside target tolerance")
-        if self.temperature_target is not None and self.baseline_temperature is not None:
+        if (self.temperature_deviation_policy == "abort" and
+                self.temperature_target is not None and self.baseline_temperature is not None):
             criteria = self.config.temperature_stability.criteria
             if abs(state.sample_temperature_k - self.baseline_temperature) > criteria.stable_range:
                 raise AttoDryError("Temperature drifted from qualified baseline")
@@ -310,6 +341,14 @@ class CryostatPointSession:
                        "temperature_statistics": statistics,
                        "temperature_mean_k": statistics["mean_k"],
                        "temperature_min_k": min(values), "temperature_max_k": max(values)}
+            flags = list(dict.fromkeys(flag for record in self.window
+                         for flag in record.get("temperature_assessment", {}).get("quality_flags", [])))
+            if (self.temperature is not None and
+                    max(values) - min(values) > self.config.temperature_stability.criteria.stable_range):
+                flags.append("temperature_formal_range_exceeded")
+            summary["temperature_quality"] = {"policy": self.temperature_deviation_policy,
+                "quality_flags": flags, "warning": bool(flags),
+                "range_k": max(values) - min(values)}
             field_means = {}
             field_range_ok = True
             for axis in ("x", "z"):
@@ -318,15 +357,30 @@ class CryostatPointSession:
                 summary["field_" + axis + "_range_t"] = max(fields) - min(fields)
                 field_range_ok &= max(fields) - min(fields) <= self.config.magnet.stability.criteria.stable_range
             summary["field_mean"] = field_means
+            if self.magnetic is not None:
+                magnetic_flags = list(dict.fromkeys(flag for record in self.window
+                    for flag in record.get("magnetic_assessment", {}).get("quality_flags", [])))
+                if not field_range_ok:
+                    magnetic_flags.append("magnetic_formal_range_exceeded")
+                summary["magnetic_quality"] = {
+                    "policy": self.magnetic_deviation_policy, "quality_flags": magnetic_flags,
+                    "warning": bool(magnetic_flags),
+                    "field_x_range_t": summary["field_x_range_t"],
+                    "field_z_range_t": summary["field_z_range_t"],
+                    "stable_range_t": self.config.magnet.stability.criteria.stable_range,
+                    "qualification": self.field_qualification}
             if self.field_policy is not None:
                 summary["field_readback_policy"] = self.field_policy.snapshot()
                 summary["field_readback_assessment"] = self.field_policy.assessment(
-                    VectorField(field_means["field_x_t"], field_means["field_z_t"]))
+                    VectorField(field_means["field_x_t"], field_means["field_z_t"]),
+                    **({"command": self.driver.field_readback_context(
+                        self.driver.last_confirmed_state)} if self.command_scoped_field else {}))
             self.event("environment_formal_window", summary)
-            if (self.temperature is not None and
+            if (self.temperature_deviation_policy == "abort" and self.temperature is not None and
                     max(values) - min(values) > self.config.temperature_stability.criteria.stable_range):
                 raise AttoDryError("Temperature range exceeded during formal sample")
-            if self.magnetic is not None and not field_range_ok:
+            if (self.magnetic is not None and self.magnetic_deviation_policy == "abort"
+                    and not field_range_ok):
                 raise AttoDryError("Magnetic range exceeded during formal sample")
             for reading in reads:
                 if reading["module"] == "temperature":
@@ -341,6 +395,7 @@ class CryostatPointSession:
 
     def cleanup(self, module, failed):
         self.cleaning = True
+        magnetic_quality = None
         if self.driver is None or module not in self.touched:
             return {"attempted": False, "verified": True, "reason": "no writes attempted"}
         if module == "temperature":
@@ -372,11 +427,23 @@ class CryostatPointSession:
                 if not self.driver._field_matches(state.field_setpoint, self.field_target):
                     raise AttoDryError("Field hold setpoint changed")
                 tolerance = self.config.magnet.stability.criteria.tolerance
-                if (abs(state.field.bx_t - self.field_target.bx_t) > tolerance or
-                        abs(state.field.bz_t - self.field_target.bz_t) > tolerance or
-                        (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance)):
+                error_x = state.field.bx_t - self.field_target.bx_t
+                error_z = state.field.bz_t - self.field_target.bz_t
+                outside = (abs(error_x) > tolerance or abs(error_z) > tolerance or
+                           (self.field_target.magnitude_t == 0 and state.field.magnitude_t > tolerance))
+                magnetic_quality = {"policy": self.magnetic_deviation_policy,
+                    "warning": outside, "target_error_x_t": error_x, "target_error_z_t": error_z,
+                    "quality_flags": ["magnetic_outside_target_tolerance"] if outside else [],
+                    "qualification": self.field_qualification,
+                    "stability_certified": False}
+                if self.field_qualification is None:
+                    raise AttoDryError("Magnetic axis has no completed qualification")
+                # A held zero remains actual-zero verification, never a quality waiver.
+                if outside and (self.magnetic_deviation_policy == "abort" or
+                                self.field_target.magnitude_t == 0):
                     raise AttoDryError("Field hold readback outside tolerance")
         return {"attempted": True, "verified": True, "policy": policy, "state": asdict(state),
+                **({"magnetic_quality": magnetic_quality} if magnetic_quality is not None else {}),
                 "scan_limits_violated": self.recovery_scan_limits_violated}
 
     def close(self):

@@ -253,7 +253,8 @@ class FieldPolicyHardwareCombinationTests(unittest.TestCase):
     """Exercise the actual session/driver/cleanup path with fake transports only."""
     def setUp(self):
         hardware_fixture.CryostatCombinationTests.setUp(self)
-        # These regressions explicitly retain the archived v2/0.5 mT policy.
+        # Keep the older configured tolerance spelling, while hardware
+        # Combination installs its current command-scoped safety policy.
         self.base = self.base.replace("readback_tolerance_t = 0.0015", "field_tolerance_t = 0.001")
     write_config = hardware_fixture.CryostatCombinationTests.write_config
     factory = hardware_fixture.CryostatCombinationTests.factory
@@ -381,9 +382,12 @@ class FieldPolicyHardwareCombinationTests(unittest.TestCase):
         config = load_hardware_combination(self.path)
         self.assertEqual(config.plan.magnet_limits.hardware_z_max_t, 9)
         summary = launch_summary(config, self.database, "offline")
-        self.assertNotIn("field_resultant_limit_t", summary)
+        self.assertEqual(summary["field_resultant_limit_t"], 3)
+        self.assertEqual(summary["field_resultant_limit_scope"], "simultaneous_nonzero_command_axes")
+        self.assertTrue(summary["field_readback_policy"]["command_scoped"])
         text = launch_text(summary, width=200)
-        self.assertIn("Field target: single Z | |Bz| <= 9 T", text)
+        self.assertIn("Field commands: |Bx| <= 3 T | |Bz| <= 9 T", text)
+        self.assertIn("Both axes nonzero: |B| <= 3 T", text)
         self.assertNotIn("Field: resultant <= 3", text)
         self.assertEqual(self.dll.events, [])
         self.base = self.base.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 6.0')
@@ -405,7 +409,7 @@ class FieldPolicyHardwareCombinationTests(unittest.TestCase):
         self.assertTrue(all(row["status.magnetic"]["field_readback_policy"]["mode"] == "vector"
                             for row in rows))
 
-    def test_inactive_axis_drift_rejects_and_existing_owned_cleanup_verifies_zero(self):
+    def test_inactive_axis_hard_fault_does_not_expand_cleanup_envelope(self):
         self.points([(0.1, 0)], ("magnetic", "smu"))
         def modify(adapter):
             original = adapter.read
@@ -420,12 +424,24 @@ class FieldPolicyHardwareCombinationTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed", result)
         self.assertIn("readback Bz", result["error"])
         self.assertEqual(load_combination_rows(self.database), ())
-        self.assertIn("sweep_zero", self.dll.events)
+        self.assertNotIn("sweep_zero", self.dll.events)
         action = next(a for a in result["cleanup"]["actions"] if a["module"] == "magnetic")
-        self.assertTrue(action["result"]["verified"])
-        self.assertTrue(action["result"]["scan_limits_violated"])
-        self.assertEqual(action["result"]["state"]["field"], {"bx_t": 0.0, "bz_t": 0.0})
+        self.assertFalse(action["result"]["verified"])
+        self.assertFalse(action["clean"])
+        self.assertIn("readback Bz", action["result"]["error"])
+        self.assertAlmostEqual(action["result"]["last_confirmed_state_not_current"]["field"]["bz_t"], 0.0006)
         self.assertTrue(result["cleanup"]["manual_verification_required"])
+
+    def test_mixed_single_axis_high_z_plan_uses_each_command_scope(self):
+        self.points([(0, 4), (1, 0)])
+        config = load_hardware_combination(self.path)
+        self.assertTrue(config.plan.command_scoped_field)
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        rows = load_combination_rows(self.database)
+        self.assertEqual([row["status.magnetic"]["field_readback_assessment"]["mode"] for row in rows],
+                         ["single_z", "single_x"])
+        self.assertEqual([row["requested.field_z_t"] for row in rows], [4, 0])
 
     def test_single_axis_communication_failure_does_not_certify_cleanup(self):
         self.points([(0.1, 0)], ("magnetic", "smu"))
