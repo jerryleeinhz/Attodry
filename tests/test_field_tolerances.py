@@ -24,12 +24,12 @@ from attodry_control.combination_terminal import launch_text
 
 
 class FieldToleranceTests(unittest.TestCase):
-    def driver(self):
+    def driver(self, tolerance=0.0015):
         config = load_config("config/hardware.example.toml")
-        criteria = replace(config.magnet.stability.criteria, tolerance=0.0015, dwell_s=2)
+        criteria = replace(config.magnet.stability.criteria, tolerance=tolerance, dwell_s=2)
         stability = replace(config.magnet.stability, criteria=criteria, wait_timeout_s=8)
         config = replace(config, magnet=replace(config.magnet, stability=stability,
-                                                readback_tolerance_t=0.0015))
+                                                readback_tolerance_t=tolerance))
         dll = fake.FakeAttoDryDll()
         driver = AttoDryDriver.from_config(config, dll=dll,
             connection_authorized=True, writes_authorized=True)
@@ -82,7 +82,18 @@ class FieldToleranceTests(unittest.TestCase):
             legacy = load_config(path)
             self.assertIsNone(legacy.magnet.readback_tolerance_t)
             self.assertEqual(legacy.magnet.stability.criteria.tolerance, 0.001)
-            for bad in ("0", "0.0016", "nan", '"0.0015"'):
+            path.write_text(source.replace("readback_tolerance_t = 0.0015",
+                "field_tolerance_t = 0.0016"), encoding="utf-8")
+            with self.assertRaises(ConfigError):
+                load_config(path)
+            for value in (0.0016, 0.01, 1e100):
+                path.write_text(source.replace("readback_tolerance_t = 0.0015",
+                    "readback_tolerance_t = " + str(value)), encoding="utf-8")
+                with self.subTest(tolerance=value):
+                    opened = load_config(path)
+                    self.assertEqual(opened.magnet.readback_tolerance_t, value)
+                    self.assertEqual(opened.magnet.stability.criteria.tolerance, value)
+            for bad in ("0", "-0.001", "nan", "inf", "true", '"0.0015"'):
                 path.write_text(source.replace("readback_tolerance_t = 0.0015",
                     "readback_tolerance_t = " + bad), encoding="utf-8")
                 with self.subTest(bad=bad), self.assertRaises(ConfigError):
@@ -91,6 +102,60 @@ class FieldToleranceTests(unittest.TestCase):
                 "readback_tolerance_t = 0.0015\nfield_tolerance_t = 0.001"), encoding="utf-8")
             with self.assertRaises(ConfigError):
                 load_config(path)
+
+    def test_configurable_tolerance_snapshots_preserve_historical_versions(self):
+        for flags, version, old in (
+            ({}, "planned-axis-readback-v4", "planned-axis-readback-v3"),
+            ({"command_scoped": True}, "command-scoped-readback-v2", "command-scoped-readback-v1"),
+            ({"strict_resultant": True}, "strict-resultant-readback-v2", "strict-resultant-readback-v1"),
+        ):
+            with self.subTest(flags=flags):
+                policy = FieldReadbackPolicy.from_targets(
+                    (VectorField(0, 2),), readback_tolerance_t=0.01, **flags)
+                snapshot = policy.snapshot()
+                self.assertEqual(snapshot["version"], version)
+                self.assertEqual(snapshot["zero_magnitude_tolerance_t"], 0.01)
+                self.assertEqual(FieldReadbackPolicy.from_snapshot(snapshot), policy)
+                with self.assertRaises(ValueError):
+                    FieldReadbackPolicy.from_snapshot({**snapshot, "version": old})
+                previous = FieldReadbackPolicy.from_targets(
+                    (VectorField(0, 2),), readback_tolerance_t=0.0015, **flags)
+                self.assertEqual(previous.snapshot()["version"], old)
+                self.assertEqual(FieldReadbackPolicy.from_snapshot(previous.snapshot()), previous)
+
+    def test_large_configured_tolerance_does_not_expand_physical_axis_or_vector_caps(self):
+        for scoped in (False, True):
+            with self.subTest(scoped=scoped):
+                policy = FieldReadbackPolicy.from_targets(
+                    (VectorField(0, 4),), readback_tolerance_t=1e100, command_scoped=scoped)
+                context = {"command": VectorField(0, 4)} if scoped else {}
+                policy.snapshot()  # Large finite tolerances must not overflow float32 helpers.
+                policy.validate_readback(VectorField(0.005, 4), **context)
+                for actual in (VectorField(3.01, 4), VectorField(0, 9.01)):
+                    with self.subTest(actual=actual), self.assertRaises(SafetyViolation):
+                        policy.validate_readback(actual, **context)
+        dual = FieldReadbackPolicy.from_targets((VectorField(1, 1),),
+            readback_tolerance_t=0.01, command_scoped=True)
+        with self.assertRaises(SafetyViolation):
+            dual.validate_readback(VectorField(2.2, 2.2), command=VectorField(1, 1))
+
+    def test_wider_tolerance_reaches_driver_takeover_and_zero_verification(self):
+        driver, dll = self.driver(0.01)
+        driver.field_readback_policy = FieldReadbackPolicy.from_targets(
+            (VectorField(0, 1),), readback_tolerance_t=0.01, command_scoped=True)
+        dll.field_control = 0
+        dll.bz_t = 0.005
+        driver.ensure_field_control(True, monotonic=fake.StepClock(), sleeper=lambda _: None)
+        self.assertEqual(dll.field_control, 1)
+        self.assertIn("toggle_field_control", dll.events)
+        def zero():
+            dll.setpoint_x_t = dll.setpoint_z_t = 0
+            dll.bx_t, dll.bz_t = 0.003, 0.006
+            return 0
+        dll.AttoDRY_Interface_sweepFieldToZero = zero
+        state = driver.request_zero_field(monotonic=fake.StepClock(), sleeper=lambda _: None)
+        self.assertGreater(state.field.magnitude_t, 0.0015)
+        self.assertLess(state.field.magnitude_t, 0.01)
 
     def test_ack_setting_is_independent_and_bounded(self):
         driver, dll = self.driver()

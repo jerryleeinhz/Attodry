@@ -14,7 +14,6 @@ from .models import LockinRole, VectorField
 from .safety import (
     CONFIRMED_EXPERIMENT_VECTOR_MAX_T,
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
-    APPROVED_READBACK_TOLERANCE_MAX_T,
     FIELD_SETPOINT_ACK_TOLERANCE_T,
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
     FieldTransitionPolicy,
@@ -580,9 +579,8 @@ def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
     unified = "readback_tolerance_t" in table
     key = "readback_tolerance_t" if unified else "field_tolerance_t"
     tolerance = _positive_number(table[key], f"{name}.{key}")
-    maximum = APPROVED_READBACK_TOLERANCE_MAX_T if unified else CONFIRMED_FIELD_TOLERANCE_MAX_T
-    if tolerance > maximum:
-        raise ConfigError(f"magnet.{key} cannot exceed the approved {maximum:g} T zero-field criterion.")
+    if not unified and tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T:
+        raise ConfigError(f"magnet.{key} cannot exceed the legacy {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T zero-field criterion.")
     stability = _parse_stability({**table, "field_tolerance_t": tolerance}, name, value_prefix="field_")
     tolerance = stability.criteria.tolerance
     ack = _positive_number(table.get("setpoint_ack_tolerance_t", FIELD_SETPOINT_ACK_TOLERANCE_T),

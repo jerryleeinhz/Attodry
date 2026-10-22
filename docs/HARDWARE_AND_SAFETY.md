@@ -1,5 +1,20 @@
 # Hardware and safety guide
 
+## 2026-10-22 开放 readback_tolerance_t（本地修复，待当前扫描结束部署）
+
+操作者明确要求 readback_tolerance_t 可编辑，移除解析器/策略/驱动构造/控制接管的1.5mT固定上限。
+该字段接受有限正数，沿用统一到场/采样目标误差、控制接管、非工作轴残余和回零范数判据；
+完整稳定dwell、range及所有读取/写入/核验/等待调度保留。配置容差不扩大物理轴上限或双轴3T边界。
+非工作轴上限还受配置本轴硬上限约束。旧 field_tolerance_t/ACK 契约保留，历史快照不重解释。
+详情见 [磁场组合选项](MAGNETIC_COMBINATION_OPTIONS.md)。
+
+LK_setup 当前采集19356与monitor18444于16:59:33/17:00:09UTC创建；本次只读发现时仍在运行，
+用户已明确选择保留当前扫描，结束后再部署。不得修改活动源码/计划/配置，不Stop/kill/中断/重启。
+先保存本地修复/测试/提交与受控部署包；之后固定run只读跟进，真正terminal、原身份退出、monitor退出、
+所有DB终态/Notebookidle/全部owner释放/哈希通过后才部署文件并运行硬件阻断验收。
+不连接仪器，不启动扫描或改目标，不把普通等待当故障，进度无变化保持安静。
+证据及后续部署结果：.test-tmp/readback-open-20261022/。当前用户TOML值不自动替换，部署时保留其修改。
+
 ## 2026-10-22 当前磁场组合契约（操作者批准）
 
 当前光学组合中的 magnetic 轴使用 [磁场组合选项](MAGNETIC_COMBINATION_OPTIONS.md)。

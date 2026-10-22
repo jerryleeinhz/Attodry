@@ -15,6 +15,7 @@ FIELD_SETPOINT_READBACK_TOLERANCE_T = 1e-5
 # The legacy controller workflow and its commissioned project template both use
 # 1 mT as the widest acceptable field-to-target (and zero-field) tolerance.
 CONFIRMED_FIELD_TOLERANCE_MAX_T = 0.001
+# Historical archive boundary, not a ceiling on the configurable unified field.
 APPROVED_READBACK_TOLERANCE_MAX_T = 0.0015
 # Operator-approved register ACK tolerance after the 44 uT quantization audit;
 # not an actual-field arrival criterion or a manufacturer accuracy claim.
@@ -29,6 +30,9 @@ FIELD_READBACK_POLICY = "planned-axis-readback-v2"
 UNIFIED_FIELD_READBACK_POLICY = "planned-axis-readback-v3"
 STRICT_RESULTANT_READBACK_POLICY = "strict-resultant-readback-v1"
 COMMAND_SCOPED_READBACK_POLICY = "command-scoped-readback-v1"
+CONFIGURABLE_UNIFIED_FIELD_READBACK_POLICY = "planned-axis-readback-v4"
+CONFIGURABLE_STRICT_RESULTANT_READBACK_POLICY = "strict-resultant-readback-v2"
+CONFIGURABLE_COMMAND_SCOPED_READBACK_POLICY = "command-scoped-readback-v2"
 FIELD_READBACK_MARGIN_T = 0.0005
 INACTIVE_AXIS_READBACK_MAX_T = 0.0005
 
@@ -159,9 +163,9 @@ class FieldReadbackPolicy:
         if self.readback_tolerance_t is not None and (
             type(self.readback_tolerance_t) not in (float, int)
             or not math.isfinite(self.readback_tolerance_t)
-            or not 0 < self.readback_tolerance_t <= APPROVED_READBACK_TOLERANCE_MAX_T
+            or self.readback_tolerance_t <= 0
         ):
-            raise ValueError("readback_tolerance_t must be positive and at most 0.0015 T.")
+            raise ValueError("readback_tolerance_t must be a finite positive number.")
 
     @classmethod
     def from_targets(cls, targets: Sequence[VectorField],
@@ -222,8 +226,15 @@ class FieldReadbackPolicy:
         return self.mode if command.magnitude_t == 0 else FieldScanMode.VECTOR
 
     def _inactive_readback_limit(self, nominal: float) -> float:
-        residual = max(self.inactive_axis_max_t, float32_value(self.inactive_axis_max_t))
-        return min(nominal, residual) if self.command_scoped else residual
+        clamp = self.command_scoped or self.configurable_tolerance
+        bound = min(nominal, self.inactive_axis_max_t) if clamp else self.inactive_axis_max_t
+        residual = max(bound, float32_value(bound))
+        return min(nominal, residual) if clamp else residual
+
+    @property
+    def configurable_tolerance(self) -> bool:
+        return (self.readback_tolerance_t is not None and
+                self.readback_tolerance_t > APPROVED_READBACK_TOLERANCE_MAX_T)
 
     def validate_readback(self, actual: VectorField, *, command: VectorField | None = None) -> VectorField:
         mode = self._readback_mode(command)
@@ -276,11 +287,15 @@ class FieldReadbackPolicy:
         }
 
     def snapshot(self) -> dict[str, object]:
+        version = (COMMAND_SCOPED_READBACK_POLICY if self.command_scoped else
+                   STRICT_RESULTANT_READBACK_POLICY if self.strict_resultant else
+                   FIELD_READBACK_POLICY if self.readback_tolerance_t is None else UNIFIED_FIELD_READBACK_POLICY)
+        if self.configurable_tolerance:
+            version = (CONFIGURABLE_COMMAND_SCOPED_READBACK_POLICY if self.command_scoped else
+                       CONFIGURABLE_STRICT_RESULTANT_READBACK_POLICY if self.strict_resultant else
+                       CONFIGURABLE_UNIFIED_FIELD_READBACK_POLICY)
         return {
-            "version": (COMMAND_SCOPED_READBACK_POLICY if self.command_scoped else
-                        STRICT_RESULTANT_READBACK_POLICY if self.strict_resultant else
-                        FIELD_READBACK_POLICY if self.readback_tolerance_t is None
-                        else UNIFIED_FIELD_READBACK_POLICY), "mode": self.mode.value,
+            "version": version, "mode": self.mode.value,
             "limits": asdict(self.limits),
             "readback_margin_t": 0.0 if self.strict_resultant or self.command_scoped else FIELD_READBACK_MARGIN_T,
             "inactive_axis_max_abs_t": self.inactive_axis_max_t,

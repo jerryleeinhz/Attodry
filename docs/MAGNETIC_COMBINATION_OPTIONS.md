@@ -15,13 +15,23 @@ magnetic_deviation_policy = "record_continue"
 | 字段 | 合法值 | 省略时 | 作用阶段 |
 |---|---|---|---|
 | `[combination_scan].magnetic_deviation_policy` | `"abort"`, `"record_continue"` | `"abort"` | 本次磁场点完整判稳通过后的内层采集 |
-| `[magnet].readback_tolerance_t` | 严格 loader 校验的正数，至多 0.0015 T | 依既有配置契约 | 入点与采样目标容差；单轴非工作轴硬残余边界独立保留 |
+| `[magnet].readback_tolerance_t` | 任意有限正数，单位 T；不再写死 0.0015 T 上限 | 依既有配置契约 | 统一到场/采样目标误差、控制接管误差、非工作轴残余及回零合场容差 |
 | `[magnet].stable_range_t` | 严格 loader 校验的正数 | 依既有配置契约 | 判稳窗口/正式采样窗口的峰峰差 |
 | `[magnet].stable_dwell_s` | 严格 loader 校验的正数 | 依既有配置契约 | 入场完整连续稳定窗口 |
 
 `magnetic_deviation_policy` 放在组合扫描表，是因为它决定外层已判稳之后如何处理内层测量质量。
 它不是磁体硬件限值，也不属于初始判稳参数。独立 magnetic-field 命令不使用此选项。
 未选择 magnetic 轴时，非默认 `record_continue` 拒绝加载，避免无效配置造成误解。
+
+2026-10-22 后续操作者明确要求开放 `readback_tolerance_t`：解析器、策略、驱动构造和控制接管
+均接受有限正数，拒绝零、负数、NaN/Inf、布尔和字符串，没有另一个 1.5 mT 隐含上限。
+例如 `readback_tolerance_t = 0.005` 表示 5 mT。它按现有统一接口**同时**改变上述几项判据：
+回零仍要实际合场在该配置容差内并满足完整稳定窗口，报告的是“满足配置回零判据”，不是数学零或传感器准确度。
+此字段不调整 `stable_range_t`、`stable_dwell_s`，不扩大 X/Z 标称硬上限、双轴合场上限，
+也不调整独立的 `setpoint_ack_tolerance_t`。非工作轴有效上限还受本轴配置硬上限约束。
+旧 `field_tolerance_t` 保留其兼容契约；需要可调容差时使用 `readback_tolerance_t`，两字段不能同时配置。
+大于历史 1.5 mT 的新归档使用可配置容差版本（命令上下文 v2、独立 unified v4、strict-resultant v2）；
+小容差旧快照保持原样，旧版本不接受篡改为更大容差的声明。1.5 mT 仅作为历史版本分界，不是当前参数上限。
 
 ## 运行行为
 

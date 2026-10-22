@@ -18,7 +18,6 @@ from .models import CryostatState, VectorField
 from .safety import (
     AxisWriteOrder,
     CONFIRMED_FIELD_TOLERANCE_MAX_T,
-    APPROVED_READBACK_TOLERANCE_MAX_T,
     FIELD_SETPOINT_ACK_TOLERANCE_T,
     FIELD_SETPOINT_READBACK_TOLERANCE_T,
     FieldTransitionPlan,
@@ -200,26 +199,26 @@ class AttoDryDriver:
         setpoint_ack_tolerance_t: float = FIELD_SETPOINT_ACK_TOLERANCE_T,
     ) -> None:
         field_tolerance = field_stability.criteria.tolerance
-        maximum = (CONFIRMED_FIELD_TOLERANCE_MAX_T if readback_tolerance_t is None
-                   else APPROVED_READBACK_TOLERANCE_MAX_T)
         if readback_tolerance_t is not None and (
             type(readback_tolerance_t) not in (float, int)
             or not math.isfinite(readback_tolerance_t)
-            or not 0 < readback_tolerance_t <= maximum
+            or readback_tolerance_t <= 0
             or readback_tolerance_t != field_tolerance
         ):
-            raise ValueError("Unified readback and stability tolerances must match and be at most 0.0015 T.")
+            raise ValueError("Unified readback and stability tolerances must match and be finite positive numbers.")
         if (type(setpoint_ack_tolerance_t) not in (float, int)
                 or not math.isfinite(setpoint_ack_tolerance_t)
                 or not 0 < setpoint_ack_tolerance_t <= FIELD_SETPOINT_ACK_TOLERANCE_T):
             raise ValueError("Setpoint acknowledgement tolerance must be positive and at most 0.0001 T.")
         if (
-            field_tolerance is None
-            or field_tolerance > maximum
+            type(field_tolerance) not in (float, int)
+            or not math.isfinite(field_tolerance)
+            or field_tolerance <= 0
+            or (readback_tolerance_t is None and field_tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T)
         ):
             raise ValueError(
-                "AttoDryDriver field tolerance must be configured and cannot "
-                f"exceed {maximum:g} T."
+                "AttoDryDriver field tolerance must be finite and positive; "
+                f"legacy field_tolerance_t cannot exceed {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
             )
         configure_attodry_signatures(dll)
         self.dll = dll
@@ -514,15 +513,15 @@ class AttoDryDriver:
             if not enabled:
                 return
             tolerance = self.field_stability.criteria.tolerance
-            maximum = (CONFIRMED_FIELD_TOLERANCE_MAX_T if self.readback_tolerance_t is None
-                       else APPROVED_READBACK_TOLERANCE_MAX_T)
             if (
-                tolerance is None
-                or tolerance > maximum
+                type(tolerance) not in (float, int)
+                or not math.isfinite(tolerance)
+                or tolerance <= 0
+                or (self.readback_tolerance_t is None and tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T)
             ):
                 raise AttoDryError(
-                    "Field-control takeover requires a configured field tolerance "
-                    f"no greater than {maximum:g} T."
+                    "Field-control takeover requires a finite positive field tolerance; "
+                    f"legacy field_tolerance_t cannot exceed {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
                 )
             mismatch = math.hypot(
                 state.field.bx_t - state.field_setpoint.bx_t,
