@@ -36,7 +36,16 @@ Last updated: 2026-10-23
   wait, serial ownership and offline/real validation boundaries:
   [MEASUREMENT_PERFORMANCE.md](MEASUREMENT_PERFORMANCE.md). No instrument connection,
   live status consumption or experiment run/resume is part of this delivery.
-  Target verification and software delivery are recorded separately when complete.
+- LK_setup passed all 70 target guarded tests in 19.445 s from a canonical
+  isolated release, then fast-forwarded acquisition source to `28c8f74`.
+  Independent verification at 2026-10-23T09:49:01Z confirms clean tracked source
+  and byte-identical private hardware TOML, local safety and both original user
+  Notebooks. Their three existing tracked modifications remain. Delivery evidence
+  stays private under `run_data/operator_lockin_range_rules_delivery_20261023T094803Z`.
+  The initial script precheck mistook Git newline warnings for changed paths and
+  stopped before source replacement; its versioned script is retained. The corrected
+  software-delivery script separates that warning policy without ignoring edits.
+  No real instrument response/accuracy validation or experiment replay occurred.
 
 ### Axis-entry qualification and shared Lock-in settling (2026-10-15)
 

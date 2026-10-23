@@ -22,6 +22,12 @@
   time brackets. Documentation includes configuration and command/wait budgets.
   No added hardware module, background system, automatic range, Reserve/input/TC
   change, instrument connection, commissioning or experiment replay.
+- Target offline complete: LK_setup's lyr passed 70 guarded cases in 19.445 s,
+  then acquisition commit `28c8f74` was fast-forwarded. Independent readback
+  confirms clean source and unchanged private hardware/local safety/Notebooks;
+  the existing three tracked user modifications remain. A software-precheck
+  warning-parsing failure was corrected before source replacement; private
+  delivery evidence remains under the station's ignored run_data directory.
 
 ## Current: axis-entry qualification and shared Lock-in settling (2026-10-15)
 
