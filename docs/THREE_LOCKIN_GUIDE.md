@@ -81,7 +81,42 @@ evidence cannot be replaced with today's TOML. Old dual archives remain readable
 
 Unified plotting includes AUX axes, raw/matched/independent-dark responses and a
 Three detectors · h1 comparison card. Default channel-quality exclusions remain.
-The stored channel label is used on the AUX comparison panel.
+Archived channel labels appear on all three comparison panels and curve axes.
+
+## Sample wiring labels (2026-10-19, local implementation)
+
+Add an optional single-line `channel_label` to the existing XX and XY sections:
+
+```toml
+[lockin_xx]
+channel_label = "端口1-2 / b轴"
+# Keep the remaining XX instrument settings here.
+
+[lockin_xy]
+channel_label = "端口3-4 / 45度"
+# Keep the remaining XY instrument settings here.
+```
+
+Edit the existing sections rather than duplicating them. The field name is
+`channel_label`, not `lable`. Omitted/blank XX and XY labels preserve the ordinary
+role display. AUX keeps its existing required label. Labels describe sample
+wiring only: they do not change VISA routing, reference roles, range, commands,
+settling, protection or quality classification.
+
+New Combination runs archive the label in the configuration snapshot and sample
+status. Unified Plotting reads that archive, never today's TOML. X/Y/Z choices,
+axes, legends, dark/delta signals and three-detector panels retain the semantic
+role, for example `Lock-in XX/端口1-2 / b轴`. Saved plot setups continue to use the
+unchanged machine keys. CSV export includes `channel_label.xx/xy/aux` metadata.
+Different runs retain their own labels; unlabeled legacy data remain unlabeled
+and are not retroactively named from the current configuration. Existing raw
+records, quality flags and background subtraction are not rewritten.
+
+Chinese plot text uses an installed Microsoft YaHei, SimHei, Noto Sans CJK SC or
+PingFang SC fallback. Machines without a matching font may need one installed
+for Chinese PNG/PDF text. The notebook only supplies instructions and delegates
+plotting to the shared module. This change is local; LK_setup source deployment
+and a new process using the updated parser are required before station use.
 
 ## Verification and handoff
 

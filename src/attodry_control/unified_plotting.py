@@ -20,6 +20,7 @@ import re
 from typing import Any, Iterable, Mapping, Sequence
 
 from .analysis_observations import observation_id
+from .combination_analysis import lockin_channel_labels, rotator_labels
 
 from .scientific_plotting import (
     OKABE_ITO_ON_WHITE,
@@ -35,6 +36,7 @@ from .scientific_plotting import (
 
 _LOCKIN_SCANS = frozenset({"frequency", "excitation", "frequency_excitation"})
 _SMU_ROLES = ("smu_bias", "gate_top", "gate_bottom")
+_POWER_RESPONSES = frozenset({"power_lowest", "power_selected"})
 _SCALAR_TYPES = (str, int, float, bool)
 _IGNORED_DIRECTORIES = frozenset({
     ".git", ".ipynb_checkpoints", "__pycache__", ".venv", "venv",
@@ -422,7 +424,7 @@ def numeric_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, str],
 
     keys = sorted({key for row in rows for key in row})
     return tuple(
-        (column_label(key), key)
+        (column_label(key, rows), key)
         for key in keys
         if any(_is_numeric(row.get(key)) for row in rows)
     )
@@ -431,7 +433,7 @@ def numeric_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, str],
 def scalar_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, str], ...]:
     keys = sorted({key for row in rows for key in row})
     return tuple(
-        (column_label(key), key)
+        (column_label(key, rows), key)
         for key in keys
         if any(_scalar(row.get(key)) for row in rows)
     )
@@ -442,7 +444,34 @@ def column_values(rows: Sequence[Mapping[str, Any]], key: str) -> tuple[Any, ...
     return tuple(sorted(values.values(), key=_sort_value))
 
 
-def column_label(key: str) -> str:
+def _channel_caption(key: str, rows: Sequence[Mapping[str, Any]]) -> str | None:
+    match = re.match(r"(?:measured|dark|actual)\.lockin_(xx|xy|aux)_h[123]_", key)
+    if not match:
+        return None
+    role = match[1]
+    labels = {lockin_channel_labels(row).get(role, "") for row in rows if key in row}
+    # Earlier three-role archives generated Vxx/Vxy when no name was supplied.
+    labels = {"" if label in (role.upper(), "V" + role) else label for label in labels}
+    if not any(labels):
+        return None
+    return " | ".join(role.upper() + ("/" + label if label else " (unlabelled)")
+                      for label in sorted(labels))
+
+
+def _rotator_caption(key: str, rows: Sequence[Mapping[str, Any]]) -> str | None:
+    match = re.fullmatch(r"(?:requested|actual|measured)\.(rotator_[12])_angle_deg", key)
+    if not match:
+        return None
+    role = match[1]
+    labels = {rotator_labels(row).get(role, "") for row in rows if key in row}
+    if not any(labels):
+        return None
+    name = "Rotator " + role[-1]
+    return " | ".join(name + ("/" + label if label else " (unlabelled)")
+                      for label in sorted(labels))
+
+
+def column_label(key: str, rows: Sequence[Mapping[str, Any]] = ()) -> str:
     """Readable variable label with actual/requested and channel identity."""
 
     prefix, dot, suffix = key.partition(".")
@@ -454,6 +483,12 @@ def column_label(key: str) -> str:
             name = suffix.replace(".", " ").replace("_", " ")
             return name
         label, unit = _known_label(suffix)
+        caption = _channel_caption(key, rows)
+        if caption:
+            label = re.sub(r"Lock-in (?:XX|XY|AUX)", lambda _: "Lock-in " + caption, label, count=1)
+        rotator_caption = _rotator_caption(key, rows)
+        if rotator_caption:
+            label = rotator_caption + " angle"
         qualifier = "Dark" if prefix == "dark" else status.get(prefix, "")
         text = f"{qualifier} {label}".strip()
         return f"{text} ({unit})" if unit else text
@@ -468,13 +503,36 @@ def column_label(key: str) -> str:
         "direction": "Scan direction",
         "sample_status": "Sample status",
     }
+    if prefix == "channel_label" and suffix in ("xx", "xy", "aux"):
+        return suffix.upper() + " channel label"
+    if prefix == "rotator_label" and suffix in ("rotator_1", "rotator_2"):
+        return "Rotator " + suffix[-1] + " waveplate label"
+    if prefix == "rotator_optical_zero_calibrated" and suffix in ("rotator_1", "rotator_2"):
+        return "Rotator " + suffix[-1] + " optical zero calibrated"
+    if prefix == "rotator_optical_zero_deg" and suffix in ("rotator_1", "rotator_2"):
+        return "Rotator " + suffix[-1] + " archived optical zero (deg)"
+    if prefix == "positioner_context":
+        return "Positioner " + {"coordinate_frame": "coordinate frame", "mode": "coordinate mode",
+            "z_mode": "Z mode", "focus_plane_id": "focus-plane calibration ID"}.get(suffix, suffix.replace("_", " "))
+    if prefix in ("positioner_origin", "positioner_target") and suffix in ("x_um", "y_um", "z_um"):
+        name = "frozen origin" if prefix == "positioner_origin" else "resolved absolute target"
+        return f"Positioner {suffix[0].upper()} {name} (μm)"
     return names.get(key, key.replace("_", " ").replace(".", " "))
 
 
 def _known_label(name: str) -> tuple[str, str]:
     if name in _COLUMN_LABELS:
         return _COLUMN_LABELS[name]
-    harmonic = re.fullmatch(r"(lockin_(?:xx|xy|aux))_h([123])_(delta_)?(x_v|y_v|amplitude_v|phase_deg)", name)
+    rotator = re.fullmatch(r"rotator_([12])_angle_deg", name)
+    if rotator:
+        return "Rotator " + rotator[1] + " angle", "deg"
+    positioner = re.fullmatch(r"positioner_([xyz])(_offset)?_um", name)
+    if positioner:
+        meaning = "offset from frozen origin" if positioner[2] else "absolute position"
+        return f"Positioner {positioner[1].upper()} {meaning}", "μm"
+    if name == "positioner_focus_error_um":
+        return "Positioner focus-plane error", "μm"
+    harmonic = re.fullmatch(r"(lockin_(?:xx|xy|aux))_h([123])_(power_delta_|delta_)?(x_v|y_v|amplitude_v|phase_deg)", name)
     if harmonic:
         channel, order, delta, field = harmonic.groups()
         channel_label = {"lockin_xx": "Lock-in XX", "lockin_xy": "Lock-in XY", "lockin_aux": "Lock-in AUX"}[channel]
@@ -482,7 +540,8 @@ def _known_label(name: str) -> tuple[str, str]:
             "x_v": ("X", "V"), "y_v": ("Y", "V"),
             "amplitude_v": ("R", "V"), "phase_deg": ("Phase", "deg"),
         }[field]
-        return f"{channel_label} h{order} {'Δ' if delta else ''}{field_name}", "V RMS" if field == "amplitude_v" else unit
+        qualifier = "Power-reference Δ" if delta == "power_delta_" else "Δ" if delta else ""
+        return f"{channel_label} h{order} {qualifier}{field_name}", "V RMS" if field == "amplitude_v" else unit
     smu = re.fullmatch(r"(smu_bias|gate_top|gate_bottom)_(.+)", name)
     if smu:
         role, field = smu.groups()
@@ -551,6 +610,10 @@ def _dimension_module(key: str) -> str | None:
         return "lockin"
     if bare.startswith("optical_"):
         return "optical"
+    if bare in {"rotator_1_angle_deg", "rotator_2_angle_deg"}:
+        return "rotator"
+    if bare.startswith("positioner_") or key.startswith(("positioner_context.", "positioner_origin.", "positioner_target.")):
+        return "positioner"
     if bare.startswith("csv."):
         return "csv"
     return None
@@ -570,7 +633,7 @@ def _condition_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     keys = {key for row in rows for key in row}
     condition = {
         key for key in keys
-        if key.startswith(("requested.", "axes."))
+        if key.startswith(("requested.", "axes.", "positioner_context.", "positioner_origin."))
         and not key.endswith((".segment", ".direction"))
     }
     condition.update(
@@ -601,7 +664,7 @@ def _unresolved_dimensions(
     group_keys: Iterable[str],
 ) -> list[tuple[str, int]]:
     tokens, modules = _coordinate_coverage((*plot_keys, *group_keys))
-    from .combination_analysis import _coordinate_for_x
+    from .combination_analysis import _coordinate_for_x, positioner_focus_z_is_derived
     requested = {k[10:] for r in rows for k in r if k.startswith("requested.")}
     for key in (*plot_keys, *group_keys):
         coordinate = _coordinate_for_x(key, requested)
@@ -624,6 +687,10 @@ def _unresolved_dimensions(
         if len(values) <= 1 or key in fixed_by_filter:
             continue
         if key in covered_keys:
+            continue
+        if key == "requested.positioner_z_um" and rows and all(positioner_focus_z_is_derived(row) for row in rows):
+            # Focus-plane Z follows archived XY; it is not a third independent
+            # sweep dimension. Manual/unknown Z still requires an explicit slice.
             continue
         if key in {"requested.optical_source_level_pct", "requested.optical_current_a"}:
             actuators = {"cld_current"} if key.endswith("current_a") else {"source_current", "source_power"}
@@ -663,14 +730,59 @@ def _audit_title(rows):
     return " · ".join(flags) + "\n" if flags else ""
 
 
+def _response_note(spec):
+    mode = spec.get("photoresponse", "raw")
+    if mode == "power_lowest":
+        return "light − lowest planned-power light"
+    if mode == "power_selected":
+        power = spec.get("reference_power_w")
+        return f"light − selected-power light ({float(power) * 1e6:g} μW)" if _is_numeric(power) else "light − selected-power light"
+    return "light − dark"
+
+
+def _response_metadata(spec):
+    return {key: spec.get(key) for key in ("photoresponse", "reference_power_w")
+            if key in spec}
+
+
+def _response_column(key, prefix):
+    # A saved card may already contain a derived column. Switching the response
+    # still selects exactly one subtraction, rather than nesting its prefixes.
+    return re.sub(r"^(measured\.lockin_(?:xx|xy|aux)_h\d+_)(?:power_delta_|delta_)?",
+                  lambda match: match[1] + prefix, key)
+
+
+def _component_base(component):
+    return component.removeprefix("power_delta_").removeprefix("delta_")
+
+
+def _uncertainty_description(key):
+    if "_power_delta_" in key:
+        return ("SD: target repeat scatter; SEM: target mean plus shared power-reference covariance; "
+                "reference self-subtraction uses shared-sample covariance; complex mean before magnitude/phase; "
+                "first-order magnitude/phase uncertainty; drift excluded")
+    if "_delta_" in key:
+        return "SD: scatter after subtraction; SEM: repeat SEM plus shared dark covariance; magnitude/phase first-order; drift excluded"
+    return "sample SD (ddof=1); SEM=SD/sqrt(n), independence assumed; undefined for n<2"
+
+
 def _draw_curve(axis, rows, spec, x, y):
     from .analysis_observations import qualify_observations, repeat_statistics, observation_id
     mode = spec.get("statistics", "raw")
-    kept, quality = qualify_observations([r for r in rows if not r.get("_manual_excluded")], (x, y), spec.get("quality_policy", "exclude"))
+    power_summary = "_power_delta_" in y and mode != "raw"
+    quality_columns = (x, y)
+    if power_summary and y.endswith("phase_deg"):
+        # An individual zero difference has no phase, but its X/Y vector still
+        # contributes to the complex mean whose phase is displayed.
+        base = y.removesuffix("phase_deg")
+        quality_columns = (x, base + "x_v", base + "y_v")
+    kept, quality = qualify_observations([r for r in rows if not r.get("_manual_excluded")], quality_columns, spec.get("quality_policy", "exclude"))
     token = lambda row: json.dumps(observation_id(row), sort_keys=True)
     kept_ids = {token(row) for row in kept}
     # Retain excluded/missing positions as NaN gaps; never join across them.
-    masked = [{**row, y: None} if token(row) not in kept_ids else row for row in rows]
+    masked = [{**row, **({y: None} if token(row) not in kept_ids else {}),
+               **({"_power_summary_excluded": token(row) not in kept_ids} if power_summary else {})}
+              for row in rows]
     groups = _curve_groups(masked, spec.get("group_by"), separate_samples=mode == "raw")
     summaries = []
     valid = [row for row in kept if _is_numeric(row.get(x)) and _is_numeric(row.get(y))]
@@ -678,6 +790,10 @@ def _draw_curve(axis, rows, spec, x, y):
         points = repeat_statistics(group, x=x, y=y, mode=mode)
         summaries.extend({**p, "group": dict(identity), "channel": y} for p in points)
         label = _series_label(identity, len(groups) > 1)
+        captions = [_channel_caption(key, group) or _rotator_caption(key, group) for key in (x, y)]
+        captions = list(dict.fromkeys(c for c in captions if c))
+        if captions:
+            label += " · " + "; ".join(captions)
         color = OKABE_ITO_ON_WHITE[index % len(OKABE_ITO_ON_WHITE)]
         xs = [p["x"] if _is_numeric(p["x"]) else float("nan") for p in points]
         ys = [p["y"] if _is_numeric(p["y"]) else float("nan") for p in points]
@@ -689,7 +805,7 @@ def _draw_curve(axis, rows, spec, x, y):
                       marker=SERIES_MARKERS[index % len(SERIES_MARKERS)] if style != "line" else None,
                       linestyle="-" if style != "points" else "none", markersize=4,
                       capsize=2, linewidth=1, label=label)
-    axis.set(xlabel=column_label(x), ylabel=column_label(y))
+    axis.set(xlabel=column_label(x, rows), ylabel=column_label(y, rows))
     for name, key in (("x", x), ("y", y)):
         scale = spec.get(name + "_scale", "linear")
         if scale not in ("linear", "log"):
@@ -702,9 +818,9 @@ def _draw_curve(axis, rows, spec, x, y):
             getattr(axis, "set_" + name + "scale")("log")
     note = "Raw observations" if mode == "raw" else "Mean ± " + ("SD" if mode == "mean_sd" else "SEM") + " (within condition)"
     if "_delta_" in y:
-        note += " · light − dark"
+        note += " · " + (_response_note(spec) if "_power_delta_" in y else "light − dark")
         if mode == "mean_sem":
-            note += " (shared dark error included)"
+            note += " (shared " + ("power-reference" if "_power_delta_" in y else "dark") + " error included)"
     if y.startswith("dark.lockin_"):
         note += " · dark reads" + (" (mean of individual R readings)" if y.endswith("amplitude_v") and mode != "raw" else "")
     ns = [p["n"] for p in summaries if p["n"] > 0]
@@ -724,15 +840,15 @@ def _draw_curve(axis, rows, spec, x, y):
         outside_legend(axis)
     if len(groups) > 12:
         axis.text(.01, .01, f"{len(groups)} separate traces; see exported group table", transform=axis.transAxes, fontsize=8)
-    report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **quality, "selected_row_count": len(rows), "plotted_row_count": len(valid),
+    report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **_response_metadata(spec), **quality, "selected_row_count": len(rows), "plotted_row_count": len(valid),
               "omitted_missing_or_nonfinite_count": len(kept)-len(valid),
               "displayed_point_count": sum(_is_numeric(p["y"]) for p in summaries),
               "statistics": mode, "replication_unit": ("dark reads within the same source/run/baseline capture" if y.startswith("dark.") else "formal repeats within the same source/run/condition/attempt"),
-              "uncertainty": ("SD: scatter after subtraction; SEM: repeat SEM plus shared dark covariance; magnitude/phase first-order; drift excluded"
-                              if "_delta_" in y else "sample SD (ddof=1); SEM=SD/sqrt(n), independence assumed; undefined for n<2"),
+              "uncertainty": _uncertainty_description(y),
               "undefined_error_point_count": sum(p['n'] > 0 and p['error'] is None for p in summaries) if mode != 'raw' else 0,
               "source_paths": sorted({str(r.get("source_path")) for r in rows if r.get("source_path")})}
-    return {"rows": tuple(valid), "summary_rows": summaries, "report": report}
+    return {"rows": tuple(valid), "summary_rows": summaries, "report": report,
+            "audit_rows": tuple(rows) if spec.get("photoresponse") in _POWER_RESPONSES else ()}
 
 
 def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
@@ -749,14 +865,23 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     if response_mode != "raw":
         excluded = set(spec.get("excluded_sample_ids", ()))
         marked = tuple({**r, "_manual_excluded": _sample_token(r) in excluded} for r in rows)
-        rows = subtract_dark(marked, mode=response_mode, dark_run_id=spec.get("dark_run_id", ""),
-                             phase_confirmed=spec.get("dark_phase_confirmed", False),
-                             max_age_s=spec.get("dark_max_age_s", 600.0))
+        if response_mode in _POWER_RESPONSES:
+            from .optical_power_reference import subtract_power_reference
+            # All loaded light rows remain available as reference candidates.
+            # Display filters are applied only after manual exclusions and matching.
+            rows = subtract_power_reference(marked, mode=response_mode,
+                                            reference_power_w=spec.get("reference_power_w"))
+            prefix = "power_delta_"
+        else:
+            rows = subtract_dark(marked, mode=response_mode, dark_run_id=spec.get("dark_run_id", ""),
+                                 phase_confirmed=spec.get("dark_phase_confirmed", False),
+                                 max_age_s=spec.get("dark_max_age_s", 600.0))
+            prefix = "delta_"
         for axis in ("y", "z"):
             key = spec.get(axis) or ""
-            spec[axis] = re.sub(r"^(measured\.lockin_(?:xx|xy|aux)_h\d+_)(?!delta_)", r"\1delta_", key)
+            spec[axis] = _response_column(key, prefix)
         component = spec.get("field_component", "amplitude_v")
-        spec["field_component"] = component if component.startswith("delta_") else "delta_" + component
+        spec["field_component"] = prefix + _component_base(component)
     mode = spec.get("mode", "curve")
     if mode not in ("curve", "xy_z", "field", "three_channels"):
         raise ValueError("Plot mode must be curve, xy_z or field")
@@ -774,7 +899,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     plot_keys = [k for k in (x, y, z) if k]
     if mode in ("field", "three_channels"):
         field = spec.get("field_component", "amplitude_v")
-        if field.removeprefix("delta_") not in ("amplitude_v", "x_v", "y_v", "phase_deg"):
+        if _component_base(field) not in ("amplitude_v", "x_v", "y_v", "phase_deg"):
             raise ValueError("Unsupported channel component")
         plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in (("xx", "xy", "aux") if mode == "three_channels" else ("xx", "xy"))
                           for h in ((1,) if mode == "three_channels" else (1, 2))]
@@ -787,30 +912,33 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     with publication_style():
         import matplotlib as mpl
         import matplotlib.pyplot as plt
+        # Keep operator wiring names readable in Chinese when a local font exists.
+        # This context is restored on exit; no global font setting is changed.
+        if any(any(ord(char) > 127 for char in label)
+               for row in selected for label in (*lockin_channel_labels(row).values(), *rotator_labels(row).values())):
+            from matplotlib import font_manager
+            installed = {font.name for font in font_manager.fontManager.ttflist}
+            fallbacks = [name for name in ("Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "PingFang SC")
+                         if name in installed]
+            mpl.rcParams["font.family"] = ["DejaVu Sans", *fallbacks]
         figure = None
         try:
             if mode in ("field", "three_channels"):
                 figure, axes = plt.subplots(1, 3, figsize=(15, 4.5), layout="constrained") if mode == "three_channels" else plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
                 reports, raw, summary = {}, [], []
                 for axis, key in zip(axes.flat, plot_keys[1:]):
-                    panel = _draw_curve(axis, selected, {**spec, "title": column_label(key)}, x, key)
-                    if key.startswith("measured.lockin_aux_"):
-                        labels = {(r.get("status.lockin") or {}).get("channel_labels", {}).get("aux") for r in eligible}
-                        labels.discard(None)
-                        if len(labels) == 1:
-                            label = next(iter(labels))
-                            axis.set_title(axis.get_title().replace("Lock-in AUX", label))
-                            axis.set_ylabel(axis.get_ylabel().replace("Lock-in AUX", label))
+                    panel = _draw_curve(axis, selected, {**spec, "title": column_label(key, selected)}, x, key)
                     reports[key] = panel["report"]
                     raw.extend({**r, "plot_channel": key} for r in panel["rows"])
                     summary.extend(panel["summary_rows"])
                 figure.suptitle(_audit_title(selected) + (spec.get("title") or ("Vxx / Vxy / AUX · h1" if mode == "three_channels" else "Vxx / Vxy · h1 / h2")))
-                report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), "mode": mode, "channels": reports, "selected_row_count": len(selected),
+                report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **_response_metadata(spec), "mode": mode, "channels": reports, "selected_row_count": len(selected),
                           "plotted_row_count": len(raw), "excluded_quality_count": sum(r['excluded_quality_count'] for r in reports.values()),
                           "omitted_missing_or_nonfinite_count": sum(r['omitted_missing_or_nonfinite_count'] for r in reports.values()),
                           "statistics": spec.get("statistics", "raw"),
                           "source_paths": sorted({p for r in reports.values() for p in r['source_paths']})}
-                return figure, {"rows": tuple(raw), "summary_rows": summary, "report": report}
+                return figure, {"rows": tuple(raw), "summary_rows": summary, "report": report,
+                                "audit_rows": selected if response_mode in _POWER_RESPONSES else ()}
             figure, axis = plt.subplots(figsize=PUBLICATION_WIDE_FIGSIZE, layout="constrained")
             if mode == "curve":
                 data = _draw_curve(axis, selected, spec, x, y)
@@ -838,14 +966,17 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                 minimum, maximum = minimum-pad, maximum+pad
             norm = mpl.colors.TwoSlopeNorm(0, vmin=minimum, vmax=maximum) if minimum < 0 < maximum else mpl.colors.Normalize(minimum, maximum)
             artist = axis.scatter([r[x] for r in valid], [r[y] for r in valid], c=[r[z] for r in valid], cmap="RdBu_r", norm=norm)
-            figure.colorbar(artist, ax=axis).set_label(column_label(z))
+            figure.colorbar(artist, ax=axis).set_label(column_label(z, eligible))
             overlap = len(valid)-len({(r[x],r[y]) for r in valid})
-            axis.set(xlabel=column_label(x), ylabel=column_label(y), title=(spec.get("title") or "Measured XY observations") + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
+            response_note = " · " + _response_note(spec) if response_mode in _POWER_RESPONSES else ""
+            axis.set(xlabel=column_label(x, eligible), ylabel=column_label(y, eligible), title=(spec.get("title") or "Measured XY observations") + response_note + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
             if quality['quality_policy'] == 'include' and quality['flagged_row_count']:
                 axis.set_title(axis.get_title() + " · AUDIT: flagged included")
             axis.set_title(_audit_title(selected) + axis.get_title())
             style_axis(axis)
-            return figure, {"rows": tuple(valid), "summary_rows": [], "report": {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **quality, "mode": mode,
+            return figure, {"rows": tuple(valid), "summary_rows": [],
+                "audit_rows": selected if response_mode in _POWER_RESPONSES else (),
+                "report": {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **_response_metadata(spec), **quality, "mode": mode,
                 "selected_row_count": len(selected), "plotted_row_count": len(valid),
                 "omitted_missing_or_nonfinite_count": len(qualified)-len(valid), "statistics": "raw",
                 "duplicate_xy_observation_count": overlap, "color_normalization": {"vmin": minimum, "vmax": maximum, "vcenter": 0 if minimum < 0 < maximum else None},
@@ -918,6 +1049,7 @@ def export_plot_bundle(
     destination.mkdir(exist_ok=False)
 
     csv_rows: list[dict[str, Any]] = []
+    audit_rows: list[dict[str, Any]] = []
     plot_manifest = []
     summary_rows = []
     for index, item in enumerate(rendered, start=1):
@@ -928,6 +1060,7 @@ def export_plot_bundle(
             )
         summary_rows.extend({**row, "plot_id": slug} for row in item["data"].get("summary_rows", ()))
         selected_rows = tuple(item["data"]["rows"])
+        audit_rows.extend({**dict(row), "plot_id": slug} for row in item["data"].get("audit_rows", ()))
         csv_rows.extend(
             {**dict(row), "plot_id": slug}
             for row in selected_rows
@@ -953,6 +1086,15 @@ def export_plot_bundle(
         writer.writeheader()
         for row in summary_rows:
             writer.writerow({key: _csv_export_value(row.get(key)) for key in summary_keys})
+    if audit_rows:
+        # Include missing/flagged power-reference outcomes and manual exclusions
+        # alongside the plotted subset, retaining the engine's matching evidence.
+        audit_keys = sorted({key for row in audit_rows for key in row})
+        with (destination / "analysis_audit_samples.csv").open("x", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=audit_keys)
+            writer.writeheader()
+            for row in audit_rows:
+                writer.writerow({key: _csv_export_value(row.get(key)) for key in audit_keys})
     digest = hashlib.sha256(
         json.dumps(_json_safe(csv_rows), sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -963,6 +1105,7 @@ def export_plot_bundle(
         "vector_formats": ["pdf", "svg"],
         "figure_count": len(plot_manifest),
         "selected_sample_rows": len(csv_rows),
+        "analysis_audit_sample_rows": len(audit_rows),
         "selected_samples_sha256": digest,
         "aggregation": "per plot specification; plotted_statistics.csv records n, SD, SEM and sample identities",
         "interpolation": "none",
@@ -973,6 +1116,9 @@ def export_plot_bundle(
         "statistics_source_sha256": hashlib.sha256(Path(__file__).with_name("analysis_observations.py").read_bytes()).hexdigest(),
         "plotting_source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     }
+    if any(item["spec"].get("photoresponse") in _POWER_RESPONSES for item in rendered):
+        manifest["power_reference_source_sha256"] = hashlib.sha256(
+            Path(__file__).with_name("optical_power_reference.py").read_bytes()).hexdigest()
     (destination / "plot_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False),
         encoding="utf-8",
@@ -1166,8 +1312,13 @@ class UnifiedPlotDashboard:
         quality = widgets.Dropdown(options=[("Exclude flagged channels", "exclude"), ("AUDIT: include flagged", "include")],
                                   value=default_spec.get("quality_policy", "exclude"), description="Quality:", layout=widgets.Layout(width="360px"))
         photoresponse = widgets.Dropdown(options=[("Raw light", "raw"), ("Light − recorded dark", "matched"),
-            ("Light − selected dark run", "separate")], value=default_spec.get("photoresponse", "raw"),
+            ("Light − selected dark run", "separate"),
+            ("Light − lowest-power light", "power_lowest"),
+            ("Light − selected-power light", "power_selected")], value=default_spec.get("photoresponse", "raw"),
             description="Response:", layout=widgets.Layout(width="100%"))
+        saved_power = default_spec.get("reference_power_w")
+        reference_power = widgets.FloatText(value=float(1e-6 if saved_power is None else saved_power) * 1e6,
+            description="Ref. (μW):", layout=widgets.Layout(width="260px"))
         dark_run = widgets.Text(value=default_spec.get("dark_run_id", ""), description="Dark run ID:",
                                 layout=widgets.Layout(width="100%"))
         dark_phase = widgets.Checkbox(value=default_spec.get("dark_phase_confirmed", False),
@@ -1192,6 +1343,7 @@ class UnifiedPlotDashboard:
             "figure": None, "rendered": None, "updating": False,
             "statistics": statistics, "quality": quality, "component": component, "excluded": excluded,
             "photoresponse": photoresponse, "dark_run": dark_run, "dark_phase": dark_phase, "dark_age": dark_age,
+            "reference_power": reference_power,
             "image": figure_image,
         }
         card["widget"] = widgets.VBox([
@@ -1201,9 +1353,12 @@ class UnifiedPlotDashboard:
             checklist.widget,
             runs,
             widgets.HBox([load_runs, load_status]),
-            photoresponse, dark_run, dark_phase, dark_age,
+            photoresponse, reference_power, dark_run, dark_phase, dark_age,
             widgets.HTML("For an independent dark, load both light and dark run IDs above. OFF evidence, matching settings and channel quality are required. Select raw lock-in axes; Response applies subtraction."),
+            widgets.HTML("Power reference: use the lowest planned power or enter a reference in μW. Matching uses the same run and outer visit. Plot filters may hide the reference; Exclude IDs removes reference samples too. ΔR is |Z − mean(Zref)|, not R − Rref. Reference uncertainty and matching evidence are exported."),
             widgets.HTML("Dark drift: choose X = Time since run start (s), Y = Dark Lock-in XX/XY/AUX X/Y/R/Phase, and Response = Raw light (no subtraction). Each dark read is loaded once; capture UTC and baseline ID are exported."),
+            widgets.HTML("Waveplates: target/readback Rotator 1/2 angles are available on X and Y. Names and optical-zero calibration come from each archived run; mechanical angle is not a polarization-angle calibration. Group or filter the other rotator when both vary."),
+            widgets.HTML("Positioner: absolute XYZ readbacks and requested absolute/relative offsets are separate. Use XY–Z for position maps, actual Z or focus-plane error. Group or filter other varying position coordinates, coordinate frames and calibrations; missing positions stay missing."),
             widgets.HBox([x_axis, component if mode in ("field", "three_channels") else y_axis], layout=widgets.Layout(width="100%")),
             group_axis if mode != "xy_z" else z_axis,
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
@@ -1223,7 +1378,7 @@ class UnifiedPlotDashboard:
         load_runs.on_click(lambda _button, target=card: self._load_selected_runs(target))
         runs.observe(lambda _change, target=card: self._card_changed(target), names="value")
         photoresponse.observe(lambda _change, target=card: self._response_changed(target), names="value")
-        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded, dark_run, dark_phase, dark_age):
+        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded, dark_run, dark_phase, dark_age, reference_power):
             control.observe(lambda _change, target=card: self._card_changed(target), names="value")
         self.cards.append(card)
         self.card_box.children = tuple(item["widget"] for item in self.cards)
@@ -1396,6 +1551,7 @@ class UnifiedPlotDashboard:
         try:
             for name in ("dark_run", "dark_phase", "dark_age"):
                 card[name].layout.display = "" if card["photoresponse"].value == "separate" else "none"
+            card["reference_power"].layout.display = "" if card["photoresponse"].value == "power_selected" else "none"
             rows = self._selected_rows(card)
             pending = sum(key not in self._cache for key, _source in self._cache_keys(card))
             dark_count = sum(r.get("observation_kind") == "dark" for r in rows)
@@ -1522,6 +1678,7 @@ class UnifiedPlotDashboard:
             "statistics": card["statistics"].value, "quality_policy": card["quality"].value,
             "field_component": card["component"].value,
             "photoresponse": card["photoresponse"].value,
+            "reference_power_w": card["reference_power"].value * 1e-6,
             "dark_run_id": card["dark_run"].value.strip(),
             "dark_phase_confirmed": card["dark_phase"].value,
             "dark_max_age_s": card["dark_age"].value,

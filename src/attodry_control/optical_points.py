@@ -663,6 +663,31 @@ class OpticalPointSession:
     def expected_measurements(self):
         return ({"optical_power_w"} if self.meter else set()) | ({"pem_frequency_hz"} if self.pem else set())
 
+    def prepare_positioner_return(self):
+        """OFF-first cleanup phase, retaining owned read access for return motion.
+
+        Full source/reference/transport cleanup still runs from close, after
+        electrical protection and the positioner return have been attempted.
+        """
+        errors = []
+        try:
+            self.suspend()
+            evidence = self.observe_dark(phase="positioner_return_off")
+        except BaseException as exc:
+            evidence = None
+            errors.append(f"positioner return OFF: {type(exc).__name__}: {exc}")
+            self.cleanup_result["errors"].extend(errors)
+        result = {"verified": not errors, "off_confirmed": not errors,
+                  "source_finish_pending": True, "evidence": evidence, "errors": errors}
+        try:
+            self._event("optical_positioner_return_off", evidence=result)
+        except BaseException as exc:
+            message = f"positioner return OFF audit: {type(exc).__name__}: {exc}"
+            self.cleanup_result["errors"].append(message)
+            result["errors"].append(message)
+            result["verified"] = False
+        return result
+
     def cleanup(self, *, finish_pem=True, close_meter=True):
         """OFF first; retain reference/shared VISA manager until electrical protection.
 

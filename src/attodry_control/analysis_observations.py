@@ -34,6 +34,21 @@ def channel_quality(row: Mapping, column: str) -> tuple[str, tuple[str, ...]]:
         if (row.get("dark_valid_by_channel") or {}).get(f"{role}:h{order}") is False:
             return "flagged", tuple(dict.fromkeys((*reasons, "recorded_invalid_dark_sample")))
         return state, reasons
+    power_delta = re.fullmatch(r"measured\.(lockin_(xx|xy|aux))_h(\d+)_power_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
+    if power_delta:
+        role, short_role, order, metric = power_delta.groups()
+        quality = channel_quality(row, f"measured.{role}_h{order}_{metric}")
+        if quality[0] != "clear":
+            return quality
+        reference = (row.get("status.lockin") or {}).get("power_reference")
+        if not isinstance(reference, Mapping):
+            return "unknown", ("missing_power_reference",)
+        channel = reference.get("channels", {}).get(f"{short_role}:h{order}", {})
+        if channel.get("valid_for_analysis") is not True:
+            return "flagged", ("invalid_power_reference",)
+        if metric == "phase_deg" and channel.get("phase_defined") is not True:
+            return "flagged", ("undefined_power_differential_phase",)
+        return "clear", ()
     delta = re.fullmatch(r"measured\.(lockin_(xx|xy|aux))_h(\d+)_delta_(x_v|y_v|amplitude_v|phase_deg)", column)
     if delta:
         role, short_role, order, metric = delta.groups()
@@ -269,17 +284,42 @@ def repeat_statistics(rows: Sequence[Mapping], *, x: str, y: str, mode="mean_sd"
         if row.get("condition_id") is None:
             raise ValueError("Repeat statistics require a recorded condition_id; use Raw observations for this source.")
         identity_keys = ["source_path", "run_id", "condition_id", "attempt_index", "repeat_index", "role", "harmonic"]
-        identity_keys += sorted(k for k in row if k.startswith(("requested.", "axes.")))
+        identity_keys += sorted(k for k in row if k.startswith(("requested.", "axes.", "positioner_context.", "positioner_origin.")))
         identity = tuple((k, repr(row.get(k))) for k in identity_keys)
         groups.setdefault(identity, []).append(row)
     points = []
     for group in groups.values():
-        valid = [r for r in group if finite(r.get(x)) and finite(r.get(y))]
+        power_column = re.fullmatch(r"(measured\.lockin_(?:xx|xy|aux)_h\d+_power_delta_)(?:x_v|y_v|amplitude_v|phase_deg)", y)
+        if power_column:
+            # A zero individual vector has no phase but still belongs in the
+            # complex mean. Plot masking must remain effective for such rows.
+            stem = power_column[1]
+            valid = [r for r in group if not r.get("_power_summary_excluded")
+                     and finite(r.get(x)) and finite(r.get(stem + "x_v"))
+                     and finite(r.get(stem + "y_v"))]
+        else:
+            valid = [r for r in group if finite(r.get(x)) and finite(r.get(y))]
         if not valid:
             xs = [r[x] for r in group if finite(r.get(x))]
             points.append({"x": statistics.fmean(xs) if xs else None, "y": None,
                            "n": 0, "sd": None, "sem": None, "error": None,
                            "sample_ids": [observation_id(r) for r in group]})
+            continue
+        if power_column:
+            from .optical_power_reference import power_reference_statistics
+            stats = power_reference_statistics(valid, y)
+            mean, sd, sem = (stats[key] for key in ("mean", "sd", "sem"))
+            points.append({"x": statistics.fmean(r[x] for r in valid), "y": mean,
+                           "n": len(valid), "sd": sd, "sem": sem,
+                           "error": sd if mode == "mean_sd" else sem,
+                           "x_min": min(r[x] for r in valid), "x_max": max(r[x] for r in valid),
+                           "dark_mean_variance": None,
+                           "power_reference_mean_variance": stats["reference_mean_variance"],
+                           "power_reference_statistics": "complex mean before magnitude/phase; shared reference covariance",
+                           **{key: stats.get(key) for key in (
+                               "covariance_mean_xy_v2", "target_reference_overlap_count",
+                               "reference_self_complete", "uncertainty_reason")},
+                           "sample_ids": [observation_id(r) for r in valid]})
             continue
         values = [float(r[y]) for r in valid]
         n = len(values)

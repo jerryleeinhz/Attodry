@@ -72,7 +72,7 @@ def run(argv: list[str] | None = None) -> int:
     simulate.add_argument("--run-id", required=True)
     simulate.add_argument("--resume", action="store_true")
     hardware_description = commands.add_parser(
-        "describe-hardware", help="Offline validation of selected electrical, environment and optical axes")
+        "describe-hardware", help="Offline validation of selected electrical, environment, optical and positioner axes")
     hardware_description.add_argument("--config", type=Path, default=Path("config/hardware.local.toml"))
     hardware_run = commands.add_parser(
         "run", help="Authorize and run REAL selected-module writes/status reads using the TOML")

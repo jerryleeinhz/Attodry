@@ -1,0 +1,114 @@
+# 离线格式示例：所有坐标、范围、容差、幅频、次序均为合成值，不能用于实机。
+# 默认 enabled=false，组合加载会明确拒绝而不会打开设备。
+# 离线预览：复制到临时/private TOML，仅将 enabled 改 true，再使用 describe-hardware。
+# 真正接管前逐项填写经过确认的身份、SDK SHA、坐标基准、间隙及安全参数。
+# 不在本示例保存 LK_setup 序列号、路径或实验焦点数据。
+
+[project]
+mode = "hardware"
+database_path = "../run_data/positioner/combination.sqlite"
+
+[combination_scan]
+backend = "hardware"
+order = ["positioner"]
+samples_per_condition = 1
+repeats = 1
+run_id = "auto"
+run_name = "SYNTHETIC_POSITIONER_FORMAT_EXAMPLE"
+note = "Synthetic coordinates only; no real motion acceptance"
+illumination_policy = "off_before_axis_change"
+
+[positioner]
+enabled = false
+controller_serial_number = "CHANGE_ME_EXACT_RAW_CONTROLLER_SERIAL"
+expected_firmware_raw = 0 # Placeholder: replace with confirmed raw SDK integer.
+dll_path = 'CHANGE_ME_PINNED_WIN64_ANC350_DLL'
+dll_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+coordinate_frame = "SYNTHETIC_FORMAT_EXAMPLE_FRAME"
+coordinate_frame_confirmed = true # Synthetic frame only; reconfirm installed hardware separately.
+z_mode = "focus_plane" # manual | focus_plane
+move_order = ["x", "y", "z"] # Synthetic example, NOT an installed collision-safe order.
+settle_s = 0.2
+poll_interval_s = 0.05
+move_timeout_s = 3.0
+finish = "hold" # hold | return_start; return path must pass the same limits.
+external_light_off_confirmed = true # Synthetic declaration; real operation needs a fresh route check.
+focus_tolerance_um = 0.1
+
+[positioner.axes.x]
+index = 0 # SDK 0 = Daisy Axis 1 = user-confirmed physical X.
+min_position_um = -1000.0
+max_position_um = 1000.0
+max_move_um = 100.0
+position_tolerance_um = 0.1
+expected_actuator_name = "CHANGE_ME_CURRENT_X_PRESET"
+expected_lut_name = "CHANGE_ME_CURRENT_X_LUT"
+amplitude_v = 20.0 # Expected EXISTING readback; software does not write this value.
+frequency_hz = 100.0 # Expected EXISTING readback; not an inferred allowed drive rate.
+
+[positioner.axes.y]
+index = 1
+min_position_um = -1000.0
+max_position_um = 1000.0
+max_move_um = 100.0
+position_tolerance_um = 0.1
+expected_actuator_name = "CHANGE_ME_CURRENT_Y_PRESET"
+expected_lut_name = "CHANGE_ME_CURRENT_Y_LUT"
+amplitude_v = 20.0
+frequency_hz = 100.0
+
+[positioner.axes.z]
+index = 2
+min_position_um = -1000.0
+max_position_um = 1000.0
+max_move_um = 100.0
+position_tolerance_um = 0.1
+expected_actuator_name = "CHANGE_ME_CURRENT_Z_PRESET"
+expected_lut_name = "CHANGE_ME_CURRENT_Z_LUT"
+amplitude_v = 20.0
+frequency_hz = 100.0
+
+[positioner.scan]
+mode = "absolute" # relative: these numerical XY entries are offsets from ONE frozen origin.
+x_values_um = [10.0, 50.0, 90.0]
+y_values_um = [10.0, 50.0, 90.0]
+order = "xy" # X outer, Y inner; yx reverses nesting.
+serpentine = true
+# Lists OR inclusive ranges per scalar coordinate, never both:
+# x_ranges_um = [{min=10.0,max=90.0,scale="linear",points=3}]
+# Instead of the grid, remove x/y/order/serpentine and use an explicit path:
+# points = [{x_um=10.0,y_um=10.0}, {x_um=50.0,y_um=10.0}]
+# In manual Z mode, remove focus_plane/focus_tolerance_um; explicit points need
+# x_um/y_um/z_um, while a grid needs one fixed z_um (absolute or relative offset).
+
+[positioner.focus_plane]
+model = "plane"
+coordinate_frame = "SYNTHETIC_FORMAT_EXAMPLE_FRAME"
+z_offset_um = 0.0
+max_residual_um = 0.1 # Allowed fit residual, not optical focus accuracy.
+rms_residual_um = 0.1
+extrapolation_policy = "reject"
+calibration_conditions = "SYNTHETIC points; no actual thermal or optical calibration"
+# If supplied, BOTH are mandatory and the live combination temperature is checked:
+# calibration_temperature_k = 20.0
+# temperature_tolerance_k = 0.1
+
+[[positioner.focus_plane.points]]
+x_um = 0.0
+y_um = 0.0
+z_um = 100.0
+
+[[positioner.focus_plane.points]]
+x_um = 100.0
+y_um = 0.0
+z_um = 102.0
+
+[[positioner.focus_plane.points]]
+x_um = 0.0
+y_um = 100.0
+z_um = 99.0
+
+[[positioner.focus_plane.points]]
+x_um = 100.0
+y_um = 100.0
+z_um = 101.0

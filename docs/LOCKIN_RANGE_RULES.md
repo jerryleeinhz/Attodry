@@ -11,9 +11,15 @@ SR865A 的 `input_range_v_peak`；输入端过载不能仅通过增大检测灵�
 ## 适用范围
 
 规则引用 `combination_scan.order` 中排在 `lockin` **之前**的已启用模块。温度、
-磁场、光学、光路波片 rotator 和已有 SMU 坐标都使用相同的匹配机制。规则不会
+磁场、光学、光路波片 rotator、positioner 和已有 SMU 坐标都使用相同的匹配机制。规则不会
 启用模块、重排扫描、扩大轴点表或增加任何设备能力。rotator 只表示已有获批的
 光路波片机械角度，不表示冷台或样品旋转。
+
+positioner 的绝对模式匹配 `positioner_x_um/y_um/z_um`，相对模式匹配
+`positioner_x_offset_um/y_offset_um/z_offset_um`（焦面模式只有 XY offset），
+或用 positioner 点序号选择重复访问；规则只用冻结计划的请求坐标，不用运动中 actual
+或噪声自动换档。焦面绝对 Z 是派生坐标，不增加扫描维度。示例和单位见
+[POSITIONER](modules/POSITIONER.md)，仍须对所有外层联合条件唯一、完整覆盖。
 
 第一版用于固定灵敏度、只扫描激励幅度的光电锁相会话：包括当前内部 XX 参考的
 两台 SR830 和可选第三台 AUX SR865A，以及已有 PEM 光电会话。内部 XX 参考组合

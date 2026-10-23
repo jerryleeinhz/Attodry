@@ -76,6 +76,10 @@ def _context(row, role, harmonic):
         conditions={k:v for k,v in row.items() if k.startswith("requested.") and
                     not k.startswith("requested.optical_")},
         formal=formal, simulated=row.get("simulated"))
+    from .combination_analysis import positioner_reference_context
+    positioner = positioner_reference_context(row)
+    if positioner is not None:
+        context["positioner"] = positioner
     return json.dumps(context, sort_keys=True, allow_nan=False, default=str)
 
 

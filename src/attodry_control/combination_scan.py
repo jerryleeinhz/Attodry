@@ -22,6 +22,8 @@ from .safety import FieldReadbackPolicy, MagnetLimits, float32_field
 
 
 MODULE_KEYS = {
+    "positioner": {"positioner_x_um", "positioner_y_um", "positioner_z_um",
+                   "positioner_x_offset_um", "positioner_y_offset_um", "positioner_z_offset_um"},
     "rotator": {"rotator_1_angle_deg", "rotator_2_angle_deg"},
     "temperature": {"temperature_k"},
     "magnetic": {"field_x_t", "field_z_t"},
@@ -129,6 +131,11 @@ class CombinationPlan:
             if axis.module in {"temperature", "magnetic", "lockin"}:
                 if keys != MODULE_KEYS[axis.module]:
                     raise ValueError(f"Specify every {axis.module} coordinate (fixed values included)")
+            if axis.module == "positioner" and keys not in (
+                    {"positioner_x_um", "positioner_y_um", "positioner_z_um"},
+                    {"positioner_x_offset_um", "positioner_y_offset_um", "positioner_z_offset_um"},
+                    {"positioner_x_offset_um", "positioner_y_offset_um"}):
+                raise ValueError("Positioner requires absolute XYZ or relative XYZ/XY offsets")
             for role in SMU_ROLES:
                 if {role + "_v", role + "_a"} <= keys:
                     raise ValueError("An SMU role cannot source voltage and current together")
@@ -231,6 +238,13 @@ class SimulatedCombinationStation:
 
     def apply(self, module: str, point: AxisPoint) -> dict:
         self.values.update(point.values)
+        if module == "positioner":
+            # Explicit synthetic origin, never confused with a hardware origin.
+            for role in "xyz":
+                offset = "positioner_" + role + "_offset_um"
+                if offset in point.values:
+                    self.values["positioner_" + role + "_um"] = point.values[offset]
+            self.values.setdefault("positioner_z_um", 0.0)
         self.operations.append(("apply", module, dict(point.values)))
         return {"actual": dict(point.values), "simulated": True}
 
@@ -247,6 +261,8 @@ class SimulatedCombinationStation:
     def read(self, module: str) -> dict:
         self.operations.append(("read", module))
         actual = {k: v for k, v in self.values.items() if k in MODULE_KEYS[module]}
+        if module == "positioner":
+            actual = {k: v for k, v in actual.items() if not k.endswith("_offset_um")}
         measured: dict[str, float] = {}
         excitation = self.values.get("lockin_excitation_v_rms", 0)
         if module == "smu":
@@ -551,6 +567,9 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                     finite = all(type(v) in (int, float) and math.isfinite(v)
                                  for v in (*actual.values(), *measurements.values()))
                     expected_keys = set(condition["requested"])
+                    if "positioner" in modules:
+                        expected_keys -= {"positioner_x_offset_um", "positioner_y_offset_um", "positioner_z_offset_um"}
+                        expected_keys |= {"positioner_x_um", "positioner_y_um", "positioner_z_um"}
                     expected_measured = station.expected_measurements(condition)
                     finish = utc_now()
                     fresh = all(datetime.fromisoformat(start) <=
@@ -620,7 +639,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 cleanup_errors.append(f"attempt audit: {audit_error}")
     finally:
         # An audit/presentation failure must not prevent later cleanup actions.
-        for module in ("optical", "lockin", "smu", "rotator", "magnetic", "temperature"):
+        for module in ("optical", "lockin", "smu", "rotator", "positioner", "magnetic", "temperature"):
             if module not in modules:
                 continue
             try:

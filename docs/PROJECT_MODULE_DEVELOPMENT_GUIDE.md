@@ -1,5 +1,11 @@
 # 项目模块开发与操作者协作规范
 
+2026-10-23 新增已离线实现的 [Positioner 工作包](modules/POSITIONER.md)：使用现有
+CombinationPlan/生命周期/Store/CLI，坐标定义包含 requested offset 与 actual XYZ；
+完整预检后才允许设置，关光/逐轴路径/完整稳定窗、采样位置守卫、独立停止/断开、跨
+配置控制器租约均属模块边界。无 positioner 的旧配置/归档不增加虚构 XYZ；参考分析
+必须隔离 frame/plane/origin/target/visit。硬件阻断测试不替代真实运动/聚焦验收。
+
 最后更新：2026-10-17
 
 2026-10-18补充：用户批准在内部XX参考拓扑中可选增加语义角色lockin_aux

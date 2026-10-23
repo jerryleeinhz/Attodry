@@ -1,5 +1,13 @@
 # attoDRY Transport Control
 
+## Positioner：XYZ 与焦面跟随（离线实现）
+
+ANC350 RES 位移台支持绝对/相对 XYZ、XY 网格/蛇形、多点焦面标定与 Z 跟随，
+可用现有组合引擎独立运行，或放在温度/磁场内层、光学/SMU/锁相外层。
+说明及操作边界见 [POSITIONER](docs/modules/POSITIONER.md)，合成且默认禁用的
+[示例 TOML](config/positioner.example.toml)。`describe-hardware` 只校验/预览，
+`run` 才是明确的真实设置/运动入口；真实小步验收尚未执行，不能直接使用示例参数接管实机。
+
 ## 当前磁场组合质量策略（2026-10-22）
 
 `[combination_scan].magnetic_deviation_policy="record_continue"`：每个磁场点先完整判稳，

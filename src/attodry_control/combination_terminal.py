@@ -41,6 +41,8 @@ def _coordinate(key, values, route=None):
              "field_x_t": ("Bx", "T"), "field_z_t": ("Bz", "T"),
              "temperature_k": ("T", "K")}
     names.update({"optical_wavelength_nm": ("lambda", "nm"),
+                  **{"positioner_" + role + "_um": (role.upper(), "um") for role in "xyz"},
+                  **{"positioner_" + role + "_offset_um": ("d" + role.upper() + " (frozen origin)", "um") for role in "xyz"},
                   "rotator_1_angle_deg": ("Rotator 1 angle", "deg"),
                   "rotator_2_angle_deg": ("Rotator 2 angle", "deg"),
                   "optical_bandwidth_nm": ("bandwidth", "nm"),
@@ -94,6 +96,18 @@ def launch_text(summary, width=None):
                          segment["points"]))
     lines += ["", *_table(("Axis", "Segment/direction", "Requested scan", "Points"), axes, width)]
     hardware = []
+    positioner = summary.get("positioner")
+    if positioner is not None:
+        lines.append("Positioner: ANC350 RES | SDK 0/1/2 = X/Y/Z | " + positioner["mode"] +
+            " | Z: " + positioner["z_mode"] + " | frame: " + positioner["coordinate_frame"])
+        lines.append("Motion order: " + " -> ".join(positioner["move_order"]) +
+            " | finish: " + positioner["finish"] + " | origin frozen once after fresh stable readback")
+        for role, settings in positioner["axes"].items():
+            lines.append(f"{role.upper()}: {settings['min_position_um']:g}..{settings['max_position_um']:g} um; "
+                f"max move {settings['max_move_um']:g} um; tolerance {settings['position_tolerance_um']:g} um")
+        if positioner.get("focus_plane"):
+            lines.append("Focus plane: " + positioner["focus_plane"]["calibration_sha256"] +
+                " | outside calibration convex hull: reject")
     for role, settings in summary.get("rotator", {}).items():
         zero = settings.get("optical_zero_deg")
         lines.append(f"{role}/{settings['label']}: {settings['controller']} + {settings['stage_model']} | "
@@ -363,7 +377,7 @@ def _monitor_progress_lines(snapshot, now=None):
     for axis in axes:
         module = axis["module"]
         name = {"temperature": "Temperature", "optical": "Optical", "lockin": "Lock-in",
-                "magnetic": "Magnetic", "smu": "SMU", "rotator": "Rotator"}.get(module, module)
+                "magnetic": "Magnetic", "smu": "SMU", "rotator": "Rotator", "positioner": "Positioner"}.get(module, module)
         current = axis.get("current_point")
         lines.append(f"{name} point: {current if current is not None else '-'}/{axis['total_points']}"
                      + f" | Fully completed in scope: {axis['completed_points']}/{axis['total_points']}"

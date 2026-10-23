@@ -1,5 +1,10 @@
 # Photonics / nonlinear Hall combination scan
 
+2026-10-23 本地只读分析新增 Light − lowest-power light／Light − selected-power light，
+可按最低或指定设定功率扣除同组 light 参考均值，分别保留功率参考差分与原 dark 差分。
+往返／回访隔离、分点量程兼容、参考缺失、共享误差及导出说明见
+[光功率参考差分分析](OPTICAL_POWER_REFERENCE_ANALYSIS.md)。无需修改采集 TOML 或重采数据。
+
 ## 磁场与温度的判稳后策略（2026-10-22）
 
 `[combination_scan].magnetic_deviation_policy` 与 `temperature_deviation_policy`

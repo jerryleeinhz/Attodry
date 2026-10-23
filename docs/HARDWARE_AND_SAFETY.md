@@ -1,5 +1,26 @@
 # Hardware and safety guide
 
+## 2026-10-23 Positioner 运动实现边界
+
+位移台生产代码已完成离线实现；不代表获得真实运动授权或已测定安全行程/间隙。
+ANC350 RES 的 SDK 0/1/2 对应用户确认的 X/Y/Z，坐标单位 um，SDK 米；ANC300 精扫
+状态不自动相加。必须显式填写范围、最大单步、容差、顺序、固件/DLL/预设/LUT/幅频、
+坐标系确认和标定条件。无输出参数/预设自动修复，无 Home/清零/自动关闭输出。
+
+连接时三轴须输出 OFF/静止/无传感器或 EOT 故障。moving=false 不能证明原生 auto 已关闭，
+故不接管初始 ON。完整原点稳定窗和全部路径通过后，OFF 状态先以 fresh actual 写目标，
+随后 targetGround(false)/targetRange/输出准备，再完整原点判稳；ACK 只表示命令完成，
+不是未暴露的目标/range getter。普通 hold 保留输出，下次 run 前需操作者释放。
+每步确认光 OFF 并保留环境守卫；无光路所有权必须明确 external_light_off_confirmed。
+实际 XYZ、焦面误差、完整稳定窗和采样前后守卫决定资格，不能仅靠 target_reached。
+漂移/非有限/未知/通信/审计错误 fail closed，拒绝不确定重发；最后确认位置与未知状态
+分开保存。停止本 session 已发起的 auto、核验静止、断开彼此独立，失败不回原点。
+
+焦面拒绝凸包外目标与逐轴路径；只证明配置几何，不保证安装物理间隙。温度声明存在时
+须新鲜温度读回匹配，没有声明也不意味着温变下焦面仍有效。三点零残差不认证聚焦精度。
+同步 SDK 调用无可配置取消接口：共享截止时间防止迟到结果取得资格，不能承诺中途抢断
+阻塞的原生调用；禁止用 kill 代替有证据的停止。详见 [POSITIONER](modules/POSITIONER.md)。
+
 ## 2026-10-22 开放 readback_tolerance_t（本地修复，待当前扫描结束部署）
 
 操作者明确要求 readback_tolerance_t 可编辑，移除解析器/策略/驱动构造/控制接管的1.5mT固定上限。

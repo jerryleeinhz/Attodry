@@ -20,7 +20,7 @@ OTHER_TABLES = {
     "pem", "pem_run", "pm100d", "pm100d_run", "optical_scan", "power_feedback",
     "combination_scan", "photonics_lockin", "pem_internal_diagnostic",
     "temperature_excitation_scan", "magnetic_field_run",
-    "chopper", "cld1010", "optical_background", "rotator_1", "rotator_2", "rotator_scan",
+    "chopper", "cld1010", "optical_background", "rotator_1", "rotator_2", "rotator_scan", "positioner",
 }
 
 

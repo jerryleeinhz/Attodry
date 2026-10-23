@@ -187,4 +187,6 @@ def launch_summary(config, database, run_id):
         summary["optical"] = config.optical.snapshot()
     if getattr(config, "rotator", None) is not None:
         summary["rotator"] = {device.role: asdict(device) for device in config.rotator.devices}
+    if getattr(config, "positioner", None) is not None:
+        summary["positioner"] = config.positioner.snapshot()
     return summary

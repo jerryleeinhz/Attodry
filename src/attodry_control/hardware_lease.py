@@ -4,6 +4,24 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 import os
+import hashlib
+import tempfile
+
+
+@contextmanager
+def controller_hardware_lease(serial_number, *, directory=None):
+    """Cross-config ANC350 ownership; vendor connection ownership is also required.
+
+    Spaces/case are aliases only for this resource key. Device discovery still
+    compares the exact configured serial. Never unlink a live lock file.
+    """
+    if not isinstance(serial_number, str) or not serial_number.strip():
+        raise ValueError("Controller lease requires an explicit serial number")
+    identity = serial_number.replace(" ", "").upper()
+    root = Path(directory) if directory is not None else Path(tempfile.gettempdir()) / "attodry-controller-leases"
+    key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    with station_hardware_lease(root / ("anc350-" + key + ".toml")) as path:
+        yield path
 
 
 @contextmanager

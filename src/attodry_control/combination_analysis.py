@@ -47,6 +47,154 @@ def _sample_time(record: dict, captured_at: str | None, run_started_at: str) -> 
         pass
 
 
+def lockin_channel_labels(record: Mapping) -> dict[str, str]:
+    """Operator names from this observation/run archive, never a live TOML."""
+    status = record.get("status.lockin") or {}
+    labels = (status.get("channel_labels") or {}) if isinstance(status, Mapping) else {}
+    context = record.get("analysis_context") or {}
+    config = (context.get("lockin") or {}) if isinstance(context, Mapping) else {}
+    result = {}
+    for role in ("xx", "xy", "aux"):
+        role_config = (config.get("lockin_" + role) or {}) if isinstance(config, Mapping) else {}
+        value = labels.get(role) if isinstance(labels, Mapping) else None
+        if value is None and isinstance(role_config, Mapping):
+            value = role_config.get("channel_label")
+        if value is None:
+            value = record.get("channel_label." + role)
+        if isinstance(value, str) and value.strip():
+            result[role] = value.strip()
+    return result
+
+
+def rotator_labels(record: Mapping) -> dict[str, str]:
+    """Waveplate names from the archived run/loaded row, never today's TOML."""
+    context = record.get("analysis_context") or {}
+    config = (context.get("rotator") or {}) if isinstance(context, Mapping) else {}
+    result = {}
+    for role in ("rotator_1", "rotator_2"):
+        device = (config.get(role) or {}) if isinstance(config, Mapping) else {}
+        value = device.get("label") if isinstance(device, Mapping) else None
+        if value is None:
+            value = record.get("rotator_label." + role)
+        if isinstance(value, str) and value.strip():
+            result[role] = value.strip()
+    return result
+
+
+def _rotator_metadata(record: dict) -> None:
+    record.update({"rotator_label." + role: label for role, label in rotator_labels(record).items()})
+    config = (record.get("analysis_context") or {}).get("rotator") or {}
+    if not isinstance(config, Mapping):
+        return
+    for role in ("rotator_1", "rotator_2"):
+        device = config.get(role)
+        if not isinstance(device, Mapping):
+            continue
+        zero = device.get("optical_zero_deg")
+        calibrated = type(zero) in (int, float) and math.isfinite(zero)
+        record["rotator_optical_zero_calibrated." + role] = calibrated
+        if calibrated:
+            record["rotator_optical_zero_deg." + role] = zero
+        # A mechanical coordinate is never converted into polarization angle.
+
+
+def _positioner_status(record: Mapping) -> Mapping | None:
+    status = record.get("status.positioner")
+    if isinstance(status, Mapping):
+        # ModuleRead retains its diagnostic envelope around the stable scope.
+        return status["positioner"] if isinstance(status.get("positioner"), Mapping) else status
+    lockin = record.get("status.lockin")
+    if isinstance(lockin, Mapping) and isinstance(lockin.get("positioner"), Mapping):
+        return lockin["positioner"]
+    return None
+
+
+def _positioner_metadata(record: dict) -> None:
+    """Expose this sample's archived coordinate frame, never a live config.
+
+    Resolved absolute targets stay separate from requested relative offsets.
+    Missing evidence is left missing; no zero position or calibration is inferred.
+    """
+    status = _positioner_status(record)
+    if not isinstance(status, Mapping):
+        return
+    for key in ("coordinate_frame", "mode", "z_mode", "focus_plane_id"):
+        if key in status:
+            record["positioner_context." + key] = status[key]
+    for scope in ("origin", "target"):
+        values = status.get(scope)
+        if isinstance(values, Mapping):
+            for axis in "xyz":
+                key = "positioner_" + axis + "_um"
+                if key in values:
+                    record[f"positioner_{scope}.{axis}_um"] = values[key]
+
+
+def positioner_reference_context(record: Mapping) -> dict | None:
+    """Exact stable position/visit identity for background and power matching.
+
+    Actual positions contain sensor noise and must not form an equality key.
+    The frozen resolved target, origin, frame and calibration are authoritative.
+    Old archives without a positioner keep their existing matching behavior.
+    """
+    present = (any(key.startswith(("requested.positioner_", "actual.positioner_", "axes.positioner."))
+                   for key in record) or _positioner_status(record) is not None
+               or bool((record.get("analysis_context") or {}).get("positioner")))
+    if not present:
+        return None
+    status = _positioner_status(record)
+    if not isinstance(status, Mapping):
+        raise ValueError("Positioner reference matching needs archived coordinate-frame evidence")
+    if status.get("verified") is not True or any(
+            type(record.get("actual.positioner_" + axis + "_um")) not in (int, float)
+            or not math.isfinite(record["actual.positioner_" + axis + "_um"]) for axis in "xyz"):
+        raise ValueError("Positioner reference matching needs verified actual XYZ evidence")
+    frame, mode, z_mode = (status.get(key) for key in ("coordinate_frame", "mode", "z_mode"))
+    plane = status.get("focus_plane_id")
+    if (not isinstance(frame, str) or not frame.strip() or mode not in ("absolute", "relative")
+            or z_mode not in ("manual", "focus_plane")
+            or (z_mode == "focus_plane" and (not isinstance(plane, str) or not plane))):
+        raise ValueError("Unknown positioner frame/mode/focus calibration for reference matching")
+    values = {}
+    for scope in ("origin", "target"):
+        point = status.get(scope)
+        if not isinstance(point, Mapping) or any(
+                type(point.get("positioner_" + axis + "_um")) not in (int, float)
+                or not math.isfinite(point["positioner_" + axis + "_um"]) for axis in "xyz"):
+            raise ValueError("Missing frozen positioner origin/absolute target for reference matching")
+        values[scope] = {"positioner_" + axis + "_um": point["positioner_" + axis + "_um"] for axis in "xyz"}
+    for axis in "xyz":
+        absolute_key = "positioner_" + axis + "_um"
+        requested_key = absolute_key if mode == "absolute" else "positioner_" + axis + "_offset_um"
+        if "requested." + requested_key in record:
+            requested = record["requested." + requested_key]
+            if type(requested) not in (int, float) or not math.isfinite(requested):
+                raise ValueError("Invalid requested positioner coordinate for reference matching")
+            resolved = requested if mode == "absolute" else values["origin"][absolute_key] + requested
+            if resolved != values["target"][absolute_key]:
+                raise ValueError("Requested positioner coordinates disagree with frozen absolute target")
+    index = record.get("axes.positioner.index")
+    if type(index) is not int or index < 0:
+        raise ValueError("Missing positioner axis visit identity for reference matching")
+    return {"coordinate_frame": frame, "mode": mode, "z_mode": z_mode,
+            "focus_plane_id": plane, **values,
+            "visit": {key: record.get("axes.positioner." + key) for key in ("index", "segment", "direction")}}
+
+
+def positioner_focus_z_is_derived(record: Mapping) -> bool:
+    """Only an archived resolved focus target can release dependent planned Z."""
+    status = _positioner_status(record)
+    if not isinstance(status, Mapping) or status.get("z_mode") != "focus_plane":
+        return False
+    plane = status.get("focus_plane_id")
+    requested = record.get("requested.positioner_z_um")
+    target = status.get("target")
+    return (isinstance(plane, str) and bool(plane)
+            and type(requested) in (int, float) and math.isfinite(requested)
+            and isinstance(target, Mapping) and target.get("positioner_z_um") == requested
+            and all("requested.positioner_" + axis + "_um" in record for axis in "xy"))
+
+
 def load_combination_dark_rows(path: str | Path, *, run_id: str | None = None,
                                audit: bool = False) -> tuple[dict, ...]:
     """One row per archived dark read, independent of light/background reuse.
@@ -61,7 +209,10 @@ def load_combination_dark_rows(path: str | Path, *, run_id: str | None = None,
         rows = connection.execute("""
             SELECT e.event_id, e.run_id, e.payload_json, r.schema_version,
                    r.status, r.created_at_utc, json_extract(r.cleanup_json, '$.clean') AS clean,
-                   json_extract(r.plan_json, '$.config_sha256') AS config_sha256
+                   json_extract(r.plan_json, '$.config_sha256') AS config_sha256,
+                   json_extract(r.plan_json, '$.hardware.lockin') AS lockin_config_json,
+                   json_extract(r.plan_json, '$.hardware.rotator') AS rotator_config_json,
+                   json_extract(r.plan_json, '$.hardware.positioner') AS positioner_config_json
             FROM combination_events e JOIN combination_runs r USING(run_id)
             WHERE e.event_type='optical_dark_background'
             """ + ("AND e.run_id=? " if run_id is not None else "") + """
@@ -81,6 +232,13 @@ def load_combination_dark_rows(path: str | Path, *, run_id: str | None = None,
             continue
         seen.add(identity)
         context = baseline.get("context") or {}
+        actual_rotator = (context.get("actual_conditions") or {}).get("rotator") or {}
+        if not isinstance(actual_rotator, Mapping):
+            actual_rotator = {}
+        # The matching axis-entry snapshot belongs to this dark capture. Do not
+        # borrow a later light position or flatten unrelated context evidence.
+        actual_rotator = {key: value for key, value in actual_rotator.items()
+                          if key in ("rotator_1_angle_deg", "rotator_2_angle_deg")}
         requested = {key: value for point in (context.get("requested_conditions") or {}).values()
                      if isinstance(point, Mapping) for key, value in point.items()}
         visits = context.get("axis_visits") or {}
@@ -90,19 +248,28 @@ def load_combination_dark_rows(path: str | Path, *, run_id: str | None = None,
         for index, reading in enumerate(baseline.get("raw_readings") or ()):
             if reading.get("module") != "lockin":
                 continue
+            positioner_status = (reading.get("status") or {}).get("positioner", context.get("positioner"))
             record = {
                 "source_path": str(Path(path).resolve()), "run_id": event["run_id"],
                 "run_status": event["status"], "accepted": accepted,
                 "config_sha256": event["config_sha256"],
+                "analysis_context": {"lockin": json.loads(event["lockin_config_json"] or "{}"),
+                                     "rotator": json.loads(event["rotator_config_json"] or "{}"),
+                                     "positioner": json.loads(event["positioner_config_json"] or "null")},
                 "observation_kind": "dark", "baseline_id": baseline_id,
                 "dark_event_id": event["event_id"], "dark_context": context,
                 # Each capture is a distinct replication unit, even for once-per-scan reuse.
                 "condition_id": "dark-" + str(baseline_id or event["event_id"]),
                 "sample_index": index, "clean": reading.get("clean"),
                 "status.lockin": reading.get("status"),
+                **({"status.positioner": positioner_status} if isinstance(positioner_status, Mapping) else {}),
                 **_flatten("requested", requested),
                 **_flatten("axes", axes),
-                **_flatten("actual", reading.get("actual") or {}),
+                # Positioner targets/context never stand in for a dark sample's
+                # own actual XYZ. Missing readback remains missing.
+                **_flatten("actual", {**actual_rotator, **(reading.get("actual") or {})}),
+                **_flatten("measured", {key: value for key, value in (reading.get("measurements") or {}).items()
+                                        if key == "positioner_focus_error_um"}),
                 **{"dark." + key: value for key, value in (reading.get("measurements") or {}).items()
                    if key.startswith(("lockin_xx_h", "lockin_xy_h", "lockin_aux_h")) and "_delta_" not in key},
             }
@@ -111,6 +278,9 @@ def load_combination_dark_rows(path: str | Path, *, run_id: str | None = None,
                 for name, channel in (baseline.get("channels") or {}).items()
                 if index < len(channel.get("samples") or ())}
             _sample_time(record, reading.get("captured_at_utc"), event["created_at_utc"])
+            record.update({"channel_label." + role: label for role, label in lockin_channel_labels(record).items()})
+            _rotator_metadata(record)
+            _positioner_metadata(record)
             output.append(record)
     return tuple(output)
 
@@ -139,6 +309,18 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
             runs[run["run_id"]] = (run["status"], json.loads(run["cleanup_json"] or "{}"),
                                   {"config_sha256": plan.get("config_sha256"),
                                    "lockin": plan.get("hardware", {}).get("lockin"),
+                                   "rotator": plan.get("hardware", {}).get("rotator"),
+                                   "positioner": plan.get("hardware", {}).get("positioner"),
+                                   # One archived optical grid per run, shared by rows.
+                                   # Missing formal points must not change the minimum
+                                   # used for power-reference analysis.
+                                   "power_reference_plan": {
+                                       "loop_order": [axis.get("module") for axis in plan.get("axes", ())],
+                                       "axes": [axis for axis in plan.get("axes", ())
+                                                if axis.get("module") == "optical"],
+                                       "feedback": (plan.get("hardware", {}).get("optical", {})
+                                                    .get("scan", {}).get("feedback")),
+                                   },
                                    "optical": {key: plan.get("hardware", {}).get("optical", {}).get(key)
                                                for key in ("chopper", "pem")}})
         rows = connection.execute("""
@@ -208,6 +390,9 @@ def load_combination_rows(path: str | Path, *, run_id: str | None = None,
                     record.update(_flatten("optical_power_quality", assessment))
         _sample_time(record, record.get("timestamps.lockin") or sample.get("finished_at_utc"),
                      row["run_started_at_utc"])
+        record.update({"channel_label." + role: label for role, label in lockin_channel_labels(record).items()})
+        _rotator_metadata(record)
+        _positioner_metadata(record)
         if isinstance(lockin_status, Mapping) and lockin_status.get("schema_version") == "photonics-lockin-v1":
             from .analysis_observations import channel_quality
             channels = {key: channel_quality(record, key) for key in record
@@ -310,6 +495,11 @@ def _coordinate_for_x(x: str, requested: set[str]) -> str | None:
     name = x.split(".", 1)[-1]
     if name in requested:
         return name
+    # Actual absolute readbacks can display a relative path without renaming
+    # them offsets. Frozen origin metadata remains a separate protected scope.
+    if name in {"positioner_" + axis + "_um" for axis in "xyz"}:
+        offset = name.removesuffix("_um") + "_offset_um"
+        return offset if offset in requested else None
     for role in ("smu_bias", "gate_top", "gate_bottom"):
         if name.startswith(role + "_"):
             return next((key for key in (role + "_v", role + "_a") if key in requested), None)
@@ -338,12 +528,20 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
                 and all(row.get(key) == value for key, value in filters.items())]
     requested = {key[10:] for row in selected for key in row if key.startswith("requested.")}
     x_coordinate = _coordinate_for_x(x, requested)
+    plotted_coordinates = {x_coordinate}
+    y_coordinate = _coordinate_for_x(y, requested)
+    if y_coordinate in {"rotator_1_angle_deg", "rotator_2_angle_deg"} or (y_coordinate or "").startswith("positioner_"):
+        plotted_coordinates.add(y_coordinate)
     covered = {key.split(".", 1)[-1] for key in (*group_by, *filters)}
     protected = ["run_id", "simulated", "repeat_index", "sample_index", "role", "harmonic"]
     protected += sorted({key for row in selected for key in row if
                          key.startswith("axes.") and key.endswith((".segment", ".direction"))})
+    protected += sorted({key for row in selected for key in row
+                         if key.startswith(("positioner_context.", "positioner_origin."))})
     protected += sorted("requested." + key for key in requested
-                        if key != x_coordinate and key not in covered)
+                        if key not in plotted_coordinates and key not in covered
+                        and not (key == "positioner_z_um" and selected
+                                 and all(positioner_focus_z_is_derived(row) for row in selected)))
     # Literal point revisits on non-X axes are different histories.
     x_module = next((m for m, keys in {
         "temperature": {"temperature_k"}, "magnetic": {"field_x_t", "field_z_t"},
@@ -351,6 +549,8 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
         "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
         "optical": {"optical_source_level_pct", "optical_wavelength_nm", "optical_bandwidth_nm",
                     "optical_nd_pct", "optical_target_power_w", "optical_pulse_picker_ratio", "optical_current_a"},
+        "rotator": {"rotator_1_angle_deg", "rotator_2_angle_deg"},
+        "positioner": {"positioner_" + axis + suffix for axis in "xyz" for suffix in ("_um", "_offset_um")},
     }.items() if x_coordinate in keys), None)
     protected += sorted({key for row in selected for key in row
                          if key.startswith("axes.") and key.endswith(".index")
@@ -379,6 +579,8 @@ def _column_label(column: str) -> str:
         "optical_source_level_pct": "Optical source setting (%)", "optical_nd_pct": "ND setting (%)",
         "optical_current_a": "Laser diode current setting (A)",
         "optical_pulse_picker_ratio": "Pulse picker ratio", "pem_frequency_hz": "PEM reference (Hz)",
+        "rotator_1_angle_deg": "Rotator 1 angle (deg)",
+        "rotator_2_angle_deg": "Rotator 2 angle (deg)",
     }
     for role in ("smu_bias", "gate_top", "gate_bottom"):
         label = role.replace("_", " ").capitalize()
@@ -386,6 +588,9 @@ def _column_label(column: str) -> str:
                       role + "_current_a": label + " current (A)",
                       role + "_v": label + " source (V)",
                       role + "_a": label + " source (A)"})
+    for axis in "xyz":
+        names["positioner_" + axis + "_um"] = "Positioner " + axis.upper() + " absolute position (μm)"
+        names["positioner_" + axis + "_offset_um"] = "Positioner " + axis.upper() + " offset (μm)"
     prefix, _, key = column.partition(".")
     suffix = " target" if prefix == "requested" else " readback" if prefix == "actual" else ""
     if key in names:
