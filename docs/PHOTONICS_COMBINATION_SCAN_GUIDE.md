@@ -951,6 +951,7 @@ SR865A 的 `CUROVLDSTAT?` 已确认可读；SR830 未消费状态锁存，NKT �
 
 项目整体状态见 [集成工作包](modules/INTEGRATION_PHOTONICS_NONLINEAR_HALL.md)、
 [当前交接](PROJECT_HANDOFF.md) 与 [硬件安全说明](HARDWARE_AND_SAFETY.md)。
+
 ## 按外层条件设置锁相量程（2026-10-23）
 
 新增 `[[combination_scan.lockin_range_rules]]`：按 `lockin` 之前已启用模块的计划

@@ -94,7 +94,9 @@ Fake communication counts are not claims of real speed or settling validity.
 
 Deploy only after separate deployment authorization. First real stage is identity,
 reference/settings and TTL distribution verification, then a separately authorized
-small dark/light run. Current production files and old raw scans are preserved.## 按外层扫描条件选择固定量程（2026-10-23）
+small dark/light run. Current production files and old raw scans are preserved.
+
+## 按外层扫描条件选择固定量程（2026-10-23）
 
 `[[combination_scan.lockin_range_rules]]` 可为温度、磁场、光功率/光谱、波片角度或
 已有 SMU 外层点选择完整的 XX/XY/AUX 灵敏度；第一版限固定灵敏度、激励幅度扫描。
