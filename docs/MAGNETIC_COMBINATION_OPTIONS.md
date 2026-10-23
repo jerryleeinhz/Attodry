@@ -16,6 +16,7 @@ magnetic_deviation_policy = "record_continue"
 |---|---|---|---|
 | `[combination_scan].magnetic_deviation_policy` | `"abort"`, `"record_continue"` | `"abort"` | 本次磁场点完整判稳通过后的内层采集 |
 | `[magnet].readback_tolerance_t` | 任意有限正数，单位 T；不再写死 0.0015 T 上限 | 依既有配置契约 | 统一到场/采样目标误差、控制接管误差、非工作轴残余及回零合场容差 |
+| `[magnet].setpoint_ack_tolerance_t` | 有限正数，且不大于 `max(0.0001, readback_tolerance_t)` T；旧 `field_tolerance_t` 使用对应实际容差 | `0.0001` T | 写入目标后的寄存器确认，以及转场/保持/回零目标一致性；不代表实际场到达 |
 | `[magnet].stable_range_t` | 严格 loader 校验的正数 | 依既有配置契约 | 判稳窗口/正式采样窗口的峰峰差 |
 | `[magnet].stable_dwell_s` | 严格 loader 校验的正数 | 依既有配置契约 | 入场完整连续稳定窗口 |
 
@@ -32,6 +33,25 @@ magnetic_deviation_policy = "record_continue"
 旧 `field_tolerance_t` 保留其兼容契约；需要可调容差时使用 `readback_tolerance_t`，两字段不能同时配置。
 大于历史 1.5 mT 的新归档使用可配置容差版本（命令上下文 v2、独立 unified v4、strict-resultant v2）；
 小容差旧快照保持原样，旧版本不接受篡改为更大容差的声明。1.5 mT 仅作为历史版本分界，不是当前参数上限。
+
+## 目标 ACK 容差与等待（2026-10-23）
+
+```toml
+[magnet]
+readback_tolerance_t = 0.0015       # 实际到场/回零等统一容差：1.5mT
+setpoint_ack_tolerance_t = 0.0002   # 独立目标寄存器一致性：0.2mT
+```
+
+两字段的单位都是T，但用途不同。ACK默认100uT；显式值须有限正数且不超过
+max(默认100uT, 当前实际场容差)。例如上述200uT允许目标读回存在约133uT偏差，
+但仍须实际场到达目标并完成原稳定窗口，不能把ACK成功记为到场。旧实际容差小于100uT
+而使用默认ACK的配置仍合法。配置不增加物理轴/合场/混合拐角硬边界余量。
+
+ACK容差也用于计划起点/分量转场、正式窗口目标保持和回零目标一致性；实际回零范数、
+stable_range_t和stable_dwell_s不受其改变。写入跳过使用原独立小阈值，不扩大跳过范围。
+30秒ACK预算保持：固定目标偏差不会因多等而消失，不能仅增加等待或用record_continue
+忽略目标确认失败。真正硬件/通信/控制/未知状态仍fail closed，不自动重发不确定命令。
+活动run不改配置；失败后先核清理和完整空闲门，再备份、改配置及创建新run，保留原记录。
 
 ## 运行行为
 

@@ -72,7 +72,7 @@ class FieldToleranceTests(unittest.TestCase):
             config = load_config(path)
             self.assertEqual(config.magnet.readback_tolerance_t, 0.0015)
             self.assertEqual(config.magnet.stability.criteria.tolerance, 0.0015)
-            for bad in ("0", "0.0002", "nan", '"0.0001"'):
+            for bad in ("0", "0.0016", "nan", '"0.0001"'):
                 path.write_text(source.replace("setpoint_ack_tolerance_t = 0.0001",
                     "setpoint_ack_tolerance_t = " + bad), encoding="utf-8")
                 with self.subTest(ack=bad), self.assertRaises(ConfigError):

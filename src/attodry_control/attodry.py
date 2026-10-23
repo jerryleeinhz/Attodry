@@ -206,10 +206,6 @@ class AttoDryDriver:
             or readback_tolerance_t != field_tolerance
         ):
             raise ValueError("Unified readback and stability tolerances must match and be finite positive numbers.")
-        if (type(setpoint_ack_tolerance_t) not in (float, int)
-                or not math.isfinite(setpoint_ack_tolerance_t)
-                or not 0 < setpoint_ack_tolerance_t <= FIELD_SETPOINT_ACK_TOLERANCE_T):
-            raise ValueError("Setpoint acknowledgement tolerance must be positive and at most 0.0001 T.")
         if (
             type(field_tolerance) not in (float, int)
             or not math.isfinite(field_tolerance)
@@ -219,6 +215,15 @@ class AttoDryDriver:
             raise ValueError(
                 "AttoDryDriver field tolerance must be finite and positive; "
                 f"legacy field_tolerance_t cannot exceed {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
+            )
+        if (type(setpoint_ack_tolerance_t) not in (float, int)
+                or not math.isfinite(setpoint_ack_tolerance_t)
+                or not 0 < setpoint_ack_tolerance_t <= max(
+                    FIELD_SETPOINT_ACK_TOLERANCE_T, field_tolerance)):
+            raise ValueError(
+                "Setpoint acknowledgement tolerance must be finite and positive "
+                "and cannot exceed the larger of the 0.0001 T compatibility "
+                "default and the configured actual-field tolerance."
             )
         configure_attodry_signatures(dll)
         self.dll = dll

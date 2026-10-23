@@ -585,8 +585,14 @@ def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
     tolerance = stability.criteria.tolerance
     ack = _positive_number(table.get("setpoint_ack_tolerance_t", FIELD_SETPOINT_ACK_TOLERANCE_T),
                            f"{name}.setpoint_ack_tolerance_t")
-    if ack > FIELD_SETPOINT_ACK_TOLERANCE_T:
-        raise ConfigError("magnet.setpoint_ack_tolerance_t cannot exceed 0.0001 T.")
+    # Preserve the historical default for narrower actual-field criteria. A
+    # wider explicit register ACK may not exceed the configured actual-field
+    # tolerance; actual arrival/dwell, zero magnitude and hard limits stay unchanged.
+    if ack > max(FIELD_SETPOINT_ACK_TOLERANCE_T, tolerance):
+        raise ConfigError(
+            "magnet.setpoint_ack_tolerance_t cannot exceed the larger of "
+            "the 0.0001 T compatibility default and the configured actual-field tolerance."
+        )
     return MagnetConfig(limits=limits, stability=stability,
                         readback_tolerance_t=tolerance if unified else None,
                         setpoint_ack_tolerance_t=ack)
