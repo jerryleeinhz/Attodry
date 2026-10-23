@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import textwrap
 from datetime import datetime, timezone
@@ -40,6 +41,8 @@ def _coordinate(key, values, route=None):
              "field_x_t": ("Bx", "T"), "field_z_t": ("Bz", "T"),
              "temperature_k": ("T", "K")}
     names.update({"optical_wavelength_nm": ("lambda", "nm"),
+                  "rotator_1_angle_deg": ("Rotator 1 angle", "deg"),
+                  "rotator_2_angle_deg": ("Rotator 2 angle", "deg"),
                   "optical_bandwidth_nm": ("bandwidth", "nm"),
                   "optical_source_level_pct": ("source", "%"),
                   "optical_current_a": ("LD current", "A"),
@@ -91,9 +94,15 @@ def launch_text(summary, width=None):
                          segment["points"]))
     lines += ["", *_table(("Axis", "Segment/direction", "Requested scan", "Points"), axes, width)]
     hardware = []
+    for role, settings in summary.get("rotator", {}).items():
+        zero = settings.get("optical_zero_deg")
+        lines.append(f"{role}/{settings['label']}: {settings['controller']} + {settings['stage_model']} | "
+                     f"Home: {settings['home_policy']} | Mechanical angle (deg) | Optical zero: "
+                     + ("uncalibrated" if zero is None else f"{zero:g} deg"))
     optical = summary.get("optical")
     if optical is not None:
         lines.append("Laser source: " + optical["scan"].get("laser_source", "nkt"))
+        lines.append("Unreachable optical target: " + summary.get("unreachable_target_policy", "abort"))
         chopper = optical.get("chopper")
         if chopper:
             lines.append("Chopper: " + chopper["model"] + " / " + chopper["backend"] + " | " +
@@ -294,19 +303,31 @@ def _monitor_targets(requested):
     return "; ".join(parts)
 
 
-def _record_age(timestamp):
+def _seconds_since(timestamp, now=None):
     if not timestamp:
         return None
     try:
         recorded = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         if recorded.tzinfo is None:
             return None
-        seconds = max(0, int((datetime.now(timezone.utc) - recorded).total_seconds()))
+        seconds = ((now or datetime.now(timezone.utc)) - recorded).total_seconds()
     except (TypeError, ValueError):
         return None
+    return seconds if seconds >= 0 and math.isfinite(seconds) else None
+
+
+def _duration(seconds):
+    if not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0:
+        return "unknown"
+    seconds = int(seconds)
     hours, remainder = divmod(seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _record_age(timestamp, now=None):
+    seconds = _seconds_since(timestamp, now)
+    return _duration(seconds) if seconds is not None else None
 
 
 def _phase_name(phase):
@@ -323,7 +344,7 @@ def _phase_name(phase):
     return name
 
 
-def _monitor_progress_lines(snapshot):
+def _monitor_progress_lines(snapshot, now=None):
     lines = []
     progress = snapshot.get("progress") or {}
     axes = progress.get("axes", [])
@@ -355,23 +376,121 @@ def _monitor_progress_lines(snapshot):
         lines.append("Current phase (last recorded): " + _phase_name(phase))
         started = phase.get("started_at_utc")
         if started:
-            age = _record_age(started)
+            age = _record_age(started, now)
             lines.append("Phase started: " + started + (" | Elapsed: " + age if age else ""))
         updated = phase.get("last_update_at_utc")
         if updated:
-            age = _record_age(updated)
+            age = _record_age(updated, now)
             lines.append("Last database event: " + updated + (" | Age: " + age if age else ""))
     elif phase:
         lines.append("Current phase: unavailable (no explicit phase record)")
     return lines
 
 
-def snapshot_text(snapshot, width=None):
+def environment_refresh_active(snapshot):
+    """Only text ages need periodic refresh; JSON remains evidence based."""
+    phase = snapshot.get("phase") or {}
+    return (snapshot.get("status") == "active" and phase.get("status") == "recorded"
+            and phase.get("module") in {"temperature", "magnetic"}
+            and phase.get("phase") in {"axis_apply", "axis_qualification"})
+
+
+def _environment_value(value, unit):
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        return f"{value:.6f} {unit}"
+    return "unavailable"
+
+
+def _field_value(field):
+    if not isinstance(field, dict):
+        return "unavailable"
+    bx, bz = field.get("bx_t"), field.get("bz_t")
+    if any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v)
+           for v in (bx, bz)):
+        return "unavailable"
+    return f"Bx={bx:+.6f} T | Bz={bz:+.6f} T | |B|={math.hypot(bx, bz):.6f} T"
+
+
+def _environment_lines(snapshot, now=None):
+    environments = snapshot.get("environment") or {}
+    if not environments:
+        return []
+    lines = ["Latest environment readback (stored; not a live query):"]
+    phase = snapshot.get("phase") or {}
+    for module, entry in environments.items():
+        captured = entry.get("captured_at_utc")
+        age = _record_age(captured, now)
+        available = (snapshot.get("status") == "active" and entry.get("status") == "available"
+                     and age is not None)
+        if module == "temperature":
+            lines.append("Latest temperature: " + (_environment_value(entry.get("actual_temperature_k"), "K")
+                         if available else "unavailable"))
+            lines.append("Target temperature: " + _environment_value(entry.get("target_temperature_k"), "K")
+                         + " (archived plan)")
+        elif module == "magnetic":
+            lines.append("Latest field: " + (_field_value(entry.get("actual_field_t"))
+                         if available else "unavailable"))
+            lines.append("Target field: " + _field_value(entry.get("target_field_t")) + " (archived plan)")
+            if available and entry.get("commanded_waypoint_t"):
+                lines.append("Commanded waypoint: " + _field_value(entry["commanded_waypoint_t"]) + " (recorded)")
+        else:
+            continue
+        if available:
+            lines.append("Captured UTC: " + captured + " | Age: " + age)
+            lines.append("Source condition: " + str(entry.get("source_condition_id", "unavailable"))
+                         + " | Attempt: " + str(entry.get("source_attempt_index", "unavailable")))
+        else:
+            lines.append("Captured UTC: unavailable | Age: unknown")
+            lines.append("Readback evidence: " + str(entry.get("reason") or "unavailable or invalid timestamp"))
+        active = (environment_refresh_active(snapshot) and phase.get("module") == module)
+        if active:
+            started = entry.get("qualification_started_at_utc")
+            label = "Qualification elapsed" if phase.get("phase") == "axis_qualification" else "Axis entry elapsed"
+            if phase.get("phase") == "axis_apply":
+                started = entry.get("visit_started_at_utc")
+            lines.append(label + ": " + (_record_age(started, now) or "unknown")
+                         + " (wall-clock estimate)")
+            qualification = entry.get("qualification") or {}
+            if qualification.get("acceptance_mode") is not None:
+                lines.append("Acceptance mode: " + str(qualification["acceptance_mode"]))
+            if module == "temperature" and qualification.get("tolerance") is not None:
+                lines.append("Target tolerance: +/-" + _environment_value(qualification["tolerance"], "K"))
+            if qualification.get("stable_range") is not None:
+                lines.append("Stable range limit: " + _environment_value(qualification["stable_range"], "K" if module == "temperature" else "T"))
+            lines.append("Stable window accumulated: " + _duration(qualification.get("stable_window_elapsed_s"))
+                         + " / required " + _duration(qualification.get("dwell_s")))
+            lines.append("Qualification timeout limit: " + _duration(qualification.get("wait_timeout_s")))
+            lines.append("Qualification timeout remaining: " + _duration(qualification.get("timeout_remaining_s")))
+            subwait = entry.get("subwait") or {}
+            if module == "magnetic" and available and subwait:
+                lines.append("Field subphase: " + str(subwait.get("phase", "unknown")) + " (recorded)")
+                lines.append("Sub-wait elapsed at capture: " + _duration(subwait.get("elapsed_s")))
+                lines.append("Sub-wait timeout remaining at capture: " + _duration(subwait.get("timeout_remaining_s")))
+                lines.append("Sub-wait captured UTC: " + str(subwait.get("captured_at_utc", "unavailable")))
+    status = snapshot.get("status")
+    terminal = (snapshot.get("phase") or {}).get("status") == "terminal"
+    continuation = "enabled" if status == "active" else "disabled (terminal)" if terminal else "unknown"
+    lines.append("Automatic continuation: " + continuation)
+    has_optical = any(axis.get("module") == "optical" for axis in
+                      (snapshot.get("progress") or {}).get("axes", []))
+    lines.append("Time to optical activation: " + ("unknown" if status == "active" and has_optical
+                 else "not applicable (terminal)" if terminal else "not applicable (no optical axis)"
+                 if not has_optical else "unknown"))
+    lines.append("The display does not establish a pause or a safe optical-alignment window.")
+    if status == "active":
+        lines.append("After qualification the program continues automatically; process liveness is not established by these records.")
+    return lines
+
+
+def snapshot_text(snapshot, width=None, *, now=None):
     width = max(40, width or shutil.get_terminal_size((110, 30)).columns)
     lines = [f"Status: {snapshot['status']} | Accepted conditions: {snapshot.get('accepted_conditions', '?')}/"
              f"{snapshot.get('total_conditions', '?')} | Process liveness: {snapshot.get('process_liveness', 'unknown')}",
              "Run ID: " + snapshot.get("run_id", "?")]
-    lines.extend(_monitor_progress_lines(snapshot))
+    lines.extend(_monitor_progress_lines(snapshot, now))
+    lines.extend(_environment_lines(snapshot, now))
+    if snapshot.get("skipped_conditions"):
+        lines.append("Skipped conditions: " + str(snapshot["skipped_conditions"]) + " (not measured)")
     attempt = snapshot.get("current_attempt")
     if attempt:
         lines.append(f"Attempt: {attempt['condition_id']} / {attempt['attempt_index']} / {attempt['status']}")
@@ -395,8 +514,25 @@ def snapshot_text(snapshot, width=None):
             + f" | elapsed {payload.get('elapsed_s', 0):.1f} s"
             + f" | remaining {payload.get('remaining_s', payload.get('timeout_s', 0)):.1f} s"
             + " | " + recovery["created_at_utc"])
+    formal = snapshot.get("last_formal_measurement")
+    formal_contract = "last_formal_measurement" in snapshot
+    if formal_contract:
+        lines.append("Last formal measurement (accepted; stored, not live):")
+        if formal and formal.get("attempt_status") == "accepted":
+            sample = formal.get("sample_index")
+            lines.append("Condition: " + str(formal.get("condition_id", "unavailable"))
+                         + " | Attempt: " + str(formal.get("attempt_index", "unavailable"))
+                         + f" | Sample: {sample + 1 if isinstance(sample, int) else '?'}/"
+                         + str(formal.get("expected_samples", "?")) + " | Status: accepted")
+            lines.append("Formal sample finished UTC: " + str(formal.get("captured_at_utc", "unavailable")))
+            selected_readings = formal.get("modules") or {}
+        else:
+            lines.append("Unavailable (no accepted formal measurement)")
+            selected_readings = {}
+    else:
+        selected_readings = snapshot.get("last_recorded_readings", {})
     readings = []
-    for module, reading in snapshot.get("last_recorded_readings", {}).items():
+    for module, reading in selected_readings.items():
         values = {**reading.get("actual", {}), **reading.get("measurements", {})}
         if module == "lockin":
             background = (reading.get("status") or {}).get("background")
@@ -418,8 +554,9 @@ def snapshot_text(snapshot, width=None):
         readings.append((module, reading.get("captured_at_utc", "?"),
             json.dumps(values, ensure_ascii=False), str(reading.get("clean", "unknown"))))
     if readings:
-        lines += ["Last recorded values (not live queries):",
-                  *_table(("Module", "Captured UTC", "Readback", "Clean"), readings, width)]
+        if not formal_contract:
+            lines.append("Last recorded raw candidates (not formal or live):")
+        lines += _table(("Module", "Captured UTC", "Readback", "Clean"), readings, width)
     cleanup = snapshot.get("cleanup")
     if cleanup is not None:
         lines.append(f"Cleanup overall: clean={cleanup.get('clean')} | Manual verification: "

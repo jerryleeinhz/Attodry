@@ -1,4 +1,4 @@
-"""Four-module plan, shared coordinator and acquisition-order-independent records.
+"""Modular plan, shared coordinator and acquisition-order-independent records.
 
 The public simulator entry accepts only simulated stations. The separate
 hardware entry validates authorization/configuration before using the core.
@@ -16,12 +16,13 @@ from pathlib import Path
 from .combination_store import CombinationStore, utc_now
 from .models import VectorField
 from .measurement_timing import MeasurementTiming
-from .optical_recovery import OpticalPowerDeviation
+from .optical_recovery import OpticalPowerDeviation, OpticalTargetUnreachable
 from .reference_transients import ReferenceTransientError
 from .safety import FieldReadbackPolicy, MagnetLimits, float32_field
 
 
 MODULE_KEYS = {
+    "rotator": {"rotator_1_angle_deg", "rotator_2_angle_deg"},
     "temperature": {"temperature_k"},
     "magnetic": {"field_x_t", "field_z_t"},
     "smu": {"smu_bias_v", "smu_bias_a", "gate_top_v", "gate_top_a",
@@ -74,6 +75,7 @@ class CombinationPlan:
     readback_tolerance_t: float | None = None
     lockin_coordinate_limits: tuple[float, float, float, float] | None = None
     strict_resultant: bool = False
+    unreachable_target_policy: str = "abort"
     command_scoped_field: bool = False
 
     def validate(self) -> None:
@@ -103,6 +105,14 @@ class CombinationPlan:
         modules = [axis.module for axis in self.axes]
         if not modules or len(set(modules)) != len(modules):
             raise ValueError("Provide distinct module axes")
+        if self.unreachable_target_policy not in ("abort", "skip_wavelength"):
+            raise ValueError("Unsupported unreachable_target_policy")
+        if self.unreachable_target_policy == "skip_wavelength":
+            if modules not in (["optical", "lockin"], ["optical", "smu", "lockin"]):
+                raise ValueError("skip_wavelength requires outer optical and only inner SMU/lockin")
+            waves = [p.values.get("optical_wavelength_nm") for p in self.axes[0].points]
+            if None in waves or len(set(waves)) != len(waves):
+                raise ValueError("skip_wavelength requires one optical target per distinct wavelength")
         for value in (self.samples_per_condition, self.repeats):
             if type(value) is not int or not 1 <= value <= 1000:
                 raise ValueError("Sample/repeat counts must be integers in 1..1000")
@@ -132,6 +142,8 @@ class CombinationPlan:
                     raise ValueError("Coordinates must be finite real numbers")
                 if axis.module == "temperature" and point.values["temperature_k"] <= 0:
                     raise ValueError("Temperature must be positive")
+                if axis.module == "rotator" and any(not 0 <= v <= 360 for v in point.values.values()):
+                    raise ValueError("Waveplate mechanical angles must be in 0..360 degrees")
                 if axis.module == "lockin":
                     if not source_min <= point.values["lockin_excitation_v_rms"] <= source_max:
                         raise ValueError("Lock-in excitation is outside the configured limits")
@@ -327,6 +339,8 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 raise ValueError("Legacy combination axis limits cannot exceed 3 T")
     if not isinstance(run_id, str) or not run_id.strip():
         raise ValueError("run_id must be nonempty")
+    if resume and plan.unreachable_target_policy == "skip_wavelength":
+        raise ValueError("Wavelength skipping requires a new run; resume is unsupported")
     completed = store.begin_run(run_id, snapshot, conditions, resume=resume)
     modules = tuple(a.module for a in plan.axes)
     current: dict | None = None
@@ -351,6 +365,39 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
         else:
             emit("scan_phase", {"phase": name, **context})
 
+    def prepare_condition(condition, indices, previous_indices):
+        # Index prefixes preserve duplicate points and inner-axis resets.
+        for depth, axis in enumerate(plan.axes):
+            if previous_indices is None or indices[:depth + 2] != previous_indices[:depth + 2]:
+                point = axis.points[condition["axes"][axis.module]["index"]]
+                emit("axis_setting", {"module": axis.module, "requested": point.values})
+                phase("axis_apply", module=axis.module)
+                with timing.timed_stage("axis_apply", module=axis.module):
+                    emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
+                if hasattr(station, "qualify_axis"):
+                    scope = {"repeat_index": condition["repeat_index"],
+                             "axis_indices": list(indices[1:depth + 2]),
+                             "condition_id": condition["condition_id"]}
+                    phase("axis_qualification", module=axis.module)
+                    with timing.timed_stage("axis_qualification", module=axis.module):
+                        result = station.qualify_axis(axis.module, point, scope)
+                        emit("axis_qualification", {"module": axis.module, **result})
+                        if result.get("ready") is not True:
+                            raise ValueError("Axis did not qualify: " + axis.module)
+        with timing.timed_stage("condition_qualification"):
+            result = station.qualify(modules)
+            emit("condition_qualification", result)
+            if result.get("ready") is not True:
+                raise ValueError("Condition did not qualify")
+
+    skipped_groups = {}
+    skipped_count = 0
+
+    def archive_skip(evidence):
+        store.finish_attempt(run_id, current["condition_id"], attempt,
+                             expected_samples=plan.samples_per_condition,
+                             error=evidence["original_error"])
+        store.skip_condition(run_id, current["condition_id"], attempt, evidence)
 
     try:
         # Only a successfully committed run may become the monitor default.
@@ -370,31 +417,37 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             current = condition
             attempt = store.begin_attempt(run_id, condition["condition_id"])
             emit("condition_started", condition)
+            if plan.unreachable_target_policy == "skip_wavelength" and timing.audit_errors:
+                raise OSError("Measurement audit failure prevents wavelength continuation")
             indices = (condition["repeat_index"], *(
                 condition["axes"][module]["index"] for module in modules))
-            # Index prefixes, not values: preserve duplicate points and inner resets.
-            for depth, axis in enumerate(plan.axes):
-                if previous_indices is None or indices[:depth + 2] != previous_indices[:depth + 2]:
-                    point = axis.points[condition["axes"][axis.module]["index"]]
-                    emit("axis_setting", {"module": axis.module, "requested": point.values})
-                    phase("axis_apply", module=axis.module)
-                    with timing.timed_stage("axis_apply", module=axis.module):
-                        emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
-                    if hasattr(station, "qualify_axis"):
-                        scope = {"repeat_index": condition["repeat_index"],
-                                 "axis_indices": list(indices[1:depth + 2]),
-                                 "condition_id": condition["condition_id"]}
-                        phase("axis_qualification", module=axis.module)
-                        with timing.timed_stage("axis_qualification", module=axis.module):
-                            axis_qualification = station.qualify_axis(axis.module, point, scope)
-                            emit("axis_qualification", {"module": axis.module, **axis_qualification})
-                            if axis_qualification.get("ready") is not True:
-                                raise ValueError("Axis did not qualify: " + axis.module)
-            with timing.timed_stage("condition_qualification"):
-                qualification = station.qualify(modules)
-                emit("condition_qualification", qualification)
-                if qualification.get("ready") is not True:
-                    raise ValueError("Condition did not qualify")
+            group = (condition["repeat_index"], condition["axes"].get("optical", {}).get("index"))
+            if group in skipped_groups:
+                archive_skip(skipped_groups[group])
+                skipped_count += 1
+                attempt = None
+                continue
+            try:
+                prepare_condition(condition, indices, previous_indices)
+            except OpticalTargetUnreachable as exc:
+                if plan.unreachable_target_policy != "skip_wavelength":
+                    raise
+                if timing.audit_errors:
+                    raise OSError("Measurement audit failure prevents wavelength skip") from exc
+                # This catch excludes formal sampling/recovery. All fresh
+                # station guards must pass before any remaining leaves skip.
+                with timing.timed_stage("unreachable_wavelength_guard"):
+                    evidence = station.skip_unreachable_wavelength(exc)
+                evidence = {**evidence, "trigger_condition_id": condition["condition_id"]}
+                archive_skip(evidence)
+                skipped_groups[group] = evidence
+                skipped_count += 1
+                emit("wavelength_skipped", evidence)
+                if timing.audit_errors:
+                    raise OSError("Wavelength skip audit failure prevents continuation") from exc
+                previous_indices = None
+                attempt = None
+                continue
             for sample_index in range(plan.samples_per_condition):
                 with timing.timed_stage("sample", sample_index=sample_index):
                     start = utc_now()
@@ -559,7 +612,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 cleanup_errors.append(f"attempt audit: {audit_error}")
     finally:
         # An audit/presentation failure must not prevent later cleanup actions.
-        for module in ("optical", "lockin", "smu", "magnetic", "temperature"):
+        for module in ("optical", "lockin", "smu", "rotator", "magnetic", "temperature"):
             if module not in modules:
                 continue
             try:
@@ -604,9 +657,13 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
     payloads = [json.loads(r[0]) for r in store.connection.execute(
         "SELECT payload_json FROM combination_samples WHERE run_id=?", (run_id,))]
     summary = overload_summary([p["reads"] for p in payloads])
-    completion_message = ("completed with overload points; inspect per-channel validity"
+    completion_message = (f"completed with {skipped_count} skipped conditions; inspect wavelength skip evidence"
+                          if status == "completed" and skipped_count else
+                          "completed with overload points; inspect per-channel validity"
                           if status == "completed" and summary["data_quality"] == "overload_recorded"
                           else status)
-    emit("data_quality_summary", {**summary, "completion_message": completion_message})
+    emit("data_quality_summary", {**summary, "completion_message": completion_message,
+                                  "skipped_conditions": skipped_count})
     return {"run_id": run_id, "status": status, "cleanup": cleanup, "error": error,
-            "overload_summary": summary, "completion_message": completion_message}
+            "overload_summary": summary, "completion_message": completion_message,
+            "skipped_conditions": skipped_count}

@@ -8,6 +8,7 @@ import time
 
 from .nkt_config import NktError
 from .nkt_control import NktController, utc_now
+from .optical_recovery import OpticalTargetUnreachable
 from .power_feedback import (feedback_evidence, adaptive_feedback_step, next_cld_current_a,
                              next_nd_pct, next_source_current_pct, next_source_power_pct,
                              target_in_tolerance, tuning_in_tolerance)
@@ -15,11 +16,13 @@ from .power_feedback import (feedback_evidence, adaptive_feedback_step, next_cld
 
 class OpticalScan:
     def __init__(self, nkt_config, config, backend, *, pem=None, meter=None,
-                 clock=time.monotonic, sleep=time.sleep, on_event=None, controller=None):
+                 clock=time.monotonic, sleep=time.sleep, on_event=None, controller=None,
+                 state_guard=None):
         config.validate(nkt_config, pem.config if pem else None, meter.config if meter else None)
         self.config, self.nkt_config = config, nkt_config
         self.pem, self.meter = pem, meter
         self.clock, self.sleep, self.on_event = clock, sleep, on_event
+        self.state_guard = state_guard
         self.fixed_feedback_settings = None
         self.nkt = controller or NktController(nkt_config, backend, clock=clock, sleep=sleep, on_event=self._nkt_event)
         self._response_history_key, self._response_history = None, []
@@ -47,8 +50,10 @@ class OpticalScan:
             raise NktError("Optical point total timeout (includes all preparation and tuning)")
 
     def _verify(self, point, wavelength, emitting, deadline, *, verify_meter=True):
-        self._deadline(deadline)
         self.record["state_current"] = False
+        if self.state_guard is not None:
+            self.state_guard()
+        self._deadline(deadline)
         state = {"nkt": self.nkt.verify_point(point, emitting=emitting),
                  "pem": self.pem.verify_ready() if self.pem else None,
                  "pm100d": self.meter.verify_ready(wavelength) if self.meter and verify_meter else None}
@@ -87,6 +92,8 @@ class OpticalScan:
         # Keep raw acquisition evidence even if a later device/state check fails.
         row["power_samples"].append(sample)
         self._event("power_sample", sample=sample.copy())
+        if self.state_guard is not None:
+            self.state_guard()
         self._deadline(deadline)
         if feedback:
             if sample["power_w"] > feedback["max_power_w"]:
@@ -190,8 +197,27 @@ class OpticalScan:
                 tuning = replace(cfg, target_tolerance_w=cfg.tuning_tolerance_w())
                 if source_percentage:
                     next_value = next_source_current_pct if cfg.actuator == "source_current" else next_source_power_pct
-                    revised = replace(point, source_level_pct=next_value(
-                        point.source_level_pct, adjustment_power, tuning, step_pct=effective_step))
+                    try:
+                        revised = replace(point, source_level_pct=next_value(
+                            point.source_level_pct, adjustment_power, tuning, step_pct=effective_step))
+                    except OpticalTargetUnreachable as exc:
+                        # Only this fresh, fully guarded tuning sample can support
+                        # an opted-in skip. Low/zero signal, timeouts and unsafe
+                        # power never receive this classification.
+                        exc.effective_point = point
+                        exc.evidence = {
+                            "actuator": cfg.actuator, "target_power_w": cfg.target_power_w,
+                            "measured_power_w": adjustment_power, "sample_sequence": sample["sequence"],
+                            "source_current_pct": point.source_level_pct,
+                            "maximum_current_pct": cfg.source_current_max_pct,
+                            "skip_eligible": (self.record["state_current"] is True
+                                and not reduce_now and cfg.actuator == "source_current"
+                                and math.isclose(point.source_level_pct, cfg.source_current_max_pct,
+                                                 abs_tol=0.01, rel_tol=0)
+                                and adjustment_power < cfg.target_power_w - cfg.target_tolerance_w),
+                        }
+                        self._event("target_unreachable", condition_id=row["condition_id"], evidence=exc.evidence)
+                        raise
                     label = "source_current" if cfg.actuator == "source_current" else "source_power"
                     row.setdefault(label + "_iterations", []).append({"from_" + label + "_pct": point.source_level_pct,
                         "to_" + label + "_pct": revised.source_level_pct, "window": result,

@@ -44,7 +44,7 @@ MAXIMUM_SR830_SINE_OUTPUT_V = 5.0
 OPTICAL_CONFIG_TABLES = {
     "nkt_source", "nkt_varia", "nkt_lltf", "nkt_run", "pem", "pem_run",
     "pm100d", "pm100d_run", "optical_scan", "power_feedback", "photonics_lockin", "pem_internal_diagnostic",
-    "chopper", "cld1010", "optical_background",
+    "chopper", "cld1010", "optical_background", "rotator_1", "rotator_2", "rotator_scan",
 }
 
 
@@ -938,6 +938,9 @@ def load_temperature_operation_config(
         "visa",
         "lockin_xx",
         "lockin_xy",
+        # The combination lock-in loader validates the optional third detector.
+        # Daily temperature operation only permits its table to coexist.
+        "lockin_aux",
         "lockin_sweep",
         "gate_top",
         "gate_bottom",

@@ -17,6 +17,7 @@ from .nkt_config import NktError, load_nkt_config, number, tenths
 from .nkt_control import SimulatedNkt, utc_now
 from .optical_config import document, load_scan_config
 from .optical_scan import OpticalScan
+from .optical_recovery import OpticalTargetUnreachable
 from .power_feedback import target_in_tolerance
 
 
@@ -123,12 +124,13 @@ class OpticalPointSession:
 
     def __init__(self, config, event_sink=None, *, backend_factory=None,
                  pem_factory=None, meter_factory=None, clock=time.monotonic, sleep=time.sleep,
-                 on_settings_applied=None, chopper_factory=None):
+                 on_settings_applied=None, chopper_factory=None, state_guard=None):
         config.validate()
         self.config, self.event_sink = config, event_sink
         self.backend_factory, self.pem_factory, self.meter_factory = backend_factory, pem_factory, meter_factory
         self.clock, self.sleep = clock, sleep
         self.on_settings_applied = on_settings_applied
+        self.state_guard = state_guard
         self.chopper_factory = chopper_factory
         self.chopper = None
         self._reference_prepared = False
@@ -252,7 +254,7 @@ class OpticalPointSession:
                                                   sleep=self.sleep, on_event=self._engine_event)
             self.engine = OpticalScan(self.config.nkt, self.config.scan, self.backend,
                 pem=self.pem, meter=self.meter, clock=self.clock, sleep=self.sleep,
-                on_event=self._engine_event, controller=controller)
+                on_event=self._engine_event, controller=controller, state_guard=self.state_guard)
             source, filt = self.engine.nkt.begin_session(authorize_writes=authorize_writes,
                                                         confirm_manual_route=confirm_manual_route)
             if self.config.scan.feedback and self.config.scan.feedback.actuator in ("source_current", "source_power"):
@@ -412,7 +414,12 @@ class OpticalPointSession:
     def qualify(self):
         try:
             return self._qualify_point()
-        except BaseException:
+        except BaseException as exc:
+            if isinstance(exc, OpticalTargetUnreachable) and hasattr(exc, "effective_point"):
+                # Tuning may have changed the current before reaching its bound.
+                # Keep the exact effective point for subsequent fresh OFF guards.
+                self.point = exc.effective_point
+                exc.optical_point_index = self.index
             self._previous_current = None
             self.qualified = False
             self._qualified_power_window = None

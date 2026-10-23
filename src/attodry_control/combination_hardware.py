@@ -1,4 +1,4 @@
-"""Gated four-module point execution; no I/O until explicit run authorization."""
+"""Gated module point execution; no I/O until explicit run authorization."""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -24,7 +24,7 @@ from .models import VectorField
 from .safety import MagnetLimits, plan_ordered_field_transitions
 from .photonics_lockin_config import PHOTONICS_REFERENCE_TOPOLOGIES
 from .reference_transients import ReferenceTransientError
-from .optical_recovery import OpticalPowerDeviation
+from .optical_recovery import OpticalPowerDeviation, OpticalTargetUnreachable
 
 
 def _window_error(errors):
@@ -67,6 +67,7 @@ class HardwareCombinationConfig:
     optical: object | None = None
     reference_topology: str = "internal_xx_xy"
     illumination_policy: str = "off_before_axis_change"
+    rotator: object | None = None
 
 
 def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
@@ -76,7 +77,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     known = {"project", "cryostat", "magnet", "temperature_stability", "temperature_run",
              "temperature_scan", "temperature_excitation_scan", "magnetic_field_run",
              "cleanup", "visa", "lockin_xx", "lockin_xy", "lockin_aux", "lockin_sweep",
-             "smu_bias", "gate_top", "gate_bottom", "three_smu_run", "combination_scan"}
+             "smu_bias", "gate_top", "gate_bottom", "three_smu_run", "combination_scan",
+             "rotator_1", "rotator_2", "rotator_scan"}
     known |= configuration.OPTICAL_CONFIG_TABLES
     if set(document) - known:
         raise ValueError("Unknown top-level combination configuration table")
@@ -87,10 +89,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     configuration._strict_keys_with_optional(
         table, "combination_scan",
         {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"},
-        {"lockin_mode", "run_id", "reference_topology", "illumination_policy",
-         "temperature_deviation_policy", "magnetic_deviation_policy", "unreachable_target_policy"})
-    if table.get("unreachable_target_policy", "abort") != "abort":
-        raise ValueError("This combination supports unreachable_target_policy=abort only")
+        {"lockin_mode", "run_id", "reference_topology", "illumination_policy", "unreachable_target_policy",
+         "temperature_deviation_policy", "magnetic_deviation_policy"})
     temperature_policy = table.get("temperature_deviation_policy", "abort")
     if temperature_policy not in ("abort", "record_continue"):
         raise ValueError("combination_scan.temperature_deviation_policy must be abort or record_continue")
@@ -116,9 +116,12 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         raise ValueError("Hardware combination requires backend='hardware'")
     order = table["order"]
     if (not isinstance(order, list) or not order
-            or not all(isinstance(m, str) and m in {"temperature", "magnetic", "smu", "lockin", "optical"} for m in order)
+            or not all(isinstance(m, str) and m in {"temperature", "magnetic", "smu", "lockin", "optical", "rotator"} for m in order)
             or len(set(order)) != len(order)):
-        raise ValueError("Hardware order requires distinct temperature/magnetic/smu/lockin/optical axes")
+        raise ValueError("Hardware order requires distinct temperature/magnetic/smu/lockin/optical/rotator axes")
+    if "rotator" in order and (order not in (["rotator", "optical", "lockin"],
+            ["rotator", "optical", "smu", "lockin"]) or illumination != "off_before_axis_change"):
+        raise ValueError("Waveplate rotator requires rotator -> optical -> optional smu -> lockin and OFF before axis changes")
     if temperature_policy != "abort" and "temperature" not in order:
         raise ValueError("temperature_deviation_policy requires the temperature axis")
     if magnetic_policy != "abort" and "magnetic" not in order:
@@ -135,7 +138,15 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     hardware = {}
     temperature = magnetic = cryostat = None
     optical = None
+    rotator = None
     lockin_limits = None
+    if "rotator" in order:
+        from .rotator_config import load_rotator_config
+        rotator = load_rotator_config(document)
+        if rotator is None or not rotator.devices:
+            raise ValueError("The rotator axis requires at least one enabled waveplate rotator")
+        axes["rotator"] = ScanAxis("rotator", tuple(AxisPoint(dict(p)) for p in rotator.points))
+        hardware["rotator"] = {device.role: _json(asdict(device)) for device in rotator.devices}
     if "temperature" in order:
         temperature = configuration.load_temperature_operation_config(path)
         points = (temperature.temperature_scan.points_k if temperature.temperature_scan is not None
@@ -257,6 +268,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         optical = load_optical_point_config(path)
         if optical.background.enabled and (lockin is None or photonics):
             raise ValueError("Matched complex backgrounds require the internal-XX dual SR830 path")
+        if rotator is not None and optical.background.enabled and optical.background.capture_mode != "per_condition":
+            raise ValueError("Waveplate scans require per_condition dark backgrounds for matched angle visits")
         if photonics and not optical.scan.use_pem:
             raise ValueError("PEM reference optical scans require PEM enabled")
         if not photonics and lockin is not None and optical.scan.use_pem:
@@ -320,7 +333,20 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                            readback_tolerance_t=cryostat.magnet.readback_tolerance_t if cryostat else None,
                            lockin_coordinate_limits=lockin_limits,
                            strict_resultant=(photonics or optical is not None) and magnetic is None,
-                           command_scoped_field=magnetic is not None)
+                           command_scoped_field=magnetic is not None,
+                           unreachable_target_policy=table.get("unreachable_target_policy", "abort"))
+    plan.validate()
+    if plan.unreachable_target_policy == "skip_wavelength":
+        feedback = optical.scan.feedback if optical is not None else None
+        if (topology != "internal_xx_xy" or illumination != "off_before_axis_change"
+                or feedback is None or feedback.actuator != "source_current"
+                or optical.scan.laser_source != "nkt"
+                or len(axes["lockin"].points) != 1
+                or axes["lockin"].points[0].values["lockin_excitation_v_rms"] != 0.004
+                or any(c.sine_output_connected for c in
+                       (lockin.lockin_xx, lockin.lockin_xy, *(
+                           (lockin.lockin_aux,) if getattr(lockin, "lockin_aux", None) else ())))):
+            raise ValueError("skip_wavelength requires NKT current feedback, internal XX, fixed4mV and disconnected SINE outputs")
     snapshot = plan.snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     qualification_policy="axis-entry-strict-environment-v1",
@@ -347,6 +373,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         snapshot["hardware_scope"] = "photonics-combination-v1"
         snapshot["cleanup_policy"]["optical"] = "laser_off_then_electrical_protection_then_pem_finish"
         snapshot["reference_topology"] = topology
+    if rotator is not None:
+        snapshot["cleanup_policy"]["rotator"] = "stop_if_moving_preserve_angle_no_automatic_home"
     # Include point engines and shared safety code, not just the Cartesian loop.
     snapshot["source_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in Path(__file__).parent.glob("*.py")}
@@ -354,7 +382,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if not database.is_absolute():
         database = path.parent / database
     return HardwareCombinationConfig(path, plan, smu, lockin, snapshot, temperature, magnetic,
-                                     cryostat, database.resolve(), run_id, mode, optical, topology, illumination)
+                                     cryostat, database.resolve(), run_id, mode, optical, topology, illumination, rotator)
 
 
 class _Events:
@@ -385,13 +413,17 @@ class _Events:
 class HardwareCombinationStation:
     def __init__(self, config, *, smu_adapter_factory=None, manager_factory=None, sleep=None,
                  dll=None, monotonic=None, optical_backend_factory=None,
-                 pem_factory=None, meter_factory=None, chopper_factory=None):
+                 pem_factory=None, meter_factory=None, chopper_factory=None, rotator_device_factory=None):
         self.config = config
         self.smu_adapter_factory = smu_adapter_factory
         self.manager_factory = manager_factory
         self.sleep = sleep
         self.smu = self.lockin = None
         self.optical = None
+        self.rotator = None
+        self.rotator_device_factory = rotator_device_factory
+        self._rotator_actual_context = {}
+        self._rotator_motion_active = False
         self.source_cleanup_verified = False
         self.optical_backend_factory = optical_backend_factory
         self.pem_factory, self.meter_factory = pem_factory, meter_factory
@@ -451,7 +483,7 @@ class HardwareCombinationStation:
                       for role in active_smu_roles(self.config.smu.plan)}
             explicit_optical_gates = (
                 self.config.optical is not None
-                and [axis.module for axis in self.config.plan.axes] == ["optical", "smu", "lockin"]
+                and [axis.module for axis in self.config.plan.axes if axis.module != "rotator"] == ["optical", "smu", "lockin"]
                 and bool(active)
                 and all(role in {"gate_top", "gate_bottom"}
                         and device.source_mode is SourceMode.VOLTAGE
@@ -486,7 +518,9 @@ class HardwareCombinationStation:
                 "clock": self.monotonic,
                 "sleep": self.sleep}.items() if value is not None}
             self.optical = OpticalPointSession(self.config.optical, self.events.event,
-                on_settings_applied=self._signal_change_callback("optical.tuning_completed"), **kwargs)
+                on_settings_applied=self._signal_change_callback("optical.tuning_completed"),
+                state_guard=self._rotator_state_guard if getattr(self.config, "rotator", None) else None,
+                **kwargs)
             preflight["optical"] = self.optical.open(authorize_writes=True, confirm_manual_route=True)
             if self.config.optical.background.enabled:
                 from .optical_background import MatchedLockinBackground
@@ -495,6 +529,13 @@ class HardwareCombinationStation:
             self.lockin.reference_recovery_guard = self._reference_recovery_guard
         elif self.lockin is not None and self.optical is not None:
             self.lockin.wait_guard = self._internal_wait_guard
+        if getattr(self.config, "rotator", None) is not None:
+            from .rotator_points import RotatorPointSession
+            kwargs = {key: value for key, value in {
+                "device_factory": self.rotator_device_factory, "clock": self.monotonic,
+                "sleep": self.sleep}.items() if value is not None}
+            self.rotator = RotatorPointSession(self.config.rotator, event_sink=self.events.event, **kwargs)
+            preflight["rotator"] = self.rotator.open()
         # All active preflights must succeed before any configuration writes.
         if self.optical is not None:
             if self.lockin is not None:
@@ -503,6 +544,13 @@ class HardwareCombinationStation:
             # Prepare a reference while laser OFF; HARM/reference setup needs
             # the actual PEM frequency even when modulation starts disabled.
             self.optical.set_point(0)
+        if self.rotator is not None:
+            self._rotator_motion_active = True
+            try:
+                self._rotator_off_guard()
+                self.rotator.begin(guard=self._rotator_off_guard)
+            finally:
+                self._rotator_motion_active = False
         if self.lockin is not None:
             self.lockin.configure()
             # The first lock-in axis may request high excitation before an
@@ -523,6 +571,18 @@ class HardwareCombinationStation:
         # inner-axis changes while the optical coordinates themselves stay fixed.
         if self.optical is not None:
             self.optical.suspend()
+        if module == "rotator":
+            self._rotator_motion_active = True
+            try:
+                result = self.rotator.set_point(point.values, guard=self._rotator_off_guard)
+            finally:
+                self._rotator_motion_active = False
+            self._rotator_actual_context = dict(result["actual"])
+            if self.background is not None:
+                self.background.invalidate("waveplate angle visit changed")
+            if result.get("changed"):
+                self._signal_changed("rotator.motion_completed")
+            return result
         if module == "optical":
             axis = next(a for a in self.config.plan.axes if a.module == "optical")
             index = point.metadata.get("optical_point_index")
@@ -558,6 +618,18 @@ class HardwareCombinationStation:
         if not self._optical_group_ready:
             raise ValueError("A continuous optical group must qualify before gate movement")
         return self.optical.observe_hold(phase="gate_transition")
+
+    def _rotator_off_guard(self):
+        if self.optical is None:
+            raise ValueError("Waveplate movement requires an owned optical OFF guard")
+        return self.optical.observe_dark(phase="rotator_motion_guard")
+
+    def _rotator_state_guard(self):
+        # During our owned motion the separate fresh optical OFF guard runs;
+        # target-position checks apply once the angle axis has qualified.
+        if (self.rotator is not None and self.rotator.begun and self.rotator.targets
+                and not self._rotator_motion_active):
+            return self.rotator.verify()
 
     def _signal_change_callback(self, reason):
         if self.lockin is not None:
@@ -635,6 +707,8 @@ class HardwareCombinationStation:
         raise ValueError("Unsupported axis in continuous_gate_scan")
 
     def qualify(self, modules):
+        if self.rotator is not None:
+            self.rotator.verify()
         if self.config.illumination_policy == "continuous_gate_scan":
             self._guard_continuous_optical()
             if self.background is not None and self.background.needs_capture:
@@ -666,6 +740,8 @@ class HardwareCombinationStation:
                 self._capture_dark_background()
             self.set_monitor_phase("optical_tuning", module="optical")
             self.optical.qualify()
+            if self.rotator is not None:
+                self.rotator.verify()
             if self.lockin is not None:
                 # PEM activation or power/wavelength changes may disturb the
                 # reference; formal electrical qualification follows them.
@@ -684,6 +760,8 @@ class HardwareCombinationStation:
                  for key in ("phase", "ref", "nharmonic", "dharmonic", "blade", "enable")}
                 if self.optical.chopper else None),
             "xx_sample_connected": self.config.lockin.lockin_xx.sine_output_connected}
+        if self.rotator is not None:
+            context["actual_conditions"] = {"rotator": dict(self._rotator_actual_context)}
         if getattr(self.config.lockin, "lockin_aux", None) is not None:
             context["lockin_identities"] = dict(self.lockin.identities)
             context["active_roles"] = [c.role.value for c in self.lockin.roles]
@@ -713,6 +791,9 @@ class HardwareCombinationStation:
         try:
             for sample_index in range(self.background.config.samples):
                 self.set_monitor_phase("dark_acquisition", module="lockin", sample_index=sample_index)
+                dark_angles = {}
+                if self.rotator is not None:
+                    dark_angles = self.rotator.verify()
                 self.optical.observe_dark(phase="background_sample_before")
                 self._background_smu_guard()
                 temperature_observation = None
@@ -744,8 +825,12 @@ class HardwareCombinationStation:
                             "field_x_t": magnetic_observation["field_x_t"],
                             "field_z_t": magnetic_observation["field_z_t"]},
                         "status": {**reading["status"], "magnetic_observation": magnetic_observation}}
+                if dark_angles:
+                    reading = {**reading, "actual": {**reading["actual"], **dark_angles}}
                 readings.append(reading)
                 self.optical.observe_dark(phase="background_sample_after")
+                if self.rotator is not None:
+                    self.rotator.verify()
                 self._background_smu_guard()
                 if self._background_context() != context:
                     raise ValueError("Reference/phase changed during dark baseline acquisition")
@@ -765,7 +850,62 @@ class HardwareCombinationStation:
             if not sample.clean:
                 raise ValueError("SMU dark-background state failed its existing electrical protection")
 
+    def skip_unreachable_wavelength(self, error):
+        """Handle one expected tuning bound, with fresh guards and no retry.
+
+        This runs inside an open, healthy station before any formal light read.
+        It never recovers a failed/closed SMU or turns an output ON for evidence.
+        A failed guard propagates to the unchanged fail-closed run cleanup.
+        """
+        if (self.config.plan.unreachable_target_policy != "skip_wavelength"
+                or type(error) is not OpticalTargetUnreachable
+                or not getattr(error, "evidence", {}).get("skip_eligible")
+                or getattr(error, "optical_point_index", None) != self.optical.index
+                or self.optical.sample_active or self.events.errors):
+            raise ValueError("Optical failure is not eligible for wavelength skipping") from error
+        self.optical.suspend()
+        self.optical.observe_dark(phase="skip_unreachable_wavelength", deadline=self.optical.deadline)
+        self.lockin.protect_source()
+        self.lockin.verify_ready()
+        # Unlike dark readiness alone, qualify checks the receiver references.
+        previous_deadline = self.lockin.wait_deadline
+        self.lockin.wait_deadline = self.optical.deadline
+        try:
+            self.lockin.qualify()
+        finally:
+            self.lockin.wait_deadline = previous_deadline
+        self._verify_optical_reference()
+        if getattr(self.config.lockin, "lockin_aux", None) is not None:
+            for cfg, device in zip(self.lockin.roles, self.lockin.pair):
+                status = device.read_reference_status(current_status_supported=cfg.current_status_supported)
+                problems = self.lockin._status_problems(cfg, status, allow_reference_unlock=False)
+                self.events.event("unreachable_skip_reference_status", {"role": cfg.role.value,
+                                                                        "status": asdict(status)})
+                if problems:
+                    raise ValueError("Mixed lock-in fault prevents wavelength skip: " + "; ".join(problems))
+        else:
+            for device in self.lockin.pair:
+                lia, errors = device.read_status_latches()
+                self.events.event("unreachable_skip_reference_status", {"role": device.role.value,
+                    "lia_status": asdict(lia), "error_status": errors})
+                if lia.raw != 0 or errors != 0:
+                    raise ValueError("Mixed SR830 status prevents wavelength skip")
+        self._background_smu_guard()
+        self.optical.observe_dark(phase="skip_unreachable_wavelength_after", deadline=self.optical.deadline)
+        if self.background is not None:
+            self.background.invalidate("unreachable wavelength skipped")
+        if self.events.errors:
+            raise OSError("Wavelength skip audit failed: " + "; ".join(self.events.errors))
+        return {"ready": True, "laser_off_confirmed": True,
+                "reference_verified": True, "electrical_guard_verified": True,
+                "optical_point_index": self.optical.index,
+                "wavelength_nm": self.optical.wavelength, "reason": "target_unreachable",
+                "original_error": f"{type(error).__name__}: {error}",
+                "target_evidence": error.evidence}
+
     def begin_sample(self):
+        if self.rotator is not None:
+            self.rotator.verify()
         if self.optical is not None:
             self.optical.begin_sample()
             try:
@@ -783,6 +923,11 @@ class HardwareCombinationStation:
 
     def end_sample(self, reads):
         errors = []
+        if self.rotator is not None:
+            try:
+                self.rotator.verify()
+            except BaseException as exc:
+                errors.append(exc)
         for device in (self.optical, self.cryo):
             if device is not None:
                 try:
@@ -844,6 +989,7 @@ class HardwareCombinationStation:
                 self.lockin.wait_deadline = None
 
     def _reference_recovery_guard(self, deadline):
+        self._rotator_state_guard()
         if self.optical is not None:
             self.optical.guard_reference_recovery(deadline=deadline)
             if self.lockin.configured:
@@ -852,6 +998,7 @@ class HardwareCombinationStation:
             self.cryo.capture("reference_recovery")
 
     def _internal_wait_guard(self):
+        self._rotator_state_guard()
         if self.optical is not None and self.optical.point is not None:
             self.optical.guard_reference_recovery(deadline=self.lockin.wait_deadline)
         if self.cryo is not None:
@@ -905,6 +1052,11 @@ class HardwareCombinationStation:
                     "pair_tolerance_hz": self.config.lockin.pair_tolerance_hz})
 
     def read(self, module):
+        if module == "rotator":
+            actual = self.rotator.verify()
+            return {"module": "rotator", "captured_at_utc": utc_now(), "actual": actual,
+                    "measurements": {}, "clean": True, "problems": [],
+                    "status": {"verified": True, "angle_units": "deg"}}
         if module == "optical":
             return self.optical.read()
         if module in {"temperature", "magnetic"}:
@@ -958,6 +1110,9 @@ class HardwareCombinationStation:
             # and the PEM reference open until all electrical protection finishes.
             result = self.optical.cleanup(finish_pem=False, close_meter=False)
             clean = result["verified"]
+        elif module == "rotator" and self.rotator is not None:
+            result = self.rotator.cleanup(failed=failed)
+            clean = result.get("verified") is True
         elif module == "lockin" and self.lockin is not None:
             result = self.lockin.cleanup()
             clean = result["verified"]
@@ -987,7 +1142,7 @@ class HardwareCombinationStation:
 
     def close(self):
         errors = []
-        for device in (self.lockin, self.smu, self.cryo, self.optical):
+        for device in (self.lockin, self.smu, self.cryo, self.rotator, self.optical):
             if device is not None:
                 try:
                     result = (device.close(finish_pem=self.lockin is None or self.source_cleanup_verified)
@@ -996,6 +1151,8 @@ class HardwareCombinationStation:
                         self.events.event("optical_final_cleanup", result)
                         if result.get("verified") is not True:
                             errors.append("Optical final cleanup unverified: " + str(result))
+                    elif device is self.rotator and result:
+                        errors.extend(str(error) for error in result)
                 except BaseException as exc:
                     errors.append(f"{type(exc).__name__}: {exc}")
         errors.extend(self.events.errors)
@@ -1009,7 +1166,8 @@ def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
                                smu_adapter_factory=None, manager_factory=None, sleep=None,
                                on_registered=None, authorize_optical=False,
                                confirm_optical_route=False, optical_backend_factory=None,
-                               pem_factory=None, meter_factory=None, chopper_factory=None):
+                               pem_factory=None, meter_factory=None, chopper_factory=None,
+                               rotator_device_factory=None):
     if not authorize_hardware:
         raise ValueError("Explicit combined connection/write/status-consumption authorization required")
     if config.lockin is not None:
@@ -1032,7 +1190,8 @@ def run_hardware_combination(config, store, run_id, *, authorize_hardware=False,
                                            dll=dll, monotonic=monotonic,
                                            optical_backend_factory=optical_backend_factory,
                                            pem_factory=pem_factory, meter_factory=meter_factory,
-                                           chopper_factory=chopper_factory)
+                                           chopper_factory=chopper_factory,
+                                           rotator_device_factory=rotator_device_factory)
     snapshot = {**config.snapshot, "authorization": {
         "combined_connection_writes_status_consumption": True,
         "xy_sine_disconnected": (False if config.reference_topology == "pem_xy_xx_sine" else confirm_xy_sine_disconnected),

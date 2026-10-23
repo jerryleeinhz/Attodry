@@ -6,6 +6,7 @@ import math
 import statistics
 
 from .nkt_config import NktError, number, tenths
+from .optical_recovery import OpticalTargetUnreachable
 
 
 def _checked_sample(sample, epoch_s, max_power_w, last_sequence, last_finished_s):
@@ -158,7 +159,7 @@ def next_source_current_pct(current, power_w, config, *, step_pct=None):
     value = round(min(config.source_current_max_pct,
                       max(config.source_current_min_pct, current + sign * step)), 1)
     if math.isclose(value, current, abs_tol=0.01):
-        raise NktError("Target unreachable at configured source current boundary/resolution")
+        raise OpticalTargetUnreachable("Target unreachable at configured source current boundary/resolution")
     return value
 
 

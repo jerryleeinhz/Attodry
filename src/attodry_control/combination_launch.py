@@ -91,6 +91,7 @@ def launch_summary(config, database, run_id):
     summary["source_version"] = __version__
     summary["source_entry_sha256"] = hashlib.sha256(Path(__file__).with_name("combination_cli.py").read_bytes()).hexdigest()
     summary["illumination_policy"] = config.illumination_policy
+    summary["unreachable_target_policy"] = config.plan.unreachable_target_policy
     if config.magnetic is not None:
         summary["magnetic_deviation_policy"] = config.cryostat.magnetic_deviation_policy
         summary["field_transition_policy"] = config.magnetic.run.transition_policy.value
@@ -182,4 +183,6 @@ def launch_summary(config, database, run_id):
         summary["lockin"]["active_roles"] = ["xx", "xy", "aux"]
     if config.optical is not None:
         summary["optical"] = config.optical.snapshot()
+    if getattr(config, "rotator", None) is not None:
+        summary["rotator"] = {device.role: asdict(device) for device in config.rotator.devices}
     return summary

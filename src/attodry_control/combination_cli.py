@@ -22,7 +22,7 @@ def load_plan(path: str | Path) -> CombinationPlan:
     table = document["combination_scan"]
     if not isinstance(table, dict):
         raise ValueError("combination_scan must be a table")
-    allowed = {"backend", "axes", "samples_per_condition", "repeats", "run_name", "note"}
+    allowed = {"backend", "axes", "samples_per_condition", "repeats", "run_name", "note", "unreachable_target_policy"}
     if set(table) - allowed or table.get("backend") != "simulation":
         raise ValueError("Only backend='simulation' and documented scan keys are supported")
     axes = []
@@ -45,9 +45,20 @@ def load_plan(path: str | Path) -> CombinationPlan:
         axes.append(ScanAxis(axis["module"], tuple(points)))
     plan = CombinationPlan(tuple(axes), table.get("samples_per_condition", 1),
                            table.get("repeats", 1), table.get("run_name", ""),
-                           table.get("note", ""))
+                           table.get("note", ""),
+                           unreachable_target_policy=table.get("unreachable_target_policy", "abort"))
     plan.validate()
     return plan
+
+
+def monitor_output_due(snapshot, *, changed, json_output, last_rendered, now):
+    """Refresh active environment ages in text only, without changing evidence."""
+    if changed:
+        return True
+    if json_output or last_rendered is None:
+        return False
+    from .combination_terminal import environment_refresh_active
+    return environment_refresh_active(snapshot) and now - last_rendered >= 5.0
 
 
 def run(argv: list[str] | None = None) -> int:
@@ -152,12 +163,16 @@ def run(argv: list[str] | None = None) -> int:
     if not args.json:
         print("Database: " + str(database), flush=True)
     previous = None
+    last_rendered = None
     while True:
         snapshot = {**run_snapshot(database, run_id), "database": str(database)}
         encoded = json.dumps(snapshot, ensure_ascii=False)
-        if encoded != previous:
+        observed = time.monotonic()
+        if monitor_output_due(snapshot, changed=encoded != previous, json_output=args.json,
+                              last_rendered=last_rendered, now=observed):
             print(encoded if args.json else snapshot_text(snapshot), flush=True)
             previous = encoded
+            last_rendered = observed
         if args.once or snapshot["status"] != "active":
             return 0
         time.sleep(1)

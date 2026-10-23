@@ -374,7 +374,9 @@ class LockinPointSession:
             self._wait(self.args.sample_interval_s)
         self._ensure_settled(self.point_record)
         actual = self._read_coordinates()
-        record = {**self.point_record, "samples": [], "harmonic_transition_status": []}
+        record = {**self.point_record, "samples": [], "harmonic_transition_status": [],
+                  "channel_labels": {cfg.role.value: cfg.channel_label
+                                     for cfg in (self.config.lockin_xx, self.config.lockin_xy)}}
         try:
             daily._capture_sweep_point(
                 *self.pair, target_frequency_hz=actual["lockin_frequency_hz"],
