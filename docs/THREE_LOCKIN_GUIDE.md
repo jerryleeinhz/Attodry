@@ -94,5 +94,15 @@ Fake communication counts are not claims of real speed or settling validity.
 
 Deploy only after separate deployment authorization. First real stage is identity,
 reference/settings and TTL distribution verification, then a separately authorized
-small dark/light run. Current production files and old raw scans are preserved.
+small dark/light run. Current production files and old raw scans are preserved.## 按外层扫描条件选择固定量程（2026-10-23）
+
+`[[combination_scan.lockin_range_rules]]` 可为温度、磁场、光功率/光谱、波片角度或
+已有 SMU 外层点选择完整的 XX/XY/AUX 灵敏度；第一版限固定灵敏度、激励幅度扫描。
+每个外层条件必须唯一匹配一条规则，各路仍检查型号档位和本站 allowlist。换档在
+首次准备 optical/lockin 轴之前核验并完成原有等待，先于光学参考转换、正式窗口
+和匹配暗背景；实际温度/磁场波动不会触发换档。内部 XX 两路规则会话与三路一样
+要求 A−B/AC/24 dB RC；未配置规则时原有会话保持原支持范围。
+此功能独立于被拒绝的逐谐波/原有逐点量程覆盖，不改变 AUX 输入范围或激励源。
+完整 TOML、模块坐标、往返磁场点序号、背景兼容性及离线预览见
+[按外层扫描点设置锁相量程](LOCKIN_RANGE_RULES.md)。
 

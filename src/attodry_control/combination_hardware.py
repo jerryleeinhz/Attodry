@@ -68,6 +68,7 @@ class HardwareCombinationConfig:
     reference_topology: str = "internal_xx_xy"
     illumination_policy: str = "off_before_axis_change"
     rotator: object | None = None
+    lockin_range_schedule: object | None = None
 
 
 def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
@@ -90,7 +91,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         table, "combination_scan",
         {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"},
         {"lockin_mode", "run_id", "reference_topology", "illumination_policy", "unreachable_target_policy",
-         "temperature_deviation_policy", "magnetic_deviation_policy"})
+         "temperature_deviation_policy", "magnetic_deviation_policy", "lockin_range_rules"})
     temperature_policy = table.get("temperature_deviation_policy", "abort")
     if temperature_policy not in ("abort", "record_continue"):
         raise ValueError("combination_scan.temperature_deviation_policy must be abort or record_continue")
@@ -247,7 +248,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             visa=configuration._parse_visa(configuration._table(document, "visa")))
         from .internal_lockin_group import load_auxiliary_config, InternalLockinGroupSession
         lockin.lockin_aux = load_auxiliary_config(document, safety_document, xx.frequency_hz)
-        session_type = InternalLockinGroupSession if lockin.lockin_aux is not None else LockinPointSession
+        session_type = (InternalLockinGroupSession if lockin.lockin_aux is not None
+                        or "lockin_range_rules" in table else LockinPointSession)
         prepared = session_type(path, lockin, lambda *_: None, mode=mode)
         axes["lockin"] = ScanAxis("lockin", tuple(AxisPoint({
             "lockin_excitation_v_rms": point.source_v_rms, "lockin_frequency_hz": point.frequency_hz},
@@ -347,7 +349,43 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                        (lockin.lockin_xx, lockin.lockin_xy, *(
                            (lockin.lockin_aux,) if getattr(lockin, "lockin_aux", None) else ())))):
             raise ValueError("skip_wavelength requires NKT current feedback, internal XX, fixed4mV and disconnected SINE outputs")
+    range_schedule = None
+    if "lockin_range_rules" in table:
+        from .lockin_range_rules import compile_lockin_range_rules
+        from .lockin_backend import capabilities_for
+        if lockin is None or mode != "excitation":
+            raise ValueError("lockin_range_rules requires fixed-sensitivity lock-in excitation mode")
+        roles = {"lockin_xx": lockin.lockin_xx, "lockin_xy": lockin.lockin_xy}
+        if getattr(lockin, "lockin_aux", None) is not None:
+            roles["lockin_aux"] = lockin.lockin_aux
+        safety_path = Path(lockin.safety_path) if photonics else path.with_name("lockin_safety.toml")
+        safety_doc = configuration._load_document(safety_path)
+        allowed = {}
+        for role, cfg in roles.items():
+            if getattr(cfg.sensitivity_mode, "value", cfg.sensitivity_mode) != "fixed" or getattr(cfg, "harmonic_settings", ()):
+                raise ValueError("lockin_range_rules cannot combine with auto/per-harmonic sensitivity")
+            scales = safety_doc[role]["allowed_fixed_full_scales_v"]
+            allowed[role] = tuple(v for v in scales if v in capabilities_for(cfg.model).sensitivity_full_scales_v)
+        if not photonics and any(
+                p.range_spec.xx_full_scale_v is not None or p.range_spec.xy_full_scale_v is not None
+                for p in prepared.grid):
+            raise ValueError("lockin_range_rules cannot combine with segment sensitivity overrides")
+        range_schedule = compile_lockin_range_rules(table["lockin_range_rules"], plan, allowed)
+        if illumination == "continuous_gate_scan":
+            group_ranges = {}
+            for row in range_schedule.preview():
+                group = row["outer_indices"]["optical"]
+                ranges = tuple(sorted(row["full_scales_v"].items()))
+                if group in group_ranges and group_ranges[group] != ranges:
+                    raise ValueError("continuous_gate_scan requires invariant lock-in ranges within each optical group")
+                group_ranges[group] = ranges
+        if (optical is not None and optical.background.enabled
+                and optical.background.capture_mode == "once_before_scan"
+                and len({tuple(sorted(row["full_scales_v"].items())) for row in range_schedule.preview()}) > 1):
+            raise ValueError("Variable lockin_range_rules requires per_condition dark backgrounds")
     snapshot = plan.snapshot()
+    if range_schedule is not None:
+        snapshot["lockin_range_rules"] = range_schedule.snapshot()
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     qualification_policy="axis-entry-strict-environment-v1",
                     lockin_mode=mode,
@@ -369,6 +407,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if lockin is not None and getattr(lockin, "lockin_aux", None) is not None:
         snapshot["hardware"]["lockin"]["active_roles"] = ["xx", "xy", "aux"]
         snapshot["cleanup_policy"]["lockin"] = "explicit_source_cleanup_preserve_internal_xx_ttl_receivers"
+    if range_schedule is not None and not photonics:
+        snapshot["cleanup_policy"]["lockin"] = "explicit_source_cleanup_preserve_internal_xx_ttl_receivers"
     if optical is not None:
         snapshot["hardware_scope"] = "photonics-combination-v1"
         snapshot["cleanup_policy"]["optical"] = "laser_off_then_electrical_protection_then_pem_finish"
@@ -382,7 +422,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if not database.is_absolute():
         database = path.parent / database
     return HardwareCombinationConfig(path, plan, smu, lockin, snapshot, temperature, magnetic,
-                                     cryostat, database.resolve(), run_id, mode, optical, topology, illumination, rotator)
+                                     cryostat, database.resolve(), run_id, mode, optical, topology, illumination, rotator, range_schedule)
 
 
 class _Events:
@@ -496,7 +536,8 @@ class HardwareCombinationStation:
             self.events.event("smu_preflight", preflight["smu"])
         if self.config.lockin is not None:
             session_type = LockinPointSession
-            if getattr(self.config.lockin, "lockin_aux", None) is not None:
+            if (getattr(self.config.lockin, "lockin_aux", None) is not None
+                    or getattr(self.config, "lockin_range_schedule", None) is not None):
                 from .internal_lockin_group import InternalLockinGroupSession
                 session_type = InternalLockinGroupSession
             if self.config.reference_topology in PHOTONICS_REFERENCE_TOPOLOGIES:
@@ -562,6 +603,26 @@ class HardwareCombinationStation:
             self.smu.begin_points(self.events)
         self.open_completed = True
         return _json({"mode": "hardware", "identities_and_initial_state": preflight})
+
+    def prepare_lockin_ranges(self, condition):
+        """Select from frozen requested axes before optical/lock-in preparation."""
+        schedule = getattr(self.config, "lockin_range_schedule", None)
+        if schedule is None:
+            return
+        selection = schedule.resolve({module: value["index"] for module, value in condition["axes"].items()})
+        if self.optical is not None:
+            current = self.lockin.range_context()
+            held_continuous = (self.config.illumination_policy == "continuous_gate_scan"
+                and self._optical_group_ready and current.get("verified") is True
+                and current.get("confirmed_full_scales_v") == selection.full_scales_v)
+            if not held_continuous:
+                self.optical.suspend()
+        result = self.lockin.apply_range_profile({"name": selection.rule_name,
+                                                 "ranges": selection.full_scales_v})
+        if self.background is not None and result.get("changed_roles"):
+            self.background.invalidate("lock-in sensitivity profile changed")
+        self.events.event("lockin_range_selected", {"condition_id": condition["condition_id"],
+            "outer_indices": list(selection.outer_indices), "requested": selection.requested, **result})
 
     def apply(self, module, point):
         self._applied[module] = dict(point.values)
@@ -760,6 +821,11 @@ class HardwareCombinationStation:
                  for key in ("phase", "ref", "nharmonic", "dharmonic", "blade", "enable")}
                 if self.optical.chopper else None),
             "xx_sample_connected": self.config.lockin.lockin_xx.sine_output_connected}
+        if getattr(self.config, "lockin_range_schedule", None) is not None:
+            profile = self.lockin.range_context()
+            if not profile.get("verified"):
+                raise ValueError("No verified lock-in range profile for dark matching")
+            context["lockin_full_scales_v"] = profile["confirmed_full_scales_v"]
         if self.rotator is not None:
             context["actual_conditions"] = {"rotator": dict(self._rotator_actual_context)}
         if getattr(self.config.lockin, "lockin_aux", None) is not None:
@@ -1064,6 +1130,8 @@ class HardwareCombinationStation:
         if module == "lockin":
             reading = self.lockin.sample_point(
                 measurement_context=self.cryo.capture if self.cryo is not None else None)
+            if getattr(self.config, "lockin_range_schedule", None) is not None:
+                reading.setdefault("status", {})["lockin_range_profile"] = self.lockin.range_context()
             if self.background is not None:
                 reading = self.background.apply(reading, self._background_context())
                 reading["status"]["background"] = reading["background"]

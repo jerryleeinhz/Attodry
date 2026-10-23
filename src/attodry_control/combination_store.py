@@ -354,6 +354,11 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "SELECT created_at_utc, payload_json FROM combination_events WHERE run_id=? "
             "AND event_type='optical_background_status' ORDER BY event_id DESC LIMIT 1", (run_id,)
         ).fetchone()
+        range_profile = connection.execute(
+            "SELECT created_at_utc, payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type IN ('lockin_range_selected','lockin_range_profile_attempt','lockin_range_profile_applied','lockin_range_profile_failed') "
+            "ORDER BY event_id DESC LIMIT 1", (run_id,)
+        ).fetchone()
         last_confirmed = {}
         for raw in connection.execute(
             "SELECT payload_json FROM combination_events WHERE run_id=? "
@@ -374,6 +379,8 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "cleanup": json.loads(row["cleanup_json"]) if row["cleanup_json"] else None,
             "error": row["error"], "process_liveness": "unknown",
             "last_recorded_readings": last_confirmed,
+            "lockin_range_profile": ({"created_at_utc": range_profile["created_at_utc"],
+                **json.loads(range_profile["payload_json"])} if range_profile else None),
             "dark_background": ({"created_at_utc": background["created_at_utc"],
                                  **json.loads(background["payload_json"])} if background else None),
             "reference_recovery": ({"created_at_utc": recovery["created_at_utc"],

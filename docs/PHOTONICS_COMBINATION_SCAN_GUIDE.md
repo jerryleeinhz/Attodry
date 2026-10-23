@@ -951,3 +951,12 @@ SR865A 的 `CUROVLDSTAT?` 已确认可读；SR830 未消费状态锁存，NKT �
 
 项目整体状态见 [集成工作包](modules/INTEGRATION_PHOTONICS_NONLINEAR_HALL.md)、
 [当前交接](PROJECT_HANDOFF.md) 与 [硬件安全说明](HARDWARE_AND_SAFETY.md)。
+## 按外层条件设置锁相量程（2026-10-23）
+
+新增 `[[combination_scan.lockin_range_rules]]`：按 `lockin` 之前已启用模块的计划
+坐标或模块点序号选择完整量程组，覆盖温度、磁场、光学、rotator 和已有 SMU。
+支持固定灵敏度的激励幅度光电会话；每个外层条件必须唯一匹配，规则不扩大扫描
+网格。实际读回波动与 `record_continue` 不触发切换；改档仍须核验和原有稳定等待。
+会改变量程的计划不能使用 `once_before_scan` 暗背景，需采用 `per_condition`；
+原有背景限制继续有效。完整用法与离线预览见
+[按外层扫描点设置锁相量程](LOCKIN_RANGE_RULES.md)。

@@ -170,6 +170,15 @@ def launch_text(summary, width=None):
                 if minimum is not None and maximum is not None:
                     hardware.append((role, f"h{override['harmonic']} AUTO limits",
                         _number(minimum, "V") + " .. " + _number(maximum, "V"), "-", "-"))
+    ranges = summary.get("lockin_range_rules")
+    if ranges:
+        lines.append(f"Lock-in range rules: {len(ranges['rules'])} | "
+                     f"Resolved outer visits: {len(ranges['preview'])} | Full mapping: describe-hardware")
+        for rule in ranges["rules"]:
+            scales = {role: rule[role + "_full_scale_v"] for role in
+                      ("lockin_xx", "lockin_xy", "lockin_aux") if role + "_full_scale_v" in rule}
+            lines.append("Range rule " + rule["name"] + ": " +
+                         ", ".join(role + "=" + _number(value, "V") for role, value in scales.items()))
     if hardware:
         lines += ["", *_table(("Instrument", "Measurement", "Sensitivity", "Reserve", "Protection/timing"),
                               hardware, width)]
@@ -489,6 +498,12 @@ def snapshot_text(snapshot, width=None, *, now=None):
              "Run ID: " + snapshot.get("run_id", "?")]
     lines.extend(_monitor_progress_lines(snapshot, now))
     lines.extend(_environment_lines(snapshot, now))
+    range_profile = snapshot.get("lockin_range_profile")
+    if range_profile:
+        lines.append("Lock-in range: " + str(range_profile.get("rule_name", "?")) + " | " +
+            ", ".join(role + "=" + (_number(value, "V") if value is not None else "unknown")
+                      for role, value in range_profile.get("confirmed_full_scales_v", {}).items()) +
+            " | Verified: " + str(range_profile.get("verified")))
     if snapshot.get("skipped_conditions"):
         lines.append("Skipped conditions: " + str(snapshot["skipped_conditions"]) + " (not measured)")
     attempt = snapshot.get("current_attempt")

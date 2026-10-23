@@ -37,6 +37,21 @@ Last updated: 2026-10-22
 
 ## Current stage
 
+### 2026-10-23 外层条件锁相量程规则
+
+新增可选 `combination_scan.lockin_range_rules`：按 temperature/magnetic/optical/rotator/SMU
+的外层计划坐标及可选零基点序号选择完整 XX/XY/AUX 固定量程。离线检查唯一完整覆盖、
+型号/本站允许档位、外层顺序及冲突；预览和归档保存逐条件映射。无规则保留旧行为。
+支持现有固定 excitation 组会话；内部 XX 的双/三路须 A-B/AC/24dB RC，PEM 路径保留。
+每条件首次 optical/lockin 准备前应用，实际变化通道单次 sensitivity 写入，更新运行时
+预期值并完成原 transition/剩余等待和状态核验；原 TOML、源输出、参考、TC/Reserve 不改。
+部分失败禁止继续并保留未知读回，独立清理不覆盖主错误。匹配暗背景加入确认量程；
+变化量程拒绝 once_before_scan。连续照光组内量程必须恒定，避免内层关光或调档。
+新规则、运行时、组合、监控测试使用硬件阻断入口；使用说明见
+[外层量程规则](LOCKIN_RANGE_RULES.md)。本次为代码/文件部署，未启动实机采集或状态查询。
+LK_setup 文件更新须全站终态、精确进程/Notebook idle、全部 owner 租约、源哈希通过；
+保留所有本机实验 TOML/安全策略。部署证据记录于 `.test-tmp/lockin-ranges-20261023/`。
+
 
 ### English Combination monitor progress and phases (2026-10-20)
 

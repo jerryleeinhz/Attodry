@@ -100,7 +100,14 @@ def run(argv: list[str] | None = None) -> int:
         from .combination_hardware import load_hardware_combination, run_hardware_combination
         config = load_hardware_combination(args.config)
         if args.command == "describe-hardware":
-            print(json.dumps({"plan": config.snapshot, "conditions": config.plan.conditions()},
+            conditions = config.plan.conditions()
+            if config.lockin_range_schedule is not None:
+                for condition in conditions:
+                    selection = config.lockin_range_schedule.resolve(
+                        {module: axis["index"] for module, axis in condition["axes"].items()})
+                    condition["lockin_range_profile"] = {"rule_name": selection.rule_name,
+                        "full_scales_v": selection.full_scales_v}
+            print(json.dumps({"plan": config.snapshot, "conditions": conditions},
                              ensure_ascii=False, indent=2))
             return 0
         from .combination_launch import resolve_launch, check_run_destination, launch_summary

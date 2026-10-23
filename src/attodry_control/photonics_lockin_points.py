@@ -1,7 +1,7 @@
 """Single-owner, fixed-range point acquisition with PEM-owned external frequency."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from enum import Enum
 from functools import wraps
@@ -97,6 +97,8 @@ class PhotonicsLockinPointSession:
         self.reference_recovery_guard = None
         self._reference_operation_context = None
         self._configuration_settings_applied = False
+        self._range_profile_context = {}
+        self._range_profile_failure = None
 
     def disturbed(self, reason, *, roles=None):
         """Record a successful setting or a completed external signal change."""
@@ -796,6 +798,106 @@ class PhotonicsLockinPointSession:
     def _expected_reference_source(self, cfg):
         return "external"
 
+    def range_context(self):
+        """Return saved range evidence without another instrument query."""
+        return _plain(self._range_profile_context)
+
+    def apply_range_profile(self, profile):
+        """Apply one already safety-validated outer-condition sensitivity profile.
+
+        This operation changes no source, reference, filter or input range.
+        Physical model capabilities are checked again before any I/O. The
+        original configuration stays immutable; ``roles`` holds only the owned
+        runtime expectations confirmed by each sensitivity adapter. A failed
+        command cannot be retried or turned into a successful cleanup record.
+        """
+        self._require_ready()
+        if self.reference_transition_pending:
+            raise RuntimeError("Apply the range profile outside a PEM reference transition.")
+        if not isinstance(profile, dict) or set(profile) != {"name", "ranges"}:
+            raise ValueError("A lock-in range profile requires only name and ranges.")
+        name, ranges = profile["name"], profile["ranges"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("The lock-in range rule name must be nonempty.")
+        enabled = {"lockin_" + cfg.role.value for cfg in self.roles}
+        if not isinstance(ranges, dict) or set(ranges) != enabled:
+            raise ValueError("The range profile must specify every enabled lock-in role exactly once.")
+        for cfg in self.roles:
+            scale = ranges["lockin_" + cfg.role.value]
+            if (cfg.sensitivity_mode != "fixed"
+                    or isinstance(scale, bool) or not isinstance(scale, (float, int))
+                    or not math.isfinite(scale) or scale <= 0
+                    or scale not in capabilities_for(cfg.model).sensitivity_full_scales_v):
+                raise ValueError("Unsupported physical sensitivity for lockin_" + cfg.role.value)
+        context = {"rule_name": name, "requested_full_scales_v": dict(ranges),
+                   "confirmed_full_scales_v": dict(self._range_profile_context.get(
+                       "confirmed_full_scales_v", {})),
+                   "changed_roles": [], "attempted_roles": [], "verified": False,
+                   "applied_at_utc": None}
+        self._range_profile_context = context
+        try:
+            self.event("lockin_range_profile_attempt", self.range_context())
+            before = self._verify_settings()
+            context["confirmed_full_scales_v"] = {"lockin_" + role:
+                settings["sensitivity_full_scale_v"] for role, settings in before.items()}
+            changed = [cfg for cfg in self.roles if ranges["lockin_" + cfg.role.value]
+                       != cfg.sensitivity_full_scale_v]
+            context["changed_roles"] = ["lockin_" + cfg.role.value for cfg in changed]
+            for cfg, device in zip(self.roles, self.pair):
+                role = "lockin_" + cfg.role.value
+                if cfg not in changed:
+                    continue
+                context["attempted_roles"].append(role)
+                # The transport may complete a write before raising. Until the
+                # adapter returns a verified readback the new state is unknown.
+                context["confirmed_full_scales_v"][role] = None
+                self.event("lockin_range_write_attempt", {
+                    "rule_name": name, "role": role, "previous_full_scale_v": cfg.sensitivity_full_scale_v,
+                    "requested_full_scale_v": ranges[role]})
+                try:
+                    device.set_sensitivity(ranges[role], authorize_writes=True)
+                except BaseException as error:
+                    try:
+                        self.disturbed("sensitivity_profile", roles=(role,))
+                    except BaseException as audit_error:
+                        error.add_note(f"Range disturbance audit failed: {audit_error}")
+                    raise
+                self.roles = tuple(replace(current, sensitivity_full_scale_v=ranges[role])
+                                   if current.role is cfg.role else current for current in self.roles)
+                context["confirmed_full_scales_v"][role] = ranges[role]
+                self.disturbed("sensitivity_profile", roles=(role,))
+                self.event("lockin_range_write_verified", {"rule_name": name, "role": role,
+                    "confirmed_full_scale_v": ranges[role]})
+            if changed:
+                # Retain the existing transition/status brackets and remaining
+                # settling deadline. Owned setting latches are consumed here,
+                # before set_point's clean entry probe and any dark/formal read.
+                self._transition()
+            context.update(verified=True, applied_at_utc=_now())
+            self.event("lockin_range_profile_applied", self.range_context())
+            return self.range_context()
+        except BaseException as error:
+            self.failed = True
+            context.update(verified=False, error_type=type(error).__name__, error=str(error))
+            self._range_profile_failure = f"{type(error).__name__}: {error}"
+            try:
+                self.event("lockin_range_profile_failed", self.range_context())
+            except BaseException as audit_error:
+                error.add_note(f"Range failure audit failed: {audit_error}")
+            raise
+        finally:
+            try:
+                self._emit_audit("apply_range_profile", suppress=self.failed)
+            except BaseException as error:
+                self.failed = True
+                context.update(verified=False, error_type=type(error).__name__, error=str(error))
+                self._range_profile_failure = f"{type(error).__name__}: {error}"
+                try:
+                    self.event("lockin_range_profile_failed", self.range_context())
+                except BaseException as audit_error:
+                    error.add_note(f"Range failure audit failed: {audit_error}")
+                raise
+
     def _verify_settings(self):
         result = {}
         for cfg, device in zip(self.roles, self.pair):
@@ -1007,6 +1109,8 @@ class PhotonicsLockinPointSession:
                   "identities": dict(self.identities), "sequential_role_reads": True,
                   "overload_policy": self.config.overload_policy,
                   "reference_unlock_policy": self.config.reference_unlock_policy}
+        if self._range_profile_context:
+            record["lockin_range_profile"] = self.range_context()
         measured = {}
         try:
             if self.sample_count:
@@ -1167,6 +1271,9 @@ class PhotonicsLockinPointSession:
             except BaseException as exc:
                 result["errors"].append(f"{device.role.value}: {type(exc).__name__}: {exc}")
         result["errors"].extend(self._emit_audit("cleanup", suppress=True))
+        if self._range_profile_failure is not None:
+            result["errors"].append("range profile: " + self._range_profile_failure)
+            result["lockin_range_profile"] = self.range_context()
         result["verified"] = not result["errors"]
         result["manual_verification_required"] = not result["verified"]
         self.cleanup_result = result

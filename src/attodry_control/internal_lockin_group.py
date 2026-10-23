@@ -72,11 +72,12 @@ def group_configuration(config, prepared):
            for p in prepared.grid):
         raise ValueError("Three-channel profile does not accept per-point range overrides")
     aux = config.lockin_aux
-    caps = capabilities_for(aux.model)
-    for harmonic in aux.harmonics:
-        caps.validate_detection(config.lockin_xx.frequency_hz, harmonic)
+    if aux is not None:
+        caps = capabilities_for(aux.model)
+        for harmonic in aux.harmonics:
+            caps.validate_detection(config.lockin_xx.frequency_hz, harmonic)
     safety = config.lockin_safety
-    tau = max(c.time_constant_s for c in (*roles, aux))
+    tau = max(c.time_constant_s for c in (*roles, aux) if c is not None)
     frequency = config.lockin_xx.frequency_hz
     return PhotonicsLockinConfig(
         schema_version=1, lockin_xx=roles[0], lockin_xy=roles[1],

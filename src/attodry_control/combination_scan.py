@@ -366,8 +366,16 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             emit("scan_phase", {"phase": name, **context})
 
     def prepare_condition(condition, indices, previous_indices):
+        # Bind the profile to the complete requested condition before optical
+        # reference transitions/qualification can consume lock-in status.
+        range_prepared = False
         # Index prefixes preserve duplicate points and inner-axis resets.
         for depth, axis in enumerate(plan.axes):
+            if axis.module in {"optical", "lockin"} and not range_prepared:
+                if hasattr(station, "prepare_lockin_ranges"):
+                    with timing.timed_stage("lockin_range_prepare"):
+                        station.prepare_lockin_ranges(condition)
+                range_prepared = True
             if previous_indices is None or indices[:depth + 2] != previous_indices[:depth + 2]:
                 point = axis.points[condition["axes"][axis.module]["index"]]
                 emit("axis_setting", {"module": axis.module, "requested": point.values})

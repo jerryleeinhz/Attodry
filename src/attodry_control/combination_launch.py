@@ -86,6 +86,8 @@ def launch_summary(config, database, run_id):
         "samples_per_condition": config.plan.samples_per_condition,
         "total_samples": count * config.plan.samples_per_condition,
         "cleanup": config.snapshot["cleanup_policy"], "hardware_resume": False}
+    if getattr(config, "lockin_range_schedule", None) is not None:
+        summary["lockin_range_rules"] = config.lockin_range_schedule.snapshot()
     summary["source_path"] = str(Path(__file__).resolve().parent)
     from . import __version__
     summary["source_version"] = __version__
