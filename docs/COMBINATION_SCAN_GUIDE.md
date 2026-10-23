@@ -1,5 +1,20 @@
 # Four-module combination scans — bounded hardware validation complete
 
+## 按外层计划坐标选择固定量程
+
+可选 `[[combination_scan.lockin_range_rules]]` 在 temperature、magnetic、SMU
+位于 `lockin` 外层时选择 XX/XY 固定满量程，支持单模块和多模块联合匹配及
+零起始 `point_indices` 区分重复访问。每条件恰好一条规则，连接前检查全部
+覆盖、冲突、仪器档位与本站安全白名单，不新增扫描点或重排模块。
+
+当前三种 `lockin_mode` 均接入现有电学会话；与自动、任何逐谐波设置及原逐点/
+分段满量程覆盖互斥。同一条件各谐波使用同一路量程，不改 Reserve/TC/输入。
+协调层在本条件 lockin 轴和资格检查前应用、读回核验；更新运行预期，保留
+不可变 cleanup 基线及现有剩余 settle。无规则配置保持原行为。
+完整配置、每条件 `condition_bindings` 预览、记录/分析和不可修改规则的恢复
+约定见 [锁相量程规则](LOCKIN_RANGE_RULES.md)。此功能未引入光学、rotator、
+AUX 硬件或暗背景系统；原历史实机验收范围不自动扩展为规则换档实机验收。
+
 2026-10-12：选择 temperature 的运行新增两路温度/两路功率关联事件及只读 SQLite
 轨迹导出。见 [温度与加热功率记录](TEMPERATURE_TELEMETRY.md)；仅磁场运行不增加功率查询。
 

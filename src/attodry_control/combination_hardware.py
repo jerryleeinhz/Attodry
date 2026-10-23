@@ -48,6 +48,7 @@ class HardwareCombinationConfig:
     database_path: Path | None = None
     run_id: str = "auto"
     lockin_mode: str = "excitation"
+    lockin_range_schedule: object | None = None
 
 
 def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
@@ -67,7 +68,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     configuration._strict_keys_with_optional(
         table, "combination_scan",
         {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"},
-        {"lockin_mode", "run_id"})
+        {"lockin_mode", "run_id", "lockin_range_rules"})
     mode = table.get("lockin_mode", "excitation")
     if not isinstance(mode, str) or mode not in {"excitation", "frequency", "frequency_excitation"}:
         raise ValueError("combination_scan.lockin_mode must be excitation, frequency or frequency_excitation")
@@ -179,7 +180,28 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                            table["repeats"], table["run_name"], table["note"],
                            magnet_limits=cryostat.magnet.limits if cryostat else MagnetLimits(),
                            readback_tolerance_t=cryostat.magnet.readback_tolerance_t if cryostat else None)
+    range_schedule = None
+    if "lockin_range_rules" in table:
+        from .lockin_backend import capabilities_for
+        from .lockin_range_rules import compile_lockin_range_rules
+        if lockin is None:
+            raise ValueError("lockin_range_rules requires an active lockin axis")
+        allowed = {}
+        for role in ("lockin_xx", "lockin_xy"):
+            device = getattr(lockin, role)
+            if device.sensitivity_mode is not configuration.SensitivityMode.FIXED or device.harmonic_settings:
+                raise ValueError("lockin_range_rules cannot combine with auto/per-harmonic sensitivity")
+            allowed[role] = set(capabilities_for(device.model).sensitivity_full_scales_v).intersection(
+                getattr(lockin.lockin_safety, role).allowed_fixed_full_scales_v)
+        if any(point.xx_full_scale_v is not None or point.xy_full_scale_v is not None
+               for name in ("frequency_point_specs", "excitation_point_specs")
+               for point in getattr(lockin.lockin_sweep, name)):
+            raise ValueError("lockin_range_rules cannot combine with segment sensitivity overrides")
+        range_schedule = compile_lockin_range_rules(table["lockin_range_rules"], plan, allowed)
     snapshot = plan.snapshot()
+    if range_schedule is not None:
+        snapshot["lockin_range_rules"] = {
+            **range_schedule.snapshot(), "condition_bindings": range_schedule.condition_preview(plan)}
     snapshot.update(mode="hardware", hardware_scope="four-module-lockin-grid-v2",
                     lockin_mode=mode,
                     hardware=_json(hardware), config_path=str(path),
@@ -206,7 +228,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if not database.is_absolute():
         database = path.parent / database
     return HardwareCombinationConfig(path, plan, smu, lockin, snapshot, temperature, magnetic,
-                                     cryostat, database.resolve(), run_id, mode)
+                                     cryostat, database.resolve(), run_id, mode, range_schedule)
 
 
 class _Events:
@@ -366,6 +388,22 @@ class HardwareCombinationStation:
             "condition_id": last_condition["condition_id"], "formal_samples_taken": 0})
         return {"ready": True, "condition_id": last_condition["condition_id"],
                 "formal_samples_taken": 0}
+
+    def prepare_lockin_ranges(self, condition):
+        """Apply the compiled target profile before this condition's Lock-in entry."""
+        schedule = self.config.lockin_range_schedule
+        if schedule is None:
+            return
+        selection = schedule.resolve({module: item["index"]
+                                      for module, item in condition["axes"].items()})
+        result = self.lockin.apply_range_profile({"name": selection.rule_name,
+                                                "ranges": selection.full_scales_v})
+        if result.get("verified") is not True:
+            raise ValueError("Condition Lock-in sensitivity profile was not verified")
+        self.events.event("lockin_range_selected", {
+            "condition_id": condition["condition_id"], "repeat_index": condition["repeat_index"],
+            "outer_indices": dict(zip(schedule.outer_modules, selection.outer_indices)),
+            "requested": selection.requested, **result})
 
     def apply(self, module, point):
         if module in {"temperature", "magnetic"}:

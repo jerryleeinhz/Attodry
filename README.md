@@ -5,6 +5,11 @@
 原点列和失败数据保留，每次启动单独归档配置。详见
 [组合扫描恢复](docs/COMBINATION_RECOVERY.md)。
 
+组合扫描可选按 temperature、magnetic 或 SMU **外层计划坐标**选择 XX/XY 固定
+满量程。规则在连接前完整展开，不改变扫描点；与自动/逐谐波/分段量程覆盖互斥。
+合法 TOML、离线预览和恢复限制见
+[按外层条件设置锁相量程](docs/LOCKIN_RANGE_RULES.md)。
+
 项目开发中的设计取舍、实机失败与测试环境/回归失败复盘见
 [项目开发与测试失败经验](docs/PROJECT_DEVELOPMENT_AND_TEST_LESSONS.md)。
 

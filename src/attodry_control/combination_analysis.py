@@ -59,6 +59,42 @@ def _snapshot_digest(value) -> str:
                                      allow_nan=False, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
+def _lockin_range_bindings(plan):
+    schedule = plan.get("lockin_range_rules")
+    if not schedule:
+        return None
+    bindings = {}
+    for item in schedule.get("condition_bindings", ()):
+        condition_id = item["condition_id"]
+        if condition_id in bindings:
+            raise ValueError("Formal sample lacks its unique archived Lock-in range binding")
+        bindings[condition_id] = item
+    return bindings
+
+
+def _lockin_range_columns(bindings, condition_id, reading):
+    """Expose archived condition ranges without inferring missing actual settings."""
+    if bindings is None:
+        return {}
+    if condition_id not in bindings:
+        raise ValueError("Formal sample lacks its unique archived Lock-in range binding")
+    binding = bindings[condition_id]
+    scales = binding["full_scales_v"]
+    status = (reading.get("status") or {}).get("lockin_range_rule") or {}
+    if ((status.get("rule_name") is not None and status["rule_name"] != binding["rule_name"])
+            or (status.get("requested_full_scales_v") is not None
+                and status["requested_full_scales_v"] != scales)):
+        raise ValueError("Formal Lock-in range rule differs from its archived condition binding")
+    return {
+        "lockin_range_configuration": json.dumps(scales, sort_keys=True, allow_nan=False,
+                                                  separators=(",", ":")),
+        "lockin_range.rule_name": binding["rule_name"],
+        "lockin_range.verified": status.get("verified"),
+        **_flatten("lockin_range.requested_full_scales_v", scales),
+        **_flatten("lockin_range.confirmed_full_scales_v", status.get("confirmed_full_scales_v") or {}),
+    }
+
+
 def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None = None,
                               audit: bool = False, preview: bool = False) -> CombinationSnapshot:
     """Read all selected runs and their provenance at one committed DB revision.
@@ -110,6 +146,7 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
                 key = mapping["run_id"], mapping["condition_id"], mapping["attempt_index"]
                 attempt_executions[key] = mapping["execution_id"]
     output = []
+    plan_cache = {}
     cleanup_by_run = {}
     runs = []
     for run in run_rows:
@@ -141,7 +178,7 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
             if execution_id not in run_executions:
                 raise ValueError("Formal sample lacks its archived execution/configuration")
             execution = run_executions[execution_id]
-            execution_plan = json.loads(execution["plan_json"])
+            plan_json = execution["plan_json"]
             provenance = {
                 "execution_id": execution_id, "execution_index": execution["sequence_index"],
                 "execution_kind": execution["kind"], "execution_status": execution["status"],
@@ -151,12 +188,17 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
         else:
             # Schema-1 records remain readable without writing a migration. No
             # historical execution identity is invented by this read-only path.
-            execution_plan = json.loads(row["plan_json"])
+            plan_json = row["plan_json"]
             provenance = {"execution_id": None, "execution_index": 0,
                 "execution_kind": "legacy_unsegmented", "execution_status": row["run_status"],
                 "execution_error": row["run_error"], "execution_cleanup": cleanup}
-        plan_sha256 = hashlib.sha256(json.dumps(execution_plan, sort_keys=True,
-            ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        plan_key = row["run_id"], provenance["execution_id"]
+        if plan_key not in plan_cache:
+            execution_plan = json.loads(plan_json)
+            plan_sha256 = hashlib.sha256(json.dumps(execution_plan, sort_keys=True,
+                ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+            plan_cache[plan_key] = execution_plan, plan_sha256, _lockin_range_bindings(execution_plan)
+        execution_plan, plan_sha256, range_bindings = plan_cache[plan_key]
         config_sha256 = execution_plan.get("config_sha256")
         provenance.update(config_sha256=config_sha256, plan_sha256=plan_sha256,
             configuration_revision=config_sha256 or plan_sha256,
@@ -179,6 +221,8 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
         for reading in sample["reads"]:
             record[f"timestamps.{reading['module']}"] = reading["captured_at_utc"]
             record[f"status.{reading['module']}"] = reading.get("status")
+            if reading["module"] == "lockin":
+                record.update(_lockin_range_columns(range_bindings, row["condition_id"], reading))
         output.append(record)
     materialized = tuple(output)
     for run in runs:
@@ -214,6 +258,11 @@ def execution_provenance(rows: Sequence[Mapping]) -> tuple[dict, ...]:
                     ("source_path", "run_id", "execution_id", "configuration_revision"))
         segment = segments.setdefault(key, {name: row.get(name) for name in fields})
         segment["selected_row_count"] = segment.get("selected_row_count", 0) + 1
+        if "lockin_range_configuration" in row:
+            configurations = segment.setdefault("lockin_range_configurations", [])
+            configuration = json.loads(row["lockin_range_configuration"])
+            if configuration not in configurations:
+                configurations.append(configuration)
     return tuple(segments.values())
 
 
@@ -329,7 +378,7 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
     requested = {key[10:] for row in selected for key in row if key.startswith("requested.")}
     x_coordinate = _coordinate_for_x(x, requested)
     covered = {key.split(".", 1)[-1] for key in (*group_by, *filters)}
-    protected = ["run_id", "configuration_revision", "simulated", "repeat_index", "sample_index", "role", "harmonic"]
+    protected = ["run_id", "configuration_revision", "lockin_range_configuration", "simulated", "repeat_index", "sample_index", "role", "harmonic"]
     protected += sorted({key for row in selected for key in row if
                          key.startswith("axes.") and key.endswith((".segment", ".direction"))})
     protected += sorted("requested." + key for key in requested

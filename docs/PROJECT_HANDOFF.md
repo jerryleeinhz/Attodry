@@ -1,8 +1,42 @@
 # Project handoff
 
-Last updated: 2026-10-15
+Last updated: 2026-10-23
 
 ## Current stage
+
+### Outer-coordinate Lock-in sensitivity rules (2026-10-23)
+
+- Reuse the published photonics rule compiler from `ff3738f`/`132d27e` and adapt
+  the existing electrical XX/XY point session. Optional
+  `[[combination_scan.lockin_range_rules]]` selects fixed sensitivities by target
+  coordinates and/or zero-based module point indices before the Lock-in axis.
+  Exactly one complete profile must cover every condition; inner/inactive
+  selectors, unsupported/station-disallowed scales and competing auto/harmonic/
+  segment range settings reject offline. The original grid/order stays unchanged.
+- Archive raw rules, outer visits and full condition/repeat bindings. Apply and
+  read-verify both roles before point preparation/qualification, retain the profile
+  across harmonics/frequency changes and reuse existing settle deadlines. A partial
+  failure stops acquisition and preserves attempted/confirmed state. Cleanup
+  restores the immutable original baseline. No optics/rotator/AUX hardware added.
+- Ordinary same-run recovery requires the identical archived schedule and
+  re-establishes the first pending profile with fresh environment qualification.
+  Validate each formal pair against the raw rule, binding and physical setting
+  codes; accepted evidence and partial failures are retained. Source compatibility
+  and historical recovery boundaries remain strict. Analysis/exports group by
+  physical range configuration; file-only monitoring labels a measurement profile
+  superseded once cleanup begins rather than claiming it is the current range.
+- New rules/runtime/coordinator/provenance/whole-condition recovery verification
+  passed 60 hardware-blocked tests. The broad 424-test regression exposed nine
+  historical-fixture failures because the new module changed its simulated source
+  inventory. Its fixture is now pinned to its old files; all 55 affected recovery,
+  raw-audit and SMU verification cases passed on rerun. Production compatibility
+  guards are unchanged. SMU read timestamps retain full precision so same-millisecond
+  valid samples are not incorrectly rejected as preceding their formal window.
+- Usage/configuration: [LOCKIN_RANGE_RULES.md](LOCKIN_RANGE_RULES.md). Query/write,
+  wait, serial ownership and offline/real validation boundaries:
+  [MEASUREMENT_PERFORMANCE.md](MEASUREMENT_PERFORMANCE.md). No instrument connection,
+  live status consumption or experiment run/resume is part of this delivery.
+  Target verification and software delivery are recorded separately when complete.
 
 ### Axis-entry qualification and shared Lock-in settling (2026-10-15)
 

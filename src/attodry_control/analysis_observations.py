@@ -144,7 +144,7 @@ def repeat_statistics(rows: Sequence[Mapping], *, x: str, y: str, mode="mean_sd"
     for row in rows:
         if row.get("condition_id") is None:
             raise ValueError("Repeat statistics require a recorded condition_id; use Raw observations for this source.")
-        identity_keys = ["source_path", "run_id", "condition_id", "attempt_index", "repeat_index", "role", "harmonic"]
+        identity_keys = ["source_path", "run_id", "condition_id", "attempt_index", "repeat_index", "role", "harmonic", "lockin_range_configuration"]
         identity_keys += sorted(k for k in row if k.startswith(("requested.", "axes.")))
         identity = tuple((k, repr(row.get(k))) for k in identity_keys)
         groups.setdefault(identity, []).append(row)

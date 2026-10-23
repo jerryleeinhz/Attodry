@@ -497,3 +497,26 @@ bidirectional = false
 # run_name = "electrical_combination"
 # run_id = "auto"  # default: UTC timestamp + sanitized run_name; or a unique manual ID
 # note = "Review DC+AC circuit limits and authorize joint commissioning first."
+
+# Optional fixed detector ranges selected by existing OUTER planned coordinates.
+# Entire example remains commented: it does not change this template's defaults.
+# This two-rule example assumes order=["temperature", "lockin"] and an existing
+# temperature point table exactly [2.0, 4.0] K. It creates NO temperature points.
+# Both roles must be fixed; do not combine with ANY harmonic_settings, autorange
+# or point/segment xx_full_scale_v/xy_full_scale_v overrides. The base role ranges
+# above remain the initialization/cleanup settings. Values illustrate format only:
+# verify discrete model support and this station's lockin_safety allowlists.
+# No optical/rotator/AUX hardware is enabled by these rules. Preview before run:
+# python -m attodry_control.combination_cli describe-hardware
+# See docs/LOCKIN_RANGE_RULES.md for joint matching, point_indices and recovery.
+# [[combination_scan.lockin_range_rules]]
+# name = "temperature_2K"
+# match = { temperature_k = [2.0] }
+# lockin_xx_full_scale_v = 0.010
+# lockin_xy_full_scale_v = 0.001
+#
+# [[combination_scan.lockin_range_rules]]
+# name = "temperature_4K"
+# match = { temperature_k = [4.0] }
+# lockin_xx_full_scale_v = 0.050
+# lockin_xy_full_scale_v = 0.010

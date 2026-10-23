@@ -1044,7 +1044,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _code_version() -> str:

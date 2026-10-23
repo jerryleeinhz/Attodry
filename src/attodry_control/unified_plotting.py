@@ -767,7 +767,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
         plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in ("xx", "xy") for h in (1, 2)]
     group_keys = [spec["group_by"]] if spec.get("group_by") else []
     if mode != "xy_z":
-        group_keys += ["source_path", "run_id", "configuration_revision", "segment", "direction", "repeat_index", "role", "harmonic", "scan_type", "source_kind"]
+        group_keys += ["source_path", "run_id", "configuration_revision", "lockin_range_configuration", "segment", "direction", "repeat_index", "role", "harmonic", "scan_type", "source_kind"]
     unresolved = _unresolved_dimensions(eligible, plot_keys=plot_keys, filter_keys=filters, group_keys=group_keys)
     if unresolved:
         raise ValueError("Unresolved varying conditions: " + ", ".join(column_label(k) for k, _ in unresolved) + ". Choose a grouping variable or fixed-condition filter.")
@@ -817,13 +817,15 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                 pad = abs(minimum)*.05 or 1
                 minimum, maximum = minimum-pad, maximum+pad
             norm = mpl.colors.TwoSlopeNorm(0, vmin=minimum, vmax=maximum) if minimum < 0 < maximum else mpl.colors.Normalize(minimum, maximum)
-            revisions = tuple(dict.fromkeys(r.get("configuration_revision") for r in valid))
+            configuration_keys = ("configuration_revision", "lockin_range_configuration")
+            revisions = tuple(dict.fromkeys(tuple(r.get(key) for key in configuration_keys) for r in valid))
             for index, revision in enumerate(revisions):
-                group = [r for r in valid if r.get("configuration_revision") == revision]
+                group = [r for r in valid if tuple(r.get(key) for key in configuration_keys) == revision]
                 artist = axis.scatter([r[x] for r in group], [r[y] for r in group],
                     c=[r[z] for r in group], cmap="RdBu_r", norm=norm,
                     marker=SERIES_MARKERS[index % len(SERIES_MARKERS)],
-                    label=f"config {str(revision)[:12]}" if len(revisions) > 1 else None)
+                    label=_series_label(tuple(zip(configuration_keys, revision)), True)
+                    if len(revisions) > 1 else None)
             if len(revisions) > 1 and spec.get("show_legend", True):
                 axis.legend(title="Archived configuration")
             figure.colorbar(artist, ax=axis).set_label(column_label(z))
@@ -847,7 +849,7 @@ def _curve_groups(
     rows: Sequence[Mapping[str, Any]], group_by: str | None, *, separate_samples=True
 ) -> dict[tuple[tuple[str, Any], ...], list[Mapping[str, Any]]]:
     automatic_keys = [
-        "source_path", "simulated", "run_id", "configuration_revision", "segment", "direction", "repeat_index", "role",
+        "source_path", "simulated", "run_id", "configuration_revision", "lockin_range_configuration", "segment", "direction", "repeat_index", "role",
         "harmonic", "scan_type", "source_kind",
     ]
     if separate_samples:
@@ -855,7 +857,8 @@ def _curve_groups(
     automatic_keys += sorted({k for r in rows for k in r if k.startswith("axes.") and k.endswith((".segment", ".direction"))})
     automatic_keys = [
         key for key in automatic_keys
-        if len({_value_key(row.get(key)) for row in rows if _scalar(row.get(key))}) > 1
+        if len({_value_key(row.get(key)) for row in rows
+                if _scalar(row.get(key)) or key == "lockin_range_configuration"}) > 1
     ]
     keys = list(dict.fromkeys(([group_by] if group_by else []) + automatic_keys))
     result: dict[tuple[tuple[str, Any], ...], list[Mapping[str, Any]]] = {}
@@ -880,6 +883,8 @@ def _series_label(identity: tuple[tuple[str, Any], ...], show: bool) -> str:
             parts.append(str(value).replace("lockin_", "").upper())
         elif key == "configuration_revision":
             parts.append(f"config {str(value)[:12]}")
+        elif key == "lockin_range_configuration" and value is not None:
+            parts.append(f"ranges {value}")
         elif key in {"segment", "direction"}:
             parts.append(f"{column_label(key)}={value}")
         else:

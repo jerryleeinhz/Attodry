@@ -58,6 +58,23 @@ and unused-module settings do not change the scan. Selected harmonic overrides
 may be added/removed without changing the effective harmonic identities.
 Unsupported settings fail closed.
 
+### Outer-coordinate Lock-in range rules
+
+`combination_scan.lockin_range_rules` is an immutable schedule in the first
+version. Recovery compares the archived rules, outer-visit preview and complete
+per-condition bindings, including repeat/sequence identity. Adding, removing or
+changing a rule or its selected full scales requires a new run; the ordinary
+no-rule range/Reserve recovery options above remain available. A rule schedule
+does not approve arbitrary source-version changes.
+
+The first pending whole condition freshly resolves, applies and verifies its
+compiled XX/XY ranges before Lock-in axis preparation and qualification. No
+instrument range or previous process memory is assumed correct. Accepted
+conditions and raw rejected attempts are untouched. Runtime expected settings
+follow the condition ranges; final cleanup still restores the immutable base
+configuration, not the final condition's range. See
+[configuration and constraints](LOCKIN_RANGE_RULES.md).
+
 ## Handoff and failures
 
 As explicitly requested on 2026-10-15, ordinary hardware run/resume no longer

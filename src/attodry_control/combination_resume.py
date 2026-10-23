@@ -132,6 +132,9 @@ def _allowed(path, old, new, hardware):
 
 
 def configuration_changes(original, current):
+    if json.loads(encode(original.get("lockin_range_rules"))) != json.loads(
+            encode(current.get("lockin_range_rules"))):
+        raise ValueError("Lock-in range rules/resolved schedule changed; start a new run")
     if scan_contract(original) != scan_contract(current):
         raise ValueError("Scan points/order/repeats/groups/harmonics changed; start a new run")
     changes = []

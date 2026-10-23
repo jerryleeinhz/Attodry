@@ -1,5 +1,27 @@
 # Hardware and safety guide
 
+## Planned outer-condition Lock-in ranges
+
+Optional `combination_scan.lockin_range_rules` selects only detector sensitivity
+full scale from existing outer temperature/magnetic/SMU target coordinates and
+visits. It does not change targets, order, source output, SR865A input range,
+Reserve, time constants or any safety boundary. Every condition must have one
+complete XX/XY selection; coverage, overlap, coordinate order, discrete model
+capabilities and station fixed-range allowlists are checked before connection.
+Auto/per-harmonic/segment overrides cannot compete with this schedule.
+
+The existing session freshly reads each role, writes only a different full scale,
+verifies readback and updates runtime expected settings before qualification or
+formal acquisition. Partial application fails the condition and retains attempted
+actions/readbacks; mixed settings never enter formal acquisition. Actual changes
+reuse the existing monotonic settling deadline and serial response ownership.
+Immutable startup bases remain the cleanup targets. These rules are not an
+overload recovery mechanism and do not suppress raw status or invalid data.
+Recovery requires the same archived schedule and fresh condition preparation.
+No optical, rotator or AUX hardware path is introduced. See
+[Lock-in range rules](LOCKIN_RANGE_RULES.md); real switching commissioning is
+separate from code/offline validation.
+
 ## Axis-entry qualification and acquisition timing (2026-10-15)
 
 The operator approved one temperature qualification on each axis entry, before

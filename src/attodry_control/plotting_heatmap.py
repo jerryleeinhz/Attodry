@@ -34,7 +34,7 @@ def _coordinate_label(key: str, column_label: Any) -> str:
 
 
 def _facet_keys(rows: Sequence[Mapping[str, Any]], value_key: Any) -> tuple[str, ...]:
-    keys = ["source_path", "run_id", "configuration_revision", "repeat_index", "simulated", "role", "harmonic",
+    keys = ["source_path", "run_id", "configuration_revision", "lockin_range_configuration", "repeat_index", "simulated", "role", "harmonic",
             "segment", "direction", "scan_type", "source_kind"]
     keys += sorted({key for row in rows for key in row
                     if key.startswith("axes.") and key.endswith((".segment", ".direction"))})
@@ -43,7 +43,7 @@ def _facet_keys(rows: Sequence[Mapping[str, Any]], value_key: Any) -> tuple[str,
 
 def _condition_identity(rows: Sequence[Mapping[str, Any]]) -> set[tuple]:
     # Axis indices distinguish revisits even if their numeric coordinates agree.
-    keys = ["source_path", "run_id", "condition_id", "attempt_index", "repeat_index", "role", "harmonic"]
+    keys = ["source_path", "run_id", "condition_id", "attempt_index", "repeat_index", "role", "harmonic", "lockin_range_configuration"]
     keys += sorted({key for row in rows for key in row if key.startswith(("requested.", "axes."))})
     return {tuple((key, repr(row.get(key))) for key in keys) for row in rows}
 

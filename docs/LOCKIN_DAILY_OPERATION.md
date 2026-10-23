@@ -1,5 +1,22 @@
 # 电学 Lock-in 日常扫频与扫幅
 
+## Combination 外层坐标量程规则
+
+在组合扫描中可用 `[[combination_scan.lockin_range_rules]]` 为外层 temperature、
+magnetic、SMU 目标组合选择 XX/XY 各自固定满量程。三种已有 Lock-in 网格模式
+均复用原会话；独立 sweep 命令不读取这套组合规则。规则只改
+`sensitivity_full_scale_v`，不改激励、输入范围、Reserve 或时间常数。
+
+每条规则必须写全 XX/XY，完整计划恰好一条匹配；只能引用 lockin 之前的坐标。
+启用时两角色应为 fixed，删除/注释自动量程、任何 `harmonic_settings` 和逐点/
+分段满量程覆盖，不能把规则当作另一层覆盖优先级。每条件各谐波沿用同一路
+量程；基础量程仍是初始化/cleanup 基线，不能删除。
+
+先运行 `combination_cli describe-hardware` 检查每个 `condition_bindings`，
+再按原操作授权启动。实际换档读回和剩余 settle 保留；分析按有效量程区分，
+不会把已过载数据自动改为有效。恢复要求原规则完全一致。
+完整 TOML、点序号与限制见 [量程规则说明](LOCKIN_RANGE_RULES.md)。
+
 ## Combination 频率读回容差（2026-10-12）
 
 组合扫描的坐标读回、正式读数和结束清理统一沿用已有 sweep 标准：

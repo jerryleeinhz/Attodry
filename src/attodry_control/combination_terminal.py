@@ -135,6 +135,16 @@ def launch_text(summary, width=None):
             lines.append("Segment SENS precedence: excitation > frequency > baseline; harmonic settings apply.")
         if lockin["skipped_harmonics_by_frequency"]:
             lines.append("Skipped harmonics: " + json.dumps(lockin["skipped_harmonics_by_frequency"]))
+    if "lockin_range_rules" in summary:
+        rows = []
+        for item in summary["lockin_range_rules"]["condition_bindings"]:
+            coordinates = ", ".join(f"{key}={value:.12g}" for key, value in item["requested"].items())
+            visits = ", ".join(f"{key}#{value}" for key, value in item["outer_indices"].items())
+            rows.append((item["condition_id"], visits, coordinates, item["rule_name"],
+                         _number(item["full_scales_v"]["lockin_xx"], "V"),
+                         _number(item["full_scales_v"]["lockin_xy"], "V")))
+        lines += ["", "Planned Lock-in sensitivity rules:",
+                  *_table(("Condition", "Outer visits", "Requested", "Rule", "XX", "XY"), rows, width)]
     if "field_transition_policy" in summary:
         policy = summary.get("field_readback_policy")
         if policy is not None and policy["mode"] != "vector":
@@ -225,6 +235,17 @@ def snapshot_text(snapshot, width=None):
     if readings:
         lines += ["Last recorded values (not live queries):",
                   *_table(("Module", "Captured UTC", "Readback", "Clean"), readings, width)]
+    ranges = snapshot.get("last_recorded_lockin_ranges")
+    if ranges:
+        values = ranges.get("confirmed_full_scales_v", {})
+        lines.append("Last recorded Lock-in ranges (measurement profile"
+                     + ("; superseded by cleanup" if ranges.get("superseded_by_cleanup") else "")
+                     + "): " + str(ranges.get("rule_name", "?"))
+                     + " | " + str(ranges.get("captured_at_utc", "?"))
+                     + " | verified=" + str(ranges.get("verified", False)))
+        for role in ("lockin_xx", "lockin_xy"):
+            value = values.get(role)
+            lines.append(role + ": " + (_number(value, "V") if value is not None else "unknown"))
     cleanup = snapshot.get("cleanup")
     if cleanup is not None:
         lines.append(f"Cleanup overall: clean={cleanup.get('clean')} | Manual verification: "

@@ -1,5 +1,28 @@
 # Development stages
 
+## Current: outer-coordinate Lock-in sensitivity rules (2026-10-23)
+
+- Compile optional target-coordinate/point-index rules before hardware access;
+  require unique complete coverage and model/station-approved XX/XY sensitivities.
+  Reuse published photonics compiler `ff3738f` with full condition/repeat bindings.
+  Preserve the scan grid and the legacy no-rule path; reject competing range
+  mechanisms and inactive/inner selectors rather than reordering axes.
+- Apply profiles in the coordinator before Lock-in preparation/qualification.
+  Verify serial writes/readbacks, update runtime expected settings, preserve
+  profiles across harmonic/frequency transitions and share the existing settling
+  deadlines. Partial failures stop; cleanup retains original baseline settings.
+- Same-rule recovery reapplies a fresh pending profile, retains accepted/rejected
+  raw data, and audits both physical roles and each formal pair. Analysis,
+  repeat statistics and heatmaps preserve range provenance and grouping.
+  Read-only monitors distinguish old measurement profiles from later cleanup.
+- 60 new guarded cases passed. Broad regression first exposed a historical
+  source-inventory fixture mismatch; the fixture is pinned, without weakening
+  production source-version guards; 55 affected recovery/raw-audit/SMU cases passed
+  on rerun. Full-precision SMU timestamps preserve formal
+  time brackets. Documentation includes configuration and command/wait budgets.
+  No added hardware module, background system, automatic range, Reserve/input/TC
+  change, instrument connection, commissioning or experiment replay.
+
 ## Current: axis-entry qualification and shared Lock-in settling (2026-10-15)
 
 - Qualify each temperature axis entry once before its inner scan in the common

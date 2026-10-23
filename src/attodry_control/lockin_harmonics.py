@@ -59,6 +59,8 @@ class HarmonicSensitivitySession:
         self.settling = LockinSettling(monotonic=monotonic, sleep=sleep)
         self.settling.changed("acquisition_initialization")
         self.frequency_transition_pending = False
+        # Per-condition scales leave the archived configs/cleanup baseline intact.
+        self.fixed_range_profile = {}
 
     def track_pair(self, xx, xy):
         return (self.settling.wrap(xx, "lockin_xx"), self.settling.wrap(xy, "lockin_xy"))
@@ -189,7 +191,7 @@ class HarmonicSensitivitySession:
         before = self._read(instruments, event.setdefault("readbacks", []))
         commands = event.setdefault("commands", [])
         for role in self.configs:
-            if role not in self.owned:
+            if role not in self.owned and role not in self.fixed_range_profile:
                 continue
             actual = before["roles"][role]
             sensitivity, reserve = targets[role]
@@ -232,7 +234,10 @@ class HarmonicSensitivitySession:
     def _targets(self, harmonics, roles):
         targets = {}
         for role, harmonic in harmonics.items():
-            if role in self.owned and role in roles:
+            if role in self.fixed_range_profile and role in roles:
+                targets[role] = (sensitivity_code_for(self.configs[role], self.fixed_range_profile[role]),
+                                 self.expected_reserves[role])
+            elif role in self.owned and role in roles:
                 setting = self.setting(role, harmonic)
                 state = self.states.get((role, harmonic))
                 targets[role] = (sensitivity_code_for(self.configs[role], state.current_full_scale_v if state else

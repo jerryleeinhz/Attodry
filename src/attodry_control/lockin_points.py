@@ -5,7 +5,10 @@ sampling reuse lockin_test; a point never performs whole-sweep cleanup.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
+from collections.abc import Mapping
+import math
 
 from . import lockin_test as daily
 from .combination_store import utc_now
@@ -102,6 +105,9 @@ class LockinPointSession:
         self.frequency_setup = None
         self.point_record = None
         self.sample_count = 0
+        self.range_profile = None
+        self.range_profile_record = None
+        self.range_profile_failed = False
         self.harmonics_by_role = daily._requested_sweep_harmonics_by_role(self.args)
         self.harmonics = daily._requested_sweep_harmonics(self.args)
         self.target_frequency_hz = config.lockin_xx.frequency_hz
@@ -254,7 +260,107 @@ class LockinPointSession:
                                          "fixed": self.fixed_setup,
                                          "frequency": self.frequency_setup})
 
+    def _require_range_profile_ready(self):
+        if self.range_profile_failed:
+            raise daily.Sr830Error("Lock-in range profile failed; acquisition cannot continue")
+
+    def range_context(self):
+        """Detached condition provenance; never infer an unconfirmed scale."""
+        if self.range_profile_record is None:
+            return None
+        return deepcopy({key: value for key, value in self.range_profile_record.items()
+                         if key not in {"harmonic_setting_checks", "final_setting_checks"}})
+
+    def apply_range_profile(self, profile):
+        """Apply one compiled fixed profile, outside formal acquisition.
+
+        Validate the complete pair before I/O, publish new expectations only after
+        both roles verify, and let the existing final-settings deadline settle it.
+        The original config and cleanup baseline are deliberately not replaced.
+        """
+        self._require_range_profile_ready()
+        if not isinstance(profile, Mapping) or set(profile) != {"name", "ranges"}:
+            raise ValueError("Lock-in range profile must contain name and ranges")
+        name, ranges = profile["name"], profile["ranges"]
+        roles = ("lockin_xx", "lockin_xy")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Lock-in range profile name must be nonempty")
+        if not isinstance(ranges, Mapping) or set(ranges) != set(roles):
+            raise ValueError("Lock-in range profile must specify both active roles")
+        codes, normalized = {}, {}
+        for role in roles:
+            config, value = getattr(self.config, role), ranges[role]
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError(f"{role} range profile scale must be positive and finite")
+            if (config.sensitivity_mode is not daily.SensitivityMode.FIXED
+                    or config.harmonic_settings):
+                raise ValueError("Lock-in range profiles require fixed mode without harmonic overrides")
+            if value not in getattr(self.config.lockin_safety, role).allowed_fixed_full_scales_v:
+                raise ValueError(f"{role} range profile scale is not allowed by lockin_safety.toml")
+            codes[role] = daily.sensitivity_code_for(config, value)
+            normalized[role] = float(value)
+        if any(p.range_spec.xx_full_scale_v is not None or p.range_spec.xy_full_scale_v is not None
+               for p in self.grid):
+            raise ValueError("Lock-in range profiles cannot combine with segment or point range overrides")
+        if self.pair is None or self.harmonic_control is None:
+            raise ValueError("Lock-in range profile requires a configured session")
+        record = {"contract": "outer-condition-lockin-range-v1", "rule_name": name,
+                  "requested_full_scales_v": normalized, "confirmed_full_scales_v": {},
+                  "verified": False, "changed_roles": [], "transitions": [],
+                  "captured_at_utc": utc_now()}
+        self.range_profile_record = record
+        try:
+            self.event("lockin_range_rule_apply_started", deepcopy(record))
+            before = self.harmonic_control.verify(*self.pair,
+                self.harmonic_control.current_harmonics, record)
+            for role, instrument in zip(roles, self.pair):
+                prior = before["roles"][role]["sensitivity_code"]
+                transition = {"role": role, "before_sensitivity_code": prior,
+                              "requested_sensitivity_code": codes[role],
+                              "requested_full_scale_v": normalized[role],
+                              "started_at_utc": utc_now(),
+                              "write_attempted": False, "write_returned": False}
+                record["transitions"].append(transition)
+                if prior != codes[role]:
+                    record["changed_roles"].append(role)
+                    transition["write_attempted"] = True
+                    self.sensitivity_setup["ranges"][role]["write_attempted"] = True
+                    self.event("lockin_range_rule_write_attempt", deepcopy(transition))
+                    instrument.set_sensitivity(codes[role])
+                    transition["write_returned"] = True
+                actual = instrument.read_sensitivity()
+                transition["readback_sensitivity_code"] = actual
+                transition["readback_at_utc"] = utc_now()
+                transition["readback_full_scale_v"] = daily.sensitivity_full_scale_for(
+                    getattr(self.config, role), actual)
+                self.event("lockin_range_rule_readback", deepcopy(transition))
+                if actual != codes[role]:
+                    raise daily.Sr830Error(f"{role} range profile readback {actual} != {codes[role]}")
+                record["confirmed_full_scales_v"][role] = transition["readback_full_scale_v"]
+            targets = {role: (codes[role], self.harmonic_control.expected_reserves[role])
+                       for role in roles}
+            final = self.harmonic_control._read(dict(zip(roles, self.pair)),
+                                               record.setdefault("final_setting_checks", []))
+            self.harmonic_control._check(final, self.harmonic_control.current_harmonics, targets)
+            for role in roles:
+                self.sensitivity_setup["ranges"][role]["current_sensitivity_code"] = codes[role]
+            self.harmonic_control.fixed_range_profile = dict(normalized)
+            self.range_profile = {"name": name, "ranges": dict(normalized)}
+            record["verified"] = True
+            self.event("lockin_range_rule_applied", deepcopy(record))
+            if self.point_record is not None:
+                self.point_record["lockin_range_rule"] = self.range_context()
+        except BaseException as exc:
+            self.range_profile_failed = True
+            record["verified"] = False
+            record["error"] = str(exc) or type(exc).__name__
+            self.event("lockin_range_rule_failed", deepcopy(record))
+            raise
+        return self.range_context()
+
     def set_point(self, source_v, frequency_hz=None, *, point_index=None):
+        self._require_range_profile_ready()
         target_hz = self.config.lockin_xx.frequency_hz if frequency_hz is None else frequency_hz
         if point_index is None:
             point_index = next((i for i, p in enumerate(self.grid)
@@ -272,6 +378,8 @@ class LockinPointSession:
             "range_spec": asdict(point.range_spec),
             "samples": [], "harmonic_transition_status": [],
         }
+        if self.range_profile is not None:
+            self.point_record["lockin_range_rule"] = self.range_context()
         try:
             if daily.model_name(xy) == "SR865A":
                 self.harmonic_control.verify(xx, xy, self.harmonic_control.current_harmonics,
@@ -298,16 +406,17 @@ class LockinPointSession:
         except BaseException:
             self.event("lockin_point_transition", self.point_record)
             raise
-        daily._apply_sweep_segment_ranges(
-            xx, xy, sensitivity_setup=self.sensitivity_setup,
-            point_spec=point.range_spec, lockin_xx_config=self.config.lockin_xx,
-            lockin_xy_config=self.config.lockin_xy, settle_s=self.args.settle_s,
-            record=self.point_record, harmonic=self.harmonic_control.current_harmonics,
-            overload_policy=self.harmonic_control.overload,
-            on_input_overload=lambda status: self.harmonic_control.diagnose_overload(
-                xx, xy, status, self.args.settle_s, self.point_record),
-            settling=self.harmonic_control,
-        )
+        if self.range_profile is None:
+            daily._apply_sweep_segment_ranges(
+                xx, xy, sensitivity_setup=self.sensitivity_setup,
+                point_spec=point.range_spec, lockin_xx_config=self.config.lockin_xx,
+                lockin_xy_config=self.config.lockin_xy, settle_s=self.args.settle_s,
+                record=self.point_record, harmonic=self.harmonic_control.current_harmonics,
+                overload_policy=self.harmonic_control.overload,
+                on_input_overload=lambda status: self.harmonic_control.diagnose_overload(
+                    xx, xy, status, self.args.settle_s, self.point_record),
+                settling=self.harmonic_control,
+            )
         self.harmonic_control.enter(xx, xy,
             harmonic=self.harmonic_control.initial_harmonics(target_hz),
             settle_s=self.args.settle_s, record=self.point_record)
@@ -338,6 +447,7 @@ class LockinPointSession:
         return {"lockin_excitation_v_rms": source, "lockin_frequency_hz": frequency}
 
     def qualify(self):
+        self._require_range_profile_ready()
         try:
             self.harmonic_control.enter(*self.pair,
                 harmonic=self.harmonic_control.initial_harmonics(self.target_frequency_hz),
@@ -358,7 +468,13 @@ class LockinPointSession:
             self.harmonic_control.open_transition_window(*self.pair,
                 self.point_record if self.point_record is not None else self.sensitivity_setup)
 
+    def _formal_pair_recorded(self, payload):
+        if self.range_profile is not None:
+            payload["lockin_range_rule"] = self.range_context()
+        self.event("lockin_formal_pair", payload)
+
     def sample_point(self, *, measurement_context=None):
+        self._require_range_profile_ready()
         if self.sample_count:
             daily.time.sleep(self.args.sample_interval_s)
         actual = self._read_coordinates()
@@ -374,7 +490,7 @@ class LockinPointSession:
                 frequency_rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
                 harmonic_control=self.harmonic_control,
                 measurement_context=measurement_context,
-                on_formal_sample_recorded=lambda payload: self.event("lockin_formal_pair", payload),
+                on_formal_sample_recorded=self._formal_pair_recorded,
             )
         finally:
             self.event("lockin_point_samples", record)

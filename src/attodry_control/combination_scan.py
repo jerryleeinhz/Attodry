@@ -325,6 +325,8 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 condition["axes"][module]["index"] for module in modules))
             # Index prefixes, not values: preserve duplicate points and inner resets.
             for depth, axis in enumerate(plan.axes):
+                if axis.module == "lockin" and hasattr(station, "prepare_lockin_ranges"):
+                    station.prepare_lockin_ranges(condition)
                 if previous_indices is None or indices[:depth + 2] != previous_indices[:depth + 2]:
                     point = axis.points[condition["axes"][axis.module]["index"]]
                     emit("axis_setting", {"module": axis.module, "requested": point.values})

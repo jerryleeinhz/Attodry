@@ -41,7 +41,7 @@ class ProcessGuardRemovalTests(unittest.TestCase):
         # release. Model that old filesystem, not today's acquisition additions.
         # Production's exact source-count/difference guard remains unchanged.
         historical_sources = {k: v for k, v in self.current_sources.items()
-                              if k != "lockin_settling.py"}
+                              if k not in {"lockin_settling.py", "lockin_range_rules.py"}}
         original_glob = Path.glob
         source_directory = Path(__file__).resolve().parents[1] / "src" / "attodry_control"
         def historical_glob(directory, pattern, *args, **kwargs):
@@ -147,7 +147,7 @@ class ProcessGuardRemovalTests(unittest.TestCase):
             self.assertEqual(backend.call_count, 2)
             self.assertTrue(all("recovery_owner_guard" not in call.kwargs for call in backend.call_args_list))
 
-    def test_new_timing_release_is_not_authorized_by_historical_guard_removal(self):
+    def test_new_acquisition_release_is_not_authorized_by_historical_guard_removal(self):
         old = deepcopy(self.current_sources)
         old.update({name: hashlib.sha256(("old " + name).encode()).hexdigest() for name in CHANGED})
         with self.assertRaisesRegex(ValueError, "reviewed source transition"):

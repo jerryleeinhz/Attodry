@@ -104,7 +104,57 @@ def _record_time(value, start, finish):
     return parsed
 
 
-def _validate_lockin_record(reading, snapshot, condition, start, finish):
+def _index_lockin_ranges(snapshot):
+    schedule = snapshot.get("lockin_range_rules")
+    if schedule is None:
+        return None
+    bindings = {row["condition_id"]: row for row in schedule["condition_bindings"]}
+    preview = {tuple(sorted(row["outer_indices"].items())): row for row in schedule["preview"]}
+    if len(bindings) != len(schedule["condition_bindings"]) or len(preview) != len(schedule["preview"]):
+        raise ValueError("Duplicate archived Lock-in range condition/outer visit")
+    return bindings, preview
+
+
+def _condition_lockin_range(snapshot, condition, index=None):
+    """Reproduce a compiled selection from its raw rule and exact planned visit."""
+    schedule = snapshot.get("lockin_range_rules")
+    if schedule is None:
+        return None
+    if schedule.get("contract") != "outer-condition-lockin-range-v1":
+        raise ValueError("Unknown archived Lock-in range rule contract")
+    modules = [axis["module"] for axis in snapshot["axes"]]
+    outer = modules[:modules.index("lockin")]
+    if schedule.get("outer_modules") != outer or not outer:
+        raise ValueError("Archived Lock-in range outer axes differ from the plan")
+    indices = {module: condition["axes"][module]["index"] for module in outer}
+    coordinates = {key: value for axis in snapshot["axes"] if axis["module"] in outer
+                   for key, value in axis["points"][indices[axis["module"]]]["values"].items()}
+    matches = [rule for rule in schedule["rules"]
+               if all(key in coordinates and coordinates[key] in values
+                      for key, values in rule.get("match", {}).items())
+               and all(module in indices and indices[module] in values
+                       for module, values in rule.get("point_indices", {}).items())]
+    if len(matches) != 1:
+        raise ValueError("Archived condition does not match exactly one Lock-in range rule")
+    rule = matches[0]
+    ranges = {role: rule[role + "_full_scale_v"] for role in ("lockin_xx", "lockin_xy")}
+    if any(not _finite(value) or value <= 0 for value in ranges.values()):
+        raise ValueError("Archived Lock-in range rule has an invalid full scale")
+    bindings, previews = _index_lockin_ranges(snapshot) if index is None else index
+    binding = bindings.get(condition["condition_id"])
+    preview = previews.get(tuple(sorted(indices.items())))
+    if (binding is None or preview is None
+            or binding["repeat_index"] != condition["repeat_index"]
+            or binding["requested"] != condition["requested"]
+            or binding["outer_indices"] != indices
+            or preview["requested"] != coordinates
+            or any(row["rule_name"] != rule["name"] or row["full_scales_v"] != ranges
+                   for row in (binding, preview))):
+        raise ValueError("Archived Lock-in range bindings differ from the raw rule/condition")
+    return {"rule_name": rule["name"], "full_scales_v": ranges}
+
+
+def _validate_lockin_record(reading, snapshot, condition, start, finish, range_index=None):
     """Check archived formal pairs rather than trusting an accepted/clean label."""
     from .lockin_overload import OverloadPolicy
     from .lockin_model_settings import sensitivity_full_scale_for, time_constant_seconds_for
@@ -115,6 +165,15 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish):
     if set(selections) != {"lockin_xx", "lockin_xy"}:
         raise ValueError("formal Lock-in role contract is missing")
     status = reading["status"]
+    selection = _condition_lockin_range(snapshot, condition, range_index)
+    if selection is not None:
+        context = status.get("lockin_range_rule", {})
+        if (context.get("verified") is not True or context.get("rule_name") != selection["rule_name"]
+                or context.get("requested_full_scales_v") != selection["full_scales_v"]
+                or context.get("confirmed_full_scales_v") != selection["full_scales_v"]):
+            raise ValueError("Formal Lock-in range context differs from its compiled condition")
+    elif "lockin_range_rule" in status:
+        raise ValueError("Formal Lock-in range context has no archived rule schedule")
     requested_hz = condition["requested"]["lockin_frequency_hz"]
     skipped = config.get("skipped_harmonics_by_frequency", {}).get(str(requested_hz), [])
     skipped_keys = {(item.get("role"), item["harmonic"]) for item in skipped}
@@ -125,6 +184,12 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish):
     actual_pairs = set()
     measured = {}
     for pair in status["samples"]:
+        if selection is not None:
+            context = pair.get("lockin_range_rule", {})
+            if (context.get("verified") is not True or context.get("rule_name") != selection["rule_name"]
+                    or context.get("requested_full_scales_v") != selection["full_scales_v"]
+                    or context.get("confirmed_full_scales_v") != selection["full_scales_v"]):
+                raise ValueError("Formal Lock-in pair range context differs from its compiled condition")
         harmonic = pair["harmonic"]
         selected = tuple("lockin_" + role for role in pair["selected_roles"])
         if (pair.get("sampling_policy") != "independent_roles" or pair.get("sample_index") != 0
@@ -186,6 +251,9 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish):
                 raise ValueError("formal Lock-in setting codes do not reproduce physical readbacks")
             if before[role].get("time_constant_s") != role_config["time_constant_s"]:
                 raise ValueError("formal Lock-in time constant differs from its archived configuration")
+            if (selection is not None and before[role]["sensitivity_full_scale_v"]
+                    != selection["full_scales_v"][role]):
+                raise ValueError("formal Lock-in sensitivity differs from its compiled range rule")
             if (before[role].get("model", "SR830") == "SR830"
                     and before[role].get("reserve_code") not in {0, 1, 2}):
                 raise ValueError("formal Lock-in Reserve readback is unknown")
@@ -208,6 +276,8 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish):
                 point_scale = status.get("range_spec", {}).get(role.removeprefix("lockin_") + "_full_scale_v")
                 if setting is None and point_scale is not None:
                     configured = point_scale
+                if selection is not None:
+                    configured = selection["full_scales_v"][role]
                 if scale != configured:
                     raise ValueError("formal Lock-in sensitivity differs from its archived fixed setting")
             if model == "SR830":
@@ -318,6 +388,7 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
         "SELECT * FROM combination_attempt_executions WHERE run_id=?", (run_id,))}
         if _has_table(connection, "combination_attempt_executions") else {})
     accepted_count = sample_count = 0
+    range_indexes = {}
     for attempt in connection.execute("SELECT a.*,c.context_json FROM combination_attempts a "
         "JOIN combination_conditions c ON c.run_id=a.run_id AND c.condition_id=a.condition_id "
         "WHERE a.run_id=? AND a.status='accepted' ORDER BY c.sequence_index", (run_id,)):
@@ -326,6 +397,8 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
         if configurations and execution_id not in configurations:
             raise ValueError("Accepted condition has no archived execution configuration")
         snapshot = configurations.get(execution_id, original)
+        if execution_id not in range_indexes:
+            range_indexes[execution_id] = _index_lockin_ranges(snapshot)
         modules = [a["module"] for a in snapshot["axes"]]
         rows = connection.execute("SELECT sample_index,payload_json FROM combination_samples "
             "WHERE run_id=? AND condition_id=? AND attempt_index=? ORDER BY sample_index",
@@ -363,7 +436,8 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
                     if set(reading["actual"]) != expected_actual:
                         raise ValueError("module actual coordinate ownership differs from the plan")
                     if module == "lockin":
-                        _validate_lockin_record(reading, snapshot, condition, start, finish)
+                        _validate_lockin_record(reading, snapshot, condition, start, finish,
+                                                range_indexes[execution_id])
                     elif module in {"temperature", "magnetic"}:
                         _validate_environment_record(reading, module, snapshot, start, finish)
                     elif module == "smu":
@@ -860,6 +934,23 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
                     (run_id, item["execution_id"]),
                 ).fetchone()[0]
                 executions.append(item)
+        range_event = connection.execute(
+            "SELECT event_type,created_at_utc,payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type IN ('lockin_range_selected','lockin_range_rule_apply_started',"
+            "'lockin_range_rule_failed','lockin_range_rule_applied') "
+            "ORDER BY event_id DESC LIMIT 1", (run_id,)).fetchone()
+        last_range = ({"event_type": range_event["event_type"],
+                       "captured_at_utc": range_event["created_at_utc"],
+                       **json.loads(range_event["payload_json"])} if range_event else None)
+        if (last_range is not None and executions
+                and last_range["captured_at_utc"] < executions[-1]["created_at_utc"]):
+            last_range = None
+        if last_range is not None:
+            cleanup_started = connection.execute(
+                "SELECT 1 FROM combination_events WHERE run_id=? AND event_type='cleanup_started' "
+                "AND created_at_utc>=? AND json_extract(payload_json,'$.module')='lockin' LIMIT 1",
+                (run_id, last_range["captured_at_utc"])).fetchone()
+            last_range["superseded_by_cleanup"] = cleanup_started is not None
         return {
             "run_id": run_id, "status": row["status"],
             "accepted_conditions": accepted, "total_conditions": total,
@@ -867,6 +958,7 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "cleanup": json.loads(row["cleanup_json"]) if row["cleanup_json"] else None,
             "error": row["error"], "process_liveness": "unknown",
             "last_recorded_readings": last_confirmed,
+            **({"last_recorded_lockin_ranges": last_range} if range_event else {}),
             "last_event": {**dict(event), "payload": json.loads(event["payload_json"])}
                 if event else None,
             "executions": executions,

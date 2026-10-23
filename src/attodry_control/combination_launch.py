@@ -128,4 +128,6 @@ def launch_summary(config, database, run_id):
                 "harmonic_settings": [asdict(s) for s in device.harmonic_settings]}
                 for role, device in (("lockin_xx", config.lockin.lockin_xx),
                                      ("lockin_xy", config.lockin.lockin_xy))}}
+    if "lockin_range_rules" in config.snapshot:
+        summary["lockin_range_rules"] = config.snapshot["lockin_range_rules"]
     return summary
