@@ -1,5 +1,21 @@
 # 冷台位移台与焦面跟随工作包
 
+## 2026-10-24 Station deployment and repository reconciliation
+
+The SDK-arrival/output-OFF policy from a1fcd65 was deployed with file backups,
+hash verification, the complete station lease pool and an idle-station gate.
+The target shadow tree passed 194 hardware/network-blocked regressions; the
+installed configuration passed offline parsing. This did not start a scan or
+establish current instrument position/output state.
+
+Station-only operation records, private configuration and notebook execution
+outputs are retained in the ignored reconciliation backup. Published notebooks
+retain their source edits with execution outputs removed. Repository alignment
+preserves the deployed acquisition source and private parameter files.
+
+Reconciliation validation: 303 related offline regressions passed with real
+instrument and network access blocked; notebook code cells passed syntax checks.
+
 ## 当前实现与使用方法（2026-10-24；到位策略为本地离线更新）
 
 已实现 ANC350 RES v4 的窄接口、XYZ 绝对/相对点序列、XY 网格、多点焦面拟合和

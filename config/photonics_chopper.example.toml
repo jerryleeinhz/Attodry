@@ -16,6 +16,10 @@ reference_topology = "internal_xx_xy"
 lockin_mode = "excitation" # excitation | frequency | frequency_excitation
 order = ["optical", "lockin"] # 外层->内层；可补齐SMU/环境配置再加入对应轴
 illumination_policy = "off_before_axis_change" # off_before_axis_change | continuous_gate_scan
+unreachable_target_policy = "abort" # abort | skip_wavelength（仅NKT电流反馈、每波长一个目标、固定4mV且所有SINE OUT断开）
+# skip_wavelength仅跳过初始调功时已确认的最大电流/功率不足；新鲜关光/锁相/SMU守卫须全部通过。
+# 顺序须optical->lockin或optical->smu->lockin；只支持off_before_axis_change。
+# 通信/失锁/过载/超流/身份/设置/审计异常、正式窗口故障仍停止，不属于可跳过的目标不可达。
 # continuous_gate_scan仅 ["optical","smu","lockin"] + 单一激励 + voltage gate；
 # 每active gate须有ramp或明确zero_readback_tolerance_v，不能只改order。
 samples_per_condition = 3 # 1..1000；Combination拥有正式样本数

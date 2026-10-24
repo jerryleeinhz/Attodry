@@ -966,3 +966,26 @@ SR865A 的 `CUROVLDSTAT?` 已确认可读；SR830 未消费状态锁存，NKT �
 会改变量程的计划不能使用 `once_before_scan` 暗背景，需采用 `per_condition`；
 原有背景限制继续有效。完整用法与离线预览见
 [按外层扫描点设置锁相量程](LOCKIN_RANGE_RULES.md)。
+
+## 不可达波长的显式跳过（2026-10-18）
+
+在 `[combination_scan]` 设置 `unreachable_target_policy = "skip_wavelength"`；
+省略或 `"abort"` 保持原来中断行为。当前仅支持外层optical、内层lockin或smu→lockin，
+NKT电流反馈、每个不同波长仅一个光学目标、固定4mV仪器激励设置、全部SINE OUT
+与样品断开、`illumination_policy="off_before_axis_change"`。不适用于PEM、CLD、
+温场轴、连续照光模式或多激励/多目标重复波长。
+
+只有正式光照采样之前的初始调功，在有效光信号、完整新鲜功率/设备检查后，
+达到已配置最大电流仍低于目标正式容差下限，才产生可跳过的结构化结果。随后
+先确认激光OFF，重新核验光学设置、所有锁相参考/状态和实际SMU V/I/状态/限流，
+全部通过才跳过该波长剩余gate条件，下一波长重新应用全部轴。任何额外状态问题、
+超时/低信号/硬功率/超流/通信/审计异常仍走原失败清理。正式窗/恢复中的异常不跳过。
+无需为“目标不可达”扩大电流或功率限值；失败/未知的SMU不会自动ON以取证。
+
+跳过的attempt保持rejected，原始功率、dark和失败原因保留；追加
+`combination_skipped_conditions`及`condition_skipped`/`wavelength_skipped`事件，
+默认分析不将其当作光照数据。monitor显示Accepted和Skipped分别计数；completed
+表示所有条件已测量或有明确跳过记录且最终清理通过，不代表所有计划点都有数据。
+全部跳过时Accepted=0，仍明确显示跳过数。重复扫描重新判定，不继承之前的跳过。
+旧数据库只读monitor没有新表时Skipped=0；旧数据及状态原样保留。
+该策略不支持断点恢复；需新run重新测量时，重新判定每个波长。

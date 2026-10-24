@@ -1,3 +1,4 @@
+# 用户同步主配置：仅新增已用过的XX20uV/XY50uV固定档，其余原策略保持。
 schema_version = 2
 
 # Project safety policy for SR830 sweeps.  The code also keeps non-editable
@@ -9,7 +10,7 @@ target_occupancy = 0.85
 stable_samples_before_narrowing = 2
 
 [lockin_xx]
-allowed_fixed_full_scales_v = [0.001, 0.010, 0.020, 0.050, 1.0]
+allowed_fixed_full_scales_v = [2e-05, 0.001, 0.01, 0.02, 0.05, 1.0] 
 autorange_ladders_v = [
   [0.010, 0.020],
   [0.020, 0.050],
@@ -18,7 +19,7 @@ autorange_ladders_v = [
 
 [lockin_xy]
 # Explicit candidate harmonic ranges; these do not enable automatic ranging.
-allowed_fixed_full_scales_v = [0.001, 0.002, 0.010, 0.020, 0.050, 0.100]
+allowed_fixed_full_scales_v = [5e-05, 0.001, 0.002, 0.01, 0.02, 0.05, 0.1] 
 autorange_ladders_v = [
   [0.001, 0.010],
   # Explicit optional H2 ladder (Normal Reserve is configured separately).

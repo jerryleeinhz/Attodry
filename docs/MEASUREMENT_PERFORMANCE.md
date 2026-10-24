@@ -1,5 +1,21 @@
 # 测量速度：本分支的优化边界与验收
 
+## 2026-10-24 Station deployment and repository reconciliation
+
+The SDK-arrival/output-OFF policy from a1fcd65 was deployed with file backups,
+hash verification, the complete station lease pool and an idle-station gate.
+The target shadow tree passed 194 hardware/network-blocked regressions; the
+installed configuration passed offline parsing. This did not start a scan or
+establish current instrument position/output state.
+
+Station-only operation records, private configuration and notebook execution
+outputs are retained in the ignored reconciliation backup. Published notebooks
+retain their source edits with execution outputs removed. Repository alignment
+preserves the deployed acquisition source and private parameter files.
+
+Reconciliation validation: 303 related offline regressions passed with real
+instrument and network access blocked; notebook code cells passed syntax checks.
+
 ## 2026-10-24 Positioner 到位后输出 OFF 成本（本地离线）
 
 显式 arrival_policy="target_reached_output_off" 的 manual XYZ 每个新目标轴沿用

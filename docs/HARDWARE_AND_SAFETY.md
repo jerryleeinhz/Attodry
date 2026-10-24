@@ -1,5 +1,21 @@
 # Hardware and safety guide
 
+## 2026-10-24 Station deployment and repository reconciliation
+
+The SDK-arrival/output-OFF policy from a1fcd65 was deployed with file backups,
+hash verification, the complete station lease pool and an idle-station gate.
+The target shadow tree passed 194 hardware/network-blocked regressions; the
+installed configuration passed offline parsing. This did not start a scan or
+establish current instrument position/output state.
+
+Station-only operation records, private configuration and notebook execution
+outputs are retained in the ignored reconciliation backup. Published notebooks
+retain their source edits with execution outputs removed. Repository alignment
+preserves the deployed acquisition source and private parameter files.
+
+Reconciliation validation: 303 related offline regressions passed with real
+instrument and network access blocked; notebook code cells passed syntax checks.
+
 ## 2026-10-24 Positioner SDK 到位后输出 OFF（本地离线）
 
 操作者明确选择到位后关闭输出：在 [positioner] 显式设置

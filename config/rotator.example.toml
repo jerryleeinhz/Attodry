@@ -1,0 +1,39 @@
+# Optical waveplate add-on. Merge these tables into an existing validated
+# photonics.local.toml; do not run this fragment as a complete experiment.
+# In the EXISTING [combination_scan] table select:
+# order = ["rotator", "optical", "lockin"]
+# illumination_policy = "off_before_axis_change"
+# unreachable_target_policy = "abort"
+# Optional gate variant: ["rotator", "optical", "smu", "lockin"].
+# If optical backgrounds are enabled, use capture_mode="per_condition".
+# This file does not authorize new hardware connections or rotation.
+
+[rotator_1]
+enabled = true
+label = "λ/2波片／入射偏振"
+controller = "KDC101"
+stage_model = "PRM1/MZ8"
+serial_number = "CHANGE_ME_KDC101_SERIAL" # Explicit 8 digits, starts with 27.
+min_angle_deg = 0.0
+max_angle_deg = 360.0
+home_policy = "if_needed" # if_needed | always | require_homed
+position_tolerance_deg = 0.1 # Experiment acceptance, not factory accuracy.
+settle_s = 0.5 # Continuous stationary/in-tolerance time after actual motion.
+poll_interval_s = 0.1
+move_timeout_s = 60.0 # Includes reaching the angle and settling.
+home_timeout_s = 120.0
+# dll_directory = 'C:\Program Files\Thorlabs\Kinesis'
+# optical_zero_deg = 0.0 # OMIT until physically calibrated; Home is mechanical.
+
+[rotator_2]
+enabled = false
+label = "备用波片"
+# No second serial, DLL session, movement or scan coordinate while disabled.
+# To enable: provide its distinct serial and settings, plus its own grid below.
+
+[rotator_scan]
+# Example mechanical angles, not an authorized experimental scan.
+rotator_1_angles_deg = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0, 360.0]
+# Choose explicit points OR inclusive ranges for each enabled role:
+# rotator_1_ranges = [{min=0.0,max=360.0,scale="linear",step=15.0}]
+# rotator_2_angles_deg = [0.0] # Only add after enabling rotator_2.

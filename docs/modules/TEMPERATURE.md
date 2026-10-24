@@ -1,5 +1,9 @@
 # Temperature module work package
 
+温度组合扫描配置、默认值和可选值见 [温度选项](../TEMPERATURE_COMBINATION_OPTIONS.md)。
+[combination_scan].temperature_deviation_policy 为 abort（默认）或 record_continue；后者仅允许
+完整资格后的质量偏差继续，硬件/通信/未知/控制与目标变化仍中止。
+
 ## 当前状态
 
 2026-09-22 安全顺序更新：新的 `set_temperature_and_enable(target_k)` 先写入并

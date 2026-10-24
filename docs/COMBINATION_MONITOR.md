@@ -78,3 +78,76 @@ Last database event: ... UTC | Age: ...
 本地 404 条件的合成 SQLite 对照：40 次快照的中位耗时从约 1.60 ms 到 6.07 ms。
 这是该离线样例的监控开销，不是实机测量耗时保证。硬件阻断回归同时验证阶段
 事件不改变 fake 仪器 query/write 列表、既有等待时间，以及故障后的独立清理。
+
+## 当前温度／磁场读回与判稳进度（2026-10-20）
+
+温场读回来自固定 run 的最新 `cryostat_state`，与“最后正式测量”分区。
+归属使用重复轮次、截至本轴的索引前缀和轴入口记录，并核对 condition、attempt、
+采集／落库 UTC。前一访问、预检、命令确认前读回、恢复／清理、非法／未来时间、
+缺失／损坏记录显示 unavailable，不用旧正式样本填充。相同数值的重复访问仍是
+不同点；同一温度访问下的不同内层功率条件可提供读回，但展示真实来源条件。
+
+目标、判稳模式、容差、窗口及超时上限取该 run 的归档计划。不会重读后来修改的
+TOML。按用户要求不显示 Temperature error 或 Field error 行；原始数据和安全判据保留。
+
+示意输出，以下数值不是当前实验读数：
+
+```text
+Temperature point: 2/25 | Fully completed in scope: 1/25
+Current phase (last recorded): temperature -> Axis qualification
+
+Latest environment readback (stored; not a live query):
+Latest temperature: 4.167320 K
+Target temperature: 4.200000 K (archived plan)
+Captured UTC: 2026-10-20T10:20:00+00:00 | Age: 00:00:02
+Source condition: condition-000004 | Attempt: 0
+Qualification elapsed: 00:06:21 (wall-clock estimate)
+Acceptance mode: target
+Target tolerance: +/-0.100000 K
+Stable range limit: 0.050000 K
+Stable window accumulated: unknown / required 00:02:00
+Qualification timeout limit: 01:00:00
+Qualification timeout remaining: unknown
+Automatic continuation: enabled
+Time to optical activation: unknown
+The display does not establish a pause or a safe optical-alignment window.
+After qualification the program continues automatically; process liveness is not established by these records.
+
+Last formal measurement (accepted; stored, not live):
+Condition: condition-000003 | Attempt: 0 | Sample: 3/3 | Status: accepted
+Formal sample finished UTC: ...
+Module  | Captured UTC | Readback | Clean
+optical | ...          | ...      | ...
+lockin  | ...          | ...      | ...
+```
+
+温度的 Qualification elapsed 是匹配判稳起点至本次显示的 UTC 观察估计。
+采集器运行时的单调时钟耗时、连续稳定累计尚未逐次归档，因此准确累计及超时剩余
+显示 unknown；不能用 UTC 估计伪造控制器倒计时。旧记录不会因 Age 增长产生新温度。
+
+磁场以分量和模长显示最新值与归档目标；有证据时另列 Commanded waypoint。
+实际转场／到场／等待位于 axis_apply 内，保留该真实阶段，不冒称 Axis qualification。
+已有 `magnetic_point_event/field_sample` 匹配当前读回时，可补充：
+
+```text
+Current phase (last recorded): magnetic -> Applying axis target
+Latest field: Bx=+0.099600 T | Bz=+0.000100 T | |B|=0.099600 T
+Target field: Bx=+0.100000 T | Bz=+0.000000 T | |B|=0.100000 T (archived plan)
+Field subphase: field_stability (recorded)
+Sub-wait elapsed at capture: 00:00:18
+Sub-wait timeout remaining at capture: 00:29:42
+Sub-wait captured UTC: ...
+```
+
+子等待按本访问、condition／attempt、阶段及 waypoint 区分；到场、ACK、
+中间点和最终点的耗时不能串用。剩余时间属于最后记录时的该次稳定等待，
+不是整点剩余时间或进入 optics 的时间。稳定窗口证据不足仍显示 unknown。
+
+active 温场应用／判稳阶段，英文文本在记录变化时更新，没有新记录时每5秒
+刷新 Age／观察耗时。`--json` 保留稳定的证据快照，只在证据变化时输出。
+终态覆盖活动文案：Automatic continuation disabled (terminal)，不继续累加判稳时间。
+长时间没有新记录不单独证明进程退出、控制关闭或磁场为零。
+
+正式区域从 accepted attempt 的正式样本投影必要值，保留 condition、attempt、
+sample 及各模块采集时间。当前 rejected／partial／raw 候选不能覆盖它。
+没有 accepted 正式样本时明确显示 Unavailable；不再把最近四条 raw 事件当正式结果。
