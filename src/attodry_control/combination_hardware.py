@@ -685,7 +685,8 @@ class HardwareCombinationStation:
             finally:
                 self._positioner_motion_active = False
             self._positioner_context = {key: result[key] for key in
-                ("coordinate_frame", "mode", "z_mode", "focus_plane_id", "origin", "target")}
+                ("coordinate_frame", "mode", "z_mode", "focus_plane_id", "origin", "target",
+                 "arrival_policy", "arrival_evidence") if key in result}
             if self.background is not None:
                 self.background.invalidate("positioner visit changed")
             if result.get("changed"):

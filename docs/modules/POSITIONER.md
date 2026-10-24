@@ -1,6 +1,6 @@
 # 冷台位移台与焦面跟随工作包
 
-## 当前实现与使用方法（2026-10-24；启动 OFF 为本地离线更新）
+## 当前实现与使用方法（2026-10-24；到位策略为本地离线更新）
 
 已实现 ANC350 RES v4 的窄接口、XYZ 绝对/相对点序列、XY 网格、多点焦面拟合和
 逐轴 Z 跟随策略，并接入 Combination、位置证据及分析上下文。以下为生产配置
@@ -8,6 +8,32 @@
 部署/真实运行状态以 PROJECT_HANDOFF 当前阶段为准；本次启动 OFF 仅本地修改，
 未部署到当前 LK_setup 扫描，不代表完成该阶段实机验收。原用户确认
 的 X/Y/Z 映射与当前预设/LUT 基准保持，程序不自动修复预设或 LUT。
+
+### 2026-10-24 Positioner SDK 到位后输出 OFF（本地离线）
+
+操作者明确选择到位后关闭输出：在 [positioner] 显式设置
+arrival_policy="target_reached_output_off"（仅 manual XYZ），每个新目标轴先保持关光，
+按原幅频/范围准备并发一次目标；首次读取 SDK target_reached=true 后锁定该次证据，
+正常关闭 auto，再设置输出 OFF 并读取完整 XYZ 确认三轴 OFF，才进入光学/锁相采集。
+不再用之后的 moving、目标误差、target 位回落或连续稳定窗口否决本次已到位目标；
+实际位置继续原样归档，不替换成计划坐标，也不认证到位后持续精度或保持能力。
+
+只在目标变化时重新运动；首点为三轴分别取得真实 SDK 到位及 OFF 证据，同位置不同
+功率不因传感器噪声重新追目标。每次只使当前自有轴 ON，其余轴须 OFF。正常 hold
+保留最后点且输出 OFF；显式 return_start 按相同策略返回并确认 OFF。故障独立执行
+尚未尝试的自有 normal-stop/OFF 各一次；不重放结果不确定的命令，所有原始错误、
+审计和 manual/unknown 保留，不能把最终读回 OFF 冒充整次成功。
+
+身份/有限性/安装行程/单步硬界、传感器/EOT、幅频漂移、未知/通信、审计、光 OFF/
+外层环境守卫和共享截止时间仍严格失败。启动时 OFF 后完整稳定原点及全部路径校验
+仍保留，settle_s 不再用于该策略的目标到位后判稳（原点仍用 settle_s）。
+旧配置缺省 arrival_policy="stable_hold"，保持原 moving=false、目标误差/全窗稳定、
+焦面及保持输出规则；新策略不用于 focus_plane，历史失败和证据不重解释。
+正式位置状态及背景/功率参考上下文保存 arrival_policy 和逐轴到位/OFF 证据；
+分析匹配区分新旧策略，缺失字段按历史 stable_hold 解释，不混用资格。
+本次仅本地代码与离线验收，未部署、连接或重启 LK_setup。
+
+离线验收：精确待提交候选树194项相关回归通过（44.312 s），覆盖实际驱动/fake SDK、会话、配置、光学/锁相组合、焦面、归档/分析/绘图与硬件编排。仪器 DLL 加载被阻断，未部署、连接或重启 LK_setup。
 
 ### 启动时直接设置输出 OFF（2026-10-24；本地离线）
 
@@ -80,22 +106,23 @@ python -m attodry_control.combination_cli describe-hardware --config config/posi
 | `axes.x/y/z.index` | 固定 `0/1/2`，对应 Daisy Axis 1/2/3 |
 | 各轴 `min_position_um/max_position_um` | 安装允许范围，包含起点、每个终点和中间路径 |
 | 各轴 `max_move_um` | 一次逐轴运动上限；超限拒绝，不自动拆步绕过 |
-| 各轴 `position_tolerance_um` | 实际位置的到位误差和稳定窗口范围要求 |
+| 各轴 `position_tolerance_um` | SDK target range；stable_hold 另用于目标误差/稳定窗口；新策略到位后不再比较 |
 | 各轴 `expected_actuator_name/expected_lut_name` | 当前精确预设/LUT 读回，名称不能替代机械铭牌认证 |
 | 各轴 `amplitude_v/frequency_hz` | 本次启动的期望幅频；完整原点/路径合格且三轴 OFF/静止后仅设置差异项并读回，之后严格监测 |
 | `move_order` | 显式排列 `x/y/z` 各一次；需要操作者按间隙确认 |
 | `settle_s/poll_interval_s/move_timeout_s` | 全窗稳定/轮询/共享超时，须 `0<poll<=settle<timeout` |
-| `finish` | `hold` 保持最后点；`return_start` 明确返回冻结起点并检查返回路径 |
+| `arrival_policy` | 缺省 stable_hold；manual XYZ 可显式 target_reached_output_off，锁定 SDK 到位后关闭输出并保留读回 |
+| `finish` | hold 留在最后点；return_start 明确返回冻结起点；输出保持还是关闭取决于 arrival_policy |
 | `external_light_off_confirmed` | 无受控 optical 时的外部光路 OFF 声明；有 optical 时仍使用实时 OFF 守卫 |
 
 开启闭环运动时，驱动显式设置 target-ground=false、SDK target range 为配置的位置
 容差（μm 转米），并启用输出及自动移动能力。target-ground/range 没有对应 getter，
-仅记录写入 ACK，不宣称读回认证；实际运动独立检查完整 XYZ 和状态。尤其当前
-GUI Z 的 target range 曾为 0，不能将 `target_reached` 单一布尔当作到位判据。
+仅记录写入 ACK，不宣称读回认证；实际运动独立检查完整 XYZ 和状态。stable_hold 不使用单一 target 位代替位置判稳。新策略每次先设置正的 TOML target range，
+显式按 SDK 到位位锁定，再关输出并核验 OFF，不证明后续持续位置精度。
 幅频仅在上述一次启动阶段设置；不执行 Home、清零、选择执行器、加载 LUT、flash 保存或步进命令。
 
 新代码先在正式 begin 一次关闭旧 auto/保持输出，再要求三轴 OFF/静止及完整原点判稳。
-全路径和幅频初始化通过后，在每轴 OFF 时先将新鲜实际位置写成初始 target，再设置
+默认 stable_hold 在全路径和幅频初始化通过后，在每轴 OFF 时先将新鲜实际位置写成初始 target，再设置
 ground/range、开启输出并完整复验原点，避免追逐旧目标。target 没有 getter，只记录
 命令及 ACK；独立实际位置核验不等于目标寄存器读回。正常 hold 保留输出，下一轮由
 新代码启动阶段释放；旧部署仍遵守原人工 OFF 准入。
@@ -387,7 +414,8 @@ z_offset 默认 0，用于显式整体离焦；起始实际 Z 不会被隐式转
 障碍物模型。若需要安全避让高度，必须显式配置并核验沿途范围，不猜测正 Z
 方向或默认“先升后横移”。
 
-到位要求新鲜、有限、无故障的 XYZ 位置和设备状态；设备支持的运动完成状态、
+以下完整判稳说明适用于默认 stable_hold；显式 target_reached_output_off 采用本文开头的新契约。
+默认到位要求新鲜、有限、无故障的 XYZ 位置和设备状态；设备支持的运动完成状态、
 各轴目标误差、连续稳定窗口和焦面误差同时满足：
 
 ```text

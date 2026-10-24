@@ -81,6 +81,7 @@ class PositionerConfig:
     external_light_off_confirmed: bool
     focus_plane: FocusPlane | None = None
     focus_tolerance_um: float | None = None
+    arrival_policy: str = "stable_hold"
 
     @property
     def active_keys(self):
@@ -102,6 +103,10 @@ class PositionerConfig:
             raise PositionerError("positioner.external_light_off_confirmed must be boolean")
         if self.mode not in ("absolute", "relative") or self.z_mode not in ("manual", "focus_plane"):
             raise PositionerError("positioner mode must be absolute/relative and z_mode manual/focus_plane")
+        if self.arrival_policy not in ("stable_hold", "target_reached_output_off"):
+            raise PositionerError("positioner.arrival_policy must be stable_hold or target_reached_output_off")
+        if self.arrival_policy == "target_reached_output_off" and self.z_mode != "manual":
+            raise PositionerError("target_reached_output_off currently requires manual XYZ; focus-plane qualification remains separate")
         if self.finish not in ("hold", "return_start"):
             raise PositionerError("positioner.finish must be hold or return_start")
         if len(self.axes) != 3 or tuple(axis.role for axis in self.axes) != ROLES:
@@ -200,6 +205,7 @@ class PositionerConfig:
                 "move_order": list(self.move_order), "settle_s": self.settle_s,
                 "poll_interval_s": self.poll_interval_s, "move_timeout_s": self.move_timeout_s,
                 "finish": self.finish, "external_light_off_confirmed": self.external_light_off_confirmed,
+                "arrival_policy": self.arrival_policy,
                 "focus_tolerance_um": self.focus_tolerance_um,
                 "focus_plane": self.focus_plane.snapshot() if self.focus_plane else None,
                 "units": "micrometres; SDK indices x=0,y=1,z=2",
@@ -266,7 +272,7 @@ def load_positioner_config(document):
     required = {"controller_serial_number", "expected_firmware_raw", "dll_path", "dll_sha256", "coordinate_frame",
                 "coordinate_frame_confirmed", "axes", "scan", "z_mode", "move_order", "settle_s",
                 "poll_interval_s", "move_timeout_s", "finish", "external_light_off_confirmed"}
-    optional = {"enabled", "focus_plane", "focus_tolerance_um"}
+    optional = {"enabled", "focus_plane", "focus_tolerance_um", "arrival_policy"}
     _keys(table, "positioner", set(), required | optional)
     enabled = table.get("enabled", False)
     if type(enabled) is not bool:
@@ -298,6 +304,6 @@ def load_positioner_config(document):
           z_mode=z_mode, points=_scan_points(scan, scan["mode"], z_mode, plane), move_order=tuple(table["move_order"]),
           settle_s=table["settle_s"], poll_interval_s=table["poll_interval_s"], move_timeout_s=table["move_timeout_s"],
           finish=table["finish"], external_light_off_confirmed=table["external_light_off_confirmed"], focus_plane=plane,
-          focus_tolerance_um=table.get("focus_tolerance_um"))
+          focus_tolerance_um=table.get("focus_tolerance_um"), arrival_policy=table.get("arrival_policy", "stable_hold"))
     config.validate()
     return config

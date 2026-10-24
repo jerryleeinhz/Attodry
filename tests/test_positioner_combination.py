@@ -77,6 +77,21 @@ class FakePositioner:
         self.owner.position_log.append(("stop", role))
         self.moving = False
 
+    def complete_target_if_reached(self, role, *, guard, checkpoint=None):
+        guard()
+        if checkpoint is not None:
+            checkpoint()
+        self.owner.assertEqual(self.owner.backend.source["emission_state"], 0)
+        from attodry_control.combination_store import utc_now
+        arrival = self.read_state()
+        arrival["axes"][role]["target_reached"] = True
+        arrival["axes"][role]["moving"] = True
+        self.enabled[role] = False
+        self.owner.position_log.append(("target_output_off", role))
+        return {"reached": True, "arrival_state": arrival,
+                "arrival_captured_at_utc": utc_now(), "state": self.read_state(),
+                "captured_at_utc": utc_now()}
+
     def close(self):
         self.closed = True
 
@@ -119,6 +134,51 @@ class PositionerCombinationTests(unittest.TestCase):
         self.assertEqual(len(darks), 2)
         self.assertEqual([d["context"]["positioner"]["target"]["positioner_x_um"] for d in darks], [0, 10])
         self.assertTrue(self.motor.closed)
+        self.assert_closed_laser_off()
+
+    def test_target_output_off_policy_archives_real_actual_and_arrival_proof(self):
+        self.document["positioner"]["arrival_policy"] = "target_reached_output_off"
+        self.document["optical_background"] = dict(enabled=True, samples=2, max_age_s=86400)
+        self.write_document()
+        original = HardwareCombinationStation.read
+        def noisy(station, module):
+            result = original(station, module)
+            if module == "lockin":
+                self.motor.position["z"] += 1.  # No target-error rejection after SDK arrival.
+                self.motor.moving = True
+            return result
+        with patch.object(HardwareCombinationStation, "read", noisy):
+            result = self.execute(positioner_device_factory=self.motor_factory)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["cleanup"]["clean"], result)
+        samples = self.samples()
+        self.assertEqual(len(samples), 4)
+        for sample in samples:
+            status = next(r for r in sample["reads"] if r["module"] == "positioner")["status"]["positioner"]
+            self.assertEqual(status["arrival_policy"], "target_reached_output_off")
+            self.assertEqual(set(status["arrival_evidence"]), set("xyz"))
+            self.assertTrue(all(not row["output_enabled"] for row in status["readback"]["axes"].values()))
+        self.assertGreater(samples[-1]["actual"]["positioner_z_um"], 0.)
+        darks = [p for n, p in self.events() if n == "optical_dark_background"]
+        self.assertTrue(all(p["context"]["positioner"]["arrival_policy"] == "target_reached_output_off" for p in darks))
+        self.assertFalse(any(self.motor.enabled.values()))
+        self.assert_closed_laser_off()
+
+    def test_output_on_after_lockin_rejects_raw_reading_with_new_policy(self):
+        self.document["positioner"]["arrival_policy"] = "target_reached_output_off"
+        self.write_document()
+        original = HardwareCombinationStation.read
+        def output_on(station, module):
+            result = original(station, module)
+            if module == "lockin":
+                self.motor.enabled["x"] = True
+            return result
+        with patch.object(HardwareCombinationStation, "read", output_on):
+            result = self.execute(positioner_device_factory=self.motor_factory)
+        self.assertEqual(result["status"], "failed", result)
+        self.assertIn("OFF", result["error"])
+        self.assertEqual(load_combination_rows(self.database), ())
+        self.assertTrue(any(n == "raw_reading" for n, _ in self.events()))
         self.assert_closed_laser_off()
 
     def test_held_outputs_are_released_once_with_light_off_before_new_origin(self):

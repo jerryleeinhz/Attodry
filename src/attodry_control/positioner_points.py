@@ -38,6 +38,16 @@ class PositionerPointSession:
         self._motion_errors, self._audit_errors = [], []
         self._close_errors = []
         self._unknown = False
+        self._arrival_evidence = {}
+
+    @property
+    def _target_off(self):
+        return self.config.arrival_policy == "target_reached_output_off"
+
+    @staticmethod
+    def _require_outputs_off(state):
+        if any(row["output_enabled"] for row in state["axes"].values()):
+            raise PositionerError("Positioner qualified acquisition requires all outputs OFF")
 
     def _event(self, event_type, *, independent=False, **payload):
         if self.event_sink is not None:
@@ -212,6 +222,8 @@ class PositionerPointSession:
                 "origin": deepcopy(self.origin), "targets": deepcopy(self.targets),
                 "target": deepcopy(self.targets), "coordinate_frame": self.config.coordinate_frame,
                 "mode": self.config.mode, "z_mode": self.config.z_mode,
+                "arrival_policy": self.config.arrival_policy,
+                "arrival_evidence": deepcopy(self._arrival_evidence),
                 "focus_plane_id": plane_id, "focus_error_um": self._focus_error(actual) if self.targets is not None else None}
 
     def begin(self, guard=None, *, wrap_required=False):
@@ -251,6 +263,10 @@ class PositionerPointSession:
                 raise PositionerError("Positioner drive initialization must finish with all outputs OFF and stationary axes")
             self.last_confirmed = deepcopy(state)
             self._event("positioner_drive_initialized", captured_at_utc=utc_now(), state=state)
+            if self._target_off:
+                self._require_outputs_off(state)
+                self.begun = True
+                return self._result(changed=False)
             for axis in self.config.axes:
                 self._guard(guard, deadline)
                 fresh = self._read(deadline=deadline)
@@ -283,8 +299,11 @@ class PositionerPointSession:
             while True:
                 # Audit failure cannot suppress post-stop state readback.
                 state = self._read(allow_fault=True, independent=True, deadline=deadline)
-                if not state["axes"][role]["moving"]:
-                    outcome["confirmed_stationary"] = True
+                row = state["axes"][role]
+                confirmed = not row["output_enabled"] if self._target_off else not row["moving"]
+                if confirmed:
+                    outcome["confirmed_stationary"] = not row["moving"]
+                    outcome["confirmed_output_off"] = not row["output_enabled"]
                     break
                 remaining = deadline - self.clock()
                 if remaining <= 0:
@@ -297,6 +316,8 @@ class PositionerPointSession:
         self._event("positioner_failed_motion_stop", independent=True, **outcome)
 
     def _move_targets(self, targets, guard, *, focus=True):
+        if self._target_off:
+            return self._move_targets_output_off(targets, guard)
         deadline = self.clock() + self.config.move_timeout_s
         self._guard(guard, deadline)
         state = self._read(ready=True, deadline=deadline)
@@ -339,6 +360,77 @@ class PositionerPointSession:
                 self._stop_owned(role)
             raise
 
+    def _wait_target_output_off(self, role, target, deadline, guard):
+        while True:
+            result = self.device.complete_target_if_reached(
+                role, guard=lambda: self._guard(guard, deadline),
+                checkpoint=lambda: self._deadline(deadline))
+            self._deadline(deadline)
+            state = self._validate(result["state"])
+            self.last_confirmed = deepcopy(state)
+            self._unknown = False
+            self._event("positioner_state", captured_at_utc=result["captured_at_utc"], state=state)
+            if result["reached"]:
+                arrival = self._validate(result["arrival_state"])
+                if not arrival["axes"][role]["target_reached"]:
+                    raise PositionerError(role + ": missing SDK target arrival evidence")
+                self._require_outputs_off(state)
+                self._event("positioner_target_reached", role=role, target_um=target,
+                            captured_at_utc=result["arrival_captured_at_utc"], state=arrival)
+                self._event("positioner_output_off", role=role,
+                            captured_at_utc=result["captured_at_utc"], state=state)
+                self._arrival_evidence[role] = {
+                    "target_um": target, "sdk_target_reached": True,
+                    "arrival_position_um": arrival["axes"][role]["position_um"],
+                    "arrival_captured_at_utc": result["arrival_captured_at_utc"],
+                    "output_off_confirmed": True,
+                    "output_off_captured_at_utc": result["captured_at_utc"]}
+                return
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                raise PositionerError(role + ": SDK target arrival timeout")
+            self.sleep(min(self.config.poll_interval_s, remaining))
+
+    def _move_targets_output_off(self, targets, guard):
+        deadline = self.clock() + self.config.move_timeout_s
+        changed = False
+        try:
+            self._guard(guard, deadline)
+            state = self._read(deadline=deadline)
+            self._require_outputs_off(state)
+            # Retain the full-path and fresh single-step hard bounds. An unchanged
+            # qualified axis is not reacquired merely because its sensor jitters.
+            self.config.validate_path(self._actual(state), [targets])
+            for role in self.config.move_order:
+                key = "positioner_" + role + "_um"
+                if (role in self._arrival_evidence and self.targets is not None and
+                        targets[key] == self.targets[key]):
+                    continue
+                self._guard(guard, deadline)
+                self._stop_attempted.discard(role)
+                self._motion_owned.add(role)
+                self._event("positioner_move_started", role=role, target_um=targets[key], absolute_target=targets)
+                self.device.prepare_axis(role)
+                self._deadline(deadline)
+                self.device.move_to(role, targets[key])
+                self._deadline(deadline)
+                self._wait_target_output_off(role, targets[key], deadline, guard)
+                self._motion_owned.discard(role)
+                self._event("positioner_move_completed", role=role,
+                            target_um=targets[key], actual=self._actual(self.last_confirmed))
+                changed = True
+            self._guard(guard, deadline)
+            self._require_outputs_off(self._read(deadline=deadline))
+            self.targets = deepcopy(targets)
+            return changed
+        except BaseException as exc:
+            self._unknown = True
+            self._failed = True
+            self._motion_errors.append("Positioner primary motion error: " + str(exc))
+            for role in reversed(self.config.move_order):
+                self._stop_owned(role)
+            raise
+
     def set_point(self, values, guard=None):
         if not self.begun or self._failed:
             raise PositionerError("Positioner point requires begun, known session")
@@ -353,17 +445,27 @@ class PositionerPointSession:
     def observe(self):
         if not self.preflight_complete:
             raise PositionerError("Positioner observation requires preflight")
-        return deepcopy(self._read())
+        state = self._read()
+        if self._target_off and self.targets is not None:
+            self._require_outputs_off(state)
+        return deepcopy(state)
 
     def actual(self):
         if not self.begun:
             raise PositionerError("Positioner actual requires begin")
-        return self._actual(self._read())
+        state = self._read()
+        if self._target_off:
+            self._require_outputs_off(state)
+        return self._actual(state)
 
     def verify(self):
         if not self.begun or self.targets is None or self._failed:
             raise PositionerError("Positioner verify requires a qualified target")
         try:
+            if self._target_off:
+                state = self._read()
+                self._require_outputs_off(state)
+                return self._actual(state)
             state = self._read(ready=True)
             if not self._good(state, self.targets, require_output=True, focus=True):
                 raise PositionerError("Positioner actual/focus drifted outside qualification")
@@ -388,11 +490,13 @@ class PositionerPointSession:
             try:
                 state = self._read(allow_fault=True, independent=True)
                 for role, row in state["axes"].items():
-                    if row["moving"] or not row["sensor_connected"] or row["sensor_error"] or row["eot_forward"] or row["eot_backward"]:
+                    if (row["moving"] and not self._target_off) or not row["sensor_connected"] or row["sensor_error"] or row["eot_forward"] or row["eot_backward"]:
                         errors.append(role + ": final positioner state requires manual review")
-                    if self.begun and not row["output_enabled"]:
+                    if self._target_off and row["output_enabled"]:
+                        errors.append(role + ": final output OFF is unverified")
+                    elif self.begun and not self._target_off and not row["output_enabled"]:
                         errors.append(role + ": final holding output is disabled")
-                if not failed and not self._failed and self.begun and self.targets is not None:
+                if not self._target_off and not failed and not self._failed and self.begun and self.targets is not None:
                     focus = self.config.finish != "return_start"
                     if not self._good(state, self.targets, require_output=True, focus=focus):
                         errors.append("Positioner final target/focus qualification was lost")
@@ -404,6 +508,8 @@ class PositionerPointSession:
                 errors.append(message)
         return {"verified": state is not None and not errors, "failed": bool(failed or self._failed),
                 "finish": self.config.finish, "states": state, "errors": errors,
+                "arrival_policy": self.config.arrival_policy,
+                "arrival_evidence": deepcopy(self._arrival_evidence),
                 "manual_review": bool(errors), "state_current": state is not None,
                 "last_confirmed": deepcopy(self.last_confirmed), "position_unknown": self._unknown}
 

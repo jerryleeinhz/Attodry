@@ -27,6 +27,9 @@ dll_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 coordinate_frame = "SYNTHETIC_FORMAT_EXAMPLE_FRAME"
 coordinate_frame_confirmed = true # Synthetic frame only; reconfirm installed hardware separately.
 z_mode = "focus_plane" # manual | focus_plane
+arrival_policy = "stable_hold" # stable_hold | target_reached_output_off (manual XYZ only).
+# target_reached_output_off: latch SDK arrival, stop auto and verify output OFF;
+# keep actual readbacks, but do not reject on moving/position error or dwell afterward.
 move_order = ["x", "y", "z"] # Synthetic example, NOT an installed collision-safe order.
 settle_s = 0.2
 poll_interval_s = 0.05

@@ -100,6 +100,7 @@ def launch_text(summary, width=None):
     if positioner is not None:
         lines.append("Positioner: ANC350 RES | SDK 0/1/2 = X/Y/Z | " + positioner["mode"] +
             " | Z: " + positioner["z_mode"] + " | frame: " + positioner["coordinate_frame"])
+        lines.append("Positioner arrival: " + positioner.get("arrival_policy", "stable_hold"))
         lines.append("Motion order: " + " -> ".join(positioner["move_order"]) +
             " | finish: " + positioner["finish"] + " | origin frozen once after fresh stable readback")
         for role, settings in positioner["axes"].items():

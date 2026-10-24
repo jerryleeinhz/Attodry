@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ctypes as C
 from copy import deepcopy
+from datetime import datetime, timezone
 import hashlib
 import math
 import os
@@ -91,8 +92,9 @@ class Anc350Device:
     """One owned controller. One startup drive configuration; no runtime repair.
 
     ``dll_factory`` is an offline injection seam; production uses WinDLL only
-    after file hash/bitness verification. Successful motion retains feedback
-    and output. ``close`` only disconnects and never claims to stop motion.
+    after file hash/bitness verification. The configured arrival policy decides
+    whether feedback is held or output is released after SDK arrival.
+    ``close`` only disconnects and never claims to stop motion.
     """
     def __init__(self, config, *, on_event=None, dll_factory=None, lease_factory=None):
         config.validate()
@@ -109,6 +111,7 @@ class Anc350Device:
         self.close_errors = []
         self._independent_audit = False
         self._output_off_attempted = False
+        self._output_disable_attempted, self._completion_attempted = set(), set()
         self._drive_attempted = self._drive_initialized = False
         self._startup_checkpoint = None
 
@@ -288,10 +291,10 @@ class Anc350Device:
         """Normal snapshots always enforce the configured drive settings."""
         return self._capture_state(verify_drive=True)
 
-    def _initial_axes_safe(self, state, *, allow_enabled=False):
+    def _initial_axes_safe(self, state, *, allow_enabled=False, allow_moving=False):
         for axis in self.config.axes:
             row = state["axes"][axis.role]
-            if row["moving"] or (row["output_enabled"] and not allow_enabled):
+            if (row["moving"] and not allow_moving) or (row["output_enabled"] and not allow_enabled):
                 raise Anc350Error(axis.role + ": initial output must be OFF and stationary")
             if (not row["sensor_connected"] or row["sensor_error"] or row["eot_forward"] or row["eot_backward"] or
                     not axis.min_position_um <= row["position_um"] <= axis.max_position_um):
@@ -419,10 +422,18 @@ class Anc350Device:
         if self._failed_write or role in self._prepared:
             raise Anc350Error("ANC350 prepare cannot be retried")
         axis = self._axis(role)
-        state = self.read_state()["axes"][role]
-        if (not state["sensor_connected"] or state["output_enabled"] or state["moving"] or state["sensor_error"] or
+        snapshot = self.read_state()
+        release = self.config.arrival_policy == "target_reached_output_off"
+        if release:
+            self._initial_axes_safe(snapshot, allow_moving=True)
+        state = snapshot["axes"][role]
+        if (not state["sensor_connected"] or state["output_enabled"] or (state["moving"] and not release) or state["sensor_error"] or
                 state["eot_forward"] or state["eot_backward"]):
             raise Anc350Error(role + ": preparation requires output OFF and healthy stationary axis")
+        if release:
+            self._stop_attempted.discard(role)
+            self._output_disable_attempted.discard(role)
+            self._completion_attempted.discard(role)
         self._prepared.add(role)
         self._motion_owned.add(role)
         try:
@@ -447,8 +458,14 @@ class Anc350Device:
         target = _finite(absolute_um, "absolute position")
         if not axis.min_position_um <= target <= axis.max_position_um:
             raise Anc350Error(role + ": target outside configured soft limits")
-        state = self.read_state()["axes"][role]
-        if (not state["sensor_connected"] or not state["output_enabled"] or state["moving"] or
+        snapshot = self.read_state()
+        if self.config.arrival_policy == "target_reached_output_off":
+            self._initial_axes_safe(snapshot, allow_enabled=True, allow_moving=True)
+            if any(row["output_enabled"] for key, row in snapshot["axes"].items() if key != role):
+                raise Anc350Error("Move requires all other axis outputs OFF")
+        state = snapshot["axes"][role]
+        if (not state["sensor_connected"] or not state["output_enabled"] or
+                (state["moving"] and self.config.arrival_policy != "target_reached_output_off") or
                 state["sensor_error"] or state["eot_forward"] or state["eot_backward"]):
             raise Anc350Error(role + ": move requires a healthy enabled stationary axis")
         if (not axis.min_position_um <= state["position_um"] <= axis.max_position_um or
@@ -462,8 +479,86 @@ class Anc350Device:
             self._failed_write = True
             raise
 
+    def complete_target_if_reached(self, role, *, guard, checkpoint=None):
+        """Latch one SDK arrival, then stop auto and confirm output OFF once.
+
+        No moving/position-window qualification follows the target latch.
+        Complete identity, finite position/limits, sensor/EOT, drive, ownership
+        and command/audit/deadline failures remain hard errors.
+        """
+        self._require_open()
+        if (self.config.arrival_policy != "target_reached_output_off" or self._failed_write or
+                role not in self._prepared or role not in self._motion_owned or
+                role in self._completion_attempted or not callable(guard)):
+            raise Anc350Error("Target completion requires a new owned prepared move; no retry")
+        axis = self._axis(role)
+        self._startup_checkpoint = checkpoint
+        try:
+            guard()
+            arrival = self.read_state()
+            self._initial_axes_safe(arrival, allow_enabled=True, allow_moving=True)
+            if (not arrival["axes"][role]["output_enabled"] or
+                    any(row["output_enabled"] for key, row in arrival["axes"].items() if key != role)):
+                raise Anc350Error("Target completion requires only the owned moving axis output ON")
+            captured = datetime.now(timezone.utc).isoformat()
+            if not arrival["axes"][role]["target_reached"]:
+                return {"reached": False, "state": arrival, "captured_at_utc": captured}
+            self._completion_attempted.add(role)
+            self._audit({"name": "target_reached_latched", "axis": role, "phase": "after",
+                         "captured_at_utc": captured, "actual": arrival})
+            for name, flag, attempts in (("ANC_startAutoMove", 0, self._stop_attempted),
+                                          ("ANC_setAxisOutput", 1, self._output_disable_attempted)):
+                guard()
+                for checked in self.config.axes:
+                    row = self._status(checked.index)
+                    if (not row["sensor_connected"] or row["sensor_error"] or row["eot_forward"] or row["eot_backward"] or
+                            (row["output_enabled"] and checked.role != role)):
+                        raise Anc350Error(checked.role + ": target release state/ownership changed")
+                attempts.add(role)  # A missing reply may still have acted; never reissue it.
+                self._call(name, self.handle, axis.index, 0, flag)
+            off = self._status(axis.index)
+            self._audit({"name": "target_output_off", "phase": "readback", "axis": role, "actual": off})
+            if off["output_enabled"]:
+                raise Anc350Error(role + ": target output OFF not confirmed; no retry")
+            final = self.read_state()
+            self._initial_axes_safe(final, allow_moving=True)
+            off_captured = datetime.now(timezone.utc).isoformat()
+            if checkpoint is not None:
+                checkpoint()
+            self._prepared.remove(role)
+            self._motion_owned.discard(role)
+            return {"reached": True, "arrival_state": arrival, "arrival_captured_at_utc": captured,
+                    "state": final, "captured_at_utc": off_captured}
+        except BaseException:
+            self._failed_write = True
+            raise
+        finally:
+            self._startup_checkpoint = None
+
     def stop(self, role):
         self._require_open()
+        if self.config.arrival_policy == "target_reached_output_off":
+            if role not in self._motion_owned:
+                return False
+            axis, errors = self._axis(role), []
+            for name, flag, attempts in (("ANC_startAutoMove", 0, self._stop_attempted),
+                                          ("ANC_setAxisOutput", 1, self._output_disable_attempted)):
+                if role in attempts:
+                    continue
+                attempts.add(role)
+                try:
+                    self._call(name, self.handle, axis.index, 0, flag, independent=True)
+                except BaseException as exc:
+                    errors.append(str(exc))
+            self._motion_owned.discard(role)
+            try:
+                if self._status(axis.index, independent=True)["output_enabled"]:
+                    errors.append(role + ": failure output OFF not confirmed")
+            except BaseException as exc:
+                errors.append(str(exc))
+            if errors:
+                raise Anc350Error("; ".join(errors))
+            return True
         if role not in self._motion_owned or role in self._stop_attempted:
             return False
         self._stop_attempted.add(role)

@@ -131,7 +131,7 @@ def _positioner_metadata(record: dict) -> None:
 
 
 def positioner_reference_context(record: Mapping) -> dict | None:
-    """Exact stable position/visit identity for background and power matching.
+    """Exact position/visit/arrival policy for background and power matching.
 
     Actual positions contain sensor noise and must not form an equality key.
     The frozen resolved target, origin, frame and calibration are authoritative.
@@ -151,6 +151,9 @@ def positioner_reference_context(record: Mapping) -> dict | None:
         raise ValueError("Positioner reference matching needs verified actual XYZ evidence")
     frame, mode, z_mode = (status.get(key) for key in ("coordinate_frame", "mode", "z_mode"))
     plane = status.get("focus_plane_id")
+    arrival = status.get("arrival_policy", "stable_hold")
+    if arrival not in ("stable_hold", "target_reached_output_off"):
+        raise ValueError("Unknown positioner arrival policy for reference matching")
     if (not isinstance(frame, str) or not frame.strip() or mode not in ("absolute", "relative")
             or z_mode not in ("manual", "focus_plane")
             or (z_mode == "focus_plane" and (not isinstance(plane, str) or not plane))):
@@ -177,6 +180,7 @@ def positioner_reference_context(record: Mapping) -> dict | None:
     if type(index) is not int or index < 0:
         raise ValueError("Missing positioner axis visit identity for reference matching")
     return {"coordinate_frame": frame, "mode": mode, "z_mode": z_mode,
+            "arrival_policy": arrival,
             "focus_plane_id": plane, **values,
             "visit": {key: record.get("axes.positioner." + key) for key in ("index", "segment", "direction")}}
 
