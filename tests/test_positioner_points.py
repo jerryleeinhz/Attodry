@@ -45,6 +45,19 @@ class FakePositioner:
             self.read_hook(self)
         return deepcopy(self.state)
 
+    def _read_initial_state(self):
+        return self.read_state()
+
+    def initialize_drive(self, *, guard=None, checkpoint=None):
+        self.calls.append("initialize_drive")
+        if guard is not None:
+            guard()
+        if checkpoint is not None:
+            checkpoint()
+        for axis in self.config.axes:
+            self.state["axes"][axis.role].update(amplitude_v=axis.amplitude_v, frequency_hz=axis.frequency_hz)
+        return deepcopy(self.state)
+
     def prepare_axis(self, role):
         self.calls.append(("prepare", role))
         self.state["axes"][role]["output_enabled"] = True
@@ -89,6 +102,7 @@ class PositionerSessionTests(unittest.TestCase):
         self.assertEqual(self.motor.calls, [])
         session.open()
         self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+        self.assertNotIn("initialize_drive", self.motor.calls)
         session.begin()
         self.assertEqual([call for call in self.motor.calls if isinstance(call, tuple)],
                          [("prepare", "x"), ("prepare", "y"), ("prepare", "z")])
@@ -107,6 +121,116 @@ class PositionerSessionTests(unittest.TestCase):
         count = len(self.motor.calls)
         self.assertEqual(session.verify(), xyz(10, 10, 0))
         self.assertEqual(self.motor.calls[count:], ["read"])
+
+    def test_drive_difference_is_initialized_only_after_full_stable_origin(self):
+        session = self.session()
+        self.motor.state["axes"]["x"].update(amplitude_v=1., frequency_hz=2.)
+        initial = session.open()
+        self.assertEqual(initial["axes"]["x"]["amplitude_v"], 1.)
+        original = self.motor.initialize_drive
+        def initialize(**kwargs):
+            self.assertGreaterEqual(self.clock.now, self.config.settle_s)
+            self.assertEqual(session.origin, xyz(0, 0, 0))
+            self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+            return original(**kwargs)
+        self.motor.initialize_drive = initialize
+        session.begin()
+        names = [name for name, payload in self.events]
+        self.assertLess(names.index("positioner_origin_frozen"), names.index("positioner_drive_initialization_requested"))
+        self.assertLess(names.index("positioner_drive_initialization_requested"), names.index("positioner_drive_initialized"))
+        request = next(payload for name, payload in self.events if name == "positioner_drive_initialization_requested")
+        self.assertEqual(request["actual"]["axes"]["x"]["amplitude_v"], 1.)
+        self.assertEqual(request["requested"]["x"]["amplitude_v"], self.config.axes[0].amplitude_v)
+        session.set_point(self.config.points[1])
+        self.motor.state["axes"]["x"]["frequency_hz"] += 1
+        with self.assertRaisesRegex(PositionerError, "amplitude/frequency"):
+            session.verify()
+        self.assertEqual(self.motor.calls.count("initialize_drive"), 1)
+
+    def test_return_path_failure_prevents_drive_initialization(self):
+        session = self.session(finish="return_start")
+        session.config = replace(self.config, points=(xyz(5, 0, 0), xyz(10, 0, 0)),
+            axes=tuple(replace(axis, max_move_um=6) for axis in self.config.axes))
+        session.open()
+        with self.assertRaisesRegex(PositionerError, "max_move"):
+            session.begin()
+        self.assertNotIn("initialize_drive", self.motor.calls)
+        self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+
+    def test_drive_initialization_failure_is_not_retried_or_followed_by_output(self):
+        session = self.session()
+        session.open()
+        def failed(**kwargs):
+            self.motor.calls.append("initialize_drive")
+            raise IOError("drive setting outcome unknown")
+        self.motor.initialize_drive = failed
+        with self.assertRaisesRegex(IOError, "outcome unknown"):
+            session.begin()
+        with self.assertRaises(PositionerError):
+            session.begin()
+        self.assertEqual(self.motor.calls.count("initialize_drive"), 1)
+        self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+        cleanup = session.cleanup(failed=True)
+        self.assertFalse(cleanup["verified"])
+        self.assertTrue(cleanup["manual_review"])
+        self.assertTrue(any("drive setting outcome unknown" in error for error in cleanup["errors"]))
+        self.assertEqual(session.close(), [])
+
+    def test_late_drive_initialization_cannot_enable_outputs(self):
+        session = self.session()
+        session.open()
+        original = self.motor.initialize_drive
+        def late(**kwargs):
+            state = original(**kwargs)
+            self.clock.now += self.config.move_timeout_s + 1
+            return state
+        self.motor.initialize_drive = late
+        with self.assertRaisesRegex(PositionerError, "deadline"):
+            session.begin()
+        self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+
+    def test_initialization_return_must_be_strict_healthy_off_and_stationary(self):
+        for key, value in (("output_enabled", True), ("moving", True),
+                           ("sensor_error", True), ("frequency_hz", 123.)):
+            with self.subTest(key=key):
+                session = self.session()
+                session.open()
+                original = self.motor.initialize_drive
+                def invalid(**kwargs):
+                    state = original(**kwargs)
+                    state["axes"]["z"][key] = value
+                    return state
+                self.motor.initialize_drive = invalid
+                with self.assertRaises(PositionerError):
+                    session.begin()
+                self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+
+    def test_initialization_boundary_audit_failure_prevents_output(self):
+        for event_type, expected_calls in (("positioner_drive_initialization_requested", 0),
+                                           ("positioner_drive_initialized", 1)):
+            with self.subTest(event_type=event_type):
+                session = self.session()
+                session.open()
+                def unavailable(name, payload):
+                    if name == event_type:
+                        raise IOError("drive audit unavailable")
+                session.event_sink = unavailable
+                with self.assertRaisesRegex(IOError, "audit unavailable"):
+                    session.begin()
+                self.assertEqual(self.motor.calls.count("initialize_drive"), expected_calls)
+                self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+                with self.assertRaises(PositionerError):
+                    session.begin()
+
+    def test_negative_initial_drive_cannot_be_treated_as_configurable_difference(self):
+        for key in ("amplitude_v", "frequency_hz"):
+            with self.subTest(key=key):
+                session = self.session()
+                self.motor.state["axes"]["x"][key] = -1.
+                with self.assertRaisesRegex(PositionerError, "negative drive"):
+                    session.open()
+                self.assertNotIn("initialize_drive", self.motor.calls)
+                self.assertEqual(self.motor.calls[-1], "close")
 
     def test_relative_points_use_frozen_origin_and_never_accumulate(self):
         session = self.session(relative=True)
@@ -127,6 +251,7 @@ class PositionerSessionTests(unittest.TestCase):
         session.open()
         with self.assertRaisesRegex(PositionerError, "max_move"):
             session.begin()
+        self.assertNotIn("initialize_drive", self.motor.calls)
         self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
 
     def test_wrap_path_checked_before_output(self):
@@ -137,6 +262,7 @@ class PositionerSessionTests(unittest.TestCase):
         session.open()
         with self.assertRaisesRegex(PositionerError, "max_move"):
             session.begin(wrap_required=True)
+        self.assertNotIn("initialize_drive", self.motor.calls)
         self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
 
     def test_drifting_origin_never_prepares(self):
@@ -145,6 +271,7 @@ class PositionerSessionTests(unittest.TestCase):
         session.open()
         with self.assertRaisesRegex(PositionerError, "timeout"):
             session.begin()
+        self.assertNotIn("initialize_drive", self.motor.calls)
         self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
 
     def test_missing_sensor_or_unknown_bool_rejected_and_closed(self):

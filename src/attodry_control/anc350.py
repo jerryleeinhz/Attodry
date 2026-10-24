@@ -44,6 +44,8 @@ _SIGNATURES = {
     "ANC_getPosition": [H, U, C.POINTER(D)],
     "ANC_getAmplitude": [H, U, C.POINTER(D)],
     "ANC_getFrequency": [H, U, C.POINTER(D)],
+    "ANC_setAmplitude": [H, U, D],
+    "ANC_setFrequency": [H, U, D],
     "ANC_setTargetGround": [H, U, I],
     "ANC_setTargetRange": [H, U, D],
     "ANC_setAxisOutput": [H, U, I, I],
@@ -86,7 +88,7 @@ def verified_library_bytes(path, expected_sha256):
 
 
 class Anc350Device:
-    """One owned controller. No parameter repair, Home, reset or command retry.
+    """One owned controller. One startup drive configuration; no runtime repair.
 
     ``dll_factory`` is an offline injection seam; production uses WinDLL only
     after file hash/bitness verification. Successful motion retains feedback
@@ -106,6 +108,8 @@ class Anc350Device:
         self.audit_errors = []
         self.close_errors = []
         self._independent_audit = False
+        self._drive_attempted = self._drive_initialized = False
+        self._drive_checkpoint = None
 
     def _audit(self, record, *, independent=False):
         independent = independent or self._independent_audit
@@ -119,10 +123,15 @@ class Anc350Device:
             self.audit_errors.append(str(exc))
 
     def _call(self, name, *args, independent=False):
+        checkpoint = self._drive_checkpoint if not independent else None
+        if checkpoint is not None:
+            checkpoint()
         arguments = [value.value if isinstance(value, C._SimpleCData) else
                      value if isinstance(value, (int, float, str)) else {"output_pointer": True}
                      for value in args]
         self._audit({"phase": "before", "name": name, "arguments": arguments}, independent=independent)
+        if checkpoint is not None:
+            checkpoint()
         try:
             result = getattr(self.library, name)(*args)
         except Exception as exc:
@@ -133,6 +142,8 @@ class Anc350Device:
         self._audit({"phase": "after", "name": name, "code": result}, independent=independent)
         if type(result) is not int or result != 0:
             raise Anc350Error(name + " returned " + repr(result) + "; no retry")
+        if checkpoint is not None:
+            checkpoint()
 
     def _require_open(self):
         if not self.opened or not self.handle.value:
@@ -220,14 +231,7 @@ class Anc350Device:
                 _SDK_CONNECTION_UNKNOWN = True
                 raise Anc350Error("ANC350 connect returned a null handle")
             self.opened = True
-            state = self.read_state()
-            for axis in self.config.axes:
-                row = state["axes"][axis.role]
-                if row["output_enabled"] or row["moving"]:
-                    raise Anc350Error(axis.role + ": initial output must be OFF and stationary; operator must release previous feedback/output")
-                if (not row["sensor_connected"] or row["sensor_error"] or row["eot_forward"] or row["eot_backward"] or
-                        not axis.min_position_um <= row["position_um"] <= axis.max_position_um):
-                    raise Anc350Error(axis.role + ": initial axis position/sensor/EOT unavailable")
+            self._read_initial_state()
         except BaseException as primary:
             try:
                 self.close()
@@ -235,7 +239,7 @@ class Anc350Device:
                 primary.add_note("Independent ANC350 open cleanup failed: " + str(cleanup))
             raise
 
-    def read_state(self):
+    def _capture_state(self, *, verify_drive):
         self._require_open()
         firmware, features = I(-1), U(0xffffffff)
         self._call("ANC_getFirmwareVersion", self.handle, C.byref(firmware))
@@ -256,20 +260,100 @@ class Anc350Device:
             position = self._number("ANC_getPosition", axis.index) * 1e6
             amplitude = self._number("ANC_getAmplitude", axis.index)
             frequency = self._number("ANC_getFrequency", axis.index)
+            if amplitude < 0 or frequency < 0:
+                raise Anc350Error(axis.role + f": invalid negative drive readback: {amplitude} V/{frequency} Hz")
             final = self._status(axis.index)
+            if not verify_drive and (initial["moving"] or final["moving"] or initial["output_enabled"]):
+                raise Anc350Error(axis.role + ": initial output must be OFF and stationary; operator must release previous feedback/output")
             # Motion/target bits can transition during polling. Sensor/output/fault
             # transitions across a single readback never certify a healthy snapshot.
             for key in ("sensor_connected", "output_enabled", "sensor_error", "eot_forward", "eot_backward"):
                 if initial[key] != final[key]:
                     raise Anc350Error(axis.role + ": status changed during readback: " + key)
-            if (not math.isclose(amplitude, axis.amplitude_v, rel_tol=1e-9, abs_tol=1e-9) or
+            if verify_drive and (not math.isclose(amplitude, axis.amplitude_v, rel_tol=1e-9, abs_tol=1e-9) or
                     not math.isclose(frequency, axis.frequency_hz, rel_tol=1e-9, abs_tol=1e-9)):
-                raise Anc350Error(axis.role + ": amplitude/frequency changed; no automatic repair")
+                raise Anc350Error(axis.role + ": amplitude/frequency changed; no automatic repair; "
+                                  f"actual={amplitude} V/{frequency} Hz, "
+                                  f"requested={axis.amplitude_v} V/{axis.frequency_hz} Hz")
             state["axes"][axis.role] = dict(final, axis_index=axis.index,
                 actuator_name=name, actuator_type_raw=kind.value, lut_name=lut,
                 position_um=position, amplitude_v=amplitude, frequency_hz=frequency)
         self.last_confirmed = deepcopy(state)
         return state
+
+    def read_state(self):
+        """Normal snapshots always enforce the configured drive settings."""
+        return self._capture_state(verify_drive=True)
+
+    def _initial_axes_off(self, state):
+        for axis in self.config.axes:
+            row = state["axes"][axis.role]
+            if row["output_enabled"] or row["moving"]:
+                raise Anc350Error(axis.role + ": initial output must be OFF and stationary; operator must release previous feedback/output")
+            if (not row["sensor_connected"] or row["sensor_error"] or row["eot_forward"] or row["eot_backward"] or
+                    not axis.min_position_um <= row["position_um"] <= axis.max_position_um):
+                raise Anc350Error(axis.role + ": initial axis position/sensor/EOT unavailable")
+
+    def _read_initial_state(self):
+        """Private read-only startup scope, unavailable after configuration starts."""
+        if self._drive_attempted:
+            raise Anc350Error("ANC350 initial read scope has ended")
+        state = self._capture_state(verify_drive=False)
+        self._initial_axes_off(state)
+        return state
+
+    def initialize_drive(self, *, guard=None, checkpoint=None):
+        """Set differing TOML drive values once, before any output preparation.
+
+        No retry, rollback, preset/LUT change or persistent flash save is made.
+        Every setter requires fresh healthy OFF/stationary status for all axes.
+        """
+        self._require_open()
+        if self._drive_attempted or self._failed_write or self._prepared:
+            raise Anc350Error("ANC350 startup drive initialization cannot be retried")
+        self._drive_attempted = True
+        self._drive_checkpoint = checkpoint
+        try:
+            if guard is not None:
+                guard()
+            baseline = self._capture_state(verify_drive=False)
+            self._initial_axes_off(baseline)
+            requested = {axis.role: {"amplitude_v": axis.amplitude_v, "frequency_hz": axis.frequency_hz}
+                         for axis in self.config.axes}
+            self._audit({"name": "drive_initialization", "phase": "before",
+                         "requested": requested, "actual": baseline})
+            for axis in self.config.axes:
+                for field, setter, getter in (("amplitude_v", "ANC_setAmplitude", "ANC_getAmplitude"),
+                                               ("frequency_hz", "ANC_setFrequency", "ANC_getFrequency")):
+                    value = getattr(axis, field)
+                    if math.isclose(baseline["axes"][axis.role][field], value, rel_tol=1e-9, abs_tol=1e-9):
+                        continue
+                    if guard is not None:
+                        guard()
+                    for checked in self.config.axes:
+                        status = self._status(checked.index)
+                        if (not status["sensor_connected"] or status["output_enabled"] or status["moving"] or
+                                status["sensor_error"] or status["eot_forward"] or status["eot_backward"]):
+                            raise Anc350Error(checked.role + ": drive initialization requires all axes healthy, output OFF and stationary")
+                    self._call(setter, self.handle, axis.index, value)
+                    actual = self._number(getter, axis.index)
+                    self._audit({"name": setter, "phase": "readback", "axis": axis.role,
+                                 "field": field, "requested": value, "actual": actual})
+                    if not math.isclose(actual, value, rel_tol=1e-9, abs_tol=1e-9):
+                        raise Anc350Error(f"{axis.role}: startup {field} readback mismatch; requested={value}, actual={actual}; no retry")
+            final = self.read_state()
+            self._initial_axes_off(final)
+            self._audit({"name": "drive_initialization", "phase": "after",
+                         "requested": requested, "actual": final})
+            if checkpoint is not None:
+                checkpoint()
+            self._drive_initialized = True
+            return final
+        except BaseException:
+            self._failed_write = True
+            raise
+        finally:
+            self._drive_checkpoint = None
 
     def read_state_independent(self):
         """Fresh cleanup evidence even if the durable audit sink has failed."""
@@ -281,6 +365,8 @@ class Anc350Device:
 
     def prepare_axis(self, role):
         self._require_open()
+        if not self._drive_initialized:
+            raise Anc350Error("ANC350 prepare requires completed startup drive initialization")
         if self._failed_write or role in self._prepared:
             raise Anc350Error("ANC350 prepare cannot be retried")
         axis = self._axis(role)

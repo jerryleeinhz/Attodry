@@ -42,6 +42,17 @@ class FakePositioner:
                 "sensor_error": False, "amplitude_v": axis.amplitude_v,
                 "frequency_hz": axis.frequency_hz} for axis in self.config.axes}}
 
+    def _read_initial_state(self):
+        return self.read_state()
+
+    def initialize_drive(self, *, guard=None, checkpoint=None):
+        if guard is not None:
+            guard()
+        if checkpoint is not None:
+            checkpoint()
+        self.owner.position_log.append(("initialize_drive",))
+        return self.read_state()
+
     def prepare_axis(self, role):
         self.enabled[role] = True
         self.owner.position_log.append(("prepare", role))

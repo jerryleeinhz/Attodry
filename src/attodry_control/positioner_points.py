@@ -39,14 +39,14 @@ class PositionerPointSession:
         self._close_errors = []
         self._unknown = False
 
-    def _event(self, name, *, independent=False, **payload):
+    def _event(self, event_type, *, independent=False, **payload):
         if self.event_sink is not None:
             try:
-                self.event_sink(name, deepcopy(payload))
+                self.event_sink(event_type, deepcopy(payload))
             except Exception as exc:
                 if not independent:
                     raise
-                self._audit_errors.append(name + ": " + str(exc))
+                self._audit_errors.append(event_type + ": " + str(exc))
 
     def _guard(self, guard, deadline=None):
         if guard is None:
@@ -66,7 +66,7 @@ class PositionerPointSession:
         from .anc350 import Anc350Device
         return Anc350Device(self.config, on_event=lambda raw: self._event("positioner_raw", **raw))
 
-    def _validate(self, state, *, ready=False, allow_fault=False):
+    def _validate(self, state, *, ready=False, allow_fault=False, initial=False):
         if not isinstance(state, dict) or state.get("serial_number") != self.config.controller_serial_number:
             raise PositionerError("Positioner controller identity is unknown/changed")
         if (state.get("controller_model") != "ANC350 RES" or
@@ -87,9 +87,11 @@ class PositionerPointSession:
                 value = row.get(key)
                 if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                     raise PositionerError(axis.role + ": unknown/nonfinite " + key)
+            if row["amplitude_v"] < 0 or row["frequency_hz"] < 0:
+                raise PositionerError(axis.role + ": negative drive readback")
             if not axis.min_position_um <= row["position_um"] <= axis.max_position_um:
                 raise PositionerError(axis.role + ": actual position crossed configured limits")
-            if (not math.isclose(row["amplitude_v"], axis.amplitude_v, rel_tol=1e-9, abs_tol=1e-9) or
+            if not initial and (not math.isclose(row["amplitude_v"], axis.amplitude_v, rel_tol=1e-9, abs_tol=1e-9) or
                     not math.isclose(row["frequency_hz"], axis.frequency_hz, rel_tol=1e-9, abs_tol=1e-9)):
                 raise PositionerError(axis.role + ": drive amplitude/frequency changed")
             if not allow_fault and (not row["sensor_connected"] or row["sensor_error"] or
@@ -97,14 +99,18 @@ class PositionerPointSession:
                 raise PositionerError(axis.role + ": position sensor/EOT fault")
             if ready and (row["moving"] or not row["output_enabled"]):
                 raise PositionerError(axis.role + ": axis is moving or output disabled")
+            if initial and (row["moving"] or row["output_enabled"]):
+                raise PositionerError(axis.role + ": initial read requires output OFF and stationary axes")
         return state
 
-    def _read(self, *, ready=False, allow_fault=False, independent=False, deadline=None):
+    def _read(self, *, ready=False, allow_fault=False, independent=False, deadline=None, initial=False):
         try:
-            reader = getattr(self.device, "read_state_independent", self.device.read_state) if independent else self.device.read_state
+            reader = (self.device._read_initial_state if initial else
+                      getattr(self.device, "read_state_independent", self.device.read_state) if independent else
+                      self.device.read_state)
             state = reader()
             self._deadline(deadline)
-            self._validate(state, ready=ready, allow_fault=allow_fault)
+            self._validate(state, ready=ready, allow_fault=allow_fault, initial=initial)
         except BaseException:
             self._unknown = True
             raise
@@ -139,11 +145,11 @@ class PositionerPointSession:
                 return False
         return True
 
-    def _wait(self, targets, deadline, guard, *, require_output=True, focus=True):
+    def _wait(self, targets, deadline, guard, *, require_output=True, focus=True, initial=False):
         stable_since, window = None, []
         while True:
             self._guard(guard, deadline)
-            state = self._read(deadline=deadline)
+            state = self._read(deadline=deadline, initial=initial)
             now, actual = self.clock(), self._actual(state)
             good = self._good(state, targets, require_output=require_output, focus=focus)
             if good:
@@ -158,7 +164,7 @@ class PositionerPointSession:
                 if now - stable_since + 1e-12 >= self.config.settle_s:
                     self._guard(guard, deadline)
                     # If the guard performs I/O, qualify a fresh final read afterward.
-                    final = self._read(deadline=deadline)
+                    final = self._read(deadline=deadline, initial=initial)
                     final_actual = self._actual(final)
                     if (self._good(final, targets, require_output=require_output, focus=focus) and
                             all(max([row[key] for row in window] + [final_actual[key]]) -
@@ -185,7 +191,7 @@ class PositionerPointSession:
         self.device = self._new_device()
         try:
             self.device.open()
-            state = self._read()
+            state = self._read(initial=True)
             if any(row["moving"] or row["output_enabled"] for row in state["axes"].values()):
                 raise PositionerError("Positioner preflight requires output OFF and stationary axes; operator must release previous feedback/output")
             self.preflight_complete = True
@@ -215,7 +221,7 @@ class PositionerPointSession:
             raise PositionerError("Positioner begin requires one successful preflight")
         deadline = self.clock() + self.config.move_timeout_s
         try:
-            state = self._wait(None, deadline, guard, require_output=False, focus=False)
+            state = self._wait(None, deadline, guard, require_output=False, focus=False, initial=True)
             self.origin = self._actual(state)
             targets = self.config.resolve_all_points(self.origin)
             self.config.validate_path(self.origin, targets)
@@ -225,8 +231,19 @@ class PositionerPointSession:
                 self.config.validate_path(targets[-1], [self.origin])
             self._event("positioner_origin_frozen", origin=self.origin,
                         absolute_targets=targets, coordinate_frame=self.config.coordinate_frame)
-            # All axes, origin and complete outgoing/return paths passed before
-            # the first setting/output command. No calibration/drive repair.
+            # Freeze/validate the full path before this one startup setting phase.
+            # Normal reads after it remain strict; later drift is never repaired.
+            self._event("positioner_drive_initialization_requested", actual=state,
+                        requested={axis.role: {"amplitude_v": axis.amplitude_v, "frequency_hz": axis.frequency_hz}
+                                   for axis in self.config.axes})
+            state = self.device.initialize_drive(guard=lambda: self._guard(guard, deadline),
+                                                 checkpoint=lambda: self._deadline(deadline))
+            self._deadline(deadline)
+            self._validate(state)
+            if any(row["moving"] or row["output_enabled"] for row in state["axes"].values()):
+                raise PositionerError("Positioner drive initialization must finish with all outputs OFF and stationary axes")
+            self.last_confirmed = deepcopy(state)
+            self._event("positioner_drive_initialized", captured_at_utc=utc_now(), state=state)
             for axis in self.config.axes:
                 self._guard(guard, deadline)
                 fresh = self._read(deadline=deadline)
@@ -241,8 +258,9 @@ class PositionerPointSession:
             self._wait(self.origin, deadline, guard, focus=False)
             self.begun = True
             return self._result(changed=False)
-        except BaseException:
+        except BaseException as exc:
             self._failed = True
+            self._motion_errors.append("Positioner startup error: " + str(exc))
             for role in reversed(self.config.move_order):
                 self._stop_owned(role)
             raise

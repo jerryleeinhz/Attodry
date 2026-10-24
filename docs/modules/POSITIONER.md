@@ -1,12 +1,39 @@
 # 冷台位移台与焦面跟随工作包
 
-## 当前实现与使用方法（2026-10-23，本地离线交付）
+## 当前实现与使用方法（2026-10-24；幅频初始化为本地离线更新）
 
 已实现 ANC350 RES v4 的窄接口、XYZ 绝对/相对点序列、XY 网格、多点焦面拟合和
 逐轴 Z 跟随策略，并接入 Combination、位置证据及分析上下文。以下为生产配置
 契约；后面的原始批准计划和发现历史保留，用于区分设计、离线验证和实机验收。
-本轮实现不代表已部署 LK_setup 或完成移动、输出启用、闭环或光学焦点验收。
-原用户确认的 X/Y/Z 映射与当前预设/LUT 基准保持，程序不自动修复预设或 LUT。
+此前文件部署和真实失败记录见 PROJECT_HANDOFF；本次新增启动幅频初始化尚未部署
+LK_setup、连接仪器或重新扫描，不代表完成移动、闭环或光学焦点验收。原用户确认
+的 X/Y/Z 映射与当前预设/LUT 基准保持，程序不自动修复预设或 LUT。
+
+### 启动时按 TOML 初始化幅频（2026-10-24）
+
+用户批准的流程是：三轴输出均 OFF、静止且传感器/EOT 正常，先完成原有完整原点
+稳定窗、冻结本次起点并验证全部目标、逐轴路径、重复循环连接和显式返回路径，
+再进入一次启动幅频初始化。`open/preflight` 及此前原点资格仍只读；启动私有读取
+允许记录有限、完整的已有幅频差异，身份、坐标和状态保护不放宽。公开 `read_state`
+与后续运行读回始终严格比较 TOML，不把初始差异许可扩散到正式扫描。
+
+初始化重新读取完整 XYZ 身份/位置/状态，确认三轴仍 OFF、静止且健康。仅对与 TOML
+不同的 `amplitude_v`、`frequency_hz` 各写一次，三轴最多六次 setter；已匹配的参数
+不重写。每次 setter 前执行光 OFF/外层环境守卫和共享截止时间检查，再新鲜检查
+三轴状态；每次 setter 后立即读取同一参数并严格核对。最后再取得完整 XYZ 严格
+读回和三轴 OFF/静止核验，全部通过后才允许原有 fresh-actual target 预装载、输出
+准备及完整原点判稳。`prepare_axis` 本身也拒绝尚未成功初始化的会话。
+
+使用 SDK 的 V/Hz 单位（厂商声明分辨率为 1 mV/1 Hz）；不对 TOML 静默取整，
+读回不符即终止，也不猜测新的通用幅频上限。任何写入、读回不符、审计、守卫或截止时间错误均终止本次
+会话；不重试 setter、不回滚、不在运行中修复幅频漂移，不改预设、LUT、DC、Home、
+坐标或 flash（不调用 `ANC_saveParams`）。部分成功仍保留原始命令、读回和未知状态，
+失败不自动重开扫描，也不清除旧失败归档的 manual/unknown 标记。
+
+新增会话事件 `positioner_drive_initialization_requested`、`positioner_drive_initialized`
+及底层逐次原始审计，区分请求、实际读回和初始化成功。该阶段计入已有
+`move_timeout_s`，不延长预算或缩短原有稳定窗。启动错误写入清理报告，
+后续静止读回不能掩盖失败；157项相关离线回归通过，未认证实机设置。
 
 ### 配置入口与离线预览
 
@@ -38,7 +65,7 @@ python -m attodry_control.combination_cli describe-hardware --config config/posi
 | 各轴 `max_move_um` | 一次逐轴运动上限；超限拒绝，不自动拆步绕过 |
 | 各轴 `position_tolerance_um` | 实际位置的到位误差和稳定窗口范围要求 |
 | 各轴 `expected_actuator_name/expected_lut_name` | 当前精确预设/LUT 读回，名称不能替代机械铭牌认证 |
-| 各轴 `amplitude_v/frequency_hz` | 期望已有幅频读回；程序只核验，不写入修复 |
+| 各轴 `amplitude_v/frequency_hz` | 本次启动的期望幅频；完整原点/路径合格且三轴 OFF/静止后仅设置差异项并读回，之后严格监测 |
 | `move_order` | 显式排列 `x/y/z` 各一次；需要操作者按间隙确认 |
 | `settle_s/poll_interval_s/move_timeout_s` | 全窗稳定/轮询/共享超时，须 `0<poll<=settle<timeout` |
 | `finish` | `hold` 保持最后点；`return_start` 明确返回冻结起点并检查返回路径 |
@@ -48,12 +75,13 @@ python -m attodry_control.combination_cli describe-hardware --config config/posi
 容差（μm 转米），并启用输出及自动移动能力。target-ground/range 没有对应 getter，
 仅记录写入 ACK，不宣称读回认证；实际运动独立检查完整 XYZ 和状态。尤其当前
 GUI Z 的 target range 曾为 0，不能将 `target_reached` 单一布尔当作到位判据。
-不执行 Home、清零、选择执行器、加载 LUT、调幅/调频或步进命令。
+幅频仅在上述一次启动阶段设置；不执行 Home、清零、选择执行器、加载 LUT、flash 保存或步进命令。
 
 首版准入还要求**三轴初始输出均 OFF 且未运动**。SDK 没有持续自动运动模式的
 完整 getter，`moving=false` 不能证明旧反馈/auto 已释放，因此不接管输出已 ON
 的设备，也不自动停止旧 auto 或关闭他人的输出。完整原点稳定窗和全路径检查后，
-每轴仍在输出 OFF 时，将新鲜实际位置写成初始 target，以免重新开启输出时追逐
+先按上述流程完成一次幅频初始化，再在每轴输出 OFF 时，将新鲜实际位置写成初始
+target，以免重新开启输出时追逐
 旧目标；再设置 ground/range、启用，并验证原点仍完整稳定。target 没有 getter，
 仅记录这次命令及 ACK，独立位置核验不等于目标参数读回。正常 hold 会保留输出，
 因此下一轮新 session 需操作者先按设备流程释放反馈/关闭输出，代码不自动代做。
