@@ -321,10 +321,167 @@ class Anc350Tests(unittest.TestCase):
             self.device.open()
         self.assertEqual(self.sdk.calls, [])
 
-    def test_initial_enabled_output_rejected_without_any_setter(self):
+    def test_initial_enabled_output_is_observed_without_any_setter(self):
         self.sdk.axes[1]["enabled"] = 1
-        with self.assertRaisesRegex(Anc350Error, "initial output"):
+        self.device.open()
+        self.assertTrue(self.device.last_confirmed["axes"]["y"]["output_enabled"])
+        self.assertFalse(any(call[0].startswith(("ANC_set", "ANC_start")) for call in self.sdk.calls))
+        with self.assertRaisesRegex(Anc350Error, "output must be OFF"):
+            self.device.initialize_drive()
+
+    def test_startup_output_off_stops_old_auto_before_disabling_and_reads_back(self):
+        for row in self.sdk.axes.values():
+            row["enabled"] = 1
+        self.different_drive()
+        self.device.open()
+        before = len(self.sdk.calls)
+        state = self.device.initialize_outputs_off(guard=lambda: None)
+        calls = self.sdk.calls[before:]
+        writes = [call for call in calls if call[0].startswith(("ANC_set", "ANC_start"))]
+        self.assertEqual([(call[0], call[2:]) for call in writes],
+            [(name, (axis, 0, flag)) for axis in range(3)
+             for name, flag in (("ANC_startAutoMove", 0), ("ANC_setAxisOutput", 1))])
+        self.assertEqual(len(calls), 52 + 9 * 3)
+        self.assertTrue(all(not row["output_enabled"] and not row["moving"] for row in state["axes"].values()))
+        for call in writes:
+            index = calls.index(call)
+            self.assertEqual([row[0] for row in calls[index-3:index]], ["ANC_getAxisStatus"] * 3)
+            if call[0] == "ANC_setAxisOutput":
+                self.assertEqual(calls[index+1][0:3], ("ANC_getAxisStatus", self.sdk.handle, call[2]))
+        with self.assertRaisesRegex(Anc350Error, "cannot be retried"):
+            self.device.initialize_outputs_off(guard=lambda: None)
+        self.device.initialize_drive()
+        self.device.prepare_axis("x")
+
+    def test_already_off_startup_makes_no_stop_or_output_write(self):
+        self.device.open()
+        before = len(self.sdk.calls)
+        self.device.initialize_outputs_off(guard=lambda: None)
+        self.assertEqual(len(self.sdk.calls) - before, 52)
+        self.assertFalse(any(call[0].startswith(("ANC_set", "ANC_start")) for call in self.sdk.calls))
+
+    def test_output_off_ack_without_readback_never_continues_or_retries(self):
+        self.sdk.axes[0]["enabled"] = 1
+        self.device.open()
+        self.sdk.ANC_setAxisOutput = lambda *args: 0
+        with self.assertRaisesRegex(Anc350Error, "output must be OFF"):
+            self.device.initialize_outputs_off(guard=lambda: None)
+        self.assertTrue(self.sdk.axes[0]["enabled"])
+        self.assertTrue(any(event.get("name") == "startup_output_off" and
+            event.get("phase") == "readback" and event["actual"]["output_enabled"] for event in self.events))
+        with self.assertRaises(Anc350Error):
+            self.device.initialize_outputs_off(guard=lambda: None)
+        with self.assertRaises(Anc350Error):
+            self.device.initialize_drive()
+        self.assertEqual(self.drive_writes(), [])
+
+    def test_startup_off_rejects_fault_or_motion_before_any_stop_or_off(self):
+        for field in ("moving", "sensor_error", "eot_forward", "eot_backward", "sensor_connected"):
+            with self.subTest(field=field):
+                self.device.close()
+                self.sdk = FakeAnc350(self.config)
+                self.device = Anc350Device(self.config, dll_factory=lambda path: self.sdk,
+                    lease_factory=lambda serial: nullcontext())
+                self.device.open()
+                self.sdk.axes[0]["enabled"] = 1
+                self.sdk.axes[2][field] = 0 if field == "sensor_connected" else 1
+                with self.assertRaises(Anc350Error):
+                    self.device.initialize_outputs_off(guard=lambda: None)
+                self.assertFalse(any(call[0].startswith(("ANC_set", "ANC_start")) for call in self.sdk.calls))
+
+    def test_read_only_open_still_rejects_moving_axis_without_stop(self):
+        self.sdk.axes[2].update(enabled=1, moving=1)
+        with self.assertRaisesRegex(Anc350Error, "stationary"):
             self.device.open()
+        self.assertFalse(any(call[0].startswith(("ANC_set", "ANC_start")) for call in self.sdk.calls))
+
+    def test_startup_output_stop_or_off_failure_has_no_next_command_or_retry(self):
+        for name in ("ANC_startAutoMove", "ANC_setAxisOutput"):
+            for mode in ("code", "communication"):
+                with self.subTest(name=name, mode=mode):
+                    self.device.close()
+                    self.sdk = FakeAnc350(self.config)
+                    for row in self.sdk.axes.values():
+                        row["enabled"] = 1
+                    self.device = Anc350Device(self.config, dll_factory=lambda path: self.sdk,
+                        lease_factory=lambda serial: nullcontext())
+                    self.device.open()
+                    if mode == "code":
+                        self.sdk.codes[name] = 3
+                    else:
+                        def fail(function, args):
+                            if function == name:
+                                raise OSError("reply lost")
+                        self.sdk.hook = fail
+                    with self.assertRaises(Anc350Error):
+                        self.device.initialize_outputs_off(guard=lambda: None)
+                    writes = [call for call in self.sdk.calls if call[0].startswith(("ANC_set", "ANC_start"))]
+                    self.assertEqual([row[0] for row in writes],
+                        ["ANC_startAutoMove"] if name == "ANC_startAutoMove" else
+                        ["ANC_startAutoMove", "ANC_setAxisOutput"])
+                    with self.assertRaises(Anc350Error):
+                        self.device.initialize_outputs_off(guard=lambda: None)
+                    with self.assertRaises(Anc350Error):
+                        self.device.initialize_drive()
+                    with self.assertRaises(Anc350Error):
+                        self.device.prepare_axis("x")
+                    self.assertEqual(sum(call[0] == name for call in self.sdk.calls), 1)
+
+    def test_output_release_audit_or_late_native_result_cannot_continue(self):
+        for name in ("ANC_startAutoMove", "ANC_setAxisOutput"):
+            for failure in ("before", "after", "deadline"):
+                with self.subTest(name=name, failure=failure):
+                    self.device.close()
+                    self.sdk = FakeAnc350(self.config)
+                    for row in self.sdk.axes.values():
+                        row["enabled"] = 1
+                    self.events = []
+                    self.device = Anc350Device(self.config, dll_factory=lambda path: self.sdk,
+                        lease_factory=lambda serial: nullcontext(), on_event=self.events.append)
+                    self.device.open()
+                    clock = FakeClock()
+                    def audit(record):
+                        self.events.append(record)
+                        if record['name'] == name and record['phase'] == failure:
+                            raise OSError("output audit unavailable")
+                    self.device.on_event = audit
+                    def late(function, args):
+                        if function == name and failure == "deadline":
+                            clock.now = 10.
+                    self.sdk.hook = late
+                    def checkpoint():
+                        if clock.now > 1.:
+                            raise Anc350Error("output deadline")
+                    with self.assertRaises((Anc350Error, OSError)):
+                        self.device.initialize_outputs_off(guard=lambda: None, checkpoint=checkpoint)
+                    writes = [call for call in self.sdk.calls if call[0].startswith(("ANC_set", "ANC_start"))]
+                    self.assertTrue(all(call[2] == 0 for call in writes))
+                    self.assertEqual(sum(call[0] == name for call in writes), int(failure != "before"))
+                    if failure == "deadline":
+                        self.assertTrue(any(event['name'] == name and event['phase'] == 'after' for event in self.events))
+                    with self.assertRaises(Anc350Error):
+                        self.device.initialize_drive()
+                    with self.assertRaises(Anc350Error):
+                        self.device.initialize_outputs_off(guard=lambda: None)
+
+    def test_output_release_rechecks_dark_guard_between_stop_and_off(self):
+        self.sdk.axes[0]["enabled"] = 1
+        self.device.open()
+        def guard():
+            if any(call[0] == "ANC_startAutoMove" for call in self.sdk.calls):
+                raise RuntimeError("dark evidence lost")
+        with self.assertRaisesRegex(RuntimeError, "dark evidence lost"):
+            self.device.initialize_outputs_off(guard=guard)
+        writes = [call for call in self.sdk.calls if call[0].startswith(("ANC_set", "ANC_start"))]
+        self.assertEqual([call[0] for call in writes], ["ANC_startAutoMove"])
+        self.assertTrue(self.sdk.axes[0]["enabled"])
+
+    def test_output_release_checks_all_axis_identity_and_position_before_writes(self):
+        self.sdk.axes[0]["enabled"] = 1
+        self.device.open()
+        self.sdk.axes[2]["position"] = (self.config.axes[2].max_position_um + 1) * 1e-6
+        with self.assertRaisesRegex(Anc350Error, "position/sensor/EOT"):
+            self.device.initialize_outputs_off(guard=lambda: None)
         self.assertFalse(any(call[0].startswith(("ANC_set", "ANC_start")) for call in self.sdk.calls))
 
     def test_prepare_replaces_retained_target_before_output_enable(self):

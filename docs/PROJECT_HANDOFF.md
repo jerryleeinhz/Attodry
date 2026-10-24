@@ -37,6 +37,29 @@ Last updated: 2026-10-22
 
 ## Current stage
 
+### 2026-10-24 Positioner 启动时设置 OFF（本地离线）
+
+离线验收：精确待提交候选树 172 项回归通过（41.719 s），覆盖驱动、会话、光学/锁相组合、配置、焦面、分析/绘图和硬件编排；仪器 DLL 被阻断。未部署或操作 LK_setup。
+
+操作者要求像设置幅频一样，在新扫描启动时直接设置 OFF，并提交/推送 origin；不得干扰
+LK_setup 当前进程。本次只修改本地代码、fake 测试和文档，不连接/部署目标机、不改活动
+TOML、不发实机命令或停止/重启当前扫描。该新阶段尚未实机验收。
+
+`open/preflight` 仍只读，可观察已有 ON 输出；完整身份、有限/范围、健康和静止保护不变，
+初始 moving/未知/故障仍拒绝。首次正式 begin 在独占控制器及新鲜光 OFF/环境守卫下，
+仅对基线 ON 轴各正常关闭 auto 一次，再 `ANC_setAxisOutput(axis,0,1)` 一次，立即读回。
+每次命令前均重查三轴健康/静止；最终完整 XYZ 必须 OFF/静止/健康。已 OFF 轴不重复写。
+SDK 无 auto 状态 getter，auto-off 仅记录 ACK，不能用 moving=false 证明旧反馈已释放。
+
+关闭保持后重新取得完整稳定原点、冻结相对起点并校验全部逐轴/循环/返回路径，随后才
+执行原幅频初始化、fresh-actual target 预装载和输出准备。不能沿用关闭前的原点。
+全部工作共用原 move_timeout_s；写入/读回、守卫、审计或迟到结果失败即停止后续配置，
+不重试/回滚/自动重开，保留 partial/unknown/manual；原正常 hold/return_start 不变。
+事件 positioner_outputs_off_requested / positioner_outputs_off 与 native 审计区分请求和读回。
+此阶段覆盖旧版“操作者先手动 OFF”准入，不新增任意 TOML apply、预设/LUT/DC/Home/flash
+或结束其他进程的功能。控制器仍须无其他软件占用，不能抢占 Daisy 或另一个采集器。
+
+
 ### 2026-10-24 Positioner 启动幅频初始化（本地离线）
 
 用户明确要求先完成代码：在原有完整稳定原点、冻结起点及所有逐轴/循环/返回路径

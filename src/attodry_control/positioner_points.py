@@ -16,7 +16,7 @@ _BOOLS = ("sensor_connected", "output_enabled", "moving", "target_reached",
 
 
 class PositionerPointSession:
-    """A run freezes its origin and validates every path before output writes.
+    """A run releases outputs before freezing its origin and validating paths.
 
     All point I/O, guards and complete stable windows share one monotonic point
     deadline. There is no retry after an uncertain command. Cleanup uses an
@@ -66,7 +66,7 @@ class PositionerPointSession:
         from .anc350 import Anc350Device
         return Anc350Device(self.config, on_event=lambda raw: self._event("positioner_raw", **raw))
 
-    def _validate(self, state, *, ready=False, allow_fault=False, initial=False):
+    def _validate(self, state, *, ready=False, allow_fault=False, initial=False, allow_enabled=False):
         if not isinstance(state, dict) or state.get("serial_number") != self.config.controller_serial_number:
             raise PositionerError("Positioner controller identity is unknown/changed")
         if (state.get("controller_model") != "ANC350 RES" or
@@ -99,18 +99,18 @@ class PositionerPointSession:
                 raise PositionerError(axis.role + ": position sensor/EOT fault")
             if ready and (row["moving"] or not row["output_enabled"]):
                 raise PositionerError(axis.role + ": axis is moving or output disabled")
-            if initial and (row["moving"] or row["output_enabled"]):
+            if initial and (row["moving"] or (row["output_enabled"] and not allow_enabled)):
                 raise PositionerError(axis.role + ": initial read requires output OFF and stationary axes")
         return state
 
-    def _read(self, *, ready=False, allow_fault=False, independent=False, deadline=None, initial=False):
+    def _read(self, *, ready=False, allow_fault=False, independent=False, deadline=None, initial=False, allow_enabled=False):
         try:
             reader = (self.device._read_initial_state if initial else
                       getattr(self.device, "read_state_independent", self.device.read_state) if independent else
                       self.device.read_state)
-            state = reader()
+            state = reader(allow_enabled=allow_enabled) if initial else reader()
             self._deadline(deadline)
-            self._validate(state, ready=ready, allow_fault=allow_fault, initial=initial)
+            self._validate(state, ready=ready, allow_fault=allow_fault, initial=initial, allow_enabled=allow_enabled)
         except BaseException:
             self._unknown = True
             raise
@@ -191,9 +191,7 @@ class PositionerPointSession:
         self.device = self._new_device()
         try:
             self.device.open()
-            state = self._read(initial=True)
-            if any(row["moving"] or row["output_enabled"] for row in state["axes"].values()):
-                raise PositionerError("Positioner preflight requires output OFF and stationary axes; operator must release previous feedback/output")
+            state = self._read(initial=True, allow_enabled=True)
             self.preflight_complete = True
             return deepcopy(state)
         except BaseException as primary:
@@ -221,6 +219,15 @@ class PositionerPointSession:
             raise PositionerError("Positioner begin requires one successful preflight")
         deadline = self.clock() + self.config.move_timeout_s
         try:
+            self._event("positioner_outputs_off_requested")
+            state = self.device.initialize_outputs_off(guard=lambda: self._guard(guard, deadline),
+                                                       checkpoint=lambda: self._deadline(deadline))
+            self._deadline(deadline)
+            self._validate(state, initial=True)
+            self.last_confirmed = deepcopy(state)
+            self._event("positioner_outputs_off", captured_at_utc=utc_now(), state=state)
+            # Releasing holding output can change position. Freeze only a new,
+            # complete OFF/stationary window; all path/drive checks follow it.
             state = self._wait(None, deadline, guard, require_output=False, focus=False, initial=True)
             self.origin = self._actual(state)
             targets = self.config.resolve_all_points(self.origin)

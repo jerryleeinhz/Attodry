@@ -45,8 +45,17 @@ class FakePositioner:
             self.read_hook(self)
         return deepcopy(self.state)
 
-    def _read_initial_state(self):
+    def _read_initial_state(self, *, allow_enabled=False):
         return self.read_state()
+
+    def initialize_outputs_off(self, *, guard, checkpoint=None):
+        self.calls.append("initialize_outputs_off")
+        guard()
+        if checkpoint is not None:
+            checkpoint()
+        for row in self.state["axes"].values():
+            row["output_enabled"] = False
+        return deepcopy(self.state)
 
     def initialize_drive(self, *, guard=None, checkpoint=None):
         self.calls.append("initialize_drive")
@@ -425,13 +434,96 @@ class PositionerSessionTests(unittest.TestCase):
         self.assertTrue(any("disconnect failed" in error for error in session.close()))
         self.assertEqual(self.motor.calls.count("close"), 1)
 
-    def test_initial_enabled_output_is_not_silently_taken_over(self):
-        session = self.session()
+    def test_enabled_outputs_are_read_only_until_guarded_begin_then_origin_is_frozen(self):
+        session = self.session(relative=True)
+        self.motor.state["axes"]["x"].update(output_enabled=True, position_um=5.)
+        session.open()
+        self.assertNotIn("initialize_outputs_off", self.motor.calls)
+        self.assertTrue(self.motor.state["axes"]["x"]["output_enabled"])
+        original = self.motor.initialize_outputs_off
+        def release(**kwargs):
+            self.assertIsNone(session.origin)
+            result = original(**kwargs)
+            self.motor.state["axes"]["x"]["position_um"] = 2.
+            return result
+        self.motor.initialize_outputs_off = release
+        session.begin()
+        self.assertEqual(session.origin, xyz(2, 0, 0))
+        self.assertLess(self.motor.calls.index("initialize_outputs_off"), self.motor.calls.index("initialize_drive"))
+        events = [name for name, payload in self.events]
+        self.assertLess(events.index("positioner_outputs_off"), events.index("positioner_origin_frozen"))
+
+    def test_missing_dark_guard_prevents_startup_output_release(self):
+        session = self.session(external_light_off_confirmed=False)
         self.motor.state["axes"]["x"]["output_enabled"] = True
-        with self.assertRaisesRegex(PositionerError, "output OFF"):
-            session.open()
+        session.open()
+        with self.assertRaisesRegex(PositionerError, "optical OFF guard"):
+            session.begin()
+        self.assertTrue(self.motor.state["axes"]["x"]["output_enabled"])
+        self.assertNotIn("initialize_drive", self.motor.calls)
         self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
-        self.assertEqual(self.motor.calls[-1], "close")
+
+    def test_output_release_failure_is_retained_and_never_prepares_or_retries(self):
+        session = self.session()
+        session.open()
+        def fail(**kwargs):
+            self.motor.calls.append("initialize_outputs_off")
+            raise IOError("output OFF result unknown")
+        self.motor.initialize_outputs_off = fail
+        with self.assertRaisesRegex(IOError, "OFF result unknown"):
+            session.begin()
+        with self.assertRaises(PositionerError):
+            session.begin()
+        self.assertEqual(self.motor.calls.count("initialize_outputs_off"), 1)
+        self.assertNotIn("initialize_drive", self.motor.calls)
+        result = session.cleanup(failed=True)
+        self.assertTrue(result["manual_review"])
+        self.assertTrue(any("OFF result unknown" in error for error in result["errors"]))
+
+    def test_output_release_return_must_be_off_healthy_stationary_and_complete(self):
+        for field, value in (("output_enabled", True), ("moving", True),
+                             ("sensor_error", True), ("position_um", float("nan"))):
+            with self.subTest(field=field):
+                session = self.session()
+                session.open()
+                original = self.motor.initialize_outputs_off
+                def invalid(**kwargs):
+                    state = original(**kwargs)
+                    state["axes"]["z"][field] = value
+                    return state
+                self.motor.initialize_outputs_off = invalid
+                with self.assertRaises(PositionerError):
+                    session.begin()
+                self.assertIsNone(session.origin)
+                self.assertNotIn("initialize_drive", self.motor.calls)
+                self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+
+    def test_output_off_boundary_audit_failure_cannot_continue_to_drive_or_motion(self):
+        for event, expected in (("positioner_outputs_off_requested", 0), ("positioner_outputs_off", 1)):
+            with self.subTest(event=event):
+                session = self.session()
+                session.open()
+                def failed(name, payload):
+                    if name == event:
+                        raise IOError("output audit unavailable")
+                session.event_sink = failed
+                with self.assertRaisesRegex(IOError, "output audit unavailable"):
+                    session.begin()
+                self.assertEqual(self.motor.calls.count("initialize_outputs_off"), expected)
+                self.assertIsNone(session.origin)
+                self.assertNotIn("initialize_drive", self.motor.calls)
+
+    def test_invalid_path_after_release_never_initializes_drive_or_enables_outputs(self):
+        session = self.session(relative=True)
+        self.motor.state["axes"]["x"]["output_enabled"] = True
+        session.config = replace(self.config, axes=tuple(replace(axis, max_move_um=2) for axis in self.config.axes))
+        session.open()
+        with self.assertRaisesRegex(PositionerError, "max_move"):
+            session.begin()
+        self.assertEqual(self.motor.calls.count("initialize_outputs_off"), 1)
+        self.assertNotIn("initialize_drive", self.motor.calls)
+        self.assertFalse(any(isinstance(call, tuple) for call in self.motor.calls))
+        self.assertTrue(all(not row["output_enabled"] for row in self.motor.state["axes"].values()))
 
     def test_prepare_target_failure_triggers_owned_stop_without_retry(self):
         session = self.session()

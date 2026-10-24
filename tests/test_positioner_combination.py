@@ -42,7 +42,17 @@ class FakePositioner:
                 "sensor_error": False, "amplitude_v": axis.amplitude_v,
                 "frequency_hz": axis.frequency_hz} for axis in self.config.axes}}
 
-    def _read_initial_state(self):
+    def _read_initial_state(self, *, allow_enabled=False):
+        return self.read_state()
+
+    def initialize_outputs_off(self, *, guard, checkpoint=None):
+        guard()
+        if checkpoint is not None:
+            checkpoint()
+        if self.owner.backend is not None:
+            self.owner.assertEqual(self.owner.backend.source["emission_state"], 0)
+        self.owner.position_log.append(("initialize_outputs_off",))
+        self.enabled = dict.fromkeys("xyz", False)
         return self.read_state()
 
     def initialize_drive(self, *, guard=None, checkpoint=None):
@@ -109,6 +119,22 @@ class PositionerCombinationTests(unittest.TestCase):
         self.assertEqual(len(darks), 2)
         self.assertEqual([d["context"]["positioner"]["target"]["positioner_x_um"] for d in darks], [0, 10])
         self.assertTrue(self.motor.closed)
+        self.assert_closed_laser_off()
+
+    def test_held_outputs_are_released_once_with_light_off_before_new_origin(self):
+        def held(config):
+            motor = self.motor_factory(config)
+            motor.enabled = dict.fromkeys("xyz", True)
+            return motor
+        result = self.execute(positioner_device_factory=held)
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["cleanup"]["clean"], result)
+        names = [name for name, payload in self.events()]
+        self.assertLess(names.index("positioner_outputs_off_requested"), names.index("positioner_outputs_off"))
+        self.assertLess(names.index("positioner_outputs_off"), names.index("positioner_origin_frozen"))
+        self.assertLess(names.index("positioner_origin_frozen"), names.index("positioner_drive_initialized"))
+        self.assertEqual(sum(item[0] == "initialize_outputs_off" for item in self.position_log), 1)
+        self.assertEqual(len(load_combination_rows(self.database)), 4)
         self.assert_closed_laser_off()
 
     def test_relative_origin_is_once_per_run_across_repeats_and_actual_is_absolute(self):
