@@ -34,8 +34,16 @@ Last updated: 2026-10-25
   Integration clocks advance on simulated sleep rather than observer calls;
   historical source fixtures stay pinned without changing production guards.
   Default TOML semantics, changed Python syntax, links and whitespace passed.
-- Station delivery is pending after the local release validation. No instrument
-  connection, process guard, automatic task or scan is started.
+- LK_setup passed 132 canonical-release guarded tests in 32.580 s, then
+  fast-forwarded acquisition source to `b1c4d21`. Independent verification at
+  2026-10-25T15:42:49Z confirms clean tracked source and byte-identical private
+  hardware TOML, local safety and both original user Notebooks. The three
+  existing tracked user modifications remain. Eight saved experiment databases
+  had no active run/execution or started attempt around the deployment; this is
+  saved-state evidence, not an OS-liveness claim. Private backups, logs and
+  receipts are under `run_data/operator_progress_timing_labels_delivery_20261025T154123Z`.
+  No instrument connection, OS process inventory, automatic task or scan was
+  started. Existing experiment/source-version recovery boundaries remain strict.
   Usage: [COMBINATION_MONITOR.md](COMBINATION_MONITOR.md); timing budgets:
   [MEASUREMENT_PERFORMANCE.md](MEASUREMENT_PERFORMANCE.md).
 

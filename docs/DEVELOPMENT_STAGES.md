@@ -21,7 +21,13 @@
   before optional power queries. All 150 affected cases passed in 143.747 s.
   Closing/cleanup-recovery phases are unavailable as current environment.
   Syntax, default TOML semantics, navigation and whitespace checks passed.
-  Target deployment is pending the release's station offline verification.
+- LK_setup passed 132 hardware-blocked tests in 32.580 s from the exact canonical
+  release and fast-forwarded acquisition commit `b1c4d21`. Independent UTC
+  2026-10-25T15:42:49Z readback confirms clean source and unchanged private
+  hardware/local safety/Notebooks, preserving their existing modifications.
+  Saved active/started counts were zero across eight experiment DBs; no OS
+  process inventory or liveness inference was used. Backups/receipts stay private
+  under the station's ignored delivery directory. No real commissioning or scan.
 
 ## Current: outer-coordinate Lock-in sensitivity rules (2026-10-23)
 
