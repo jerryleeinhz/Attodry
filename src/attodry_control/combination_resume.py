@@ -55,6 +55,7 @@ def _settings(snapshot):
         settings = lockin.get("lockin_" + role)
         if settings is None:
             continue
+        settings.setdefault("channel_label", "")  # legacy unlabelled archives
         overrides = {item["harmonic"]: item for item in settings.get("harmonic_settings", [])}
         fields = ("sensitivity_mode", "sensitivity_full_scale_v", "reserve_mode",
                   "autorange_min_full_scale_v", "autorange_max_full_scale_v",
@@ -106,6 +107,9 @@ def _allowed(path, old, new, hardware):
     if path[:2] == ("temperature", "temperature_run") and leaf == "poll_interval_s":
         return "timing"
     if path[0] == "lockin":
+        if path in {("lockin", "lockin_xx", "channel_label"),
+                    ("lockin", "lockin_xy", "channel_label")}:
+            return "metadata"
         measurement = {"sensitivity_mode", "sensitivity_full_scale_v", "reserve_mode",
             "time_constant_s", "filter_slope_db_oct", "autorange_min_full_scale_v",
             "autorange_max_full_scale_v", "autorange_target_occupancy", "autorange_stable_samples"}

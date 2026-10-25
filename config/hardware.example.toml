@@ -187,6 +187,8 @@ backend = "default"
 timeout_ms = 5000
 
 [lockin_xx]
+# Optional archived wiring/display name; semantic role and hardware commands stay XX.
+# channel_label = "contact 1-2 / b axis"
 # XX is always SR830: internal reference and the physically connected excitation.
 model = "SR830"
 # Keep the station-specific VISA address only in ignored hardware.local.toml.
@@ -215,6 +217,7 @@ reserve_mode = "normal"
 # autorange_stable_samples = 2
 
 [lockin_xy]
+# channel_label = "contact 3-4"
 # XY may be SR830 (legacy default) or SR865A; external TTL and physical SINE OUT
 # disconnection are required for either model. SR865A has separate input range
 # (IRNG, V peak) and sensitivity/full scale (SCAL, V), with no Reserve setting.

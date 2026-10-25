@@ -16,6 +16,17 @@ does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 
 ## Unified and combination plotting
 
+Combination XX/XY channels may carry an optional archived `channel_label` wiring
+name. Selectors, axes, legends, field panels, XY-Z and heatmap color bars show
+the role together with that name. The stored numeric keys remain
+`measured.lockin_xx_*`/`measured.lockin_xy_*`; saved plot setups keep those keys.
+Labels come from each sample's execution/status archive, never today's station
+TOML. Old unlabelled data stays unlabelled, and mixed-run labels are shown on
+their own series. Exports retain `channel_label.xx`/`channel_label.xy` plus the
+original status/configuration provenance. Label text does not certify data quality.
+Installed CJK fonts are used as local figure fallbacks for non-ASCII labels,
+without changing the notebook's global Matplotlib settings.
+
 Sample status is quality metadata, not a changing scan coordinate: mixed clean/problem
 rows are handled by **Quality** and do not require a fixed-status filter. You can still
 add a **Sample status** filter to deliberately select one status. To select one run

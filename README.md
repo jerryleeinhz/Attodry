@@ -10,6 +10,11 @@
 合法 TOML、离线预览和恢复限制见
 [按外层条件设置锁相量程](docs/LOCKIN_RANGE_RULES.md)。
 
+组合扫描的只读 `monitor` 显示归档轴访问进度、明确的采集阶段、最新环境读回和
+最后 accepted 正式样本。新运行另外保存各阶段单调时钟耗时及审计写入成本；
+用法见 [扫描进度与耗时](docs/COMBINATION_MONITOR.md)。XX/XY 可选
+`channel_label` 保存物理接线名称，并随原运行配置进入绘图和导出。
+
 项目开发中的设计取舍、实机失败与测试环境/回归失败复盘见
 [项目开发与测试失败经验](docs/PROJECT_DEVELOPMENT_AND_TEST_LESSONS.md)。
 

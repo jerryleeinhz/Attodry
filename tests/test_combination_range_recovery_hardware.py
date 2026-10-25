@@ -12,7 +12,6 @@ from attodry_control.combination_store import (
     CombinationStore, hardware_recovery_state, open_readonly, validate_accepted_records,
 )
 from attodry_control.lockin_points import LockinPointSession
-from tests import test_attodry as clock_fixture
 from tests import test_combination_cryostat as fixture
 from tests import test_combination_range_rules as range_fixture
 
@@ -35,11 +34,12 @@ class RangeRuleHardwareRecoveryTests(unittest.TestCase):
         return load_hardware_combination(self.path)
 
     def execute(self, config, recovery=None):
+        clock = fixture.Clock()
         with CombinationStore(self.database) as store:
             return run_hardware_combination(config, store, RUN,
                 authorize_hardware=True, authorize_cryostat=True,
                 confirm_xy_sine_disconnected=True, dll=self.dll,
-                monotonic=clock_fixture.StepClock(), sleep=lambda _: None,
+                monotonic=clock.monotonic, sleep=clock.sleep,
                 smu_adapter_factory=self.factory, manager_factory=lambda: self.manager,
                 recovery=recovery)
 

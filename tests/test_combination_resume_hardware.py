@@ -8,7 +8,7 @@ from attodry_control.combination_hardware import load_hardware_combination, run_
 from attodry_control.combination_resume import build_recovery
 from attodry_control.combination_store import CombinationStore, hardware_recovery_state
 from attodry_control.cryostat_points import CryostatPointSession
-from tests.test_attodry import StepClock
+from tests.test_lockin_settling import Clock
 from tests.test_combination_cryostat import CryostatCombinationTests
 from tests.test_combination_hardware import ElectricalCombinationTests
 
@@ -20,12 +20,13 @@ class HardwareRecoveryTests(unittest.TestCase):
     events = ElectricalCombinationTests.events
 
     def execute(self, config, *, recovery=None, owner_guard=None):
+        clock = Clock()
         with CombinationStore(self.database) as store:
             return run_hardware_combination(config, store, "recovery-test",
                 authorize_hardware=True, authorize_cryostat=True,
-                confirm_xy_sine_disconnected=True, dll=self.dll, monotonic=StepClock(),
+                confirm_xy_sine_disconnected=True, dll=self.dll, monotonic=clock.monotonic,
                 smu_adapter_factory=self.factory, manager_factory=lambda: self.manager,
-                sleep=lambda _: None, recovery=recovery, recovery_owner_guard=owner_guard)
+                sleep=clock.sleep, recovery=recovery, recovery_owner_guard=owner_guard)
 
     def seed(self, order, *, accepted=0, source=None):
         self.write_config(order, source=source)

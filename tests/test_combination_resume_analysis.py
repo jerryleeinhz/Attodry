@@ -226,7 +226,7 @@ class ResumeAnalysisTests(unittest.TestCase):
             self.append(store, self.conditions[6])
             snapshot = run_snapshot(self.database, RUN)
             text = snapshot_text(snapshot, width=110)
-            self.assertIn("Accepted: 7/342", text)
+            self.assertIn("Accepted conditions: 7/342", text)
             self.assertIn("Segment 2/2", text)
             self.assertIn("reused 6 accepted conditions", text)
             self.assertIn("current execution accepted 1", text)

@@ -249,6 +249,7 @@ class LockinConfig:
     reserve_mode: ReserveMode | None
     harmonic_settings: tuple[HarmonicSensitivityConfig, ...] = ()
     sr865a: Sr865aConfig | None = None
+    channel_label: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1450,7 +1451,7 @@ def _parse_lockin(
             }
         )
     _strict_keys_with_optional(
-        table, name, expected, {"harmonic_settings"},
+        table, name, expected, {"harmonic_settings", "channel_label"},
     )
     sr865a = None
     if model == "SR865A":
@@ -1632,6 +1633,7 @@ def _parse_lockin(
         reserve_mode=reserve_mode,
         harmonic_settings=_parse_harmonic_settings(table, role, name, safety_role, safety),
         sr865a=sr865a,
+        channel_label=_channel_label(table.get("channel_label", ""), f"{name}.channel_label"),
     )
 
 
@@ -2125,6 +2127,13 @@ def _strict_keys_with_optional(
         raise ConfigError(f"{name} is missing field(s): {', '.join(missing)}.")
     if unknown:
         raise ConfigError(f"{name} has unknown field(s): {', '.join(unknown)}.")
+
+
+def _channel_label(value: Any, name: str) -> str:
+    """Optional wiring metadata; it never selects an instrument operation."""
+    if not isinstance(value, str) or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ConfigError(f"{name} must be a single-line string.")
+    return value.strip()
 
 
 def _string(value: Any, name: str) -> str:

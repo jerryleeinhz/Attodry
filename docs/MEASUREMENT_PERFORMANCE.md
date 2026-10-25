@@ -4,6 +4,54 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Recorded stages and read-only progress (2026-10-25)
+
+The shared electrical coordinator reuses the published photonics
+`MeasurementTiming` helper (`e96d4cd`). `measurement_stage_timing` records the
+start/end, monotonic duration, parent stage and completed/error status for
+preflight, range preparation, axis apply/qualification, condition qualification,
+whole sample/window, individual module reads, sample storage, cleanup and close.
+`measurement_timing_summary` retains stage totals and audit callback costs through
+the final close stage; its own write and subsequent final run/quality bookkeeping
+are outside that summary scope. Whole-condition recovery records a separate
+summary in its own execution; monitor never presents an old segment's timing as
+the new segment's result.
+
+Inclusive stages nest. Only exclusive stage totals plus separately measured
+audit time can be summed; parent/child inclusive durations must not be added.
+This records actual time spent, without predicting convergence or changing any
+settling duration. Successful, failed and interrupted blocks all retain an end
+marker when the audit store is available. A timing/audit failure fails the
+attempt, preserves the primary exception and never skips later independent
+cleanup or connection close.
+
+Explicit `scan_phase` start markers identify the operation in progress. The
+existing positive Lock-in wait is bracketed by wait/resume phase records; no
+additional delay or instrument query is inserted. Zero waits produce no wait
+phase, and an interrupted wait does not claim that sampling resumed. Phase and
+timing events add synchronous SQLite writes; they are not free. A simple
+one-condition SMU/Lock-in fixture without a range schedule adds 12 phase events,
+14 stage timing events and one timing summary, while its fake command sequence
+and requested sleeps are identical with stage instrumentation disabled. Actual
+event counts also depend on selected axes, profiles, samples and positive waits.
+
+Monitor projects counts, archived requirements, current-visit environment and
+the last accepted formal sample inside one short read-only transaction. It
+does not load full sample histories or communication transcripts for display.
+The text display may refresh evidence age every five seconds during a recorded
+environment wait; JSON changes only when stored evidence changes. Neither
+display creates an acquisition watcher, OS process inventory or hardware session.
+
+Channel labels are archived metadata. They add no instrument commands, status
+reads or waits. Analysis derives names from each observation's execution rather
+than the current station TOML; unknown legacy labels remain unlabelled.
+
+Fake clocks used for integration advance on simulated operations/sleeps, not
+on reading the clock. Observation-based StepClock fixtures would otherwise
+consume the safety timeout merely because duration instrumentation reads time.
+Regression coverage compares complete fake action/sleep traces and verifies
+deadline, cleanup and raw provenance independently.
+
 ## Existing combination timing
 
 - Qualify temperature once when entering its axis point, before inner axes.

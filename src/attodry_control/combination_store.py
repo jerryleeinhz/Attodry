@@ -884,6 +884,60 @@ class CombinationStore:
             )
 
 
+def _last_formal_measurement(connection, run_id, plan):
+    """Project the last accepted formal sample, retaining its execution origin.
+
+    Current raw/rejected samples and instrument transcripts never fill this view.
+    A resumed run may legitimately retain its last accepted result from a prior
+    execution; its own archived sample count and execution ID are reported.
+    """
+    row = connection.execute(
+        "SELECT s.condition_id,s.attempt_index,s.sample_index,a.status AS attempt_status,"
+        "c.context_json,json_extract(s.payload_json,'$.started_at_utc') AS started_at_utc,"
+        "json_extract(s.payload_json,'$.finished_at_utc') AS finished_at_utc "
+        "FROM combination_samples s JOIN combination_attempts a ON a.run_id=s.run_id "
+        "AND a.condition_id=s.condition_id AND a.attempt_index=s.attempt_index "
+        "JOIN combination_conditions c ON c.run_id=s.run_id AND c.condition_id=s.condition_id "
+        "WHERE s.run_id=? AND a.status='accepted' "
+        "ORDER BY a.finished_at_utc DESC,c.sequence_index DESC,a.attempt_index DESC,s.sample_index DESC LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    execution_id = None
+    if _has_table(connection, "combination_attempt_executions"):
+        owner = connection.execute(
+            "SELECT e.execution_id,e.plan_json FROM combination_attempt_executions x "
+            "JOIN combination_executions e ON e.run_id=x.run_id AND e.execution_id=x.execution_id "
+            "WHERE x.run_id=? AND x.condition_id=? AND x.attempt_index=?",
+            (run_id,row["condition_id"],row["attempt_index"])).fetchone()
+        if owner is not None:
+            execution_id, archived = owner
+            plan = json.loads(archived)
+    readings = {}
+    for reading in connection.execute(
+        "SELECT json_extract(r.value,'$.module') AS module,"
+        "json_extract(r.value,'$.captured_at_utc') AS captured_at_utc,"
+        "json_extract(r.value,'$.actual') AS actual,"
+        "json_extract(r.value,'$.measurements') AS measurements,"
+        "json_extract(r.value,'$.clean') AS clean "
+        "FROM combination_samples s,json_each(s.payload_json,'$.reads') r "
+        "WHERE s.run_id=? AND s.condition_id=? AND s.attempt_index=? AND s.sample_index=? "
+        "AND json_extract(r.value,'$.module') IN ('temperature','magnetic','smu','lockin')",
+        (run_id,row["condition_id"],row["attempt_index"],row["sample_index"]),
+    ):
+        readings[reading["module"]] = {
+            "module":reading["module"], "captured_at_utc":reading["captured_at_utc"],
+            "actual":json.loads(reading["actual"] or "{}"),
+            "measurements":json.loads(reading["measurements"] or "{}"),
+            "clean":bool(reading["clean"]) if reading["clean"] is not None else None}
+    result = {key:row[key] for key in ("condition_id","attempt_index","sample_index",
+              "attempt_status","started_at_utc","finished_at_utc")}
+    return {**result,"captured_at_utc":row["finished_at_utc"],
+            "context":json.loads(row["context_json"]), "execution_id":execution_id,
+            "expected_samples":plan.get("samples_per_condition"),"modules":readings}
+
+
 def run_snapshot(path: str | Path, run_id: str) -> dict:
     """Read an internally consistent snapshot; active is not a liveness claim."""
     with closing(open_readonly(path)) as connection:
@@ -934,6 +988,45 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
                     (run_id, item["execution_id"]),
                 ).fetchone()[0]
                 executions.append(item)
+        # New executions have their own archived effective parameters. Never
+        # relabel an earlier segment's phase/visit as this segment's preflight.
+        plan = executions[-1]["plan"] if executions else json.loads(row["plan_json"])
+        current_execution = executions[-1]["execution_id"] if executions else None
+        if current_execution is not None:
+            attempt = connection.execute(
+                "SELECT a.condition_id,a.attempt_index,a.status FROM combination_attempts a "
+                "JOIN combination_attempt_executions x ON x.run_id=a.run_id "
+                "AND x.condition_id=a.condition_id AND x.attempt_index=a.attempt_index "
+                "WHERE a.run_id=? AND x.execution_id=? "
+                "ORDER BY a.started_at_utc DESC,a.rowid DESC LIMIT 1",
+                (run_id,current_execution)).fetchone()
+        from .monitor_progress import phase_snapshot, read_progress
+        from .monitor_environment import read_environment
+        phase_event = connection.execute(
+            "SELECT created_at_utc,payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type='scan_phase' ORDER BY event_id DESC LIMIT 1", (run_id,)).fetchone()
+        if phase_event is not None and current_execution is not None:
+            try:
+                payload = json.loads(phase_event["payload_json"])
+            except (TypeError, ValueError):
+                payload = None
+            if not isinstance(payload, dict) or payload.get("execution_id") != current_execution:
+                phase_event = None
+        progress = read_progress(connection, run_id, plan, dict(attempt) if attempt else None)
+        phase = phase_snapshot(dict(phase_event) if phase_event else None, row["status"],
+                               dict(event) if event else None)
+        environment = read_environment(connection, run_id, plan, progress, phase,
+                                       execution_id=current_execution)
+        timing_event = connection.execute(
+            "SELECT created_at_utc,payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type='measurement_timing_summary' ORDER BY event_id DESC LIMIT 1",
+            (run_id,)).fetchone()
+        timing_summary = None
+        if timing_event is not None:
+            payload = json.loads(timing_event["payload_json"])
+            if (isinstance(payload, dict) and (current_execution is None
+                    or payload.get("execution_id") == current_execution)):
+                timing_summary = {**payload, "recorded_at_utc": timing_event["created_at_utc"]}
         range_event = connection.execute(
             "SELECT event_type,created_at_utc,payload_json FROM combination_events WHERE run_id=? "
             "AND event_type IN ('lockin_range_selected','lockin_range_rule_apply_started',"
@@ -955,6 +1048,9 @@ def run_snapshot(path: str | Path, run_id: str) -> dict:
             "run_id": run_id, "status": row["status"],
             "accepted_conditions": accepted, "total_conditions": total,
             "current_attempt": dict(attempt) if attempt else None,
+            "progress": progress, "phase": phase, "environment": environment,
+            "last_formal_measurement": _last_formal_measurement(connection, run_id, plan),
+            "measurement_timing_summary": timing_summary,
             "cleanup": json.loads(row["cleanup_json"]) if row["cleanup_json"] else None,
             "error": row["error"], "process_liveness": "unknown",
             "last_recorded_readings": last_confirmed,

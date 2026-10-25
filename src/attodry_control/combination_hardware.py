@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace, is_dataclass
+from contextlib import contextmanager
 from datetime import datetime
 from enum import Enum
 import hashlib
@@ -236,6 +237,12 @@ class _Events:
         self.sink = sink
         self.cleaning = False
         self.errors = []
+        self.monitor_phase = None
+
+    def phase(self, name, **context):
+        payload = {"phase": name, **context}
+        self.event("scan_phase", payload)
+        self.monitor_phase = payload
 
     def event(self, kind, payload):
         try:
@@ -268,6 +275,21 @@ class HardwareCombinationStation:
 
     def set_event_sink(self, sink):
         self.events = _Events(sink)
+
+    def set_monitor_phase(self, name, **context):
+        self.events.phase(name, **context)
+
+    @contextmanager
+    def _monitor_lockin_wait(self):
+        previous = self.events.monitor_phase
+        context = ({"sample_index": previous["sample_index"]}
+                   if previous is not None and "sample_index" in previous else {})
+        self.set_monitor_phase("lockin_wait", module="lockin", **context)
+        yield
+        # Restore the enclosing phase only after a successful wait.
+        if previous is not None:
+            self.set_monitor_phase(previous["phase"],
+                **{key: value for key, value in previous.items() if key != "phase"})
 
     def open(self, modules):
         if modules != tuple(a.module for a in self.config.plan.axes):
@@ -304,6 +326,7 @@ class HardwareCombinationStation:
                 self.config.path, self.config.lockin, self.events.event,
                 manager_factory=self.manager_factory, mode=self.config.lockin_mode,
                 authorize_writes=self.authorize_hardware, monotonic=self.monotonic, sleep=self.sleep)
+            self.lockin.monitor_wait_context = self._monitor_lockin_wait
             preflight["lockin"] = (self.lockin.open(recovery=True) if self.recovery is not None
                                    else self.lockin.open())
         # All active preflights must succeed before any configuration writes.

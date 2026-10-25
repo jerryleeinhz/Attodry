@@ -89,7 +89,9 @@ class LockinPointSession:
             daily.prepare_configured_lockin_sweep(config_path, config, scan=mode)
         )
         self.event = event
-        self.clock = {"monotonic": monotonic, "sleep": sleep}
+        self.base_sleep = sleep or daily.time.sleep
+        self.monitor_wait_context = None
+        self.clock = {"monotonic": monotonic, "sleep": self._wait}
         self.settings["authorize_writes"] = authorize_writes is True
         self.manager_factory = manager_factory
         self.recovery_owner_guard = recovery_owner_guard
@@ -132,6 +134,13 @@ class LockinPointSession:
                 config=config, harmonics_by_role=self.harmonics_by_role)
             self.skipped_by_frequency[str(frequency.value)] = skipped
         self.point_harmonics = self.harmonics
+
+    def _wait(self, seconds):
+        """Label the existing positive wait without extra queries or sleeps."""
+        if self.monitor_wait_context is None or seconds <= 0:
+            return self.base_sleep(seconds)
+        with self.monitor_wait_context():
+            return self.base_sleep(seconds)
 
     def open(self, *, recovery=False):
         daily._require_mixed_write_authorization(self.settings)
@@ -204,7 +213,7 @@ class LockinPointSession:
             updated.append(before)
         self.preflight = tuple(updated)
         if changed:
-            daily.time.sleep(self.args.settle_s)
+            self._wait(self.args.settle_s)
             self.preflight = tuple(instrument.read_diagnostic(consume_status_latches=True)
                                    for instrument in self.pair)
             self._verify_recovery_baseline()
@@ -469,16 +478,26 @@ class LockinPointSession:
                 self.point_record if self.point_record is not None else self.sensitivity_setup)
 
     def _formal_pair_recorded(self, payload):
+        if self.channel_labels:
+            payload["channel_labels"] = self.channel_labels
         if self.range_profile is not None:
             payload["lockin_range_rule"] = self.range_context()
         self.event("lockin_formal_pair", payload)
 
+    @property
+    def channel_labels(self):
+        return {role: settings.channel_label for role, settings in
+                (("xx", self.config.lockin_xx), ("xy", self.config.lockin_xy))
+                if settings.channel_label}
+
     def sample_point(self, *, measurement_context=None):
         self._require_range_profile_ready()
         if self.sample_count:
-            daily.time.sleep(self.args.sample_interval_s)
+            self._wait(self.args.sample_interval_s)
         actual = self._read_coordinates()
         record = {**self.point_record, "samples": [], "harmonic_transition_status": []}
+        if self.channel_labels:
+            record["channel_labels"] = self.channel_labels
         try:
             daily._capture_sweep_point(
                 *self.pair, target_frequency_hz=actual["lockin_frequency_hz"],

@@ -1,5 +1,17 @@
 # 电学 Lock-in 日常扫频与扫幅
 
+## Combination 通道名称
+
+可在 `[lockin_xx]`、`[lockin_xy]` 分别设置可选单行 `channel_label`，例如
+`channel_label = "端口3-4 / b轴"`。它是接线/显示元数据，不改变仪器角色、
+源输出、参考、量程、Reserve、滤波或时间常数；省略或空白保持旧显示。
+XX 仍是激励源，XY 仍是物理断开 SINE OUT 的接收机，SR865A XY 同样支持标签。
+
+组合运行的 execution 配置、正式样本状态和逐 pair 审计保留标签。绘图从所选
+数据自己的归档读取，显示如 `XY/端口3-4 / b轴`；后来修改本机 TOML 不会改名旧数据。
+同 run 恢复允许标签作为 `metadata` 配置差异显式记录，旧 accepted 样本保持原名。
+源版本兼容、整条件恢复、保护审阅和原始数据校验仍按原恢复契约执行。
+
 ## Combination 外层坐标量程规则
 
 在组合扫描中可用 `[[combination_scan.lockin_range_rules]]` 为外层 temperature、

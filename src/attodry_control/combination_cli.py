@@ -14,6 +14,16 @@ from .combination_scan import AxisPoint, ScanAxis, CombinationPlan, run_simulate
 from .combination_store import CombinationStore, run_snapshot
 
 
+def monitor_output_due(snapshot, *, changed, json_output, last_rendered, now):
+    """Refresh text observation ages without turning JSON into a heartbeat."""
+    if changed:
+        return True
+    if json_output or last_rendered is None:
+        return False
+    from .combination_terminal import environment_refresh_active
+    return environment_refresh_active(snapshot) and now - last_rendered >= 5
+
+
 def load_plan(path: str | Path) -> CombinationPlan:
     with Path(path).open("rb") as file:
         document = tomllib.load(file)
@@ -179,12 +189,16 @@ def run(argv: list[str] | None = None) -> int:
     if not args.json:
         print("Database: " + str(database), flush=True)
     previous = None
+    last_rendered = None
     while True:
         snapshot = {**run_snapshot(database, run_id), "database": str(database)}
         encoded = json.dumps(snapshot, ensure_ascii=False)
-        if encoded != previous:
+        observed = time.monotonic()
+        if monitor_output_due(snapshot, changed=encoded != previous, json_output=args.json,
+                              last_rendered=last_rendered, now=observed):
             print(encoded if args.json else snapshot_text(snapshot), flush=True)
             previous = encoded
+            last_rendered = observed
         if args.once or snapshot["status"] != "active":
             return 0
         time.sleep(1)

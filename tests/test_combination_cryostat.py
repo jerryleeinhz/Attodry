@@ -14,6 +14,7 @@ from attodry_control.combination_store import CombinationStore, open_readonly
 from attodry_control.cryostat_points import CryostatPointSession
 from attodry_control.attodry import AttoDryError, AttoDryTimeout
 from tests.test_attodry import FakeAttoDryDll, StepClock
+from tests.test_lockin_settling import Clock
 from tests import test_combination_hardware as fixtures
 
 
@@ -35,12 +36,15 @@ class CryostatCombinationTests(unittest.TestCase):
 
     def execute(self, run_id="test", **kwargs):
         config = load_hardware_combination(self.path)
+        # Observation must not advance simulated time. Extra timing/event
+        # measurements must not consume a stability timeout in this fixture.
+        clock = Clock()
         with CombinationStore(self.database) as store:
             return run_hardware_combination(config, store, run_id,
                 authorize_hardware=True, authorize_cryostat=True,
-                confirm_xy_sine_disconnected=True, dll=self.dll, monotonic=StepClock(),
+                confirm_xy_sine_disconnected=True, dll=self.dll, monotonic=clock.monotonic,
                 smu_adapter_factory=self.factory, manager_factory=lambda: self.manager,
-                sleep=lambda _: None, **kwargs)
+                sleep=clock.sleep, **kwargs)
 
     def test_all_64_nonempty_orders_share_one_connection(self):
         modules = ("temperature", "magnetic", "smu", "lockin")

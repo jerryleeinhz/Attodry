@@ -1,8 +1,43 @@
 # Project handoff
 
-Last updated: 2026-10-23
+Last updated: 2026-10-25
 
 ## Current stage
+
+### Electrical progress, phase timing and channel labels (2026-10-25)
+
+- Adapt published photonics `e96d4cd` progress/environment/formal projections and
+  exclusive monotonic timing to the electrical coordinator. Explicit phases
+  identify preflight, axis movement/qualification, range preparation, actual
+  positive Lock-in waits, formal reads and cleanup. Counts distinguish visited
+  axes, fully completed inner scopes, accepted conditions and provisional samples.
+- Read-only monitor uses the current execution's archived configuration and
+  current axis visit; old/rejected/partial/recovery/cleanup or invalid-time
+  environment is unavailable. The last accepted formal sample is a separate
+  projection with its own execution identity. Terminal outcomes override phases;
+  legacy archives without explicit markers remain unknown. Existing recovery
+  lineage and measurement range/cleanup evidence are preserved.
+- Phase timing records inclusive/exclusive stage costs and audit writes without
+  adding hardware queries or waits. Audit errors retain primary faults and all
+  independent cleanup/close attempts. Recovery creates fresh segment timing.
+- Optional `lockin_xx.channel_label` and `lockin_xy.channel_label` are archived
+  wiring metadata for SR830/SR865A, status, plots and exports. Old missing labels
+  mean blank; renamed labels require normal reviewed metadata changes on resume.
+  Role keys, range/settle/qualification/protection policies remain unchanged.
+- Local hardware-blocked checks passed: 64 monitor, 13 label and 13 timing/review
+  cases, with overlapping related regressions. A broad 465-case run found two
+  stale test expectations: the renamed Accepted conditions caption and a pre-axis-
+  qualification-era temperature-drift trip assertion. Those fixtures now test
+  the current caption, retained drift telemetry and independently blocking hard
+  overshoot. The affected 150-case rerun passed in 143.747 s. A closing/recovery-
+  cleanup phase no longer displays cleanup readbacks as current environment.
+  Integration clocks advance on simulated sleep rather than observer calls;
+  historical source fixtures stay pinned without changing production guards.
+  Default TOML semantics, changed Python syntax, links and whitespace passed.
+- Station delivery is pending after the local release validation. No instrument
+  connection, process guard, automatic task or scan is started.
+  Usage: [COMBINATION_MONITOR.md](COMBINATION_MONITOR.md); timing budgets:
+  [MEASUREMENT_PERFORMANCE.md](MEASUREMENT_PERFORMANCE.md).
 
 ### Outer-coordinate Lock-in sensitivity rules (2026-10-23)
 

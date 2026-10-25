@@ -424,7 +424,7 @@ def numeric_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, str],
 
     keys = sorted({key for row in rows for key in row})
     return tuple(
-        (column_label(key), key)
+        (column_label(key, rows), key)
         for key in keys
         if any(_is_numeric(row.get(key)) for row in rows)
     )
@@ -433,7 +433,7 @@ def numeric_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, str],
 def scalar_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, str], ...]:
     keys = sorted({key for row in rows for key in row})
     return tuple(
-        (column_label(key), key)
+        (column_label(key, rows), key)
         for key in keys
         if any(_scalar(row.get(key)) for row in rows)
     )
@@ -444,7 +444,33 @@ def column_values(rows: Sequence[Mapping[str, Any]], key: str) -> tuple[Any, ...
     return tuple(sorted(values.values(), key=_sort_value))
 
 
-def column_label(key: str) -> str:
+def _channel_caption(key: str, rows: Sequence[Mapping[str, Any]]) -> str | None:
+    from .combination_analysis import lockin_channel_labels
+    match = re.fullmatch(r"(?:measured|actual)\.lockin_(xx|xy)_h[123]_.+", key)
+    if match is None:
+        return None
+    role = match[1]
+    labels = {lockin_channel_labels(row).get(role, "") for row in rows if key in row}
+    if not any(labels):
+        return None
+    return " | ".join(role.upper() + ("/" + label if label else " (unlabelled)")
+                      for label in sorted(labels))
+
+
+def _channel_fonts(rows: Sequence[Mapping[str, Any]]) -> None:
+    """Set installed label fallbacks only inside the caller's style context."""
+    from .combination_analysis import lockin_channel_labels
+    if any(any(ord(char) > 127 for char in label)
+           for row in rows for label in lockin_channel_labels(row).values()):
+        import matplotlib as mpl
+        from matplotlib import font_manager
+        installed = {font.name for font in font_manager.fontManager.ttflist}
+        fallbacks = [name for name in ("Microsoft YaHei", "SimHei", "Noto Sans CJK SC", "PingFang SC")
+                     if name in installed]
+        mpl.rcParams["font.family"] = ["DejaVu Sans", *fallbacks]
+
+
+def column_label(key: str, rows: Sequence[Mapping[str, Any]] = ()) -> str:
     """Readable variable label with actual/requested and channel identity."""
 
     prefix, dot, suffix = key.partition(".")
@@ -457,6 +483,9 @@ def column_label(key: str) -> str:
             return name
         label, unit = _known_label(suffix)
         qualifier = status.get(prefix, "")
+        caption = _channel_caption(key, rows)
+        if caption:
+            label = re.sub(r"Lock-in (?:XX|XY)", caption, label)
         text = f"{qualifier} {label}".strip()
         return f"{text} ({unit})" if unit else text
     names = {
@@ -674,6 +703,10 @@ def _draw_curve(axis, rows, spec, x, y):
         points = repeat_statistics(group, x=x, y=y, mode=mode)
         summaries.extend({**p, "group": dict(identity), "channel": y} for p in points)
         label = _series_label(identity, bool(identity))
+        captions = list(dict.fromkeys(caption for key in (x, y)
+                                     if (caption := _channel_caption(key, group))))
+        if captions:
+            label += " · " + "; ".join(captions)
         color = OKABE_ITO_ON_WHITE[index % len(OKABE_ITO_ON_WHITE)]
         xs = [p["x"] if _is_numeric(p["x"]) else float("nan") for p in points]
         ys = [p["y"] if _is_numeric(p["y"]) else float("nan") for p in points]
@@ -685,7 +718,7 @@ def _draw_curve(axis, rows, spec, x, y):
                       marker=SERIES_MARKERS[index % len(SERIES_MARKERS)] if style != "line" else None,
                       linestyle="-" if style != "points" else "none", markersize=4,
                       capsize=2, linewidth=1, label=label)
-    axis.set(xlabel=column_label(x), ylabel=column_label(y))
+    axis.set(xlabel=column_label(x, rows), ylabel=column_label(y, rows))
     for name, key in (("x", x), ("y", y)):
         scale = spec.get(name + "_scale", "linear")
         if scale not in ("linear", "log"):
@@ -774,13 +807,14 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     with publication_style():
         import matplotlib as mpl
         import matplotlib.pyplot as plt
+        _channel_fonts(selected)
         figure = None
         try:
             if mode == "field":
                 figure, axes = plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
                 reports, raw, summary = {}, [], []
                 for axis, key in zip(axes.flat, plot_keys[1:]):
-                    panel = _draw_curve(axis, selected, {**spec, "title": column_label(key)}, x, key)
+                    panel = _draw_curve(axis, selected, {**spec, "title": column_label(key, selected)}, x, key)
                     reports[key] = panel["report"]
                     raw.extend({**r, "plot_channel": key} for r in panel["rows"])
                     summary.extend(panel["summary_rows"])
@@ -828,9 +862,9 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                     if len(revisions) > 1 else None)
             if len(revisions) > 1 and spec.get("show_legend", True):
                 axis.legend(title="Archived configuration")
-            figure.colorbar(artist, ax=axis).set_label(column_label(z))
+            figure.colorbar(artist, ax=axis).set_label(column_label(z, selected))
             overlap = len(valid)-len({(r[x],r[y]) for r in valid})
-            axis.set(xlabel=column_label(x), ylabel=column_label(y), title=(spec.get("title") or "Measured XY observations") + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
+            axis.set(xlabel=column_label(x, selected), ylabel=column_label(y, selected), title=(spec.get("title") or "Measured XY observations") + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
             if quality['quality_policy'] == 'include' and quality['flagged_row_count']:
                 axis.set_title(axis.get_title() + " · AUDIT: flagged included")
             axis.set_title(_audit_title(selected) + axis.get_title())

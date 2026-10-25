@@ -117,7 +117,7 @@ class CombinationTemperatureTelemetryTests(unittest.TestCase):
         self.assertNotIn("get_sample_heater_power", self.dll.events)
         self.assertFalse(any(kind == "temperature_telemetry" for kind, _ in self.events()))
 
-    def test_drift_is_persisted_and_rejected_before_optional_power(self):
+    def capture_session(self):
         self.write_config(("temperature",))
         configuration = combination_fixtures.load_hardware_combination(self.path)
         events = []
@@ -129,12 +129,29 @@ class CombinationTemperatureTelemetryTests(unittest.TestCase):
         self.addCleanup(session.close)
         session.temperature_target = 2.0
         session.baseline_temperature = 2.0
+        session.temperature_qualification = {"qualified_at_utc": "2030-01-01T00:00:00+00:00"}
         self.dll.temperature_control = 1
+        return session, events
+
+    def test_qualified_drift_is_recorded_with_complete_power_evidence(self):
+        session, events = self.capture_session()
         self.dll.sample_temperature_k = 2.1
         self.dll.events.clear()
-        with self.assertRaisesRegex(AttoDryError, "drifted"):
+        record = session.capture("after_sample")
+        self.assertIn("temperature_baseline_drift", record["temperature_assessment"]["quality_flags"])
+        self.assertTrue(record["telemetry_complete"])
+        self.assertEqual(record["heater_power"], {"sample_w": .25, "vti_w": .5})
+        raw = next(row for kind, row in reversed(events) if kind == "cryostat_state")
+        self.assertAlmostEqual(raw["state"]["sample_temperature_k"], 2.1, places=5)
+        self.assertIsNone(raw["heater_power"]["sample_w"])
+
+    def test_hard_overshoot_is_persisted_and_rejected_before_optional_power(self):
+        session, events = self.capture_session()
+        self.dll.sample_temperature_k = 2.3
+        self.dll.events.clear()
+        with self.assertRaisesRegex(AttoDryError, "overshoot"):
             session.capture("after_sample")
         self.assertNotIn("get_sample_heater_power", self.dll.events)
-        self.assertEqual(events[-1][0], "environment_sample")
-        self.assertAlmostEqual(events[-1][1]["state"]["sample_temperature_k"], 2.1, places=5)
+        self.assertEqual(events[-1][0], "cryostat_state")
+        self.assertAlmostEqual(events[-1][1]["state"]["sample_temperature_k"], 2.3, places=5)
         self.assertIsNone(events[-1][1]["heater_power"]["sample_w"])

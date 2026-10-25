@@ -14,6 +14,7 @@ import math
 from pathlib import Path
 
 from .combination_store import CombinationStore, utc_now
+from .measurement_timing import MeasurementTiming
 from .models import VectorField
 from .safety import FieldReadbackPolicy, MagnetLimits
 
@@ -292,10 +293,19 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
     cleanup_errors: list[str] = []
     cleanup_actions: list[dict] = []
 
-    def emit(kind: str, payload: dict) -> None:
+    def store_event(kind: str, payload: dict) -> None:
         context = {} if current is None else {
             "condition_id": current["condition_id"], "attempt_index": attempt}
         store.event(run_id, kind, {**context, **payload})
+
+    timing = MeasurementTiming(store_event, monotonic=getattr(station, "monotonic", None))
+    emit = timing.emit
+
+    def phase(name, **context):
+        if hasattr(station, "set_monitor_phase"):
+            station.set_monitor_phase(name, **context)
+        else:
+            emit("scan_phase", {"phase": name, **context})
 
     try:
         # Only a successfully committed run may become the monitor default.
@@ -306,11 +316,15 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             emit("launch_registered", on_registered(store, run_id))
         emit("run_started", {"resume": resume or recovery is not None, "plan": snapshot,
                              "cleanup_only": bool(recovery and recovery.get("cleanup_only"))})
-        emit("preflight", station.open(modules))
+        phase("preflight")
+        with timing.timed_stage("preflight"):
+            emit("preflight", station.open(modules))
         if recovery is not None and recovery.get("cleanup_only"):
             if not hasattr(station, "prepare_cleanup_recovery"):
                 raise ValueError("Station cannot qualify a cleanup-only recovery")
-            qualification = station.prepare_cleanup_recovery(conditions[-1])
+            phase("cleanup_recovery")
+            with timing.timed_stage("cleanup_recovery"):
+                qualification = station.prepare_cleanup_recovery(conditions[-1])
             emit("cleanup_recovery_prepared", qualification)
             if qualification.get("ready") is not True:
                 raise ValueError("Cleanup recovery environment did not qualify")
@@ -326,116 +340,130 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             # Index prefixes, not values: preserve duplicate points and inner resets.
             for depth, axis in enumerate(plan.axes):
                 if axis.module == "lockin" and hasattr(station, "prepare_lockin_ranges"):
-                    station.prepare_lockin_ranges(condition)
+                    phase("lockin_range_prepare", module="lockin")
+                    with timing.timed_stage("lockin_range_prepare"):
+                        station.prepare_lockin_ranges(condition)
                 if previous_indices is None or indices[:depth + 2] != previous_indices[:depth + 2]:
                     point = axis.points[condition["axes"][axis.module]["index"]]
                     emit("axis_setting", {"module": axis.module, "requested": point.values})
-                    emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
+                    phase("axis_apply", module=axis.module)
+                    with timing.timed_stage("axis_apply", module=axis.module):
+                        emit("axis_ready", {"module": axis.module, **station.apply(axis.module, point)})
                     if hasattr(station, "qualify_axis"):
                         scope = {"repeat_index": condition["repeat_index"],
                                  "axis_indices": list(indices[1:depth + 2]),
                                  "condition_id": condition["condition_id"]}
-                        axis_qualification = station.qualify_axis(axis.module, point, scope)
-                        emit("axis_qualification", {"module": axis.module, **axis_qualification})
+                        phase("axis_qualification", module=axis.module)
+                        with timing.timed_stage("axis_qualification", module=axis.module):
+                            axis_qualification = station.qualify_axis(axis.module, point, scope)
+                            emit("axis_qualification", {"module": axis.module, **axis_qualification})
                         if axis_qualification.get("ready") is not True:
                             raise RuntimeError("Axis did not qualify: " + axis.module)
-            qualification = station.qualify(modules)
-            emit("condition_qualification", qualification)
+            phase("condition_qualification")
+            with timing.timed_stage("condition_qualification"):
+                qualification = station.qualify(modules)
+                emit("condition_qualification", qualification)
             if qualification.get("ready") is not True:
                 raise ValueError("Condition did not qualify")
             for sample_index in range(plan.samples_per_condition):
-                start = utc_now()
-                reads = []
-                if hasattr(station, "begin_sample"):
-                    station.begin_sample()
-                # All settings/settling precede every fresh SMU/Lock-in read.
-                # Per-instrument times describe sequential, not simultaneous, reads.
-                read_error = None
-                try:
-                    for module in modules:
-                        reading = station.read(module)
-                        emit("raw_reading", {"sample_index": sample_index,
-                                             "reading": _audit_value(reading)})
-                        if reading.get("module") != module:
-                            raise ValueError("Reading belongs to the wrong module")
-                        reads.append(reading)
-                        if not reading_allows_continuation(reading):
-                            # Preserve partial reads and stop later acquisition.
-                            break
-                except BaseException as exc:
-                    read_error = exc
-                    raise
-                finally:
-                    if hasattr(station, "end_sample"):
+                with timing.timed_stage("sample", sample_index=sample_index):
+                    start = utc_now()
+                    reads = []
+                    with timing.timed_stage("sample_window", sample_index=sample_index):
+                        if hasattr(station, "begin_sample"):
+                            station.begin_sample()
+                        # All settings/settling precede every fresh SMU/Lock-in read.
+                        # Per-instrument times describe sequential, not simultaneous, reads.
+                        read_error = None
                         try:
-                            station.end_sample(reads)
+                            for module in modules:
+                                phase("formal_sampling", module=module, sample_index=sample_index)
+                                with timing.timed_stage("module_read", module=module, sample_index=sample_index):
+                                    reading = station.read(module)
+                                    emit("raw_reading", {"sample_index": sample_index,
+                                                         "reading": _audit_value(reading)})
+                                    if reading.get("module") != module:
+                                        raise ValueError("Reading belongs to the wrong module")
+                                    reads.append(reading)
+                                    if not reading_allows_continuation(reading):
+                                        # Preserve partial reads and stop later acquisition.
+                                        break
                         except BaseException as exc:
-                            if read_error is None:
-                                raise
-                            read_error.add_note(f"Environmental after-read failed: {exc}")
-                            try:
-                                emit("environment_after_read_failed", {"error": str(exc)})
-                            except BaseException as audit_error:
-                                # A second failure must not replace the original
-                                # instrument error or suppress global cleanup.
-                                cleanup_errors.append(
-                                    f"environment after-read: {exc}; audit: {audit_error}")
-                actual: dict = {}
-                measurements: dict = {}
-                for reading in reads:
-                    actual.update(reading["actual"])
-                    measurements.update(reading["measurements"])
-                finite = all(type(v) in (int, float) and math.isfinite(v)
-                             for v in (*actual.values(), *measurements.values()))
-                expected_keys = set(condition["requested"])
-                expected_measured = station.expected_measurements(condition)
-                finish = utc_now()
-                fresh = all(datetime.fromisoformat(start) <=
-                            datetime.fromisoformat(r["captured_at_utc"]) <=
-                            datetime.fromisoformat(finish) for r in reads)
-                acquisition_accepted = (finite and set(actual) == expected_keys and all(
-                    reading_allows_continuation(r) for r in reads)
-                    and expected_measured <= set(measurements) and fresh)
-                if "magnetic" in modules and finite and set(actual) == expected_keys:
-                    try:
-                        if field_policy is None:
-                            # Historical snapshots retain their strict 3 T rule.
-                            if math.hypot(actual["field_x_t"], actual["field_z_t"]) > 3:
-                                raise ValueError("Historical formal field exceeds 3 T")
-                        else:
-                            field_policy.validate_readback(VectorField(actual["field_x_t"], actual["field_z_t"]))
-                    except (ValueError, KeyError, TypeError):
-                        acquisition_accepted = False
-                if finite and set(actual) == expected_keys:
-                    try:
-                        other_axes = tuple(ScanAxis(module, (AxisPoint({
-                            key: value for key, value in actual.items() if key in MODULE_KEYS[module]
-                        }),)) for module in modules if module != "magnetic")
-                        if other_axes:
-                            CombinationPlan(other_axes).validate()
-                    except ValueError:
-                        acquisition_accepted = False
-                if not finite:
-                    # Raw problematic values are already auditable via emit; JSON
-                    # rejects non-finite numbers, so a malformed backend fails closed.
-                    raise ValueError("Non-finite formal readback")
-                clean = acquisition_accepted and all(r.get("clean") is True for r in reads)
-                sample = {
-                    "acquisition_accepted": acquisition_accepted,
-                    "started_at_utc": start, "finished_at_utc": finish,
-                    "actual": actual, "measurements": measurements, "reads": reads,
-                    "clean": clean, "simulated": snapshot["mode"] == "simulation",
-                }
-                if field_policy is not None and {"field_x_t", "field_z_t"} <= actual.keys():
-                    sample["field_readback_assessment"] = field_policy.assessment(
-                        VectorField(actual["field_x_t"], actual["field_z_t"]))
-                store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
-                emit("formal_sample", {"sample_index": sample_index, "clean": clean})
-                if not acquisition_accepted:
-                    raise ValueError("Formal sample is incomplete or unclean")
+                            read_error = exc
+                            raise
+                        finally:
+                            if hasattr(station, "end_sample"):
+                                try:
+                                    station.end_sample(reads)
+                                except BaseException as exc:
+                                    if read_error is None:
+                                        raise
+                                    read_error.add_note(f"Environmental after-read failed: {exc}")
+                                    try:
+                                        emit("environment_after_read_failed", {"error": str(exc)})
+                                    except BaseException as audit_error:
+                                        # A second failure must not replace the original
+                                        # instrument error or suppress global cleanup.
+                                        cleanup_errors.append(
+                                            f"environment after-read: {exc}; audit: {audit_error}")
+                    actual: dict = {}
+                    measurements: dict = {}
+                    for reading in reads:
+                        actual.update(reading["actual"])
+                        measurements.update(reading["measurements"])
+                    finite = all(type(v) in (int, float) and math.isfinite(v)
+                                 for v in (*actual.values(), *measurements.values()))
+                    expected_keys = set(condition["requested"])
+                    expected_measured = station.expected_measurements(condition)
+                    finish = utc_now()
+                    fresh = all(datetime.fromisoformat(start) <=
+                                datetime.fromisoformat(r["captured_at_utc"]) <=
+                                datetime.fromisoformat(finish) for r in reads)
+                    acquisition_accepted = (finite and set(actual) == expected_keys and all(
+                        reading_allows_continuation(r) for r in reads)
+                        and expected_measured <= set(measurements) and fresh)
+                    if "magnetic" in modules and finite and set(actual) == expected_keys:
+                        try:
+                            if field_policy is None:
+                                # Historical snapshots retain their strict 3 T rule.
+                                if math.hypot(actual["field_x_t"], actual["field_z_t"]) > 3:
+                                    raise ValueError("Historical formal field exceeds 3 T")
+                            else:
+                                field_policy.validate_readback(VectorField(actual["field_x_t"], actual["field_z_t"]))
+                        except (ValueError, KeyError, TypeError):
+                            acquisition_accepted = False
+                    if finite and set(actual) == expected_keys:
+                        try:
+                            other_axes = tuple(ScanAxis(module, (AxisPoint({
+                                key: value for key, value in actual.items() if key in MODULE_KEYS[module]
+                            }),)) for module in modules if module != "magnetic")
+                            if other_axes:
+                                CombinationPlan(other_axes).validate()
+                        except ValueError:
+                            acquisition_accepted = False
+                    if not finite:
+                        # Raw problematic values are already auditable via emit; JSON
+                        # rejects non-finite numbers, so a malformed backend fails closed.
+                        raise ValueError("Non-finite formal readback")
+                    clean = acquisition_accepted and all(r.get("clean") is True for r in reads)
+                    sample = {
+                        "acquisition_accepted": acquisition_accepted,
+                        "started_at_utc": start, "finished_at_utc": finish,
+                        "actual": actual, "measurements": measurements, "reads": reads,
+                        "clean": clean, "simulated": snapshot["mode"] == "simulation",
+                    }
+                    if field_policy is not None and {"field_x_t", "field_z_t"} <= actual.keys():
+                        sample["field_readback_assessment"] = field_policy.assessment(
+                            VectorField(actual["field_x_t"], actual["field_z_t"]))
+                    with timing.timed_stage("sample_store", sample_index=sample_index):
+                        store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
+                    emit("formal_sample", {"sample_index": sample_index, "clean": clean})
+                    if not acquisition_accepted:
+                        raise ValueError("Formal sample is incomplete or unclean")
             store.finish_attempt(run_id, condition["condition_id"], attempt,
                                  expected_samples=plan.samples_per_condition)
             emit("condition_accepted", {})
+            phase("condition_complete")
             previous_indices = indices
             attempt = None
         current = None
@@ -455,20 +483,33 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 continue
             try:
                 emit("cleanup_started", {"module": module})
+                phase("cleanup", module=module)
             except BaseException as exc:
                 cleanup_errors.append(f"cleanup audit: {exc}")
             try:
-                action = _audit_value(station.cleanup(module, primary is not None or bool(cleanup_errors)))
-                cleanup_actions.append(action)
+                with timing.timed_stage("cleanup", module=module) as stage:
+                    action = _audit_value(station.cleanup(module, primary is not None or bool(cleanup_errors)))
+                    cleanup_actions.append(action)
+                    stage["verified"] = action.get("clean") is True
                 if action.get("clean") is not True:
                     cleanup_errors.append(f"{module}: cleanup not certified; review recorded actions")
                 emit("cleanup_result", action)
             except BaseException as exc:
                 cleanup_errors.append(f"{module}: {type(exc).__name__}: {exc}")
         try:
-            station.close()
+            phase("close")
+        except BaseException as exc:
+            cleanup_errors.append(f"close phase audit: {exc}")
+        try:
+            with timing.timed_stage("close"):
+                station.close()
         except BaseException as exc:
             cleanup_errors.append(f"close: {exc}")
+        try:
+            emit("measurement_timing_summary", timing.summary())
+        except BaseException as exc:
+            cleanup_errors.append(f"timing summary audit: {exc}")
+        cleanup_errors.extend("timing audit: " + error for error in timing.audit_errors)
     communication_uncertain = isinstance(primary, OSError) or any(
         action.get("result", {}).get("communication_uncertain") is True
         for action in cleanup_actions)

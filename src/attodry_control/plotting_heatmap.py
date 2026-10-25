@@ -93,7 +93,7 @@ def render_heatmap(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     """
     from .analysis_observations import finite, observation_id, qualify_observations, repeat_statistics
     from .scientific_plotting import publication_style, style_axis
-    from .unified_plotting import _audit_title, _unresolved_dimensions, _value_key, column_label
+    from .unified_plotting import _audit_title, _channel_fonts, _unresolved_dimensions, _value_key, column_label
 
     x, y, z = (spec.get(key) for key in ("x", "y", "z"))
     if not all((x, y, z)):
@@ -187,6 +187,8 @@ def render_heatmap(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
         import matplotlib.pyplot as plt
         from matplotlib.patches import Patch
         import numpy as np
+        _channel_fonts(rows)
+        label = lambda key: column_label(key, rows)
         figure = None
         try:
             values = [point["z"] for point in summaries if not point["masked"]]
@@ -206,9 +208,9 @@ def render_heatmap(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                     mask.append(point["masked"])
                 artist = axis.pcolormesh(panel["x_edges"], panel["y_edges"], grid,
                                          cmap=cmap, norm=norm, shading="flat", antialiased=False)
-                axis.set(xlabel=_coordinate_label(coordinate_x, column_label),
-                         ylabel=_coordinate_label(coordinate_y, column_label),
-                         title=_facet_label(panel["identity"], column_label))
+                axis.set(xlabel=_coordinate_label(coordinate_x, label),
+                         ylabel=_coordinate_label(coordinate_y, label),
+                         title=_facet_label(panel["identity"], label))
                 for name in ("x", "y"):
                     getattr(axis, "set_" + name + "scale")(spec.get(name + "_scale", "linear"))
                 axis.set_xlim(panel["x_edges"][0], panel["x_edges"][-1])
@@ -226,7 +228,7 @@ def render_heatmap(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
             for axis in list(axes.flat)[len(panels):]:
                 axis.set_visible(False)
             if values:
-                figure.colorbar(artist, ax=used_axes, label=column_label(z))
+                figure.colorbar(artist, ax=used_axes, label=column_label(z, rows))
             if any(point["masked"] for point in summaries):
                 figure.legend(handles=[Patch(facecolor=MISSING_COLOR, edgecolor="#777777", label="Missing/excluded")],
                               loc="outside lower center")

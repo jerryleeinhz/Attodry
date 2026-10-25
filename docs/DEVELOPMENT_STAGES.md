@@ -1,5 +1,28 @@
 # Development stages
 
+## Current: electrical progress, timing and channel labels (2026-10-25)
+
+- Reuse published photonics monitor/timing patterns while preserving electrical
+  execution/config history and whole-condition recovery. Display explicit scan
+  phases, archived visit/completion/sample counts, current-visit environment and
+  the last accepted formal sample separately. Unknown historic evidence remains
+  unknown; monitor uses read-only SQLite and does not judge OS processes.
+- Record nested monotonic stage durations and exclusive totals plus audit costs.
+  New audit events do not change instrument commands, settling waits or axis-entry
+  stability. Timing/audit failure retains primary faults and independent cleanup.
+- Add optional XX/XY wiring labels through config/status/per-execution analysis,
+  plots and export, including native SR865A receivers. No hardware-role rename,
+  extra module or station parameter update. Source-version recovery guards stay
+  strict; historical fixtures keep their original source inventory.
+- Hardware-blocked feature suites passed (64 monitor, 13 labels, 13 timing/review).
+  Initial broad 465-case regression found two obsolete test expectations, updated
+  for the explicit accepted-condition caption and the already-established
+  post-qualification temperature quality policy; hard overshoot still rejects
+  before optional power queries. All 150 affected cases passed in 143.747 s.
+  Closing/cleanup-recovery phases are unavailable as current environment.
+  Syntax, default TOML semantics, navigation and whitespace checks passed.
+  Target deployment is pending the release's station offline verification.
+
 ## Current: outer-coordinate Lock-in sensitivity rules (2026-10-23)
 
 - Compile optional target-coordinate/point-index rules before hardware access;

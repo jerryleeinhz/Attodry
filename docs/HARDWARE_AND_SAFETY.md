@@ -1,5 +1,18 @@
 # Hardware and safety guide
 
+## Stored progress, durations and channel labels (2026-10-25)
+
+Optional XX/XY channel labels identify wiring in archived status, analysis and
+exports; semantic roles, instrument commands and physical protections are
+unchanged. New phase/timing audit events retain the existing acquisition order,
+single axis-entry qualification and shared Lock-in settling. Failure to persist
+audit evidence stops the attempt and retains the primary fault while independent
+cleanup/close still run. Read-only monitor progress, environment and formal
+results are separately identified and bound to their original visit/execution.
+Unknown/old records do not establish present state, zero field or outputs OFF.
+No OS process supervision, additional instrument reader, automatic recovery or
+experiment replay is introduced. See [monitor operation](COMBINATION_MONITOR.md).
+
 ## Planned outer-condition Lock-in ranges
 
 Optional `combination_scan.lockin_range_rules` selects only detector sensitivity

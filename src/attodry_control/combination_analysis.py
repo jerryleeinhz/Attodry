@@ -95,6 +95,33 @@ def _lockin_range_columns(bindings, condition_id, reading):
     }
 
 
+def lockin_channel_labels(record: Mapping) -> dict[str, str]:
+    """Operator labels already archived in this observation, never a live TOML."""
+    status = record.get("status.lockin")
+    labels = status.get("channel_labels") if isinstance(status, Mapping) else None
+    result = {}
+    for role in ("xx", "xy"):
+        value = (labels.get(role) if isinstance(labels, Mapping) and role in labels
+                 else record.get("channel_label." + role))
+        if isinstance(value, str) and value.strip():
+            result[role] = value.strip()
+    return result
+
+
+def _channel_label_columns(plan: Mapping, reading: Mapping) -> dict:
+    config = (plan.get("hardware") or {}).get("lockin") or {}
+    status = reading.get("status")
+    labels = status.get("channel_labels") if isinstance(status, Mapping) else None
+    columns = {}
+    for role in ("xx", "xy"):
+        settings = config.get("lockin_" + role) or {}
+        value = (labels.get(role) if isinstance(labels, Mapping) and role in labels
+                 else settings.get("channel_label"))
+        if isinstance(value, str) and value.strip():
+            columns["channel_label." + role] = value.strip()
+    return columns
+
+
 def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None = None,
                               audit: bool = False, preview: bool = False) -> CombinationSnapshot:
     """Read all selected runs and their provenance at one committed DB revision.
@@ -223,6 +250,7 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
             record[f"status.{reading['module']}"] = reading.get("status")
             if reading["module"] == "lockin":
                 record.update(_lockin_range_columns(range_bindings, row["condition_id"], reading))
+                record.update(_channel_label_columns(execution_plan, reading))
         output.append(record)
     materialized = tuple(output)
     for run in runs:
