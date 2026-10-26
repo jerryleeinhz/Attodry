@@ -913,7 +913,8 @@ class PhotonicsLockinPointSession:
                 expected_edge = {"sine_zero_crossing": 0, "rising": 1, "falling": 2}.get(cfg.external_reference_edge)
                 reserve = {"high_reserve": 0, "normal": 1, "low_noise": 2}[cfg.reserve_mode]
                 correct = ((expected_edge is None or native.reference_slope == expected_edge) and native.input_mode == 1
-                    and native.shield_grounding == (0 if cfg.shield_grounding == "float" else 1) and native.input_coupling == 0
+                    and native.shield_grounding == (0 if cfg.shield_grounding == "float" else 1)
+                    and native.input_coupling == {"ac": 0, "dc": 1}[cfg.input_coupling]
                     and native.line_filter == 0 and native.filter_slope == 3 and native.reserve_mode == reserve)
             else:
                 correct = (native.external_reference_edge == cfg.external_reference_edge
@@ -921,7 +922,7 @@ class PhotonicsLockinPointSession:
                     and native.input_range_v_peak == cfg.input_range_v_peak
                     and not native.advanced_filter and not native.synchronous_filter
                     and native.filter_slope_db_oct == 24 and native.input_mode == "a_minus_b"
-                    and native.input_coupling == "ac" and native.shield_grounding == cfg.shield_grounding
+                    and native.input_coupling == cfg.input_coupling and native.shield_grounding == cfg.shield_grounding
                     and native.sync_output_mode == (self.preflight[cfg.role.value]["native_settings"]["sync_output_mode"]
                         if cfg.sync_output_mode == "preserve" else cfg.sync_output_mode))
             if not correct or not math.isclose(native.phase_shift_deg, cfg.phase_shift_deg, abs_tol=0.001, rel_tol=0):

@@ -23,6 +23,7 @@ class ShieldGrounding(StrEnum):
 
 class InputCoupling(StrEnum):
     AC = "ac"
+    DC = "dc"
 
 
 class SensitivityMode(StrEnum):
@@ -57,7 +58,7 @@ _REFERENCE_SOURCE_CODES = {
 _EXTERNAL_REFERENCE_EDGE_CODES = {ExternalReferenceEdge.RISING: 1}
 _INPUT_MODE_CODES = {InputMode.A_MINUS_B: 1}
 _SHIELD_GROUNDING_CODES = {ShieldGrounding.FLOAT: 0}
-_INPUT_COUPLING_CODES = {InputCoupling.AC: 0}
+_INPUT_COUPLING_CODES = {InputCoupling.AC: 0, InputCoupling.DC: 1}
 
 # Complete SR830 OFLT mapping.  These are discrete hardware settings; callers
 # must never substitute an arbitrary time constant between adjacent values.

@@ -1,5 +1,22 @@
 # Development stages
 
+## 2026-10-26 Per-role AC/DC input coupling (local offline)
+
+Explicit ac/dc signal-input coupling is supported independently for XX/XY SR830
+and optional AUX SR865A. The existing parsers/settings adapter/group/backend and
+formal settings guards now propagate and compare each role's selected mode.
+Changed ICPL is written once and verified; matching settings use existing reads.
+The existing configuration disturbance/settling boundary and cleanup are kept.
+Mode mismatch remains a hard configuration fault; original overload policy and
+raw data classifications retain their meaning. Archives/dark matching continue
+to distinguish coupling; no amplitude/phase correction is introduced.
+
+Historical PEM diagnostic takeover is kept AC-only by a pre-I/O two-role guard.
+Guides and public example comments document the choices; example parameter
+values and private station TOMLs are unchanged. User authorized origin
+publication and explicitly deferred LK_setup deployment while its process runs.
+Validation: 727 related hardware-blocked offline regressions passed in 119.498 s, including 12 new coupling/diagnostic test methods. Five public TOML examples parse and retain identical parameter values. Tests used python -X utf8 -s -B tools/run_guarded_tests.py; no real instrument connection or LK_setup deployment was performed.
+
 ## 2026-10-24 Station deployment and repository reconciliation
 
 The SDK-arrival/output-OFF policy from a1fcd65 was deployed with file backups,

@@ -1,5 +1,21 @@
 # Hardware and safety guide
 
+## 2026-10-26 Explicit AC/DC signal-input coupling (local offline)
+
+Each configured lock-in detector may explicitly select ac or dc input coupling;
+this does not set source DC output or establish the sample's DC voltage. DC
+background can overload the input even when the detected harmonic is small.
+Existing input-range, identity, wiring, reference, overload and cleanup policies
+remain applicable. Actual coupling must match the requested role before/after
+formal acquisition; mismatch is a configuration fault and is not record_continue
+quality or a recoverable reference transient. Unknown/readback/communication
+faults do not trigger an automatic switch, retry or repaired sample.
+
+The dedicated historical PEM internal-reference diagnostic still requires AC
+on both requested roles and its original observed baseline. Generic support
+does not authorize that diagnostic to take over a DC station. This change is
+software/offline only; deployment and real operations need their own scope.
+
 ## 2026-10-24 Station deployment and repository reconciliation
 
 The SDK-arrival/output-OFF policy from a1fcd65 was deployed with file backups,

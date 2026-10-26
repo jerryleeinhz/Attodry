@@ -36,13 +36,34 @@ SR865A peak input range, RMS output sensitivity, high reference impedance,
 preserved unused sync output and verified current-status support.
 A detector full scale does not establish sample/source safety.
 
-The first three-role profile uses excitation-only points at the configured XX
-frequency, fixed sensitivities, A-B voltage input, AC coupling and24dB/oct RC.
+The three-role profile uses excitation-only points at the configured XX
+frequency, fixed sensitivities, A-B voltage input and24dB/oct RC. Each role
+independently selects signal-input coupling with `input_coupling="ac"` or
+`input_coupling="dc"`; mixed AC/DC groups are supported. Existing AC settings
+remain AC. This does not configure source DC offset or change sample excitation.
 Role-specific harmonic lists1/2/3 are supported; multiple harmonics are sequential.
 Frequency sweeps, bounded auto and per-harmonic/segment sensitivity overrides
 are rejected before opening devices in this profile. Existing dual profiles
 retain those capabilities. The optional AUX does not activate historical PEM
 external-reference or XY-SINE-to-XX routing.
+
+For example, set `input_coupling="dc"` in the existing `[lockin_xx]` and
+`[lockin_xy]` tables while retaining `input_coupling="ac"` in `[lockin_aux]`.
+Edit the existing fields rather than adding duplicate TOML tables. The startup
+configuration writes only differing settings and verifies each actual coupling.
+Formal before/after checks require that role's configured mode; a mode change
+during acquisition is a settings fault, not an automatic switch or retry.
+Coupling changes use the existing configuration settling boundary and shared
+remaining wait, with no coupling writes added to unchanged measurement points.
+
+DC coupling passes the input's DC background as well as the modulated signal;
+that background can overload the input even when the detected harmonic is small.
+Existing startup checks and acquisition overload policies still apply. X/Y/R
+remain input-referred volts RMS for the selected harmonic: the software adds no
+gain division or AC/DC phase correction. Archived requested/actual coupling is
+part of formal settings and dark-background matching; AC and DC backgrounds are
+not interchangeable. Dedicated historical PEM diagnostics retain their own
+AC-baseline takeover requirement.
 
 The command remains:
 python -m attodry_control.combination_cli run --config config/photonics.local.toml
@@ -138,7 +159,7 @@ small dark/light run. Current production files and old raw scans are preserved.
 每个外层条件必须唯一匹配一条规则，各路仍检查型号档位和本站 allowlist。换档在
 首次准备 optical/lockin 轴之前核验并完成原有等待，先于光学参考转换、正式窗口
 和匹配暗背景；实际温度/磁场波动不会触发换档。内部 XX 两路规则会话与三路一样
-要求 A−B/AC/24 dB RC；未配置规则时原有会话保持原支持范围。
+要求 A−B/24 dB RC，各路 input_coupling 独立选择 ac 或 dc；未配置规则时原有会话保持原支持范围。
 此功能独立于被拒绝的逐谐波/原有逐点量程覆盖，不改变 AUX 输入范围或激励源。
 完整 TOML、模块坐标、往返磁场点序号、背景兼容性及离线预览见
 [按外层扫描点设置锁相量程](LOCKIN_RANGE_RULES.md)。

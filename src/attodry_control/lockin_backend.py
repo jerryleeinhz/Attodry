@@ -564,11 +564,10 @@ class PhysicalLockinBackend:
         """Configure the explicit fixed-range RC subset, without touching excitation."""
         if settings.model != self.capabilities.model.value or settings.role is not self.role:
             raise ValueError("Measurement settings do not belong to this role/model.")
-        if (settings.input_mode, settings.input_coupling,
-            settings.sensitivity_mode, settings.filter_slope_db_oct) != (
-            "a_minus_b", "ac", "fixed", 24
-        ) or settings.shield_grounding not in ("float", "ground"):
-            raise ValueError("Only A-B/explicit-grounding/AC/fixed/24 dB RC is supported in this profile.")
+        if (settings.input_mode, settings.sensitivity_mode, settings.filter_slope_db_oct) != (
+            "a_minus_b", "fixed", 24
+        ) or settings.input_coupling not in ("ac", "dc") or settings.shield_grounding not in ("float", "ground"):
+            raise ValueError("Only A-B/explicit-grounding/AC-or-DC/fixed/24 dB RC is supported in this profile.")
         if (isinstance(settings.time_constant_s, bool)
                 or settings.time_constant_s not in self.capabilities.time_constants_s
                 or isinstance(settings.sensitivity_full_scale_v, bool)
@@ -587,7 +586,7 @@ class PhysicalLockinBackend:
         self._authorize(authorize_writes)
         self._set_code("ISRC", 1, (0, 1) if self.capabilities.model is LockinModel.SR865A else (0, 1, 2, 3))
         self._set_code("IGND", 0 if settings.shield_grounding == "float" else 1, (0, 1))
-        self._set_code("ICPL", 0, (0, 1))
+        self._set_code("ICPL", {"ac": 0, "dc": 1}[settings.input_coupling], (0, 1))
         self._set_code("OFSL", 3, (0, 1, 2, 3))
         if self.capabilities.model is LockinModel.SR830:
             self._set_code("ILIN", 0, (0, 1, 2, 3))

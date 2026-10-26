@@ -333,7 +333,7 @@ class ConfigurationTests(unittest.TestCase):
         cases = (
             ('input_mode = "a_minus_b"', 'input_mode = "a"', "input_mode"),
             ('shield_grounding = "float"', 'shield_grounding = "ground"', "shield_grounding"),
-            ('input_coupling = "ac"', 'input_coupling = "dc"', "input_coupling"),
+            ('input_coupling = "ac"', 'input_coupling = "invalid"', "input_coupling"),
             ("time_constant_s = 0.3", "time_constant_s = 0.4", "time_constant_s"),
             ("filter_slope_db_oct = 24", "filter_slope_db_oct = 12", "filter_slope"),
             (

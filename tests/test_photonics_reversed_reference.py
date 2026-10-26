@@ -149,9 +149,9 @@ class ReversedReferenceTests(unittest.TestCase):
         doc["lockin_xy"]["harmonics"] = [2, 3]
         self.assertEqual(self.load(doc).lockin_xy.harmonics, (2, 3))
 
-    def test_preserve_blazex_required_and_ac_scope_unchanged(self):
+    def test_preserve_blazex_required_and_invalid_coupling_rejected(self):
         for table, key, value in (("sr865a", "sync_output_mode", "unipolar_sync"),
-                                  (None, "input_coupling", "dc")):
+                                  (None, "input_coupling", "invalid")):
             doc = reversed_sine_document()
             target = doc["lockin_xy"] if table is None else doc["lockin_xy"][table]
             target[key] = value

@@ -41,7 +41,7 @@ source_voltage_v = 0.004 # 仪器RMS设置；不能推断实际样品电压
 frequency_hz = "CHANGE_ME_REFERENCE_FREQUENCY_HZ" # Hz；按实际刀片/轨道选，不沿用PEM约50kHz
 input_mode = "a_minus_b" # 当前软件只支持差分a_minus_b
 shield_grounding = "float" # 当前软件只支持float
-input_coupling = "ac" # 当前软件只支持ac；硬件dc未在此路径开放
+input_coupling = "ac" # ac | dc：每路独立的信号输入耦合；dc须留意直流背景过载
 time_constant_s = 1.0 # SR830离散1/3系列：10us..30000s；示例tau=1s
 filter_slope_db_oct = 24 # 当前软件只支持24dB/oct；不照搬硬件其他档位
 sensitivity_mode = "fixed" # fixed | bounded_auto；auto需补完整本路allowlisted参数
@@ -59,7 +59,7 @@ source_voltage_v = 0.004 # 物理断开的输出保留最低设置
 frequency_hz = "CHANGE_ME_REFERENCE_FREQUENCY_HZ" # 审批坐标；外参考实际值由XX TTL给出
 input_mode = "a_minus_b"
 shield_grounding = "float"
-input_coupling = "ac"
+input_coupling = "ac" # ac | dc：每路独立选择
 time_constant_s = 1.0
 filter_slope_db_oct = 24
 sensitivity_mode = "fixed"

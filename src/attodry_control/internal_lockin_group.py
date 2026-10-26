@@ -56,8 +56,8 @@ def group_configuration(config, prepared):
     for cfg in (config.lockin_xx, config.lockin_xy):
         if (cfg.sensitivity_mode.value != "fixed" or cfg.harmonic_settings
                 or cfg.filter_slope_db_oct != 24 or cfg.input_mode.value != "a_minus_b"
-                or cfg.input_coupling.value != "ac"):
-            raise ValueError("Three-channel profile requires fixed sensitivity, A-B/AC, 24 dB RC; per-harmonic ranges are unsupported")
+                or cfg.input_coupling.value not in ("ac", "dc")):
+            raise ValueError("Three-channel profile requires fixed sensitivity, A-B with AC/DC coupling, 24 dB RC; per-harmonic ranges are unsupported")
         if not prepared.harmonics_by_role[cfg.role.value]:
             raise ValueError("Every enabled detector requires at least one measurement harmonic")
         roles.append(PhotonicsLockinRoleConfig(

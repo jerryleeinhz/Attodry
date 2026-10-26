@@ -155,7 +155,7 @@ SHA-256 命名的共享档案，集中保存解析后的策略、配置和电阻
 | `external_reference_edge` | XY 的 TTL 外参考边沿，固定为 `rising`。 | 仅 XY 必填；这不是 A-B 电压信号的极性。 |
 | `input_mode` | `a_minus_b`，差分 A-B 测量。 | 两台都固定，避免把共模信号当作输运信号。 |
 | `shield_grounding` | `float`，输入屏蔽浮地。 | 两台都固定。 |
-| `input_coupling` | `ac`，交流耦合。 | 两台都固定。 |
+| `input_coupling` | `ac`（交流耦合）或 `dc`（直流耦合）。 | 每路独立配置；启动设置后读回确认，正式采样前后必须与配置一致。 |
 | `time_constant_s` | SR830 的完整离散 `OFLT` 时间常数，10 µs--30 ks。 | 每台可独立设置；日常 sweep 使用较慢的一台自动推导所有秒数等待。完整秒值与代码见日常手册。 |
 | `filter_slope_db_oct` | SR830 低通滤波斜率；硬件可选 `6`、`12`、`18`、`24` dB/oct。当前项目确认值为 `24` dB/oct。 | 与时间常数共同定义带宽；正式采样中不能变化。当前代码和安全策略只放行 `24`，改用其他档位前必须同步更新安全策略、驱动映射、测试并重新确认 settling。 |
 | `sensitivity_mode` | XX 与 XY 都默认 `fixed`；各自可显式选择 `bounded_auto`。 | 自动模式绝不因新版本默认开启；XY SINE OUT 的物理断开与模式无关。 |
@@ -165,6 +165,12 @@ SHA-256 命名的共享档案，集中保存解析后的策略、配置和电阻
 | `autorange_target_occupancy` | 0.85。 | 到达或超过阈值才允许上移一个档位；最大档仍不安全则 fail closed。 |
 | `autorange_stable_samples` | 2 个连续安全样本。 | 符合更窄的相邻档位两次后，才允许下移一档；任一不合格样本重置计数。 |
 | `autorange_*` 总步数 | 不再配置。 | `lockin_safety.toml` 的有序 ladder 决定相邻转换；一次点内必要时可连续放大，跨点缩窄仍受稳定样本条件限制。 |
+
+`input_coupling` 只选择信号输入耦合，不设置源 DC 输出。每路的请求值和原生读回
+随正式设置保存；DC 输入中的直流背景可能占用前端范围并引起过载，原有预检和
+过载策略不变。正式 X/Y/R 继续采用输入端 V RMS，不新增增益换算或自动相位补偿。
+两路或可选第三路允许不同耦合；暗背景必须与各路归档的实际耦合一致。旧 AC 配置
+仍使用 AC；专用历史 PEM 诊断仍要求其明确的 AC 基线。
 
 LIAS bit 2 (`output_overload`) 属于 SR830 未使用的 CH1/CH2 输出路径。本项目只记录原始
 状态，不把它作为 sweep 过载或自动量程判定；bit 0 (`input_or_reserve_overload`) 和 bit 1

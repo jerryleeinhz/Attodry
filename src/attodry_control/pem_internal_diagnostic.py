@@ -47,6 +47,8 @@ def validate_station(config, station):
     if (station.reference_topology != "pem_xy_xx_sine" or lockin is None
             or lockin.lockin_xx.model != "SR830" or lockin.lockin_xy.model != "SR865A"):
         raise ValueError("Diagnostic requires the reviewed XX SR830 / XY SR865A SINE reference station")
+    if any(cfg.input_coupling != "ac" for cfg in (lockin.lockin_xx, lockin.lockin_xy)):
+        raise ValueError("This dedicated diagnostic requires AC input coupling on both lock-in roles")
     if station.optical is None or station.optical.pem is None or station.optical.pm is None:
         raise ValueError("Diagnostic requires NKT, PEM and power-meter configuration")
     if station.smu is not None or station.cryostat is not None:

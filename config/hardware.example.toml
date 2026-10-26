@@ -196,7 +196,7 @@ source_voltage_v = 0.004
 frequency_hz = 17.777
 input_mode = "a_minus_b"
 shield_grounding = "float"
-input_coupling = "ac"
+input_coupling = "ac" # ac | dc; independent signal-input coupling for this role
 # Must be one discrete SR830 OFLT value; see docs/LOCKIN_DAILY_OPERATION.md.
 time_constant_s = 0.3
 filter_slope_db_oct = 24
@@ -226,7 +226,7 @@ source_voltage_v = 0.004
 frequency_hz = 17.777
 input_mode = "a_minus_b"
 shield_grounding = "float"
-input_coupling = "ac"
+input_coupling = "ac" # ac | dc; independent signal-input coupling for this role
 # Must be one discrete SR830 OFLT value; see docs/LOCKIN_DAILY_OPERATION.md.
 time_constant_s = 0.3
 filter_slope_db_oct = 24

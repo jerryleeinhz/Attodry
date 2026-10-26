@@ -161,7 +161,7 @@ def _role_config(table, role, allowed_scales, reference_max_hz, topology):
         raise ValueError("pem_xy_xx_sine requires XX SR830 and XY SR865A.")
     _choice(table["input_mode"], ("a_minus_b",), name + ".input_mode")
     grounding = _choice(table["shield_grounding"], ("float", "ground") if topology == "pem_xy_xx_sine" else ("float",), name + ".shield_grounding")
-    _choice(table["input_coupling"], ("ac",), name + ".input_coupling")
+    coupling = _choice(table["input_coupling"], ("ac", "dc"), name + ".input_coupling")
     _choice(table["sensitivity_mode"], ("fixed",), name + ".sensitivity_mode")
     if type(table["filter_slope_db_oct"]) is not int or table["filter_slope_db_oct"] != 24:
         raise ValueError("The initial fixed-range profile requires 24 dB/oct RC filters.")
@@ -198,7 +198,7 @@ def _role_config(table, role, allowed_scales, reference_max_hz, topology):
             raise ValueError("SR865A formal acquisition requires explicitly verified current-status support.")
     return PhotonicsLockinRoleConfig(
         role, model.value, address.strip(), source, edge, connected,
-        "a_minus_b", grounding, "ac", tau, 24, "fixed", scale, phase, tuple(harmonics),
+        "a_minus_b", grounding, coupling, tau, 24, "fixed", scale, phase, tuple(harmonics),
         reserve, input_range, impedance, sync, current_status,
         channel_label=_channel_label(table.get("channel_label", ""), name + ".channel_label"),
     )

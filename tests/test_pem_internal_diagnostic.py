@@ -10,12 +10,12 @@ import sqlite3
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from attodry_control.lockin_backend import BackendSettings, BackendStatus, LockinModel
 from attodry_control.models import LockinRole
 from attodry_control.pem_internal_config import DiagnosticConfig
-from attodry_control.pem_internal_diagnostic import analyze, run, run_diagnostic, simulate
+from attodry_control.pem_internal_diagnostic import analyze, run, run_diagnostic, simulate, validate_station
 from attodry_control.photonics_lockin_config import load_photonics_lockin_config
 from attodry_control.sr830 import LiaStatus
 from attodry_control.sr865a import Sr865aCaptureError, Sr865aSettings
@@ -349,6 +349,27 @@ class PemInternalDiagnosticTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         return Harness(temporary.name, **kwargs)
+
+    def test_dc_station_configuration_rejects_before_resource_or_archive_creation(self):
+        for role in ("lockin_xx", "lockin_xy"):
+            with self.subTest(role=role):
+                harness = self.make()
+                lockin = harness.station.lockin
+                harness.station.lockin = replace(lockin, **{
+                    role: replace(getattr(lockin, role), input_coupling="dc")})
+                with self.assertRaisesRegex(ValueError, "AC input coupling"):
+                    validate_station(harness.config, harness.station)
+                manager, optical, backend = Mock(), Mock(), Mock()
+                with patch("attodry_control.pem_internal_diagnostic.Archive") as archive:
+                    with self.assertRaisesRegex(ValueError, "AC input coupling"):
+                        harness.run(manager_factory=manager, optical_factory=optical,
+                                    backend_factory=backend)
+                    archive.assert_not_called()
+                manager.assert_not_called()
+                optical.assert_not_called()
+                backend.assert_not_called()
+                self.assertEqual(harness.log, [])
+                self.assertFalse((harness.directory / "run").exists())
 
     def test_authorization_and_physical_declarations_reject_before_instrument_io(self):
         for change in ("authorize", "route", "xx", "buffer"):

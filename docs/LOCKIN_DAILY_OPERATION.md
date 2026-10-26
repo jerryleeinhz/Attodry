@@ -463,12 +463,20 @@ SINE OUT 无论量程模式如何都必须保持物理断开。自动判断、�
 | `frequency_hz` | 正数且不超过 102000 Hz；XX 与 XY 必须相同。日常基线为 17.777 Hz。 |
 | `input_mode` | 只能是 `"a_minus_b"`。 |
 | `shield_grounding` | 只能是 `"float"`。 |
-| `input_coupling` | 只能是 `"ac"`。 |
+| `input_coupling` | `"ac"` 或 `"dc"`；XX、XY 独立选择。旧配置的 `"ac"` 保持 AC。 |
 | `time_constant_s` | 必须是下表中的 SR830 离散 `OFLT` 档位。两台可不同，sweep 自动使用较慢的一台计算等待和重复样本间隔。 |
 | `filter_slope_db_oct` | SR830 硬件可选 `6`、`12`、`18`、`24` dB/oct，对应 `OFSL` 代码 `0`、`1`、`2`、`3`；当前项目只能是 `24`。 |
 | `sensitivity_mode` | 只能是 `"fixed"` 或 `"bounded_auto"`（拼写必须完全一致）。 |
 | `sensitivity_full_scale_v` | 可填 `0.001`、`0.010`、`0.020`、`0.050` 或 XX `1.0` V。当前示例 fixed：XX `1.0`、XY `0.010`；在 `bounded_auto` 中它必须等于最小量程。 |
 | `reserve_mode` | `"high_reserve"`（RMOD 0）、`"normal"`（RMOD 1）或 `"low_noise"`（RMOD 2）。只在该角色的 `hardware.local.toml` 设置；默认 `"normal"`。 |
+
+`input_coupling` 控制信号输入耦合，`ac`/`dc` 分别对应 `ICPL 0`/`ICPL 1`。
+例如只把已有 `[lockin_xy]` 的该字段改为 `"dc"`，XX 仍可保留 `"ac"`。
+启动时只写与配置不同的设置并读回确认，按现有设置变化等待后才正式采样；运行中
+耦合与配置不符仍为设置故障，不自动切回。DC 会保留输入直流背景，背景可能使前端
+过载；原预检、过载策略和无效数据分类继续生效。X/Y/R 仍为检测频率分量的输入端
+V RMS，无额外增益除法或相位校正。独立暗背景须匹配归档的实际耦合模式，不能把
+AC 背景用于 DC 数据。历史专用 PEM 诊断的 AC 基线准入保持其原有约束。
 
 SR830 全部允许的时间常数如下；在 TOML 中统一填写秒数：
 

@@ -140,7 +140,7 @@ sine_output_connected = true
 input_mode = "a_minus_b"
 # 当前pem_xy_xx_sine可选float / ground，按确认的输入屏蔽接地填写；原拓扑只float。
 shield_grounding = "float"
-# 当前profile只支持 ac；硬件dc的含义见MD，不能只改此值启用dc路径。
+# ac | dc：每路独立的信号输入耦合；dc不设置源直流偏置，须留意输入直流背景过载。
 input_coupling = "ac"
 # 离散档：1/3 × 10^n s，SR830从10us至30000s；如0.3、1.0、3.0。
 time_constant_s = 1.0
@@ -180,7 +180,7 @@ external_reference_edge = "rising"
 sine_output_connected = true
 input_mode = "a_minus_b"
 shield_grounding = "float"
-input_coupling = "ac"
+input_coupling = "ac" # ac | dc：每路独立选择
 # SR865A额外支持1us/3us；其余为1/3系列至30000s。
 time_constant_s = 1.0
 filter_slope_db_oct = 24
