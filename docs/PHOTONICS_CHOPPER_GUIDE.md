@@ -198,7 +198,12 @@ LD OFF 的 preflight 冻结实际模式；同一会话后续从 1 改为 2 或�
 不证明期间从未发生暂停。检查复用既有完整快照，不为模式新增逐点 I/O 或等待。
 
 操作者已授权把此前延后的 AC/DC 输入耦合支持一并提交／部署并与 origin 对齐。
-本轮离线测试及目标部署结果待实测验收后另记；此处不表示已完成实机运行。
+同一593项相关硬件阻断回归已通过：本地114.298 s、目标165.597 s，含12个新增温保
+用例；覆盖重叠不相加。功能提交48e67e4已发布并于2026-10-28 15:57:09.301588 UTC
+完成 LK_setup 文件部署（installed、errors=[]、Git clean），含此前 AC/DC 支持；31个
+私有TOML不变。本次未连接实机或启动扫描，未认证真实开光或功率控制。
+证据：.test-tmp/cld-temperature-modes-20261028/ 下 receipt.json、release-receipt.json、
+BACKUP_RECEIPT.json、target-tests.log。
 
 TL4000 SDK 即使以 `reset=false` 初始化，仍会隐式发送
 `*CLS;*SRE 0;*ESE 0;:STAT:PRES`，getter 也可能消费错误队列。因此 SDK 初始化

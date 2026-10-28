@@ -1,6 +1,6 @@
 # Development stages
 
-## 2026-10-28 CLD temperature-protection compatibility and DC delivery (acceptance pending)
+## 2026-10-28 CLD temperature-protection compatibility and DC file-only delivery completed
 
 The approved change accepts strict integer ENAB (1) and PROT (2), with OFF (0),
 unknown/malformed values and a temperature-protection trip rejected. No mode
@@ -19,9 +19,25 @@ automatic recovery between reads. Validation and freezing reuse the existing
 The operator now also authorized deploying the earlier AC/DC coupling feature,
 reconciling LK_setup with origin while preserving private/operator content. This
 supersedes the older DC deployment deferral below; historical entries are retained.
-Local validation: 593 related hardware-blocked regressions passed in 114.298 s,
-including 12 new temperature-mode tests. Target verification, publication and
-repository/deployment outcomes remain pending measured receipts.
+Feature 48e67e4c9d8079a840f8c14d2080335b8e6114cb is published to origin and its
+file-only LK_setup release is verified installed, errors=[] and Git clean. The same
+593 related guarded regressions passed locally in 114.298 s and on target in
+165.597 s, with 12 new temperature-mode cases; these are overlapping suites.
+All 152 owner leases, ten terminal-only databases, two idle Notebook kernels,
+twelve exact known process identities and Python/file pins passed the fresh gates.
+Daisy's exact processes were retained; no real instrument connection or scan occurred.
+
+All seven original dirty paths were reviewed; documentation/CLD contents were
+already published, while Notebook source was identical and only execution outputs
+changed. Verified raw backup covers those seven files and all 31 private TOMLs
+(38 files); the 31 TOMLs remain unchanged. The initial attempt blocked after
+backup/restore but before merge on Notebook CRLF/index stat metadata, despite an
+empty diff and a Git object matching HEAD. Metadata-only index refresh restored
+clean status. The failed receipt remains; complete_release.py rechecked fresh
+gates and performed the first fast-forward, without a scan retry or new run.
+Evidence: .test-tmp/cld-temperature-modes-20261028/receipt.json,
+release-receipt.json, BACKUP_RECEIPT.json and target-tests.log. Real CLD emission,
+power feedback and live AC/DC acquisition acceptance are not claimed.
 
 ## 2026-10-28 CLD1015 publication and file-only deployment completed
 

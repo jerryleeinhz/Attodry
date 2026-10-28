@@ -1,6 +1,6 @@
 # 测量速度：本分支的优化边界与验收
 
-## 2026-10-28 CLD 温保模式兼容与 DC 一并交付（待验收）
+## 2026-10-28 CLD 温保模式兼容与 DC 一并交付（文件部署完成）
 
 ENAB（严格整数1）／PROT（严格整数2）核验及首个健康 LD OFF preflight 的模式冻结，
 复用现有 `getTempProtMode` 读回，VISA 完整 snapshot 仍为25查询。会话中的模式漂移
@@ -12,11 +12,19 @@ ENAB（严格整数1）／PROT（严格整数2）核验及首个健康 LD OFF pr
 也不据此伪造持续照光证据。面板 Pause／Switch Off 与 ENAB／PROT 的映射未验定。
 程序兼容两模式不构成 mode 1 无保护或 mode 2 必定安全的结论。
 
-操作者已授权此前 AC/DC 支持与本次兼容一起部署并对齐 origin；其 ICPL 差异设置和
-剩余等待成本仍见下方2026-10-26条目。当前本地／目标硬件阻断回归、部署与仓库核对
-待实际验收后补记；不预填测试数量，不把测试耗时解释为实机点周期或保护响应时延。
+此前 AC/DC 支持已与本次兼容一并发布 origin，并完成 LK_setup 文件部署与仓库对齐；
+其 ICPL 差异设置和剩余等待成本仍见下方2026-10-26条目。源码功能提交为
+48e67e4c9d8079a840f8c14d2080335b8e6114cb；部署回执 installed、errors=[]、Git clean。
+同一593项相关硬件阻断回归：本地114.298 s、目标165.597 s，含12个新增温保用例；
+覆盖重叠不相加，不把测试耗时解释为实机点周期或保护响应时延。
 
-本地593项相关硬件阻断回归114.298 s通过，含12个新增温保测试；目标机验收与部署待记录。
+发布门持有152个适用owner租约，重核10个DB终态、2个Notebook idle、12个完整已知
+进程及Python／文件pin；原Daisy保留，31个私有TOML不变。原7个dirty路径及31私有
+文件共38个原始副本已验证备份。初次在备份／恢复后、merge前因Notebook CRLF／index
+stat元数据报M而阻断（实际diff空且Git对象等于HEAD）；仅刷新index元数据后，
+complete_release.py 重新过新鲜门并首次fast-forward，原失败回执保留。
+证据：.test-tmp/cld-temperature-modes-20261028/ 下 receipt.json、release-receipt.json、
+BACKUP_RECEIPT.json、target-tests.log。本次0实机连接／扫描，未测实机保护响应或采样速度。
 
 ## 2026-10-28 CLD1015 目标机离线部署验收
 

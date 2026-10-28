@@ -1,6 +1,6 @@
 # Hardware and safety guide
 
-## 2026-10-28 CLD temperature-protection ENAB/PROT compatibility
+## 2026-10-28 CLD temperature-protection ENAB/PROT compatibility (file-only deployment completed)
 
 Only strict integer modes 1=ENAB and 2=PROT are accepted. OFF (0), other numbers,
 bools, noninteger/malformed values and unknown responses fail closed; a reported
@@ -20,10 +20,23 @@ and automatic recovery occurring wholly between reads. Original responses,
 errors/manual flags and historical failures must remain unchanged; no automatic
 retry, new run or protection-mode setter is introduced.
 
-The operator separately approved origin publication, station reconciliation and
-combined deployment with the prior AC/DC feature. Guarded test and target delivery
-results are pending actual verification; this authorization does not certify
-new illumination, a successful scan or the current physical instrument state.
+The operator-approved release includes the prior AC/DC feature. Feature commit
+48e67e4c9d8079a840f8c14d2080335b8e6114cb was published to origin and verified installed
+on LK_setup, errors=[] and Git clean. The same 593 hardware-blocked regressions
+passed locally in 114.298 s and on target in 165.597 s (overlapping coverage,
+12 new temperature-mode cases). Fresh gates covered 152 owner leases, ten terminal
+DBs, two idle Notebook kernels, twelve exact known process identities and
+Python/file pins. Daisy processes were retained. All 31 private TOMLs remained
+unchanged, with verified raw backups for them and the seven reviewed dirty paths.
+
+The initial pre-merge block and failed receipt remain preserved. Only Notebook
+CRLF/index stat metadata was refreshed after its empty diff and matching Git
+object were verified; complete_release.py then passed fresh gates and performed
+the first fast-forward. Evidence is retained under
+.test-tmp/cld-temperature-modes-20261028/ (receipt.json, release-receipt.json,
+BACKUP_RECEIPT.json and target-tests.log). No real instrument connection or scan
+was performed. File delivery and guarded regressions do not certify illumination,
+a successful acquisition or the current physical instrument state.
 
 ## 2026-10-28 Explicit CLD1015 identity (offline support)
 

@@ -37,7 +37,7 @@ Last updated: 2026-10-22
 
 ## Current stage
 
-### 2026-10-28 CLD ENAB/PROT compatibility and combined DC deployment (acceptance pending)
+### 2026-10-28 CLD ENAB/PROT compatibility and combined DC file-only deployment completed
 
 The operator approved ENAB/PROT compatibility, origin publication, LK_setup
 reconciliation and deployment, explicitly including the previously deferred
@@ -59,12 +59,30 @@ necessarily safe. Existing polling cannot prove absence of a short hardware
 pause/automatic recovery between two reads. The VISA snapshot remains 25 queries;
 mode validation and freezing add no per-point I/O or waiting.
 
-Local validation: 593 related hardware-blocked regressions passed in 114.298 s,
-including 12 new temperature-mode tests. Origin publication, target reconciliation
-and target verification remain pending and must be recorded from actual results.
-Preserve operator data, private TOMLs and source/Notebook work
-through reconciliation; this entry does not certify completed deployment or
-real instrument operation.
+Feature 48e67e4c9d8079a840f8c14d2080335b8e6114cb is published to origin and its
+file-only release completed at 2026-10-28 15:57:09.301588 UTC, verified installed
+on LK_setup with errors=[] and a clean
+Git working tree. The same 593 related hardware-blocked regressions passed locally
+in 114.298 s and on target in 165.597 s, including 12 new temperature-mode cases;
+these suites overlap and are not additive. No real instrument connection or scan
+was performed. This deployment includes the prior per-role AC/DC implementation.
+
+The fresh release gate held all 152 applicable owner leases and verified ten
+terminal-only databases, two idle Notebook kernels, twelve exact known process
+identities, and Python/file pins. Exact Daisy identities were retained without
+process control. All 31 private TOMLs remained unchanged. The seven pre-existing
+dirty paths were reviewed: documentation/CLD source content was already published;
+the Notebook source was identical and only its execution outputs differed. All
+seven raw files plus the 31 private files (38 total) have verified backups.
+
+An initial attempt stopped after backup/restore and before any merge: Notebook
+CRLF/index stat metadata reported M although its diff was empty and its Git object
+matched HEAD. An index-metadata-only refresh resolved that clean-state check.
+The failed receipt remains preserved; complete_release.py then passed fresh gates
+and performed the first fast-forward. Deployment, backup and guarded-test evidence:
+.test-tmp/cld-temperature-modes-20261028/{receipt.json,release-receipt.json,
+BACKUP_RECEIPT.json,target-tests.log}. These checks certify file delivery and
+repository reconciliation, not real emission, power control or a successful scan.
 
 ### 2026-10-28 CLD1015 file deployment completed
 
