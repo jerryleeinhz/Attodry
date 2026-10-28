@@ -1,5 +1,15 @@
 # 测量速度：本分支的优化边界与验收
 
+## 2026-10-28 CLD1015 型号适配（本地离线）
+
+型号比较复用已有身份查询：VISA 完整 snapshot 仍为25次查询，无新增逐点查询、
+写入、轮询、重试或等待。两型号相同980nm假点的完整配置／采样／清理命令轨迹及
+假时钟等待完全相同。完整TEC热稳、OFF后设流、PM判功、锁相剩余滤波等待、串行
+应答归属和原始审计保留。CLD1015负电压立即失败，不沿用CLD1010LP的两秒特例。
+故障不重发ON，不自动调大限值或另开run；独立关LD／归零设流／恢复TEC／关闭仍执行。
+这些是硬件阻断验证，实机点周期、功率响应及清理验收待另行明确授权。
+Validation: 130 related hardware-blocked tests passed in 81.857 s, including 13 new model/980 nm regressions. No real instrument connection or scan was performed during implementation.
+
 ## 2026-10-26 AC/DC 输入耦合的通信与等待（本地离线）
 
 每路显式选择 ac/dc，沿用原配置阶段与正式设置读取。共享物理量后端的单路

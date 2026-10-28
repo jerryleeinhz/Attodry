@@ -1,4 +1,4 @@
-"""CLD1010LP point controller with TL4000 and USB/VISA SCPI backends.
+"""CLD1010LP/CLD1015 point controller with TL4000 and USB/VISA SCPI backends.
 
 API names/types follow Thorlabs' official CLD1010 ctypes example and TL4000
 reference XML. Fake-tested; installed DLL/diode/firmware require commissioning.
@@ -52,10 +52,13 @@ class CldConfig:
     # pattern, e.g. (1, 1, 8192); any other asserted indication still blocks LD.
     acknowledged_connection_diagnostics: tuple[int, int, int] | None = None
     acknowledgement_note: str = ""
+    expected_model: str = "CLD1010LP"
 
     def validate(self):
         if self.backend not in ("simulation", "tl4000", "visa"):
             raise NktError("CLD backend must be simulation, tl4000 or visa")
+        if self.expected_model not in ("CLD1010LP", "CLD1015"):
+            raise NktError("CLD expected_model must be CLD1010LP or CLD1015")
         for name in ("diode_model", "manual_route", "run_name"):
             text(getattr(self, name), name)
         if type(self.diode_wiring_confirmed) is not bool:
@@ -117,7 +120,7 @@ class CldConfig:
 
 def load_cld_config(doc, path):
     table = dict(doc.get("cld1010", {}))
-    optional = {"dll_path", "max_voltage_v", "acknowledged_connection_diagnostics", "acknowledgement_note",
+    optional = {"dll_path", "max_voltage_v", "acknowledged_connection_diagnostics", "acknowledgement_note", "expected_model",
                 "emit", "dwell_s"}
     fields = set(CldConfig.__dataclass_fields__) - {"points", "emit", "dwell_s"} - optional
     keys(table, "cld1010", fields | {"current_points_a", "wavelength_nm"}, optional)
@@ -272,7 +275,8 @@ class TL4000:
         strings = [ct.create_string_buffer(256) for _ in range(4)]
         def validate_identity():
             manufacturer, model, serial, firmware = [s.value.decode("ascii") for s in strings]
-            if model != "CLD1010LP" or serial != self.config.expected_serial:
+            if (manufacturer != "Thorlabs" or model != self.config.expected_model
+                    or serial != self.config.expected_serial or not firmware):
                 raise NktError("Unexpected CLD model/serial")
         self._call("identificationQuery", self.session, *strings, _validate=validate_identity,
             _outputs=lambda: {"raw_identity": [s.value.decode("ascii", errors="backslashreplace") for s in strings],
@@ -360,7 +364,7 @@ class VisaCld:
         if not self.opened:
             raise NktError("CLD session closed")
         identity = [value.strip() for value in self.transport.query("*IDN?").split(",")]
-        if (len(identity) != 4 or identity[0] != "Thorlabs" or identity[1] != "CLD1010LP"
+        if (len(identity) != 4 or identity[0] != "Thorlabs" or identity[1] != self.config.expected_model
                 or identity[2] != self.config.expected_serial or not identity[3]):
             raise NktError("Unexpected CLD manufacturer/model/serial")
         return identity
@@ -464,7 +468,7 @@ class VisaCld:
             values[name] = value
         ack = self.config.acknowledged_connection_diagnostics
         return {**values, "raw_responses": raw, "qualification": "unqualified",
-            "reason": "CLD1010LP connection indications and bit 13 have uncommissioned semantics; "
+            "reason": "CLD101x connection indications and bit 13 have uncommissioned semantics; "
                       "they establish neither a cable fault nor a connected state",
             "acknowledged_pattern": list(ack) if ack is not None else None,
             "acknowledgement_note": self.config.acknowledgement_note}
@@ -483,7 +487,7 @@ class SimulatedCld:
     is_hardware = False
     def __init__(self, config):
         self.config = config
-        self.state = {"identity": ["SIMULATED", "CLD1010LP", "SIMULATED", "0"],
+        self.state = {"identity": ["SIMULATED", config.expected_model, "SIMULATED", "0"],
             "getLdOperatingMode": 0, "getTecOperatingMode": 1, "getTempUnit": 0,
             "getTempProtMode": 2, "getLdOutputState": False, "getTecOutputState": False,
             "getLdOutpAutoOnState": False, "isTrippedLdOutputProtInterlock": False,
@@ -642,9 +646,10 @@ class CldController:
         if enabled:
             state = self.capture("cld_formal")
             voltage = state["measLdVolt"]
-            if -.0004 <= voltage < 0:
+            if self.config.expected_model == "CLD1010LP" and -.0004 <= voltage < 0:
                 # Validate every other guard before waiting; never catch a
                 # general instrument/communication error or resend LD ON.
+                # This observed CLD1010LP transient is not commissioned on CLD1015.
                 self._check_point_state(state, emitting=True, startup_voltage_pending=True)
                 until = self.clock() + 2.
                 if deadline is not None and until >= deadline:

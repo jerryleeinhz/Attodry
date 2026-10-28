@@ -37,6 +37,25 @@ Last updated: 2026-10-22
 
 ## Current stage
 
+### 2026-10-28 Explicit CLD1015 support and nominal 980 nm (local offline)
+
+The operator requested CLD1015 adaptation, origin publication, LK_setup deployment
+and a separate private TOML based on the existing photonics-cld profile. The shared
+`[cld1010]` table now accepts expected_model="CLD1015"; omission defaults to
+CLD1010LP. VISA/TL4000 require the selected exact model, serial, manufacturer and
+nonempty firmware. Simulations and requested snapshots preserve the model.
+980 nm remains a declared nominal diode wavelength used for PM correction and
+archival, not a controller measurement or tuning command. No acquisition schema,
+lock-in settings, power-feedback control or cleanup protocol is replaced.
+
+The existing 1 A software current ceiling is retained on both models. The prior
+CLD1010LP-only two-second near-zero-negative startup observation is not enabled
+on CLD1015; negative voltage fails immediately there. Original connection guards
+and exact-pattern commissioning requirements remain. See PHOTONICS_CHOPPER_GUIDE.
+Deployment receipts and the private operator-fill configuration are recorded
+separately; offline tests do not certify CLD1015 illumination or real power control.
+Validation: 130 related hardware-blocked tests passed in 81.857 s, including 13 new model/980 nm regressions. No real instrument connection or scan was performed during implementation.
+
 ### 2026-10-26 Per-role AC/DC input coupling (local offline)
 
 User approved implementation and origin publication; LK_setup has an active

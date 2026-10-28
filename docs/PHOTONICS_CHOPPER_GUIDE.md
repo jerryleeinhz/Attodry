@@ -53,7 +53,7 @@ harmonic_d = 1
 | 使用情况 | 模板 | 关键设置 |
 |---|---|---|
 | NKT/VARIA＋双 SR830＋可选斩波器 | `config/photonics_chopper.example.toml` | `laser_source="nkt"`、`internal_xx_xy`、`use_pem=false` |
-| CLD1010LP＋双 SR830＋可选斩波器 | `config/photonics_cld.example.toml` | `laser_source="cld"`、电流单位 A、标称波长 |
+| CLD1010LP／CLD1015＋双 SR830＋可选斩波器 | `config/photonics_cld.example.toml` | `laser_source="cld"`、电流单位 A、标称波长 |
 | 已有 PEM 参考链 | `config/photonics.example.toml` | 保留历史 PEM 模式和对应安全文件，不能仅改拓扑照搬本模板 |
 
 将选定模板复制成 ignored 的 `config/photonics.local.toml`。补齐全部启用字段的
@@ -161,6 +161,28 @@ CLD 使用独立模板的 `cld1010.current_points_a` 和 `cld_current` 的 A 参
 标称波长二极管，不提供 NKT 的波长／10 nm 带宽／百分数控制。标称波长只用于功率计
 校正和数据标识。二极管型号、引脚、TEC、温度／电流上限及连接诊断必须保持原有保护，
 不能把历史诊断格式例当作当前仪器的授权忽略模式。
+
+### CLD1015 与 980 nm
+
+CLD1015 继续使用 `[cld1010]` 表名和 `laser_source="cld"`，在表内显式设置
+`expected_model="CLD1015"`。仅接受 CLD1010LP、CLD1015 两个准确型号；省略字段
+默认 CLD1010LP，现有配置继续使用原身份规则。VISA 和 TL4000 都核对选定型号、
+序列号、厂家与非空固件；运行中不自动接受另一型号。配置快照保存 expected_model，
+实际身份及完整原始应答继续留在既有审计中，模拟后端也保留所选型号。
+
+`wavelength_nm=980.0` 表示所装二极管的标称波长，传入功率计校正并保存为
+`nominal_diode`；控制器不测量或扫描激光波长。功率计探头须覆盖 980 nm；固定量程
+须按该波长的原生量程重新核实。电流／TEC／温度／最大光功率及步长须填写新二极管
+和光路的实际批准值，旧控制器的诊断确认不得复制成新控制器的现场证据。
+
+本次保留软件 max_current_a<=1 A（CLD1015 手册额定 1.5 A 不自动扩大实验范围）、
+恒流 LD／恒温 TEC、OFF 后设置及完整热稳资格、独占通信、读回／正式守卫和原清理。
+只有 CLD1010LP 沿用其既有首个 ON 后 [-0.4 mV,0) 的一次两秒复核；CLD1015
+对负电压立即失败，等待操作者另行取得实机证据。连接故障／未知仍阻断开光。
+
+命令依据：Thorlabs《CLD101x User Guide》DOC-104674 Rev. B（2026-05-18），
+§4.2 共用 TL4000 驱动、§4.3.2 LD/TEC source/output/sense 命令及 §4.3.3 状态位。
+当前为本地离线适配；目标部署和真实仪器验收须分别记录。
 
 TL4000 SDK 即使以 `reset=false` 初始化，仍会隐式发送
 `*CLS;*SRE 0;*ESE 0;:STAT:PRES`，getter 也可能消费错误队列。因此 SDK 初始化

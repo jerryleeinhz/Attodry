@@ -30,8 +30,9 @@ class CldOpticalIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(NktError, "fixed nominal diode wavelength"):
             replace(config, points=(CldPoint(0.015, 730), CldPoint(0.02, 760))).validate()
 
-    def make(self, *, feedback=False, initial_tec=False):
-        config = cld_config()
+    def make(self, *, feedback=False, initial_tec=False, expected_model="CLD1010LP", wavelength_nm=730):
+        config = replace(cld_config(), expected_model=expected_model,
+                         points=(CldPoint(.015, wavelength_nm),))
         policy = None
         if feedback:
             policy = FeedbackConfig(None, None, 0.005, 5, 0, None, None, None, None,
@@ -111,6 +112,17 @@ class CldOpticalIntegrationTests(unittest.TestCase):
         self.assertLess(powers[0], powers[1])
         self.assertTrue(session.row["cld_current_iterations"])
         self.assertTrue(session.cleanup()["off_confirmed"])
+
+    def test_cld1015_980nm_feedback_preserves_nominal_wave_and_configured_pm_correction(self):
+        session, backend, _, _, _ = self.make(feedback=True, expected_model="CLD1015", wavelength_nm=980)
+        session.open()
+        session.configure()
+        result = self.sample(session, 0)
+        self.assertEqual(result["actual"]["optical_wavelength_nm"], 980)
+        self.assertEqual(result["status"]["wavelength_definition"], "nominal_diode")
+        self.assertEqual(session.meter.target_nm, 980)
+        self.assertEqual(backend.snapshot()["identity"][1], "CLD1015")
+        self.assertTrue(session.cleanup()["verified"])
 
     def test_cleanup_restores_original_enabled_tec(self):
         session, backend, _, _, _ = self.make(initial_tec=True)

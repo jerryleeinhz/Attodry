@@ -116,6 +116,24 @@ class CldSharedCleanupTests(unittest.TestCase):
         self.assertTrue(self.backend.closed and self.manager.closed and self.meter.closed)
         self.assertEqual(sum(event[0] == "cld_backend_close" for event in self.shared_log), 1)
 
+    def test_cld1015_980nm_combination_archives_model_samples_and_complete_cleanup(self):
+        self.document["cld1010"].update(expected_model="CLD1015", wavelength_nm=980.0)
+        self.write_document()
+        result = self.execute("cld1015-980nm")
+        self.assertEqual(result["status"], "completed", result)
+        self.assertTrue(result["cleanup"]["clean"], result["cleanup"])
+        with closing(open_readonly(self.database)) as db:
+            plan = json.loads(db.execute("SELECT plan_json FROM combination_runs").fetchone()[0])
+            samples = [json.loads(row[0]) for row in db.execute(
+                "SELECT payload_json FROM combination_samples")]
+        self.assertEqual(plan["hardware"]["optical"]["nkt"]["expected_model"], "CLD1015")
+        self.assertTrue(samples)
+        for sample in samples:
+            self.assertEqual(sample["actual"]["optical_wavelength_nm"], 980)
+        self.assertFalse(self.backend.state["getLdOutputState"])
+        self.assertEqual(self.backend.state["getLdCurrSetpoint"], 0)
+        self.assertTrue(self.backend.closed and self.manager.closed)
+
     def test_unverified_electrical_protection_still_closes_cld_resources_once(self):
         with patch.object(LockinPointSession, "cleanup", side_effect=OSError("XX protection unknown")):
             result = self.execute("cld-electrical-failure")

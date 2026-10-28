@@ -124,6 +124,8 @@ max_age_s = 600.0 # once模式超龄标记差分不可用、保留原始照光�
 # per_condition在每个gate重新采暗；once_before_scan不补测，不同gate的背景差分会标为不匹配。
 
 [cld1010]
+# 表名兼容保留；CLD1015也使用此表，须显式选择型号并填写对应二极管参数。
+expected_model = "CLD1010LP" # CLD1010LP(default) | CLD1015；严格核对，不自动识别后放行
 # nkt_source.allow_control_mode_change仅适用于NKT（默认false）；CLD不添加该表/字段。
 backend = "visa" # visa | tl4000 | simulation；tl4000须另填明确DLL
 # dll_path = "CHANGE_ME_TL4000_64_DLL_PATH"

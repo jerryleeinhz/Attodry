@@ -1,5 +1,19 @@
 # Development stages
 
+## 2026-10-28 CLD1015 model selection and 980 nm (local offline)
+
+Explicit expected_model in the compatible cld1010 table selects CLD1010LP or
+CLD1015; existing files default to CLD1010LP. VISA, TL4000 and simulation use the
+selected identity, preserving the raw replies and requested model in archives.
+The existing fixed-nominal-wavelength path supports 980 nm PM correction and
+optical/lock-in combination recording. Shared SCPI primitives follow Thorlabs
+CLD101x User Guide DOC-104674 Rev. B (2026-05-18), sections 4.2 and 4.3.2/4.3.3.
+Unknown/mismatched identities and protections fail closed; current remains <=1 A.
+CLD1015 does not inherit the historically commissioned CLD1010LP startup-noise wait.
+The operator also requested origin publication, scoped deployment and a private
+980 nm operator-fill TOML; those real delivery states are recorded by receipts.
+Validation: 130 related hardware-blocked tests passed in 81.857 s, including 13 new model/980 nm regressions. No real instrument connection or scan was performed during implementation.
+
 ## 2026-10-26 Per-role AC/DC input coupling (local offline)
 
 Explicit ac/dc signal-input coupling is supported independently for XX/XY SR830

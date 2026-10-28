@@ -1,5 +1,18 @@
 # Hardware and safety guide
 
+## 2026-10-28 Explicit CLD1015 identity (offline support)
+
+The CLD101x adapter supports explicitly selected CLD1010LP and CLD1015 only;
+legacy files default to CLD1010LP. A different model is never accepted merely
+because it shares USB identifiers or SCPI syntax. Exact model/serial and existing
+temperature/interlock/current/communication/OFF/cleanup guards remain required.
+The software retains its <=1 A current ceiling; a controller rating does not
+authorize diode current. New-diode pinout, TEC, temperature and optical limits
+must be operator-confirmed, and old diagnostic acknowledgments are not transferred
+as new-device commissioning evidence. The CLD1010LP-specific [-0.4 mV,0) startup
+recheck is not applied to CLD1015. A nominal 980 nm declaration is not a wavelength
+measurement. Software deployment does not certify real illumination or feedback.
+
 ## 2026-10-26 Explicit AC/DC signal-input coupling (local offline)
 
 Each configured lock-in detector may explicitly select ac or dc input coupling;

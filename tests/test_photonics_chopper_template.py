@@ -111,6 +111,18 @@ class PhotonicsChopperTemplateTests(unittest.TestCase):
             self.assertEqual(config.optical.chopper.target_frequency(100), 100)
             self.assertTrue(config.snapshot["hardware"]["lockin"]["sample_excitation_connected"])
 
+    def test_cld1015_980nm_preview_preserves_explicit_model_and_current_limits(self):
+        doc = substitute(self.document("cld"))
+        doc["cld1010"].update(expected_model="CLD1015", wavelength_nm=980.0)
+        config = self.load(doc)
+        self.assertEqual(config.optical.nkt.expected_model, "CLD1015")
+        self.assertEqual(config.optical.nkt.points[0].wavelength_nm, 980)
+        self.assertEqual(config.optical.nkt.max_current_a, doc["cld1010"]["max_current_a"])
+        archived = config.snapshot["hardware"]["optical"]["nkt"]
+        self.assertEqual(archived["expected_model"], "CLD1015")
+        self.assertEqual(archived["points"][0]["wavelength_nm"], 980)
+        self.assertFalse((self.directory / "unused.sqlite").exists())
+
     def test_nkt_spectral_arrays_ranges_power_grid_and_explicit_starts(self):
         doc = substitute(self.document())
         doc["nkt_run"]["points"] = [{"source_level_pct": 8.0,
