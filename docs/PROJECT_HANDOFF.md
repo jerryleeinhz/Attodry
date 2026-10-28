@@ -37,6 +37,39 @@ Last updated: 2026-10-22
 
 ## Current stage
 
+### 2026-10-28 CLD1015 bounded first-ON voltage observation (implementation/commissioning pending)
+
+The operator explicitly requested a fix for the abnormal startup readback and an
+SSH-run stage. For new runs, CLD1015 is to use the same existing CLD1010LP-only
+first-LD-ON observation: only an initial voltage in [-0.0004,0) V may be observed
+within the nominal two-second window after that first ON snapshot, with all
+other guards and the original deadlines intact.
+Final voltage must be nonnegative. More-negative startup values and every
+negative formal-acquisition value remain hard faults. There is no second ON,
+automatic retry or automatic replacement run. This narrowly supersedes the older
+CLD1015 immediate-negative policy below; historical runs retain their policy.
+
+Actual CLD1015 first-ON event 360 at 2026-10-28 16:27:55.691295 UTC recorded
+voltage -0.0001696199 V, current 17.94472 uA, current setpoint 40 mA,
+temperature 26.00036 C and reported trip=false. The snapshot was followed by a
+stop, not a two-second recovery observation; it does not prove that the voltage
+would recover. The original run's zero accepted samples, failure and manual/
+cleanup flags remain unchanged. No historical failure is reclassified as success.
+
+The operation uses the operator-confirmed existing exact diagnostics
+acknowledgment [1,1,8192]; this is not a blanket diagnostics bypass. The 980 nm PM
+native range 0.007223721 W was verified for the nominal 5 mW range request;
+max_power_w=0.0033 is unchanged. Existing temperature/window/current, diagnostic,
+identity, frozen protection-mode, communication, OFF and cleanup guards remain.
+Normal nonnegative startup adds no I/O or waits; the exceptional observation
+reuses the complete existing snapshots and polling interval.
+
+Local validation: 83 related hardware-blocked regressions passed in 7.509 s
+across six startup/model/driver/temperature/shared-cleanup/optical-source-
+integration modules. The earlier 66-test suite overlaps and is not additive.
+Target verification, deployment and real first-ON acceptance remain pending. This entry authorizes no silent replay of the failed run
+and claims no measured recovery or completed new scan.
+
 ### 2026-10-28 CLD ENAB/PROT compatibility and combined DC file-only deployment completed
 
 The operator approved ENAB/PROT compatibility, origin publication, LK_setup

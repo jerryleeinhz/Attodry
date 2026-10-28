@@ -1,5 +1,36 @@
 # Hardware and safety guide
 
+## 2026-10-28 CLD1015 first-ON bounded near-zero observation (pending acceptance)
+
+For newly authorized runs, the pre-existing CLD1010LP first-ON rule is to apply
+identically to CLD1015: only the first LD-ON readback in [-0.0004,0) V enters an
+observation in the nominal two-second window after that first ON snapshot.
+Blocking VISA snapshots and cleanup retain their existing I/O timeouts; this is
+not a guarantee that the LD will be OFF at exactly two seconds. Every other
+temperature/window/current,
+connection-diagnostics, identity, frozen-mode, communication and deadline guard
+remains active. The final voltage must be nonnegative. Below -0.0004 V at startup,
+or any negative voltage during formal acquisition, remains a hard failure.
+Never resend ON or create an automatic recovery run. Normal nonnegative startup
+receives no added instrument calls or wait. This replaces only the earlier
+CLD1015 first-ON immediate-negative rule for new runs; historical policy remains.
+
+The actual event 360 at 2026-10-28 16:27:55.691295 UTC reported -0.0001696199 V,
+17.94472 uA actual current, 40 mA setpoint, 26.00036 C and trip=false. This is a
+single startup snapshot followed by a stop, not proof of harmless noise or of
+recovery within two seconds. The zero-accepted failed run and original manual/
+cleanup flags remain unchanged. The software change is not physical commissioning.
+
+Only the operator-confirmed existing exact diagnostics [1,1,8192] acknowledgment
+is used, not a general suppression of connection faults. The verified 980 nm
+native PM range 0.007223721 W corresponds to the nominal 5 mW range request and
+does not raise max_power_w=0.0033. Original OFF/cleanup and raw audit requirements
+remain. The user authorized this fix and an SSH-run stage. Local validation:
+83 related guarded regressions passed in 7.509 s across six startup/model/driver/
+temperature/shared-cleanup/optical-source-integration modules; the earlier
+66-test suite overlaps and is not additive. Target verification, deployment and
+real acceptance remain pending and must be recorded separately.
+
 ## 2026-10-28 CLD temperature-protection ENAB/PROT compatibility (file-only deployment completed)
 
 Only strict integer modes 1=ENAB and 2=PROT are accepted. OFF (0), other numbers,

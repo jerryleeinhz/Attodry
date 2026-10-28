@@ -662,10 +662,10 @@ class CldController:
         if enabled:
             state = self.capture("cld_formal")
             voltage = state["measLdVolt"]
-            if self.config.expected_model == "CLD1010LP" and -.0004 <= voltage < 0:
+            if self.config.expected_model in ("CLD1010LP", "CLD1015") and -.0004 <= voltage < 0:
                 # Validate every other guard before waiting; never catch a
                 # general instrument/communication error or resend LD ON.
-                # This observed CLD1010LP transient is not commissioned on CLD1015.
+                # Both models have observed near-zero negative first-ON readbacks.
                 self._check_point_state(state, emitting=True, startup_voltage_pending=True)
                 until = self.clock() + 2.
                 if deadline is not None and until >= deadline:

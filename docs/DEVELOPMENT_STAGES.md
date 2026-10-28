@@ -1,5 +1,32 @@
 # Development stages
 
+## 2026-10-28 CLD1015 first-ON near-zero voltage parity (implementation/commissioning pending)
+
+The operator requested an abnormal-readback fix and SSH-run stage. The existing
+CLD1010LP bounded first-ON observation is to extend identically to CLD1015 for
+new runs: an initial [-0.0004,0) V value may enter the nominal two-second window after
+that first ON snapshot,
+with the original polling, deadlines and every other guard retained. Final
+voltage must be nonnegative. More-negative startup and all formal negative
+voltages fail immediately. No ON retry, automatic new run or normal positive-
+startup I/O/wait is added. This supersedes the earlier CLD1015 immediate-negative
+policy only for that first-ON band, without reinterpreting historical failures.
+
+CLD1015 event 360 (2026-10-28 16:27:55.691295 UTC) recorded -0.0001696199 V,
+17.94472 uA actual / 40 mA set, 26.00036 C and reported trip=false. Execution
+stopped after this snapshot, so recovery within two seconds is unproven. The
+original failed run remains zero accepted, with its original manual/cleanup flags.
+
+The existing exact [1,1,8192] diagnostics acknowledgment was operator-confirmed;
+no generic bypass is introduced. At 980 nm the verified native PM range is
+0.007223721 W for the nominal 5 mW request; max_power_w=0.0033 is unchanged.
+Original current/temperature/window, diagnostic, identity, communication, mode-
+freeze, OFF and cleanup protections remain. Local validation: 83 related
+hardware-blocked regressions passed in 7.509 s across six startup/model/driver/
+temperature/shared-cleanup/optical-source-integration modules. The earlier
+66-test suite overlaps and is not additive. Target verification, deployment and
+real first-ON acceptance remain pending; no recovered run is claimed.
+
 ## 2026-10-28 CLD temperature-protection compatibility and DC file-only delivery completed
 
 The approved change accepts strict integer ENAB (1) and PROT (2), with OFF (0),

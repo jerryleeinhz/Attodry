@@ -169,9 +169,9 @@ class CldModelTests(unittest.TestCase):
         config = configuration(expected_model="CLD1015", backend="simulation")
         self.assertEqual(SimulatedCld(config).snapshot()["identity"][1], "CLD1015")
 
-    def test_cld1015_does_not_inherit_cld1010lp_startup_noise_exception(self):
+    def test_cld1015_persistent_negative_startup_rejects_after_the_same_bounded_wait(self):
         config = configuration(expected_model="CLD1015", poll_interval_s=.2)
-        backend = StartupBackend(config, lambda n: {"measLdVolt": -9e-6})
+        backend = StartupBackend(config, lambda n: {"measLdVolt": -.0001696199})
         clock = Clock()
         session = CldController(config, backend, clock=clock, sleep=clock.sleep)
         session.begin(authorize_writes=True, confirm_manual_route=True)
@@ -179,8 +179,9 @@ class CldModelTests(unittest.TestCase):
         start = clock()
         with self.assertRaisesRegex(NktError, "diode voltage"):
             session.set_emission(True)
-        self.assertEqual(clock(), start)
-        self.assertFalse(any(row["phase"] == "cld_startup_voltage_wait" for row in session.record["events"]))
+        self.assertAlmostEqual(clock()-start, 2.)
+        self.assertTrue(any(row["phase"] == "cld_startup_voltage_wait" for row in session.record["events"]))
+        self.assertTrue(session.failed)
         self.assertEqual(backend.writes.count(("switchLdOutput", True)), 1)
         self.assertTrue(session.finish()["off_confirmed"])
 
