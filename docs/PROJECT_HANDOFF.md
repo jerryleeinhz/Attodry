@@ -37,6 +37,35 @@ Last updated: 2026-10-22
 
 ## Current stage
 
+### 2026-10-28 CLD ENAB/PROT compatibility and combined DC deployment (acceptance pending)
+
+The operator approved ENAB/PROT compatibility, origin publication, LK_setup
+reconciliation and deployment, explicitly including the previously deferred
+per-role AC/DC input-coupling feature. This approval supersedes the older DC
+section's deployment deferral; its implementation and validation history remains.
+No new scan, retry or automatic replacement run is part of this delivery.
+
+CLD temperature-protection modes are accepted only as strict integers 1=ENAB or
+2=PROT; OFF (0), unknown/malformed values and a temperature-protection trip still
+fail closed. The first complete healthy, LD-OFF preflight freezes the observed
+mode for the session; later 1-to-2 or 2-to-1 changes are hard faults. The program
+does not write this mode. Existing temperature, window, current, diagnostics,
+identity, communication and cleanup guards retain their original requirements.
+Raw replies and the frozen mode remain auditable; old failures are not reclassified.
+
+This is a software compatibility policy, not verification of a front-panel
+Pause/Switch Off mapping or a claim that mode 1 has no protection or mode 2 is
+necessarily safe. Existing polling cannot prove absence of a short hardware
+pause/automatic recovery between two reads. The VISA snapshot remains 25 queries;
+mode validation and freezing add no per-point I/O or waiting.
+
+Local validation: 593 related hardware-blocked regressions passed in 114.298 s,
+including 12 new temperature-mode tests. Origin publication, target reconciliation
+and target verification remain pending and must be recorded from actual results.
+Preserve operator data, private TOMLs and source/Notebook work
+through reconciliation; this entry does not certify completed deployment or
+real instrument operation.
+
 ### 2026-10-28 CLD1015 file deployment completed
 
 Feature commit 5ad5923 is published to origin/integration-photonics-nonlinear-hall.

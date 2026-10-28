@@ -148,7 +148,7 @@ class VisaCldDriverTests(unittest.TestCase):
                                ("OUTP2:PROT:TRAN:TRIP?", "1"),
                                ("SENS2:TEMP:DATA?", "31"),
                                ("SENS2:TEMP:PROT:WIND:AMPL?", "10.00001"),
-                               ("OUTP1:PROT:TEMP:MODE?", "ENAB")):
+                               ("OUTP1:PROT:TEMP:MODE?", "OFF")):
             with self.subTest(command=command):
                 driver, resource, _ = visa_backend()
                 resource.values[command] = value

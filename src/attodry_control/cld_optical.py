@@ -26,6 +26,7 @@ class CldOpticalController(CldController):
         self.healthy(state)
         if state["getLdOutputState"]:
             raise NktError("CLD preflight requires laser OFF; no automatic takeover")
+        self._freeze_temperature_protection(state)
         return state, None
 
     def configure_session(self):

@@ -1,5 +1,30 @@
 # Hardware and safety guide
 
+## 2026-10-28 CLD temperature-protection ENAB/PROT compatibility
+
+Only strict integer modes 1=ENAB and 2=PROT are accepted. OFF (0), other numbers,
+bools, noninteger/malformed values and unknown responses fail closed; a reported
+LD temperature-protection trip remains a hard fault. The first complete healthy,
+LD-OFF preflight freezes the mode for that session. A later transition between
+1 and 2 also fails; the software neither writes the mode nor silently accepts
+a new baseline. Temperature units/TEC operating mode, configured temperature and
+window limits, current/voltage, connection diagnostics, identity, OFF/readback,
+communication and cleanup protections remain independently required.
+
+This replaces the previous software-only requirement for PROT (2) on new sessions;
+it does not certify either mode by its name. The controller/API enum mapping is
+known, but its exact correspondence to front-panel Pause/Switch Off has not been
+verified. Do not describe ENAB as unprotected or PROT as sufficient evidence of
+safety. Existing polling cannot guarantee observation of a brief hardware pause
+and automatic recovery occurring wholly between reads. Original responses,
+errors/manual flags and historical failures must remain unchanged; no automatic
+retry, new run or protection-mode setter is introduced.
+
+The operator separately approved origin publication, station reconciliation and
+combined deployment with the prior AC/DC feature. Guarded test and target delivery
+results are pending actual verification; this authorization does not certify
+new illumination, a successful scan or the current physical instrument state.
+
 ## 2026-10-28 Explicit CLD1015 identity (offline support)
 
 The CLD101x adapter supports explicitly selected CLD1010LP and CLD1015 only;

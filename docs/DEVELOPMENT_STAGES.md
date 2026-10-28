@@ -1,5 +1,28 @@
 # Development stages
 
+## 2026-10-28 CLD temperature-protection compatibility and DC delivery (acceptance pending)
+
+The approved change accepts strict integer ENAB (1) and PROT (2), with OFF (0),
+unknown/malformed values and a temperature-protection trip rejected. No mode
+setter is added. The first healthy, LD-OFF preflight freezes the session mode;
+subsequent 1-to-2 or 2-to-1 changes fail as configuration faults rather than
+record_continue quality. The raw state and original temperature/window/current,
+connection diagnostics, communication and cleanup requirements are retained.
+No automatic retry, recovery run or reinterpretation of historical failures is added.
+
+These names are the controller/API enums; the front-panel Pause/Switch Off mapping
+has not been verified. Neither accepting ENAB nor requiring PROT alone certifies
+hardware safety. Polling does not guarantee detection of every short pause and
+automatic recovery between reads. Validation and freezing reuse the existing
+25-query VISA snapshot without adding per-point communication or waits.
+
+The operator now also authorized deploying the earlier AC/DC coupling feature,
+reconciling LK_setup with origin while preserving private/operator content. This
+supersedes the older DC deployment deferral below; historical entries are retained.
+Local validation: 593 related hardware-blocked regressions passed in 114.298 s,
+including 12 new temperature-mode tests. Target verification, publication and
+repository/deployment outcomes remain pending measured receipts.
+
 ## 2026-10-28 CLD1015 publication and file-only deployment completed
 
 Feature 5ad5923 is pushed to origin/integration-photonics-nonlinear-hall.

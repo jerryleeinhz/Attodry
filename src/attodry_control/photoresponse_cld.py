@@ -438,7 +438,9 @@ class VisaCld:
             number(self.get("getLdCurrSetpoint"), "LD current setpoint", 0., limit)
             if self.get("getLdOperatingMode") != 0:
                 raise NktError("CLD LD output requires constant-current mode")
-            if self.get("getTempProtMode") != 2 or self.get("isTrippedLdOutputProtTemperature"):
+            protection = self.get("getTempProtMode")
+            if (type(protection) is not int or protection not in (1, 2)
+                    or self.get("isTrippedLdOutputProtTemperature")):
                 raise NktError("CLD LD temperature protection prevents emission")
             require_connection_diagnostics(self._diagnostics(), self.config.acknowledged_connection_diagnostics)
         elif name == "switchTecOutput":
@@ -516,6 +518,7 @@ class CldController:
         self._backend_closed = False
         self.point = None
         self.initial_tec = None
+        self.temperature_protection_mode = None
         self.record = {"events": [], "last_confirmed_state": None, "state_current": False,
                        "cleanup": {"off_confirmed": False, "errors": []}}
 
@@ -538,8 +541,13 @@ class CldController:
         for name in faults:
             if type(state[name]) is not bool or state[name]:
                 raise NktError("CLD TEC protection prevents operation: " + name)
-        if state["getTempUnit"] != 0 or state["getTecOperatingMode"] != 1 or state["getTempProtMode"] != 2:
-            raise NktError("CLD requires Celsius, constant-temperature TEC and LD temperature protection")
+        if state["getTempUnit"] != 0 or state["getTecOperatingMode"] != 1:
+            raise NktError("CLD requires Celsius and constant-temperature TEC")
+        protection = state["getTempProtMode"]
+        if type(protection) is not int or protection not in (1, 2):
+            raise NktError("CLD LD temperature protection must be ENAB (1) or PROT (2)")
+        if self.temperature_protection_mode is not None and protection != self.temperature_protection_mode:
+            raise NktError("CLD LD temperature protection mode changed")
         number(state["getTecCurrLimit"], "TEC current limit", .001, c.max_tec_current_a)
         number(state["measTemp"], "diode temperature", c.temperature_min_c, c.temperature_max_c)
         # Only the bounded post-ON recheck may observe near-zero ADC noise.
@@ -571,6 +579,13 @@ class CldController:
     def stable(self, state):
         return state["getTecOutputState"] and abs(state["measTemp"]-self.config.temperature_c) <= self.config.temperature_tolerance_c
 
+    def _freeze_temperature_protection(self, state):
+        # Called only after a complete healthy, LD-OFF preflight. Never rewrite
+        # the instrument mode or replace the baseline on a later begin/guard.
+        if self.temperature_protection_mode is None:
+            self.temperature_protection_mode = state["getTempProtMode"]
+            self.record["temperature_protection_mode"] = self.temperature_protection_mode
+
     def begin(self, *, authorize_writes=False, confirm_manual_route=False):
         if self.owned or self.closed: raise NktError("CLD sessions are single-use")
         if self.backend.is_hardware:
@@ -579,6 +594,7 @@ class CldController:
         state = self.capture("cld_preflight")
         self.healthy(state)
         if state["getLdOutputState"]: raise NktError("CLD emission is already on; no takeover")
+        self._freeze_temperature_protection(state)
         self.owned = True
         self.initial_tec = state["getTecOutputState"]
         self.failed = True
