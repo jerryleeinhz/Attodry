@@ -1,8 +1,8 @@
 # Hardware and safety guide
 
-## 2026-10-28 CLD1015 first-ON bounded near-zero observation (pending acceptance)
+## 2026-10-28 CLD1015 first-ON bounded near-zero observation (file-only deployment completed)
 
-For newly authorized runs, the pre-existing CLD1010LP first-ON rule is to apply
+For newly authorized runs, the pre-existing CLD1010LP first-ON rule applies
 identically to CLD1015: only the first LD-ON readback in [-0.0004,0) V enters an
 observation in the nominal two-second window after that first ON snapshot.
 Blocking VISA snapshots and cleanup retain their existing I/O timeouts; this is
@@ -25,11 +25,21 @@ Only the operator-confirmed existing exact diagnostics [1,1,8192] acknowledgment
 is used, not a general suppression of connection faults. The verified 980 nm
 native PM range 0.007223721 W corresponds to the nominal 5 mW range request and
 does not raise max_power_w=0.0033. Original OFF/cleanup and raw audit requirements
-remain. The user authorized this fix and an SSH-run stage. Local validation:
-83 related guarded regressions passed in 7.509 s across six startup/model/driver/
-temperature/shared-cleanup/optical-source-integration modules; the earlier
-66-test suite overlaps and is not additive. Target verification, deployment and
-real acceptance remain pending and must be recorded separately.
+remain. Feature 94dc62c is published to origin and verified installed on LK_setup
+at 2026-10-28T16:39:45.017102Z, errors=[] and Git clean. The same 83 guarded tests
+passed locally in 7.509 s and on target in 10.349 s; the six-module coverage and
+earlier 66-test suite overlap and are not additive. Fresh gates held 152 leases,
+verified ten terminal databases, two idle Notebook kernels, twelve exact known
+processes (including unchanged Daisy), and Python/file pins. All 31 private TOMLs
+and the exact operative configuration remained unchanged, retaining the exact
+confirmed diagnostics acknowledgment, 980 nm native PM range and 0.0033 W cap.
+
+The native range correction had been verified in one separate PM-only session,
+closed without LD writes. This software deployment established no instrument
+session and started no scan. Real first-ON recovery and new-scan acceptance remain
+pending; file delivery does not establish either. Evidence:
+.test-tmp/cld1015-startup-window-20261028/{release-receipt.json,local-tests.log,
+target-tests.log}.
 
 ## 2026-10-28 CLD temperature-protection ENAB/PROT compatibility (file-only deployment completed)
 

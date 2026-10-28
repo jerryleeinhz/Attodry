@@ -37,10 +37,10 @@ Last updated: 2026-10-22
 
 ## Current stage
 
-### 2026-10-28 CLD1015 bounded first-ON voltage observation (implementation/commissioning pending)
+### 2026-10-28 CLD1015 bounded first-ON voltage observation (file-only deployment completed)
 
 The operator explicitly requested a fix for the abnormal startup readback and an
-SSH-run stage. For new runs, CLD1015 is to use the same existing CLD1010LP-only
+SSH-run stage. For new runs, CLD1015 uses the existing CLD1010LP
 first-LD-ON observation: only an initial voltage in [-0.0004,0) V may be observed
 within the nominal two-second window after that first ON snapshot, with all
 other guards and the original deadlines intact.
@@ -64,11 +64,22 @@ identity, frozen protection-mode, communication, OFF and cleanup guards remain.
 Normal nonnegative startup adds no I/O or waits; the exceptional observation
 reuses the complete existing snapshots and polling interval.
 
-Local validation: 83 related hardware-blocked regressions passed in 7.509 s
-across six startup/model/driver/temperature/shared-cleanup/optical-source-
-integration modules. The earlier 66-test suite overlaps and is not additive.
-Target verification, deployment and real first-ON acceptance remain pending. This entry authorizes no silent replay of the failed run
-and claims no measured recovery or completed new scan.
+Feature 94dc62c is published to origin and verified installed on LK_setup:
+errors=[], Git clean and all 31 private TOMLs unchanged. Release finished at
+2026-10-28T16:39:45.017102Z. The same 83 guarded regressions passed locally in
+7.509 s and on target in 10.349 s across six related modules; these and the prior
+66-test suite overlap and must not be added. Fresh gates held 152 owner leases
+and verified ten terminal databases, two idle Notebook kernels, twelve exact
+known process identities (including retained Daisy), and Python/file pins.
+The exact private configuration was preserved with its confirmed diagnostic
+acknowledgment, 980 nm native range and max_power_w=0.0033; its hash is in receipts.
+
+The native PM range correction was separately verified in one prior PM-only
+session, which was closed and made no LD writes. This software deployment made
+no instrument connection and started no scan. Real first-ON recovery and a new
+scan remain pending and are not claimed; the failed original run is not replayed.
+Evidence: .test-tmp/cld1015-startup-window-20261028/{release-receipt.json,
+local-tests.log,target-tests.log}.
 
 ### 2026-10-28 CLD ENAB/PROT compatibility and combined DC file-only deployment completed
 
