@@ -1,5 +1,19 @@
 # Development stages
 
+## 2026-10-28 CLD1015 publication and file-only deployment completed
+
+Feature 5ad5923 is pushed to origin/integration-photonics-nonlinear-hall.
+The scoped LK_setup adapter overlay passed 130 guarded target tests in 132.633 s;
+the local 130-test suite passed in 81.857 s. These are overlapping suites.
+Deployment held 151 owner leases and verified nine terminal-only databases,
+two idle kernels, exact known processes and protected file/Python hashes.
+The new ignored CLD1015/980 nm TOML is an operator-fill copy, with ten distinct
+CHANGE_ME values and diode_wiring_confirmed=false. Original TOMLs, user Notebook
+edits and other runtime source files were preserved. No real instrument session
+or scan was started; real CLD1015 emission/power-control acceptance remains pending.
+Outcome and retained pre-publish block evidence are in
+.test-tmp/cld1015-adaptation-20261028/finish-receipt.json.
+
 ## 2026-10-28 CLD1015 model selection and 980 nm (local offline)
 
 Explicit expected_model in the compatible cld1010 table selects CLD1010LP or

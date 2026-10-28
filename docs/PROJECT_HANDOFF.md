@@ -37,6 +37,28 @@ Last updated: 2026-10-22
 
 ## Current stage
 
+### 2026-10-28 CLD1015 file deployment completed
+
+Feature commit 5ad5923 is published to origin/integration-photonics-nonlinear-hall.
+LK_setup received the CLD adapter as a scoped file overlay; its existing branch
+checkout and the separately deferred DC-coupling implementation are preserved.
+The target's existing source plus this adapter passed all 130 related
+hardware-blocked regressions in 132.633 s (local suite: 130 in 81.857 s).
+All 151 existing owner leases, nine database inventories/terminal statuses,
+two Notebook kernel-info/idle proofs and exact process/file/Python identities
+were checked. Existing Daisy GUI identities were preserved for this CLD-only
+file delivery; no positioner source, instrument session or process control was used.
+
+The separate ignored config/three-lockin.local/photonics-cld1015-980nm.local.toml
+copies the original optical/lock-in/background settings and declares CLD1015 /
+nominal 980 nm. Ten distinct CHANGE_ME values cover new diode/TEC/temperature,
+feedback, maximum power and wavelength-specific PM range; wiring remains false
+until the operator confirms it. No scan was started. Original private TOMLs and
+the operator's existing Notebook edit remain byte-identical.
+Receipts/backups: .test-tmp/cld1015-adaptation-20261028/finish-receipt.json.
+The initial file-transfer timeout and pre-publish comment-placeholder validation
+block are retained separately; both preceded any production-file change.
+
 ### 2026-10-28 Explicit CLD1015 support and nominal 980 nm (local offline)
 
 The operator requested CLD1015 adaptation, origin publication, LK_setup deployment
