@@ -4985,3 +4985,8 @@ temperature scan and the temperature–excitation outer loop. The former
 `start_k`/`stop_k`/`step_k` format remains a read-compatible single-linear-grid
 fallback and cannot be combined with ranges. This is an offline configuration
 change only; it does not authorize or report a real DLL/VISA operation.
+
+
+## 2026-11-06 Preserve deployed AUX interface recovery
+
+Preserved the previously deployed recover-interface fix while synchronizing LK_setup. Combination configurations accept the existing AUX safety table; recovery validates semantic roles and distinct addresses, takes the station lease, and clears each configured VISA interface once. It does not change measurement settings or certify identity recovery. The isolated source snapshot passed 113 fake-VISA tests. No acquisition-loop queries, waits, or hardware operations were added.

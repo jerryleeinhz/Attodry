@@ -252,8 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
     recover_interface = subparsers.add_parser(
         "recover-interface",
         help=(
-            "Clear pending VISA responses on both SR830 interfaces without "
-            "changing instrument settings."
+            "Clear pending VISA responses on XX, XY and enabled AUX interfaces "
+            "without changing instrument settings. Stop acquisition first."
         ),
     )
     _add_pair_arguments(recover_interface)
@@ -521,7 +521,7 @@ def run(
 ) -> int:
     args = build_parser().parse_args(argv)
     factory = resource_manager_factory
-    if factory is None and args.command != "validate-config":
+    if factory is None and args.command not in ("validate-config", "recover-interface"):
         factory = _load_resource_manager_factory()
     return args.handler(args, factory)
 
@@ -701,28 +701,107 @@ def _run_monitor_live(
 
 
 def _run_recover_interface(
-    args: argparse.Namespace, factory: Callable[[], object]
+    args: argparse.Namespace, factory: Callable[[], object] | None
 ) -> int:
     """Explicitly recover stale VISA I/O after an interrupted hardware run."""
 
-    settings = _resolve_pair_settings(args)
-    _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
-    with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
-        interface_clear = _clear_pair_interfaces(lockin_xx, lockin_xy)
+    from .hardware_lease import station_hardware_lease
+
+    roles, timeout_ms, backend = _resolve_recovery_settings(args)
+    interface_clear = {"attempted": False, "completed": False, "errors": []}
+    for role, model, address in roles:
+        interface_clear[role] = {"model": model, "address": address, "completed": False}
+    errors = interface_clear["errors"]
+    try:
+        with ExitStack() as stack:
+            if args.config is not None:
+                stack.enter_context(station_hardware_lease(args.config))
+            if factory is None:
+                manager_factory = _load_resource_manager_factory()
+                manager = manager_factory() if backend == "default" else manager_factory(backend)
+            else:
+                manager = factory()
+            stack.callback(manager.close)
+            resources = []
+            # Open every configured interface before clearing any of them.
+            for role, _, address in roles:
+                resource = manager.open_resource(address)
+                stack.callback(resource.close)
+                resource.timeout = timeout_ms
+                resources.append((role, resource))
+            for role, resource in resources:
+                interface_clear["attempted"] = True
+                try:
+                    resource.clear()
+                    interface_clear[role]["completed"] = True
+                except Exception as exc:
+                    interface_clear[role]["error"] = str(exc)
+                    errors.append(f"{role}: {exc}")
+    except Exception as exc:
+        errors.append(str(exc))
+    interface_clear["completed"] = not errors
     print(
         json.dumps(
             {
                 "command": "recover-interface",
-                "completed": True,
+                "completed": interface_clear["completed"],
                 "interface_clear": interface_clear,
                 "settings_changed": False,
+                "identity_verified": False,
+                "note": "VISA clear only; successful clear does not certify communication recovery. No scan started.",
             },
             indent=2,
             ensure_ascii=False,
         ),
         flush=True,
     )
-    return 0
+    return 0 if interface_clear["completed"] else 1
+
+
+def _resolve_recovery_settings(args):
+    """Validate the selected lock-in tables, without parsing unrelated axes."""
+    from . import config as configuration
+
+    document = None if args.config is None else configuration._load_document(args.config)
+    if document is not None and "combination_scan" in document:
+        if configuration._parse_project(configuration._table(document, "project")).mode is not RunMode.HARDWARE:
+            raise ValueError("Interface recovery requires a hardware config.")
+        combination = configuration._table(document, "combination_scan")
+        if combination.get("reference_topology", "internal_xx_xy") != "internal_xx_xy":
+            from .photonics_lockin_config import load_photonics_lockin_config
+            config = load_photonics_lockin_config(args.config, document=document)
+            devices = [config.lockin_xx, config.lockin_xy]
+            visa = config.visa
+        else:
+            safety_document = configuration._load_document(Path(args.config).with_name("lockin_safety.toml"))
+            safety = configuration._parse_lockin_safety({k: v for k, v in safety_document.items() if k != "lockin_aux"})
+            xx = configuration._parse_lockin(configuration._table(document, "lockin_xx"),
+                LockinRole.XX, "lockin_xx", safety.lockin_xx, safety,
+                allow_disconnected_source="optical" in combination.get("order", []))
+            xy = configuration._parse_lockin(configuration._table(document, "lockin_xy"),
+                LockinRole.XY, "lockin_xy", safety.lockin_xy, safety)
+            configuration._validate_lockin_pair(xx, xy)
+            from .internal_lockin_group import load_auxiliary_config
+            aux = load_auxiliary_config(document, safety_document, xx.frequency_hz)
+            devices = [xx, xy] + ([] if aux is None else [aux])
+            visa = configuration._parse_visa(configuration._table(document, "visa"))
+        overrides = {"xx": args.xx_address, "xy": args.xy_address}
+        roles = [("lockin_" + d.role.value, d.model, overrides.get(d.role.value) or d.address) for d in devices]
+        timeout_ms, backend = args.timeout_ms or visa.timeout_ms, visa.backend
+    else:
+        settings = _resolve_pair_settings(args)
+        roles = [("lockin_xx", "SR830", settings["xx_address"]),
+                 ("lockin_xy", "SR830", settings["xy_address"])]
+        timeout_ms = settings["timeout_ms"]
+        backend = "default" if settings["config"] is None else settings["config"].visa.backend
+    addresses = []
+    for role, _, address in roles:
+        if not isinstance(address, str) or not address.strip() or "CHANGE_ME" in address.upper():
+            raise ValueError(f"{role} requires an explicit VISA address.")
+        addresses.append(address.strip().upper())
+    if len(set(addresses)) != len(addresses):
+        raise ValueError("All recovery VISA addresses must be distinct.")
+    return roles, timeout_ms, backend
 
 
 def _run_set_xx_sensitivity(

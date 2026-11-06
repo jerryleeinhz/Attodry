@@ -4216,3 +4216,8 @@ delete that now-unknown field. The configured RMS current/voltage limits are sti
 checked before VISA access, but these are nominal-model comparisons rather than
 guarantees against impedance changes or electrical faults. No instrument operation
 was performed for this configuration/code change.
+
+
+## 2026-11-06 Preserve deployed AUX interface recovery
+
+Preserved the previously deployed recover-interface fix while synchronizing LK_setup. Combination configurations accept the existing AUX safety table; recovery validates semantic roles and distinct addresses, takes the station lease, and clears each configured VISA interface once. It does not change measurement settings or certify identity recovery. The isolated source snapshot passed 113 fake-VISA tests. No acquisition-loop queries, waits, or hardware operations were added.
