@@ -89,6 +89,18 @@ retain their completed/accepted/clean defaults; summary/formal CSV pairs are
 deduplicated. Source checkboxes show wrapped file names. The specialized SR830,
 temperature and Three-SMU notebooks keep their existing science models.
 
+**Export folder** selects the parent directory; **Export name** optionally adds
+one prefix to every CSV, PNG/PDF/SVG and manifest filename. For example,
+`120K_gate_scan` produces `120K_gate_scan_selected_samples.csv` and
+`120K_gate_scan_plot_01.png`. Enter a name, not a path or extension. Blank keeps
+the original filenames; each export still gets a fresh timestamp directory.
+Chinese names and internal dots are supported; invalid Windows characters,
+reserved device names, trailing dots/spaces and names over 120 UTF-16 code units
+are rejected before creating files. Names are saved/restored with setup; old
+setups default to blank. Changing a name does not require rendering again.
+The manifest's `data_files`, `figure_files` and `manifest_file` record the actual
+filenames; data columns and internal `plot_id` values are unchanged.
+
 Exports contain 600-dpi PNG, vector PDF/SVG, `selected_samples.csv` (contributing
 raw observations), `plotted_statistics.csv` (displayed means/gaps, n, SD, SEM,
 group and contributing sample IDs), and `plot_manifest.json` (selection,

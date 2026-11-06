@@ -29,6 +29,7 @@ from .scientific_plotting import (
     SERIES_MARKERS,
     export_publication_figure_set,
     outside_legend,
+    save_publication_figure,
     publication_style,
     style_axis,
 )
@@ -1150,14 +1151,35 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
+def _export_name(value):
+    """Validate a filename prefix before creating any export files."""
+    if not isinstance(value, str):
+        raise ValueError("Export name must be text.")
+    if not value.strip():
+        return ""
+    if any(c in '<>:"/\\|?*' or ord(c) < 32 for c in value):
+        raise ValueError("Export name cannot contain paths or Windows filename characters: <>:\"/\\|?*")
+    if value != value.strip() or value.endswith("."):
+        raise ValueError("Export name cannot start/end with spaces or end with a dot.")
+    if value.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+        raise ValueError("Export name cannot be a Windows reserved device name.")
+    if len(value.encode("utf-16-le")) // 2 > 120:
+        raise ValueError("Export name is too long (maximum 120 UTF-16 characters).")
+    return value
+
+
 def export_plot_bundle(
     directory: str | Path,
     rendered: Sequence[Mapping[str, Any]],
+    *, export_name: str = "",
 ) -> Path:
     """Export all rendered figures and their exact selected samples to a new folder."""
 
     if not rendered:
         raise ValueError("Render at least one plot before exporting.")
+    name = _export_name(export_name)
+    prefix = name + "_" if name else ""
+    filename = lambda stem: prefix + stem
     base = Path(directory).expanduser().resolve()
     base.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
@@ -1172,9 +1194,9 @@ def export_plot_bundle(
     for index, item in enumerate(rendered, start=1):
         slug = f"plot_{index:02d}"
         with publication_style():
-            paths = export_publication_figure_set(
-                item["figure"], destination / slug, formats=("png", "pdf", "svg")
-            )
+            paths = tuple(save_publication_figure(
+                item["figure"], destination / filename(slug + "." + extension))
+                for extension in ("png", "pdf", "svg"))
         summary_rows.extend({**row, "plot_id": slug} for row in item["data"].get("summary_rows", ()))
         pixel_rows.extend({**row, "plot_id": slug} for row in item["data"].get("pixel_cells", ()))
         selected_rows = tuple(item["data"]["rows"])
@@ -1191,7 +1213,7 @@ def export_plot_bundle(
         })
 
     all_keys = sorted({key for row in csv_rows for key in row})
-    with (destination / "selected_samples.csv").open(
+    with (destination / filename("selected_samples.csv")).open(
         "x", newline="", encoding="utf-8"
     ) as stream:
         writer = csv.DictWriter(stream, fieldnames=all_keys)
@@ -1199,7 +1221,7 @@ def export_plot_bundle(
         for row in csv_rows:
             writer.writerow({key: _csv_export_value(row.get(key)) for key in all_keys})
     summary_keys = sorted({key for row in summary_rows for key in row})
-    with (destination / "plotted_statistics.csv").open("x", newline="", encoding="utf-8") as stream:
+    with (destination / filename("plotted_statistics.csv")).open("x", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=summary_keys)
         writer.writeheader()
         for row in summary_rows:
@@ -1208,14 +1230,14 @@ def export_plot_bundle(
         # Include missing/flagged power-reference outcomes and manual exclusions
         # alongside the plotted subset, retaining the engine's matching evidence.
         audit_keys = sorted({key for row in audit_rows for key in row})
-        with (destination / "analysis_audit_samples.csv").open("x", newline="", encoding="utf-8") as stream:
+        with (destination / filename("analysis_audit_samples.csv")).open("x", newline="", encoding="utf-8") as stream:
             writer = csv.DictWriter(stream, fieldnames=audit_keys)
             writer.writeheader()
             for row in audit_rows:
                 writer.writerow({key: _csv_export_value(row.get(key)) for key in audit_keys})
     if pixel_rows:
         pixel_keys = sorted({key for row in pixel_rows for key in row})
-        with (destination / "pixel_cells.csv").open("x", newline="", encoding="utf-8") as stream:
+        with (destination / filename("pixel_cells.csv")).open("x", newline="", encoding="utf-8") as stream:
             writer = csv.DictWriter(stream, fieldnames=pixel_keys)
             writer.writeheader()
             for row in pixel_rows:
@@ -1225,6 +1247,12 @@ def export_plot_bundle(
     ).hexdigest()
     manifest = {
         "schema": "unified-plot-export-v1",
+        "export_name": name,
+        "data_files": {key: filename(key + ".csv") for key in
+                       ["selected_samples", "plotted_statistics"] +
+                       (["analysis_audit_samples"] if audit_rows else []) +
+                       (["pixel_cells"] if pixel_rows else [])},
+        "manifest_file": filename("plot_manifest.json"),
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "raster_dpi": PUBLICATION_RASTER_DPI,
         "vector_formats": ["pdf", "svg"],
@@ -1233,7 +1261,7 @@ def export_plot_bundle(
         "analysis_audit_sample_rows": len(audit_rows),
         "pixel_cell_rows": len(pixel_rows),
         "selected_samples_sha256": digest,
-        "aggregation": "per plot specification; plotted_statistics.csv records n, SD, SEM and sample identities",
+        "aggregation": f"per plot specification; {filename('plotted_statistics.csv')} records n, SD, SEM and sample identities",
         "interpolation": "none",
         "plots": plot_manifest,
         "input_sources": sorted({
@@ -1245,7 +1273,7 @@ def export_plot_bundle(
     if any(item["spec"].get("photoresponse") in _POWER_RESPONSES for item in rendered):
         manifest["power_reference_source_sha256"] = hashlib.sha256(
             Path(__file__).with_name("optical_power_reference.py").read_bytes()).hexdigest()
-    (destination / "plot_manifest.json").write_text(
+    (destination / filename("plot_manifest.json")).write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False, allow_nan=False),
         encoding="utf-8",
     )
@@ -1350,6 +1378,9 @@ class UnifiedPlotDashboard:
             value=str(Path(data_directory).expanduser().resolve().parent / "analysis_output" / "unified_plotting"),
             description="Export folder:", layout=widgets.Layout(width="100%"),
         )
+        self.export_name = widgets.Text(value="", description="Export name:",
+            placeholder="Optional prefix, e.g. 120K_gate_scan (no path or extension)",
+            layout=widgets.Layout(width="100%"))
         self.configuration_path = widgets.Text(
             value="plot_setup.json", description="Setup file:", layout=widgets.Layout(width="100%")
         )
@@ -1390,6 +1421,7 @@ class UnifiedPlotDashboard:
             self.card_box,
             widgets.HBox([self.add_curve_button, self.add_map_button, self.add_field_button, self.add_three_button, self.render_button], layout=widgets.Layout(flex_flow="row wrap")),
             self.output_directory,
+            self.export_name,
             widgets.HBox([self.export_button]),
             self.configuration_path,
             widgets.HBox([self.save_button, self.load_button]),
@@ -1895,6 +1927,7 @@ class UnifiedPlotDashboard:
             destination = export_plot_bundle(
                 self.output_directory.value,
                 [card["rendered"] for card in self.cards],
+                export_name=self.export_name.value,
             )
             self.status.value = f"Exported figures, selected samples, and manifest to {html.escape(str(destination))}."
         except Exception as exc:
@@ -1903,6 +1936,7 @@ class UnifiedPlotDashboard:
     def _configuration(self) -> dict[str, Any]:
         return {
             "schema": "unified-plot-setup-v1",
+            "export_name": _export_name(self.export_name.value),
             "data_directory": str(Path(self.directory.value).expanduser()),
             "include_audit": bool(self.include_audit.value),
             "plots": [
@@ -1933,6 +1967,7 @@ class UnifiedPlotDashboard:
             payload = json.loads(path.read_text(encoding="utf-8"))
             if payload.get("schema") != "unified-plot-setup-v1":
                 raise ValueError("Unsupported plot setup file.")
+            export_name = _export_name(payload.get("export_name", ""))
             catalog = discover_plot_sources(payload["data_directory"])
             available = {str(source.path) for source in catalog}
             missing = {p for spec in payload.get("plots", []) for p in spec.get("source_paths", [])} - available
@@ -1948,6 +1983,7 @@ class UnifiedPlotDashboard:
                     available_runs = {run['run_id'] for run in list_combination_runs(source_path)}
                     if set(run_ids) - available_runs:
                         raise ValueError(f"Setup run IDs are missing from {source_path}")
+            self.export_name.value = export_name
             self.directory.value = str(payload["data_directory"])
             self.include_audit.value = bool(payload.get("include_audit", False))
             self._refresh()

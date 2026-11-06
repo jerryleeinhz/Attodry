@@ -1,5 +1,9 @@
 # Development stages
 
+## 2026-11-06：导出名称输入框
+
+按批准方案完成统一导出前缀、空名称兼容、可选CSV命名、manifest实际文件映射、setup保存恢复和旧setup兼容。保留时间戳目录及不覆盖规则；更改名称无需重新绘图，不改变统计和加载逻辑。71项离线测试通过（含6项新增），验证覆盖中文/含点名称、非法名称、多个plot和真实图片格式导出。
+
 ## 2026-11-06：Unified Plotting 图例、像素块及色块CSV
 
 完成批准的三个范围：每张曲线/多通道卡片图例勾选开关；XY–Z Pixels/Scatter及旧setup兼容；`pixel_cells.csv`精确色块导出。没有新增按run拆分CSV或仅导出所选变量的模式。原`selected_samples.csv`仍保存贡献样本全部可用字段，以source/run/plot_id区分。
