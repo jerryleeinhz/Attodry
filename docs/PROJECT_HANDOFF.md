@@ -1,5 +1,13 @@
 # Project handoff
 
+## 2026-11-06 当前：Unified Plotting 图例与像素块（本地离线完成）
+
+按用户批准范围，曲线、Four lock-in channels、Three detectors · h1 增加 `Show legend` 勾选框，作用于卡片全部面板；单条曲线可显示，超过12组不再自动隐藏。设置保存/加载和PNG/PDF/SVG导出一致，XY–Z色条独立保留。
+
+XY–Z新增Pixels/Scatter，新卡片默认Pixels、旧setup缺字段保持Scatter。像素边界按精确坐标相邻中点及外侧半间距计算；非等间隔支持，缺测/质量排除保持空白，排除坐标仍约束网格，不插值或舍入实际读回。单值轴须明确宽度；重复XY只允许同一正式条件的统计，冲突run/segment/direction/revisit提示筛选。复用原圆周相位、复数功率参考和质量规则。新增`pixel_cells.csv`记录实际色块及n/原样本身份，原始宽表与统计导出保留。
+
+136项离线绘图/加载/暗背景/功率参考/相关分析测试通过（含15项新增测试），已检查合成非等距缺测图、13组图例和三通道布局。当前测试环境Matplotlib 3.9.2；未更改项目依赖锁定。两本notebook使用同一模块，更新后重启kernel并重新运行单元格。说明见`docs/DATA_ANALYSIS.md`。无SSH/部署/真实仪器连接/采集配置修改；历史故障和停机记录保留。
+
 ## 2026-10-22 开放 readback_tolerance_t（本地修复，待当前扫描结束部署）
 
 操作者明确要求 readback_tolerance_t 可编辑，移除解析器/策略/驱动构造/控制接管的1.5mT固定上限。

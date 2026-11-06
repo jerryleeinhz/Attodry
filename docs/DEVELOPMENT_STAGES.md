@@ -1,5 +1,13 @@
 # Development stages
 
+## 2026-11-06：Unified Plotting 图例、像素块及色块CSV
+
+完成批准的三个范围：每张曲线/多通道卡片图例勾选开关；XY–Z Pixels/Scatter及旧setup兼容；`pixel_cells.csv`精确色块导出。没有新增按run拆分CSV或仅导出所选变量的模式。原`selected_samples.csv`仍保存贡献样本全部可用字段，以source/run/plot_id区分。
+
+像素模式保留非等间距和缺测/质量排除空白；采用坐标中点边界，无插值、平滑或隐式舍入。单值轴显式宽度，重复条件统计复用原实现，跨run/方向/segment/重访不合并。SD/SEM保留于导出，不伪装成像素空间误差。两本notebook说明、设置持久化、失效重绘与导出一致。
+
+验证：136项离线回归通过，新增15项覆盖边界/缺测/排除/重复统计/圆周相位/功率参考/冲突身份/单值轴/log/旧setup/图例和多run导出；合成图完成视觉检查。性能记录见`MEASUREMENT_PERFORMANCE.md`。仅本地分析代码及文档更新，未部署或接触实验仪器。
+
 ## 2026-10-28 CLD1015 first-ON near-zero voltage parity (file-only deployment completed)
 
 The operator requested an abnormal-readback fix and SSH-run stage. The existing

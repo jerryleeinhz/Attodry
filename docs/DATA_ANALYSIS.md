@@ -38,6 +38,9 @@ Restart an existing notebook kernel after updating the code, then run both cells
 2. Choose **X/Y**, or **Component** (R, X, Y, phase) for the four-channel view.
    It places Vxx h1/h2 above Vxy h1/h2; a varying actual Bx/Bz is selected when available.
    Add independent curve, four-channel or XY–Z cards as needed.
+   **Show legend** controls curve, four-channel and three-detector legends (all
+   panels on that card), including single traces and more than twelve groups.
+   Legends sit outside the axes; the XY–Z colorbar is independent.
 3. Choose **Raw observations**, **Mean ± SD**, or **Mean ± SEM**. Four-channel cards
    default to SD. Means combine only formal repeats in the same source/run/condition/
    attempt and recorded coordinate context. Runs, scan repetitions, directions,
@@ -57,14 +60,27 @@ Restart an existing notebook kernel after updating the code, then run both cells
    rendering. Empty Keep means no retained values. **Exclude IDs** removes exact
    observations from the plot only. Exclusions/missing values break lines rather
    than bridging them; no missing datum is filled with zero. Logs reject nonpositive
-   values and error intervals crossing zero. XY–Z shows raw measured points only,
-   reports overlaps and applies no interpolation. Generic CSV units/independent
+   values and error intervals crossing zero. XY–Z **Display** selects **Pixels**
+   (default for new cards) or **Scatter** (raw points with overlaps reported).
+   Pixels use adjacent coordinate midpoints and half-spacing at the outer edges,
+   in data units; nonuniform spacing is supported. Missing/quality-excluded cells
+   stay blank, and excluded coordinates still anchor the grid boundaries. No
+   interpolation, smoothing or coordinate rounding is applied. Prefer `requested.*`
+   axes for a regular scan grid; actual readbacks remain available in the raw export.
+   A single-coordinate axis requires a positive **X/Y cell width** in that axis's
+   units (0 means unspecified). Log axes also require positive cell boundaries.
+   At duplicate XY positions choose Mean for formal repeats of the same condition;
+   distinct runs, segments, directions, attempts and revisits must be filtered or
+   put on separate cards. They are never silently averaged. Pixel color is mean Z;
+   SD/SEM are exported rather than drawn as spatial error bars.
+   Generic CSV units/independent
    dimensions are not inferred; without recorded condition IDs it supports Raw only.
 6. **Render this plot** or **Render all plots**, then **Export figures + data**.
    Edits clear the old figure and export state; changed files (including SQLite
    WAL changes) require refresh/re-render. Failed refresh cannot keep stale sources.
 7. **Save/Load setup** records sources, axes, filters, statistics, exclusions and audit
-   choices. Missing source files produce an error. Setup/export files are never
+   choices, legend visibility, map style and singleton cell widths. Old setups
+   without a map style retain Scatter. Missing source files produce an error. Setup/export files are never
    overwritten.
 
 Sources: combination SQLite, archived Three-SMU metadata+CSV, SR830 sweep JSON,
@@ -79,6 +95,17 @@ group and contributing sample IDs), and `plot_manifest.json` (selection,
 quality/manual exclusions, missing counts, source paths and implementation hashes).
 Four-channel exports identify `plot_channel`: a wide source observation can
 contribute once to each valid channel. A gap row has n=0, not a measured zero.
+Pixel maps additionally export `pixel_cells.csv`: one row per colored cell,
+including `plot_id`, source/run/condition/segment/direction, X/Y/Z column names and
+values, cell boundaries, n, SD/SEM and contributing sample IDs. Blank cells are
+not filled with zero; the manifest records grid centers and the blank-cell count.
+For pixel statistics, `plotted_statistics.csv` keeps the usual X/response-Y fields
+and adds `map_y` for the second spatial coordinate.
+`selected_samples.csv` retains all available fields of contributing observations,
+including actual readbacks, not just the chosen plot variables. Multiple runs and
+cards share these tables with run/source/plot identifiers; they are not exported
+as separate per-run CSV files. Figure exports follow the rendered legend and map
+settings exactly.
 Raw source records are never rewritten. The older Python `select_series`/
 `plot_series`/`export_selection` API remains a raw-observation API; the enhanced
 quality/statistics/export behavior is in `render_plot` and the two notebooks.

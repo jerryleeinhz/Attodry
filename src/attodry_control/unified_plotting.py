@@ -836,10 +836,8 @@ def _draw_curve(axis, rows, spec, x, y):
         if measured_x and min(measured_x) != max(measured_x):
             axis.set_xlim(min(measured_x), max(measured_x))
     style_axis(axis)
-    if len(groups) > 1 and len(groups) <= 12:
+    if spec.get("show_legend", True) and groups:
         outside_legend(axis)
-    if len(groups) > 12:
-        axis.text(.01, .01, f"{len(groups)} separate traces; see exported group table", transform=axis.transAxes, fontsize=8)
     report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **_response_metadata(spec), **quality, "selected_row_count": len(rows), "plotted_row_count": len(valid),
               "omitted_missing_or_nonfinite_count": len(kept)-len(valid),
               "displayed_point_count": sum(_is_numeric(p["y"]) for p in summaries),
@@ -849,6 +847,83 @@ def _draw_curve(axis, rows, spec, x, y):
               "source_paths": sorted({str(r.get("source_path")) for r in rows if r.get("source_path")})}
     return {"rows": tuple(valid), "summary_rows": summaries, "report": report,
             "audit_rows": tuple(rows) if spec.get("photoresponse") in _POWER_RESPONSES else ()}
+
+
+def _pixel_axis_bounds(values, width, name):
+    """Midpoint cells in data units, with no coordinate rounding or interpolation."""
+    centers = sorted(set(float(v) for v in values if _is_numeric(v)))
+    if not centers:
+        raise ValueError(f"No finite {name.upper()} coordinates for pixels.")
+    if len(centers) == 1:
+        if not _is_numeric(width) or width <= 0:
+            raise ValueError(f"Only one {name.upper()} coordinate: set a positive {name.upper()} cell width in axis units, or choose Scatter.")
+        edges = [centers[0] - width / 2, centers[0] + width / 2]
+    else:
+        midpoints = [a / 2 + b / 2 for a, b in zip(centers, centers[1:])]
+        edges = [centers[0] - (midpoints[0] - centers[0]), *midpoints,
+                 centers[-1] + (centers[-1] - midpoints[-1])]
+    if not all(math.isfinite(v) for v in edges) or any(a >= b for a, b in zip(edges, edges[1:])):
+        raise ValueError(f"Cannot resolve {name.upper()} pixel boundaries at these coordinates; choose requested axes or Scatter.")
+    return dict(zip(centers, zip(edges, edges[1:])))
+
+
+def _pixel_map_data(rows, spec, x, y, z):
+    """One cell per exact XY and formal condition; preserve excluded grid positions."""
+    from .analysis_observations import qualify_observations, repeat_statistics
+    mode = spec.get("statistics", "raw")
+    power_summary = "_power_delta_" in z and mode != "raw"
+    quality_columns = (x, y, z)
+    if power_summary and z.endswith("phase_deg"):
+        base = z.removesuffix("phase_deg")
+        quality_columns = (x, y, base + "x_v", base + "y_v")
+    kept, quality = qualify_observations([r for r in rows if not r.get("_manual_excluded")],
+                                        quality_columns, spec.get("quality_policy", "exclude"))
+    kept_ids = {_sample_token(r) for r in kept}
+    bounds = {name: _pixel_axis_bounds((r.get(key) for r in rows), spec.get("pixel_" + name + "_width"), name)
+              for name, key in (("x", x), ("y", y))}
+    buckets = {}
+    for row in rows:
+        if all(_is_numeric(row.get(k)) for k in (x, y)):
+            excluded = _sample_token(row) not in kept_ids
+            masked = {**row, **({z: None} if excluded else {}),
+                      **({"_power_summary_excluded": excluded} if power_summary else {})}
+            buckets.setdefault((float(row[x]), float(row[y])), []).append(masked)
+    cells, summaries, contributing = [], [], set()
+    for (cx, cy), bucket in sorted(buckets.items()):
+        # Separate scan visits/directions even when a source reused condition IDs.
+        context_keys = ["source_path", "run_id", "simulated", "segment", "direction", "repeat_index",
+                        "role", "harmonic", "scan_type", "source_kind"]
+        context_keys += sorted({k for r in bucket for k in r if k.startswith("axes.") and k.endswith((".segment", ".direction"))})
+        groups = {}
+        for row in bucket:
+            identity = tuple(repr(row.get(k)) for k in context_keys)
+            groups.setdefault(identity, []).append(row)
+        points = [p for group in groups.values() for p in repeat_statistics(group, x=x, y=z, mode=mode)]
+        if len(points) != 1:
+            raise ValueError("Multiple observations/conditions occupy the same XY pixel. Choose Mean statistics for formal repeats; filter runs/segments/directions/revisits or use separate cards / Scatter.")
+        point = points[0]
+        if mode == "raw" and not _is_numeric(point["y"]):
+            point = {**point, "n": 0}
+        provenance = {k: bucket[0].get(k) for k in (
+            "source_path", "run_id", "condition_id", "attempt_index", "repeat_index", "segment", "direction")}
+        provenance.update({k: bucket[0][k] for k in bucket[0]
+                           if k.startswith("axes.") and k.endswith((".segment", ".direction"))})
+        summaries.append({**point, "x": cx, "map_y": cy, "group": provenance, "channel": z})
+        if not _is_numeric(point["y"]):
+            continue
+        xmin, xmax = bounds["x"][cx]
+        ymin, ymax = bounds["y"][cy]
+        cells.append({**provenance, "x": cx, "y": cy, "z": point["y"],
+                      "x_column": x, "y_column": y, "z_column": z,
+                      "x_min": xmin, "x_max": xmax, "y_min": ymin, "y_max": ymax,
+                      **{k: point[k] for k in ("n", "sd", "sem", "error", "sample_ids")}})
+        contributing.update(json.dumps(identity, sort_keys=True, ensure_ascii=False) for identity in point["sample_ids"])
+    valid = [r for r in kept if _sample_token(r) in contributing]
+    if not cells:
+        raise ValueError("No qualified finite numeric cells for the chosen axes.")
+    return {"rows": tuple(valid), "summary_rows": summaries, "pixel_cells": cells,
+            "bounds": bounds, "quality": quality,
+            "omitted_missing_or_nonfinite_count": len(kept) - len(valid)}
 
 
 def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
@@ -945,12 +1020,23 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                 axis.set_title(_audit_title(selected) + axis.get_title())
                 data["report"]["mode"] = mode
                 return figure, data
-            if spec.get("statistics", "raw") != "raw":
-                raise ValueError("XY–Z shows raw observations; choose Raw statistics.")
+            map_style = spec.get("map_style", "scatter")  # Legacy saved specifications.
+            if map_style not in ("pixels", "scatter"):
+                raise ValueError("XY–Z display must be Pixels or Scatter.")
+            if map_style == "scatter" and spec.get("statistics", "raw") != "raw":
+                raise ValueError("XY–Z Scatter shows raw observations; choose Raw statistics.")
             if not z:
                 raise ValueError("Choose Color Z first.")
-            qualified, quality = qualify_observations(eligible, (x, y, z), spec.get("quality_policy", "exclude"))
-            valid = [r for r in qualified if all(_is_numeric(r.get(k)) for k in (x, y, z))]
+            pixels = _pixel_map_data(selected, spec, x, y, z) if map_style == "pixels" else None
+            if pixels:
+                valid, quality = pixels["rows"], pixels["quality"]
+                zs = [c["z"] for c in pixels["pixel_cells"]]
+                missing = pixels["omitted_missing_or_nonfinite_count"]
+            else:
+                qualified, quality = qualify_observations(eligible, (x, y, z), spec.get("quality_policy", "exclude"))
+                valid = [r for r in qualified if all(_is_numeric(r.get(k)) for k in (x, y, z))]
+                zs = [r[z] for r in valid]
+                missing = len(qualified) - len(valid)
             if not valid:
                 raise ValueError("No qualified finite numeric samples for the chosen axes.")
             for name, key in (("x", x), ("y", y)):
@@ -959,26 +1045,56 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                     raise ValueError("Axis scale must be linear or log.")
                 if scale == "log" and any(r[key] <= 0 for r in valid):
                     raise ValueError("Log axes require positive coordinates.")
+                if scale == "log" and pixels and any(lo <= 0 for lo, _ in pixels["bounds"][name].values()):
+                    raise ValueError("Log axes require positive pixel boundaries; choose linear axes or Scatter.")
                 getattr(axis, "set_" + name + "scale")(scale)
-            minimum, maximum = min(r[z] for r in valid), max(r[z] for r in valid)
+            minimum, maximum = min(zs), max(zs)
             if minimum == maximum:
                 pad = abs(minimum)*.05 or 1
                 minimum, maximum = minimum-pad, maximum+pad
             norm = mpl.colors.TwoSlopeNorm(0, vmin=minimum, vmax=maximum) if minimum < 0 < maximum else mpl.colors.Normalize(minimum, maximum)
-            artist = axis.scatter([r[x] for r in valid], [r[y] for r in valid], c=[r[z] for r in valid], cmap="RdBu_r", norm=norm)
+            if pixels:
+                from matplotlib.collections import PolyCollection
+                # Sparse rectangles leave unmeasured/quality-excluded cells blank
+                # without allocating a dense Cartesian array for jittery readbacks.
+                vertices = [[(c['x_min'], c['y_min']), (c['x_max'], c['y_min']),
+                             (c['x_max'], c['y_max']), (c['x_min'], c['y_max'])]
+                            for c in pixels["pixel_cells"]]
+                artist = PolyCollection(vertices, array=zs, cmap="RdBu_r", norm=norm,
+                                        edgecolors="none", antialiaseds=False)
+                axis.add_collection(artist)
+                for name in ("x", "y"):
+                    edges = list(pixels["bounds"][name].values())
+                    getattr(axis, "set_" + name + "lim")(edges[0][0], edges[-1][1])
+            else:
+                artist = axis.scatter([r[x] for r in valid], [r[y] for r in valid], c=zs, cmap="RdBu_r", norm=norm)
             figure.colorbar(artist, ax=axis).set_label(column_label(z, eligible))
             overlap = len(valid)-len({(r[x],r[y]) for r in valid})
             response_note = " · " + _response_note(spec) if response_mode in _POWER_RESPONSES else ""
-            axis.set(xlabel=column_label(x, eligible), ylabel=column_label(y, eligible), title=(spec.get("title") or "Measured XY observations") + response_note + f"\n{overlap} overlapping repeats; excluded {quality['excluded_quality_count']}")
+            if pixels:
+                ns = [c["n"] for c in pixels["pixel_cells"]]
+                n_label = str(min(ns)) + (f"–{max(ns)}" if min(ns) != max(ns) else "")
+                statistic_label = "Raw Z" if spec.get("statistics", "raw") == "raw" else "Mean Z (within condition)"
+                display_note = f"Pixels · {statistic_label} · n={n_label}; blank = missing/excluded"
+            else:
+                display_note = f"{overlap} overlapping repeats"
+            axis.set(xlabel=column_label(x, eligible), ylabel=column_label(y, eligible), title=(spec.get("title") or "Measured XY observations") + response_note + f"\n{display_note}; excluded {quality['excluded_quality_count']}")
             if quality['quality_policy'] == 'include' and quality['flagged_row_count']:
                 axis.set_title(axis.get_title() + " · AUDIT: flagged included")
             axis.set_title(_audit_title(selected) + axis.get_title())
             style_axis(axis)
-            return figure, {"rows": tuple(valid), "summary_rows": [],
+            return figure, {"rows": tuple(valid), "summary_rows": pixels["summary_rows"] if pixels else [],
+                "pixel_cells": pixels["pixel_cells"] if pixels else [],
                 "audit_rows": selected if response_mode in _POWER_RESPONSES else (),
                 "report": {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **_response_metadata(spec), **quality, "mode": mode,
                 "selected_row_count": len(selected), "plotted_row_count": len(valid),
-                "omitted_missing_or_nonfinite_count": len(qualified)-len(valid), "statistics": "raw",
+                "omitted_missing_or_nonfinite_count": missing, "statistics": spec.get("statistics", "raw"),
+                "map_style": map_style,
+                **({"pixel_boundaries": "adjacent coordinate midpoints; outer half-spacing; data units; no rounding",
+                    "interpolation": "none", "displayed_cell_count": len(pixels["pixel_cells"]),
+                    "blank_cell_count": len(pixels["bounds"]["x"]) * len(pixels["bounds"]["y"]) - len(pixels["pixel_cells"]),
+                    "x_centers": list(pixels["bounds"]["x"]), "y_centers": list(pixels["bounds"]["y"]),
+                    "uncertainty": _uncertainty_description(z)} if pixels else {}),
                 "duplicate_xy_observation_count": overlap, "color_normalization": {"vmin": minimum, "vmax": maximum, "vcenter": 0 if minimum < 0 < maximum else None},
                 "source_paths": sorted({str(r['source_path']) for r in selected if r.get('source_path')})}}
         except Exception:
@@ -1052,6 +1168,7 @@ def export_plot_bundle(
     audit_rows: list[dict[str, Any]] = []
     plot_manifest = []
     summary_rows = []
+    pixel_rows = []
     for index, item in enumerate(rendered, start=1):
         slug = f"plot_{index:02d}"
         with publication_style():
@@ -1059,6 +1176,7 @@ def export_plot_bundle(
                 item["figure"], destination / slug, formats=("png", "pdf", "svg")
             )
         summary_rows.extend({**row, "plot_id": slug} for row in item["data"].get("summary_rows", ()))
+        pixel_rows.extend({**row, "plot_id": slug} for row in item["data"].get("pixel_cells", ()))
         selected_rows = tuple(item["data"]["rows"])
         audit_rows.extend({**dict(row), "plot_id": slug} for row in item["data"].get("audit_rows", ()))
         csv_rows.extend(
@@ -1095,6 +1213,13 @@ def export_plot_bundle(
             writer.writeheader()
             for row in audit_rows:
                 writer.writerow({key: _csv_export_value(row.get(key)) for key in audit_keys})
+    if pixel_rows:
+        pixel_keys = sorted({key for row in pixel_rows for key in row})
+        with (destination / "pixel_cells.csv").open("x", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=pixel_keys)
+            writer.writeheader()
+            for row in pixel_rows:
+                writer.writerow({key: _csv_export_value(row.get(key)) for key in pixel_keys})
     digest = hashlib.sha256(
         json.dumps(_json_safe(csv_rows), sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
@@ -1106,6 +1231,7 @@ def export_plot_bundle(
         "figure_count": len(plot_manifest),
         "selected_sample_rows": len(csv_rows),
         "analysis_audit_sample_rows": len(audit_rows),
+        "pixel_cell_rows": len(pixel_rows),
         "selected_samples_sha256": digest,
         "aggregation": "per plot specification; plotted_statistics.csv records n, SD, SEM and sample identities",
         "interpolation": "none",
@@ -1297,6 +1423,20 @@ class UnifiedPlotDashboard:
             options=[("Line + points", "line+points"), ("Points only", "points"), ("Lines only", "line")],
             value=str(default_spec.get("curve_style", "line+points")), description="Style:",
         )
+        show_legend = widgets.Checkbox(value=default_spec.get("show_legend", True), description="Show legend")
+        map_style = widgets.Dropdown(options=[("Pixels", "pixels"), ("Scatter", "scatter")],
+            value=default_spec.get("map_style", "scatter" if saved is not None else "pixels"), description="Display:")
+        pixel_x_width = widgets.FloatText(value=default_spec.get("pixel_x_width", 0.), description="X cell width:",
+            style={"description_width": "initial"}, layout=widgets.Layout(width="240px"))
+        pixel_y_width = widgets.FloatText(value=default_spec.get("pixel_y_width", 0.), description="Y cell width:",
+            style={"description_width": "initial"}, layout=widgets.Layout(width="240px"))
+        pixel_options = widgets.VBox([
+            widgets.HBox([pixel_x_width, pixel_y_width]),
+            widgets.HTML("Widths use axis units and apply only to a single-coordinate axis (0 = unspecified). "
+                         "Other cell edges are adjacent midpoints. Missing/excluded cells stay blank; no interpolation. "
+                         "Use requested axes for a regular scan grid; actual readbacks are never rounded. "
+                         "Choose Mean for formal repeats (SD/SEM are exported, not drawn); "
+                         "filter other runs/segments/revisits or use separate cards.")])
         x_scale = widgets.Dropdown(
             options=[("Linear X", "linear"), ("Log X", "log")],
             value=str(default_spec.get("x_scale", "linear")), description="X scale:",
@@ -1307,8 +1447,8 @@ class UnifiedPlotDashboard:
         )
         statistics = widgets.Dropdown(
             options=[("Raw observations", "raw"), ("Mean ± SD", "mean_sd"), ("Mean ± SEM", "mean_sem")],
-            value=default_spec.get("statistics", "mean_sd" if mode in ("field", "three_channels") else "raw"), description="Statistics:",
-            disabled=mode == "xy_z")
+            value=default_spec.get("statistics", "mean_sd" if mode in ("field", "three_channels") or (mode == "xy_z" and map_style.value == "pixels") else "raw"), description="Statistics:",
+            disabled=mode == "xy_z" and map_style.value == "scatter")
         quality = widgets.Dropdown(options=[("Exclude flagged channels", "exclude"), ("AUDIT: include flagged", "include")],
                                   value=default_spec.get("quality_policy", "exclude"), description="Quality:", layout=widgets.Layout(width="360px"))
         photoresponse = widgets.Dropdown(options=[("Raw light", "raw"), ("Light − recorded dark", "matched"),
@@ -1339,6 +1479,8 @@ class UnifiedPlotDashboard:
             "runs": runs, "load_runs": load_runs, "load_status": load_status,
             "x": x_axis, "y": y_axis, "z": z_axis, "group": group_axis,
             "curve_style": curve_style, "x_scale": x_scale, "y_scale": y_scale,
+            "show_legend": show_legend, "map_style": map_style,
+            "pixel_x_width": pixel_x_width, "pixel_y_width": pixel_y_width, "pixel_options": pixel_options,
             "filter_box": filter_box, "filters": [], "output": output,
             "figure": None, "rendered": None, "updating": False,
             "statistics": statistics, "quality": quality, "component": component, "excluded": excluded,
@@ -1364,7 +1506,8 @@ class UnifiedPlotDashboard:
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
             widgets.HTML("SD: scatter of formal repeats; SEM: SD/√n assumes independent repeats. Missing status stays unknown. n and exclusions are exported."),
             excluded,
-            widgets.HBox([curve_style, x_scale, y_scale], layout=widgets.Layout(width="100%")),
+            widgets.HBox(([map_style] if mode == "xy_z" else [curve_style, show_legend]) + [x_scale, y_scale], layout=widgets.Layout(width="100%")),
+            pixel_options,
             widgets.HTML("<b>Fix other changing conditions to avoid mixing dimensions</b>"),
             add_filter_button,
             filter_box,
@@ -1378,7 +1521,7 @@ class UnifiedPlotDashboard:
         load_runs.on_click(lambda _button, target=card: self._load_selected_runs(target))
         runs.observe(lambda _change, target=card: self._card_changed(target), names="value")
         photoresponse.observe(lambda _change, target=card: self._response_changed(target), names="value")
-        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded, dark_run, dark_phase, dark_age, reference_power):
+        for control in (x_axis, y_axis, z_axis, group_axis, curve_style, show_legend, map_style, pixel_x_width, pixel_y_width, x_scale, y_scale, title, statistics, quality, component, excluded, dark_run, dark_phase, dark_age, reference_power):
             control.observe(lambda _change, target=card: self._card_changed(target), names="value")
         self.cards.append(card)
         self.card_box.children = tuple(item["widget"] for item in self.cards)
@@ -1549,6 +1692,11 @@ class UnifiedPlotDashboard:
             return
         card["updating"] = True
         try:
+            pixels = card["mode"] == "xy_z" and card["map_style"].value == "pixels"
+            card["pixel_options"].layout.display = "" if pixels else "none"
+            card["statistics"].disabled = card["mode"] == "xy_z" and not pixels
+            if card["statistics"].disabled:
+                card["statistics"].value = "raw"
             for name in ("dark_run", "dark_phase", "dark_age"):
                 card[name].layout.display = "" if card["photoresponse"].value == "separate" else "none"
             card["reference_power"].layout.display = "" if card["photoresponse"].value == "power_selected" else "none"
@@ -1673,6 +1821,10 @@ class UnifiedPlotDashboard:
             "x": card["x"].value, "y": card["y"].value, "z": card["z"].value,
             "group_by": group or None,
             "curve_style": card["curve_style"].value,
+            "show_legend": card["show_legend"].value,
+            "map_style": card["map_style"].value,
+            "pixel_x_width": card["pixel_x_width"].value,
+            "pixel_y_width": card["pixel_y_width"].value,
             "x_scale": card["x_scale"].value, "y_scale": card["y_scale"].value,
             "filters": filters,
             "statistics": card["statistics"].value, "quality_policy": card["quality"].value,
