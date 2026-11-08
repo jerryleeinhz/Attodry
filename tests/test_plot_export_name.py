@@ -57,26 +57,66 @@ class ExportNameTests(unittest.TestCase):
     def test_setup_and_legacy_default(self):
         with redirect_stdout(io.StringIO()):
             d = UnifiedPlotDashboard(self.root)
-            d.export_name.value = "低温_gate"
+            d.add_plot("curve")
+            d.add_plot("xy_z")
+            for card, name in zip(d.cards, ("低温_gate", "map")):
+                card["export_name"].value = name
             d.configuration_path.value = str(self.root / "setup.json")
             d._save_setup()
-            d.export_name.value = "changed"
             d._load_setup()
-            self.assertEqual(d.export_name.value, "低温_gate")
-            payload = json.loads((self.root / "setup.json").read_text(encoding="utf-8"))
-            del payload["export_name"]
-            (self.root / "legacy.json").write_text(json.dumps(payload), encoding="utf-8")
-            d.configuration_path.value = str(self.root / "legacy.json")
-            d._load_setup()
-            self.assertEqual(d.export_name.value, "")
+            self.assertEqual([c["export_name"].value for c in d.cards], ["低温_gate", "map"])
+            payload = d._configuration()
+            self.assertNotIn("export_name", payload)
+            for spec in payload["plots"]:
+                del spec["export_name"]
+            for legacy_name in (None, "old_prefix"):
+                if legacy_name is not None:
+                    payload["export_name"] = legacy_name
+                (self.root / "legacy.json").write_text(json.dumps(payload), encoding="utf-8")
+                d.configuration_path.value = str(self.root / "legacy.json")
+                d._load_setup()
+                self.assertEqual([c["export_name"].value for c in d.cards], [legacy_name or ""] * 2)
 
-    def test_dashboard_passes_name_without_rerender(self):
+    def test_dashboard_exports_only_clicked_card(self):
+        from attodry_control.unified_plotting import render_plot
+        import matplotlib.pyplot as plt
         with redirect_stdout(io.StringIO()):
             d = UnifiedPlotDashboard(self.root)
-            d.export_name.value = "gate"
+            d.output_directory.value = str(self.root / "exports")
+            for mode, run in (("curve", "run_a"), ("xy_z", "run_b")):
+                d.add_plot(mode)
+                fig, data = render_plot([{"csv.x": 1., "csv.y": 2., "run_id": run}],
+                                       {"x": "csv.x", "y": "csv.y"})
+                self.addCleanup(plt.close, fig)
+                d.cards[-1]["rendered"] = dict(figure=fig, data=data,
+                    spec={"source_signatures": {}, "run_ids": [run]})
+            first, second = d.cards
+            original = first["rendered"]
+            first["export_name"].value = "gate"
+            self.assertIs(first["rendered"], original)
+            first["export_button"].click()
+            dest, = (self.root / "exports").iterdir()
+            manifest = json.loads((dest / "gate_plot_manifest.json").read_text())
+            self.assertEqual(manifest["figure_count"], 1)
+            self.assertEqual(manifest["plots"][0]["spec"]["run_ids"], ["run_a"])
+            self.assertEqual(len(list(dest.glob("*.png"))), 1)
+            with (dest / "gate_selected_samples.csv").open() as f:
+                self.assertEqual({r["run_id"] for r in csv.DictReader(f)}, {"run_a"})
+            self.assertEqual(second["export_status"].value, "")
+            d._invalidate_card(second)
             with patch("attodry_control.unified_plotting.export_plot_bundle", return_value=self.root) as export:
-                d._export()
-            self.assertEqual(export.call_args.kwargs["export_name"], "gate")
+                first["export_button"].click()
+                self.assertEqual(export.call_args.args[1], [original])
+                self.assertEqual(export.call_args.kwargs["export_name"], "gate")
+                export.reset_mock()
+                second["export_button"].click()
+                export.assert_not_called()
+            self.assertIn("Render this plot", second["export_status"].value)
+            first["title"].value = "changed plot"
+            self.assertIsNone(first["rendered"])
+            with patch("attodry_control.unified_plotting.export_plot_bundle") as export:
+                first["export_button"].click()
+                export.assert_not_called()
 
     def test_real_dotted_name_exports_all_formats(self):
         import matplotlib

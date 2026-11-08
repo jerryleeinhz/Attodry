@@ -1,5 +1,11 @@
 # Project handoff
 
+## 2026-11-08 Per-card figure and data export
+
+Unified Plotting now provides an independent Export name, Export this figure + data button and result message on each card. The shared destination remains global. Only the clicked card and its selected samples/statistics/pixels/audit/manifest are exported; other cards may be unrendered. Multi-channel panels stay one figure. Setup preserves card names and migrates legacy global prefixes. Naming alone does not invalidate rendering; changed plot options or stale file sources still require rendering.
+
+Validation: 50 offline plotting/export tests passed, including real single-card PNG/PDF/SVG and CSV/manifest isolation, other-card readiness, setup migration and stale-source rejection. Export touches only the selected rendered snapshot: no new database reload, instrument query/write, wait, retry or acquisition-loop change. No deployment or instrument access.
+
 ## 2026-11-06 当前：导出文件名可编辑
 
 新增全局 Export name 输入框，统一前缀命名CSV、PNG/PDF/SVG及manifest；留空保持旧文件名，内部plot_id和数据内容不变。名称随setup保存，旧setup默认空；路径字符、Windows非法/保留名称及过长名称在创建导出目录前拒绝。manifest记录实际文件引用。仅本地离线分析功能，未部署或连接仪器。

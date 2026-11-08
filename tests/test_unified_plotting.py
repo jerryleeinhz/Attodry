@@ -294,8 +294,8 @@ class PlotTests(unittest.TestCase):
             d, card, source = self.dashboard()
             d._render_card(card)
             source.write_text('U,V,W\n1,3,3\n2,8,6\n3,9,9\n', encoding='utf-8')
-            d._export()
-            self.assertIn('changed after rendering', d.status.value)
+            d._export_card(card)
+            self.assertIn('changed after rendering', card['export_status'].value)
             self.assertIsNone(card['rendered'])
             setup = d._configuration()
             setup['plots'][0]['source_paths'] = ['does-not-exist.csv']

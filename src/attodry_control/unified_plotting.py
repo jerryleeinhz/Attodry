@@ -1378,9 +1378,6 @@ class UnifiedPlotDashboard:
             value=str(Path(data_directory).expanduser().resolve().parent / "analysis_output" / "unified_plotting"),
             description="Export folder:", layout=widgets.Layout(width="100%"),
         )
-        self.export_name = widgets.Text(value="", description="Export name:",
-            placeholder="Optional prefix, e.g. 120K_gate_scan (no path or extension)",
-            layout=widgets.Layout(width="100%"))
         self.configuration_path = widgets.Text(
             value="plot_setup.json", description="Setup file:", layout=widgets.Layout(width="100%")
         )
@@ -1395,11 +1392,10 @@ class UnifiedPlotDashboard:
         self.add_three_button = widgets.Button(description="Three detectors · h1", icon="plus")
         self.add_map_button = widgets.Button(description="New XY–Z plot", icon="plus")
         self.render_button = widgets.Button(description="Render all plots", button_style="primary")
-        self.export_button = widgets.Button(description="Export figures + data", icon="download")
         self.save_button = widgets.Button(description="Save setup", icon="save")
         self.load_button = widgets.Button(description="Load setup", icon="upload")
         for button in (self.refresh_button, self.add_curve_button, self.add_map_button,
-                       self.add_field_button, self.add_three_button, self.render_button, self.export_button,
+                       self.add_field_button, self.add_three_button, self.render_button,
                        self.save_button, self.load_button):
             button.layout.width = "auto"
             button.layout.min_width = "120px"
@@ -1410,7 +1406,6 @@ class UnifiedPlotDashboard:
         self.add_three_button.on_click(lambda _button: self.add_plot("three_channels"))
         self.add_map_button.on_click(lambda _button: self.add_plot("xy_z"))
         self.render_button.on_click(self._render_all)
-        self.export_button.on_click(self._export)
         self.save_button.on_click(self._save_setup)
         self.load_button.on_click(self._load_setup)
         self.widget = widgets.VBox([
@@ -1421,8 +1416,6 @@ class UnifiedPlotDashboard:
             self.card_box,
             widgets.HBox([self.add_curve_button, self.add_map_button, self.add_field_button, self.add_three_button, self.render_button], layout=widgets.Layout(flex_flow="row wrap")),
             self.output_directory,
-            self.export_name,
-            widgets.HBox([self.export_button]),
             self.configuration_path,
             widgets.HBox([self.save_button, self.load_button]),
         ], layout=layout)
@@ -1506,7 +1499,14 @@ class UnifiedPlotDashboard:
         output = widgets.Output(layout=widgets.Layout(width="100%"))
         figure_image = widgets.Image(format="png", layout=widgets.Layout(width="100%"))
         render_card_button = widgets.Button(description="Render this plot", button_style="primary")
+        export_name = widgets.Text(value=_export_name(default_spec.get("export_name", "")),
+            description="Export name:", placeholder="Optional prefix (no path or extension)",
+            layout=widgets.Layout(width="100%"))
+        export_button = widgets.Button(description="Export this figure + data", icon="download",
+            layout=widgets.Layout(width="auto"))
+        export_status = widgets.HTML()
         card: dict[str, Any] = {
+            "export_name": export_name, "export_button": export_button, "export_status": export_status,
             "id": card_id, "mode": mode, "title": title, "sources": checklist,
             "runs": runs, "load_runs": load_runs, "load_status": load_status,
             "x": x_axis, "y": y_axis, "z": z_axis, "group": group_axis,
@@ -1546,7 +1546,9 @@ class UnifiedPlotDashboard:
             widgets.HBox([render_card_button, remove_button]),
             figure_image,
             output,
+            export_name, export_button, export_status,
         ], layout=widgets.Layout(width="100%", border="1px solid #c8c8c8", padding="12px", margin="12px 0"))
+        export_button.on_click(lambda _button, target=card: self._export_card(target))
         remove_button.on_click(lambda _button, target=card: self._remove_card(target))
         render_card_button.on_click(lambda _button, target=card: self._render_card(target))
         add_filter_button.on_click(lambda _button, target=card: self._add_filter(target))
@@ -1624,6 +1626,7 @@ class UnifiedPlotDashboard:
             self._close_figure(card["figure"])
         card["figure"] = None
         card["rendered"] = None
+        card["export_status"].value = ""
         card["image"].value = b""
         card["output"].clear_output(wait=False)
 
@@ -1914,33 +1917,31 @@ class UnifiedPlotDashboard:
             self._render_card(card)
         self.status.value = "Rendering finished. Review each card for unresolved conditions or missing data."
 
-    def _export(self, _button: Any = None) -> None:
+    def _export_card(self, card: dict[str, Any]) -> None:
         try:
-            if any(card.get("rendered") is None for card in self.cards):
-                raise ValueError("Render every plot card successfully before exporting.")
-            for card in self.cards:
-                expected = card["rendered"]["spec"]["source_signatures"]
-                if any(self._source_by_path[p].kind != "combination_sqlite"
-                       and _source_signature(Path(p)) != signature for p, signature in expected.items()):
-                    self._invalidate_card(card)
-                    raise ValueError("A source changed after rendering. Refresh and render again before export.")
+            if card.get("rendered") is None:
+                raise ValueError("Render this plot successfully before exporting.")
+            expected = card["rendered"]["spec"]["source_signatures"]
+            if any(self._source_by_path[p].kind != "combination_sqlite"
+                   and _source_signature(Path(p)) != signature for p, signature in expected.items()):
+                self._invalidate_card(card)
+                raise ValueError("A source changed after rendering. Refresh and render again before export.")
             destination = export_plot_bundle(
-                self.output_directory.value,
-                [card["rendered"] for card in self.cards],
-                export_name=self.export_name.value,
+                self.output_directory.value, [card["rendered"]],
+                export_name=card["export_name"].value,
             )
-            self.status.value = f"Exported figures, selected samples, and manifest to {html.escape(str(destination))}."
+            card["export_status"].value = f"Exported this figure, selected samples, and manifest to {html.escape(str(destination))}."
         except Exception as exc:
-            self.status.value = f"<span style='color:#a40000'>{html.escape(str(exc))}</span>"
+            card["export_status"].value = f"<span style='color:#a40000'>{html.escape(str(exc))}</span>"
 
     def _configuration(self) -> dict[str, Any]:
         return {
             "schema": "unified-plot-setup-v1",
-            "export_name": _export_name(self.export_name.value),
             "data_directory": str(Path(self.directory.value).expanduser()),
             "include_audit": bool(self.include_audit.value),
             "plots": [
-                {**self._card_spec(card), "source_paths": list(card["sources"].value)}
+                {**self._card_spec(card), "source_paths": list(card["sources"].value),
+                 "export_name": _export_name(card["export_name"].value)}
                 for card in self.cards
             ],
         }
@@ -1967,7 +1968,9 @@ class UnifiedPlotDashboard:
             payload = json.loads(path.read_text(encoding="utf-8"))
             if payload.get("schema") != "unified-plot-setup-v1":
                 raise ValueError("Unsupported plot setup file.")
-            export_name = _export_name(payload.get("export_name", ""))
+            # Legacy setups used one global prefix; copy it only to cards lacking a name.
+            for spec in payload.get("plots", []):
+                spec["export_name"] = _export_name(spec.get("export_name", payload.get("export_name", "")))
             catalog = discover_plot_sources(payload["data_directory"])
             available = {str(source.path) for source in catalog}
             missing = {p for spec in payload.get("plots", []) for p in spec.get("source_paths", [])} - available
@@ -1983,7 +1986,6 @@ class UnifiedPlotDashboard:
                     available_runs = {run['run_id'] for run in list_combination_runs(source_path)}
                     if set(run_ids) - available_runs:
                         raise ValueError(f"Setup run IDs are missing from {source_path}")
-            self.export_name.value = export_name
             self.directory.value = str(payload["data_directory"])
             self.include_audit.value = bool(payload.get("include_audit", False))
             self._refresh()

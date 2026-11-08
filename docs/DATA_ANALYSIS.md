@@ -89,15 +89,17 @@ retain their completed/accepted/clean defaults; summary/formal CSV pairs are
 deduplicated. Source checkboxes show wrapped file names. The specialized SR830,
 temperature and Three-SMU notebooks keep their existing science models.
 
-**Export folder** selects the parent directory; **Export name** optionally adds
-one prefix to every CSV, PNG/PDF/SVG and manifest filename. For example,
+**Export folder** selects the shared parent directory. Each plot card has its own
+**Export name** and **Export this figure + data** button. Only that card is exported;
+other cards need not be rendered. Three/four-channel panels remain one figure.
+The optional name prefixes that card's CSV, PNG/PDF/SVG and manifest filenames. For example,
 `120K_gate_scan` produces `120K_gate_scan_selected_samples.csv` and
 `120K_gate_scan_plot_01.png`. Enter a name, not a path or extension. Blank keeps
 the original filenames; each export still gets a fresh timestamp directory.
 Chinese names and internal dots are supported; invalid Windows characters,
 reserved device names, trailing dots/spaces and names over 120 UTF-16 code units
-are rejected before creating files. Names are saved/restored with setup; old
-setups default to blank. Changing a name does not require rendering again.
+are rejected before creating files. Names are saved/restored per card with setup; legacy global names are copied to
+cards without their own name, and older setups without names default to blank. Changing a name does not require rendering again.
 The manifest's `data_files`, `figure_files` and `manifest_file` record the actual
 filenames; data columns and internal `plot_id` values are unchanged.
 
@@ -114,9 +116,9 @@ not filled with zero; the manifest records grid centers and the blank-cell count
 For pixel statistics, `plotted_statistics.csv` keeps the usual X/response-Y fields
 and adds `map_y` for the second spatial coordinate.
 `selected_samples.csv` retains all available fields of contributing observations,
-including actual readbacks, not just the chosen plot variables. Multiple runs and
-cards share these tables with run/source/plot identifiers; they are not exported
-as separate per-run CSV files. Figure exports follow the rendered legend and map
+including actual readbacks, not just the chosen plot variables. Multiple runs selected within the exported card share these tables with
+run/source/plot identifiers; they are not split into per-run files. Other cards'
+figures, selected samples, statistics, pixel cells and audit records are excluded. Figure exports follow the rendered legend and map
 settings exactly.
 Raw source records are never rewritten. The older Python `select_series`/
 `plot_series`/`export_selection` API remains a raw-observation API; the enhanced
