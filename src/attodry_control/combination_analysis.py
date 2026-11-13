@@ -123,14 +123,19 @@ def _channel_label_columns(plan: Mapping, reading: Mapping) -> dict:
 
 
 def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None = None,
-                              audit: bool = False, preview: bool = False) -> CombinationSnapshot:
+                              audit: bool = False, preview: bool = False,
+                              terminal_prefix: bool = False) -> CombinationSnapshot:
     """Read all selected runs and their provenance at one committed DB revision.
 
-    The connection closes before decoding payloads or rendering. Concurrent WAL
+    Terminal-prefix evidence is validated inside this read-only snapshot. The
+    connection closes before materializing result rows or rendering. Concurrent WAL
     appends do not invalidate these already-materialized rows. ``preview`` adds
     only clean formal samples from accepted attempts of active runs; they retain
-    ``accepted=False`` and are labelled ``preview=True``. Audit retains its
-    historical opt-in meaning. Raw partial events never become formal rows.
+    ``accepted=False`` and are labelled ``preview=True``. ``terminal_prefix``
+    separately permits clean formal samples from accepted attempts of failed or
+    interrupted runs. They remain nonaccepted, carry ``terminal_prefix=True``,
+    and retain the original run error/cleanup. Audit retains its historical
+    opt-in meaning. Raw partial events never become formal rows.
     """
     selected_ids = None if run_ids is None else tuple(dict.fromkeys(run_ids))
     if selected_ids is not None and any(not isinstance(value, str) for value in selected_ids):
@@ -140,12 +145,26 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
         if selected_ids else " WHERE 0"
     )
     parameters = () if selected_ids is None else selected_ids
+    terminal_validation = {}
     with closing(open_readonly(path)) as connection:
         connection.execute("BEGIN")
         run_rows = connection.execute(
             "SELECT run_id, schema_version, created_at_utc, status, error, cleanup_json "
             "FROM combination_runs" + clause + " ORDER BY created_at_utc, run_id", parameters,
         ).fetchall()
+        if terminal_prefix:
+            from .combination_store import validate_accepted_records
+            for run in run_rows:
+                if run["status"] not in {"failed", "interrupted"}:
+                    continue
+                candidate = connection.execute(
+                    "SELECT 1 FROM combination_attempts WHERE run_id=? AND status='accepted' LIMIT 1",
+                    (run["run_id"],)).fetchone()
+                if candidate:
+                    # A terminal run does not certify its accepted leaves by
+                    # outcome alone. Reuse recovery's complete raw-evidence
+                    # checks in this same read transaction before exposing them.
+                    terminal_validation[run["run_id"]] = validate_accepted_records(connection, run["run_id"])
         where = clause.replace("run_id IN", "s.run_id IN")
         rows = connection.execute(f"""
             SELECT r.schema_version, r.status AS run_status, r.error AS run_error,
@@ -195,7 +214,9 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
                     and cleanup.get("clean") is True and sample.get("clean") is True)
         preliminary = (preview and row["run_status"] == "active"
                        and row["attempt_status"] == "accepted" and sample.get("clean") is True)
-        if not audit and not accepted and not preliminary:
+        partial_terminal = (terminal_prefix and row["run_status"] in {"failed", "interrupted"}
+                            and row["attempt_status"] == "accepted" and sample.get("clean") is True)
+        if not audit and not accepted and not preliminary and not partial_terminal:
             continue
         context = json.loads(row["context_json"])
         run_executions = executions.get(row["run_id"], {})
@@ -247,13 +268,15 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
             **_flatten("axes", context["axes"]), **_flatten("requested", context["requested"]),
             **_flatten("actual", sample["actual"]), **_flatten("measured", sample["measurements"]),
         }
+        if partial_terminal:
+            record["terminal_prefix"] = True
         for reading in sample["reads"]:
             record[f"timestamps.{reading['module']}"] = reading["captured_at_utc"]
             record[f"status.{reading['module']}"] = reading.get("status")
             if (reading["module"] == "excitation"
                     and execution_plan.get("measurement_contract") == "electrical-excitation-detectors-v4"):
                 status = reading.get("status") or {}
-                if accepted or preliminary:
+                if accepted or preliminary or partial_terminal:
                     from .combination_store import _validate_excitation_context
                     for evidence in (status, status.get("after_sample")):
                         _validate_excitation_context(evidence, execution_plan, context)
@@ -273,6 +296,10 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
         "runs": runs, "row_count": len(materialized), "rows_sha256": _snapshot_digest(materialized),
         "audit": bool(audit), "preview": bool(preview),
     }
+    if terminal_prefix:
+        metadata["terminal_prefix"] = True
+        metadata["terminal_prefix_row_count"] = sum(row.get("terminal_prefix") is True for row in materialized)
+        metadata["terminal_prefix_validation"] = terminal_validation
     metadata["snapshot_id"] = _snapshot_digest(metadata)
     metadata["loaded_at_utc"] = datetime.now(timezone.utc).isoformat()
     return CombinationSnapshot(materialized, metadata)

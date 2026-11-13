@@ -45,13 +45,22 @@ current is retained for point labels/exclusions. SR830 files still use their
 original archived resistance model and explicit legacy override.
 
 Only the formally selected role/harmonic is adapted (for example XX h1 and XY
-h2), using the existing native detector quality rules. Default selection requires
-a final completed/clean run and clean accepted samples. The accepted prefix of a
-recovered run remains available from its original execution; rejected attempts
-and flagged channels require explicit audit controls and are excluded from fits.
-Accepted active-run preview is separately opt-in and marked preliminary. Keep
-configuration/contract, frequency, repeat and outer-axis visits in separate curve
-groups; no current/frequency or outer-coordinate grid is invented.
+h2), using the existing native detector quality rules. The 6221 panel also loads
+and fits clean formal samples from accepted conditions of a terminal `failed` or
+`interrupted` run by default. These rows remain `terminal_prefix`, with original
+run/attempt status, error and cleanup evidence; they never become completed or
+certify hardware safety. Every prefix report is labelled with its terminal status.
+The independent shared/unified analysis defaults remain final-completed-only.
+Actual rejected attempts, unclean samples and flagged channels are audit-only
+and do not enter fits. Source before/after readback evidence is checked for the
+terminal prefix just as for completed samples. Accepted active-run preview is
+still separately opt-in and marked preliminary. Keep configuration/contract,
+frequency, repeat and outer-axis visits separate; no missing grid is invented.
+
+After changing `SCALING_RULES`, rerun the panel-construction cell and reload the
+run; existing controls retain the old rules object. After a software update,
+restart the analysis kernel and rerun setup plus the 6221 panel cell. This does
+not require editing measurement TOMLs or modifying historical failure flags.
 
 The panel reuses R/X/Y/phase plotting, log/scalar/complex harmonic fits,
 amplitude/phase experiment-plus-fit reports and the merged scalar report. It

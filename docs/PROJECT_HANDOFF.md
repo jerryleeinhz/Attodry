@@ -4,6 +4,22 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 terminal-prefix fitting (2026-11-13)
+
+- The commissioning 6221 panel fits accepted, clean formal samples from failed or
+  interrupted runs by default. Retain terminal status, original errors/cleanup and
+  execution/attempt identities; label partial-run figures and exports explicitly.
+- Actual rejected/started attempts, unclean samples and native flagged channels
+  remain outside fits. Preserve source before/after evidence validation, grouping,
+  scientific fit rules and explicit active-preview behavior.
+- Shared/unified loading keeps final-only defaults; terminal-prefix inclusion is
+  a separate opt-in there. No database mutation, cleanup reclassification, device
+  connection, new instrument I/O, wait or acquisition behavior is introduced.
+
+- Verification: 161 hardware-blocked offline regressions passed, including 17 new
+  backend/UI cases for formal completeness, rejected/flagged exclusion, provenance,
+  plot labels/export and unchanged shared defaults.
+
 ### LK_setup working-copy cleanup (2026-11-13)
 
 - Preserve the operator's existing XX/XY fixed detector full-scale allowlists;

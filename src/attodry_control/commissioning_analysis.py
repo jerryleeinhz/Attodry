@@ -23,7 +23,7 @@ from .scientific_plotting import (
 
 
 RECORD_STATUSES = frozenset(
-    {"completed", "rejected", "diagnostic", "other", "invalid"}
+    {"completed", "rejected", "diagnostic", "other", "invalid", "terminal_prefix"}
 )
 SAMPLE_STATUSES = frozenset(
     {"clean", "problem", "unlocked", "overload", "instrument_error"}
@@ -100,6 +100,9 @@ class CommissioningSample:
     configuration_revision: str | None = None
     channel_label: str | None = None
     combination_sample_index: int | None = None
+    run_status: str | None = None
+    attempt_status: str | None = None
+    terminal_prefix: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 
 from .analysis_observations import channel_quality
-from .combination_analysis import load_combination_snapshot, lockin_channel_labels
+from .combination_analysis import execution_provenance, load_combination_snapshot, lockin_channel_labels
 from .combination_store import open_readonly
 from .commissioning_analysis import CommissioningSample, _commissioning_sample
 
@@ -36,16 +36,20 @@ def _positive(value, name):
 
 
 def load_6221_sweep(database: str | Path, run_id: str, *, preview=False,
-                    include_rejected=False, include_problem=False) -> CurrentSweepSnapshot:
-    """Materialize one run; default keeps final clean accepted selected channels.
+                    include_rejected=False, include_problem=False,
+                    terminal_prefix=True) -> CurrentSweepSnapshot:
+    """Materialize clean selected channels, including accepted terminal prefixes.
 
     Each group has one archived configuration/contract, requested frequency,
     repeat and outer-axis visit. Recovery segments with the same configuration
     can share a curve, while their original execution/attempt IDs remain on rows.
+    Failed/interrupted runs retain their actual outcome; only their clean formal
+    samples from accepted attempts can receive the distinct terminal_prefix status.
     No imaginary SINE OUT voltage, resistor or measured current is created.
     """
     snapshot = load_combination_snapshot(database, run_ids=(run_id,),
-                                         audit=include_rejected, preview=preview)
+                                         audit=include_rejected, preview=preview,
+                                         terminal_prefix=terminal_prefix)
     if not snapshot.metadata["runs"]:
         raise ValueError("Selected combination run does not exist.")
     groups, descriptions, exclusions = {}, {}, []
@@ -102,7 +106,9 @@ def load_6221_sweep(database: str | Path, run_id: str, *, preview=False,
                 point = {"point_index": record["sequence_index"], "target_frequency_hz": requested_frequency,
                          "actual_frequency_hz": frequency, "source_v_rms": None}
                 row = _commissioning_sample(path=Path(database).resolve(),
-                    record_status=("completed" if record["accepted"] else "other" if record["preview"] else "rejected"),
+                    record_status=("completed" if record["accepted"] else
+                                   "terminal_prefix" if record.get("terminal_prefix") is True else
+                                   "other" if record["preview"] else "rejected"),
                     scan_type="excitation", point=point, sample=pair, role=role,
                     problems=(), recorded_excitation_path=None)
                 if row.statuses != ("clean",) and not include_problem:
@@ -117,10 +123,15 @@ def load_6221_sweep(database: str | Path, run_id: str, *, preview=False,
                     requested_current_rms_a=requested_current, run_id=run_id,
                     execution_id=record["execution_id"], condition_id=record["condition_id"],
                     attempt_index=record["attempt_index"], configuration_revision=record["configuration_revision"],
-                    channel_label=labels.get(role), combination_sample_index=record["sample_index"])
+                    channel_label=labels.get(role), combination_sample_index=record["sample_index"],
+                    run_status=record["run_status"], attempt_status=record["attempt_status"],
+                    terminal_prefix=record.get("terminal_prefix") is True)
                 groups.setdefault(group_key, []).append(row)
     metadata = dict(snapshot.metadata, current_basis="6221_rms_setting_readback",
         current_is_measured=False, group_bindings=descriptions, quality_exclusions=exclusions,
+        execution_segments=execution_provenance(snapshot.rows),
         include_problem=bool(include_problem), include_rejected=bool(include_rejected),
+        terminal_prefix=bool(terminal_prefix),
+        terminal_prefix_channel_rows=sum(row.terminal_prefix for rows in groups.values() for row in rows),
         selected_channel_rows=sum(map(len, groups.values())))
     return CurrentSweepSnapshot({k: tuple(v) for k, v in groups.items()}, metadata)

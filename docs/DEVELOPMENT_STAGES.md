@@ -1,5 +1,17 @@
 # Development stages
 
+## Current: 6221 terminal-prefix fitting (2026-11-13)
+
+- Fit clean accepted formal data from failed/interrupted 6221 runs, keeping the
+  run incomplete and preserving original failure/cleanup provenance in exports.
+- Distinguish partial terminal fits from completed runs and audit-only rejected
+  attempts. Keep native quality/source evidence gates and existing fit thresholds.
+- Preserve shared/unified final-only defaults and cached manual-refresh behavior;
+  the change adds no hardware access or acquisition-setting change.
+
+- Verification: 161 hardware-blocked offline tests passed, including 17 new
+  terminal-prefix integrity, plotting, UI/export and compatibility regressions.
+
 ## Current: LK_setup working-copy cleanup (2026-11-13)
 
 - Retain and version existing operator XX/XY detector range permissions; all other

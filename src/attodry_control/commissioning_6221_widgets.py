@@ -13,6 +13,18 @@ from .commissioning_analysis import (HarmonicScalingRules, export_commissioning_
 from .report_plotting import plot_experiment_fit_report, plot_condensed_iv_report
 
 
+def _is_terminal_prefix(row):
+    return (row.record_status == "terminal_prefix" and row.terminal_prefix is True
+            and row.run_status in ("failed", "interrupted") and row.attempt_status == "accepted")
+
+
+def _prefix_notice(rows):
+    statuses = sorted({row.run_status.upper() for row in rows if row.run_status in ("failed", "interrupted")})
+    if not statuses:
+        return ""
+    return "/".join(statuses) + (" PARTIAL PREFIX" if any(_is_terminal_prefix(row) for row in rows) else " AUDIT")
+
+
 def current_sweep_report(snapshot, group, *, excluded_conditions=(), metrics=("amplitude_v",),
                          rules=None, methods=("log", "scalar", "complex")):
     """Reuse legacy plot/fit engines on one immutable current-source selection."""
@@ -20,7 +32,12 @@ def current_sweep_report(snapshot, group, *, excluded_conditions=(), metrics=("a
     if not rows:
         raise ValueError("No rows remain after point exclusions.")
     # Audit data may be displayed/exported, but never silently fit as clean data.
-    fit_rows = tuple(r for r in rows if r.record_status in ("completed", "other") and r.statuses == ("clean",))
+    fit_rows = tuple(r for r in rows if r.statuses == ("clean",)
+                     and (r.record_status in ("completed", "other") or _is_terminal_prefix(r)))
+    prefix_rows = tuple(r for r in rows if _is_terminal_prefix(r))
+    prefix_notice = _prefix_notice(rows)
+    if prefix_rows and any(r.record_status == "rejected" or r.statuses != ("clean",) for r in rows):
+        prefix_notice += " / AUDIT"
     resolved_rules = rules or HarmonicScalingRules()
     fits = fit_harmonic_scalings(fit_rows, rules=resolved_rules) if fit_rows else {}
     figures = {}
@@ -29,7 +46,9 @@ def current_sweep_report(snapshot, group, *, excluded_conditions=(), metrics=("a
         label = channel[0].channel_label or "V" + role
         title = f"{label} · h{harmonic} · {channel[0].target_frequency_hz:g} Hz requested"
         title += f"\n{channel[0].run_id} · group {group}"
-        if any(r.record_status != "completed" for r in rows):
+        if prefix_notice:
+            title = prefix_notice + " · " + title
+        elif any(r.record_status != "completed" for r in rows):
             title = "PRELIMINARY / AUDIT · " + title
         for metric in metrics:
             figure = plot_commissioning_sweep(channel, metric=metric, x_axis="excitation_current_rms_a")
@@ -46,11 +65,17 @@ def current_sweep_report(snapshot, group, *, excluded_conditions=(), metrics=("a
     scalar_channels = tuple(k for k, fit in fits.items() if fit.scalar_selected_free_model is not None)
     if scalar_channels:
         figures["merged_scalar_report"] = plot_condensed_iv_report(
-            fits, amplitude_channels=scalar_channels, title=rows[0].run_id + " · " + group)
+            fits, amplitude_channels=scalar_channels,
+            title=(prefix_notice + " · " if prefix_notice else "") + rows[0].run_id + " · " + group)
     manifest = {"snapshot": snapshot.metadata, "group": group,
         "excluded_conditions": sorted(excluded_conditions), "metrics": list(metrics),
         "rules": asdict(resolved_rules), "methods": list(methods),
         "fit_row_count": len(fit_rows), "display_row_count": len(rows),
+        "fit_scope": ("audit_only_no_fit" if not fit_rows else "accepted_clean_formal_prefix"
+                      if any(_is_terminal_prefix(r) for r in fit_rows) else "completed_or_explicit_active_preview"),
+        "terminal_prefix_display_row_count": len(prefix_rows),
+        "terminal_prefix_fit_row_count": sum(_is_terminal_prefix(r) for r in fit_rows),
+        "original_run_outcomes_ref": "snapshot.runs",
         "fits": {f"{role}_h{harmonic}": fit.as_dict() for (role, harmonic), fit in fits.items()},
         "rows": [asdict(row) for row in rows]}
     return {"rows": rows, "fits": fits, "figures": figures, "manifest": manifest}
@@ -127,14 +152,22 @@ def build_6221_panel(database, *, output_directory, rules=None, methods=("log", 
             for key, rows in snapshot.groups.items():
                 binding = snapshot.metadata["group_bindings"][key]
                 outer = json.dumps(binding["outer_visit"], ensure_ascii=False)
+                notice = _prefix_notice(rows)
                 options.append((f"{binding['requested_frequency_hz']:g} Hz · {len(rows)} channel rows · "
-                                f"{outer} · {key}", key))
+                                f"{outer} · {key}" + (" · " + notice if notice else ""), key))
             groups.options = options
             # ipywidgets versions differ on auto-selection after empty options.
             groups.value = options[0][1] if options else None
             select_group()
+            all_rows = tuple(row for rows in snapshot.groups.values() for row in rows)
+            prefix_rows = tuple(row for row in all_rows if _is_terminal_prefix(row))
+            notice = _prefix_notice(all_rows)
+            prefix_message = (notice + ": " + ("accepted clean formal samples may be fitted; " if prefix_rows
+                              else "audit rows are excluded from fitting; ")
+                              + "the original run failure and cleanup remain recorded. " if notice else "")
             message.value = (f"Loaded {snapshot.metadata['selected_channel_rows']} channel rows; "
                 f"excluded {len(snapshot.metadata['quality_exclusions'])} flagged channels. "
+                + html.escape(prefix_message) +
                 "Current = archived 6221 RMS setting readback (not measured current). "
                 "Apply selection and plot uses this snapshot; Reload reads new data.")
         except Exception as exc:

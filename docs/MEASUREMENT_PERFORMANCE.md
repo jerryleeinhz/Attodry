@@ -4,6 +4,19 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## 6221 terminal-prefix fitting (2026-11-13)
+
+Terminal-prefix selection uses the existing read-only snapshot. Accepted-record
+integrity validation adds finite archive reads for terminal runs, including one
+sample query per accepted condition, within that same transaction. Source checks
+and fits add local CPU work for newly eligible samples; there is no background
+poll, instrument query/write, settle, retry or acquisition change. Partial or
+rejected attempts and native bad channels do not gain fit eligibility. Original
+run/execution cleanup failures remain raw; plotting does not certify live safety.
+
+Verification: 161 hardware-blocked offline regressions passed, including 17 new
+terminal-prefix cases. These timings do not establish real acquisition throughput.
+
 ## LK_setup working-copy cleanup (2026-11-13)
 
 Recording existing detector allowlists and ignoring generated artifacts adds no
