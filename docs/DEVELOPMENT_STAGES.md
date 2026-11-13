@@ -1,5 +1,17 @@
 # Development stages
 
+## Current: initial external detector latch baseline (2026-11-13)
+
+- Separate pre-configuration historical latches from the new formal window.
+  Preserve raw initial events; current SR865A overloads and non-overload faults
+  still block. Require fresh qualification/status after configured settling.
+- Add regressions for recorded initial SR83013/SR865A1819/current8 evidence,
+  prohibiting baseline reuse, present input overload and later loss of lock.
+  Existing tests retain current-scale, unknown-bit and error rejection.
+- No extra commands, waits or automatic retries; source protection and final
+  cleanup verification are unchanged.
+- Verification: 106 hardware-blocked release regressions passed in 51.126 s.
+
 ## Current: 6221 direct interlock status correction (2026-11-13)
 
 - Replace the live condition-bit interlock inference with the manufacturer query

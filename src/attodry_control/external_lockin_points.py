@@ -173,7 +173,9 @@ class ExternalLockinPointSession(LockinPointSession):
         self.detectors = ()
         self.source_baseline = {}
 
-    def _status(self, *, allow_unlock=False, transition=False, acquisition=False):
+    def _status(self, *, allow_unlock=False, transition=False, acquisition=False, initial_baseline=False):
+        if initial_baseline and (self.source_active or self.writes_started):
+            raise Sr830Error("Initial detector baseline cannot be reused after setup")
         result, problems = {}, []
         for role, instrument in zip(("lockin_xx", "lockin_xy"), self.pair):
             status, error = instrument.read_status_latches()
@@ -182,11 +184,15 @@ class ExternalLockinPointSession(LockinPointSession):
                 problems.append(role + " instrument error or unknown status")
             if daily.model_name(status) == "SR865A":
                 problems.extend(role + " " + p for p in native_status_problems(status))
+                if initial_baseline and status.native_status.input_overload is not False:
+                    problems.append(role + " current input overload or unknown input state")
+                if initial_baseline and status.native_status.output_scale_overload is not False:
+                    problems.append(role + " current scale overload or unknown scale state")
             elif status.raw < 0 or status.raw & ~0x7f:
                 problems.append(role + " unknown native status")
             if status.reference_unlocked and not allow_unlock:
                 problems.append(role + " reference unlocked")
-            if not transition and status.any_overload:
+            if not (transition or initial_baseline) and status.any_overload:
                 overloads = []
                 if status.input_or_reserve_overload:
                     overloads.append(role + " input/reserve overload")
@@ -199,9 +205,10 @@ class ExternalLockinPointSession(LockinPointSession):
                     problems.extend(overloads)
                 if status.output_overload and (role == "lockin_xy" or not acquisition):
                     problems.append(role + " output overload")
-            if not transition and (status.time_constant_changed or status.frequency_range_changed):
+            if not (transition or initial_baseline) and (status.time_constant_changed or status.frequency_range_changed):
                 problems.append(role + " unexpected detector setting change")
         evidence = {"captured_at_utc": utc_now(), "source_inactive_or_transition": allow_unlock,
+                    "initial_latch_baseline": initial_baseline,
                     "formal_sample": False, "roles": result, "problems": problems}
         self.event("external_lockin_status", evidence)
         if problems:
@@ -253,7 +260,10 @@ class ExternalLockinPointSession(LockinPointSession):
             raise Sr830Error("Duplicate detector identity")
         self.source_baseline = {role: {k: v for k, v in record.items() if k in {"sine_output_v", "phase_shift_deg"}}
                                 for role, record in self.preflight.items()}
-        self._status(allow_unlock=True)
+        # These latches precede our configuration and settling window. Retain
+        # them as history, never as formal evidence. SR865A current input status
+        # remains blocking; SR830 latches are checked afresh after settling.
+        self._status(allow_unlock=True, initial_baseline=True)
         return {"roles": deepcopy(self.preflight), "reference_policy": "external_6221_ttl",
                 "source_inactive": True, "recovery": recovery}
 

@@ -6,6 +6,11 @@ feature. Offline timings do not establish instrument settling or real throughput
 
 ## External 6221 AC excitation (2026-11-13)
 
+Initial detector latches form an archived nonformal baseline before configuration.
+This classification reuses the existing reads: no extra queries, writes or waits.
+Instantaneous SR865A faults still reject, and post-settle qualification/cleanup
+retain their normal checks. Historical latches cannot be relabeled during capture.
+
 Optional current/frequency `ranges + points` compile only during file parsing,
 before any resource connection. Generated points use the existing immutable
 coordinate fields. No per-point runtime matcher, query, write, thread or wait is

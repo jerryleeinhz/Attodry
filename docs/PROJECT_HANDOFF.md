@@ -4,6 +4,17 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### External detector initial latch boundary (2026-11-13)
+
+- Archive pre-existing SR830/SR865A overload latches at first connection as an
+  explicit nonformal initial baseline, before changing detector settings. Do not
+  reject the new scan based only on overloads latched before its configuration.
+- SR865A current input/scale overload, unknown status and instrument errors still
+  reject startup. Baseline handling cannot be reused after setup/source activation.
+  Fresh post-settle lock/status and formal raw-data validity remain mandatory;
+  cleanup remains strict. No query, write, wait or retry loop was added.
+- Verification: 106 hardware-blocked release regressions passed in 51.126 s.
+
 ### 6221 direct interlock evidence (2026-11-13)
 
 - D04 /700x station read-only verification found `OUTP:INT:TRIP?=1` with

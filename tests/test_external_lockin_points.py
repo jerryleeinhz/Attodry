@@ -123,6 +123,35 @@ class ExternalLockinTests(unittest.TestCase):
         s.sample_point()
         self.assertEqual(clock.waits, [2.5])
 
+    def test_initial_latched_overload_is_history_then_requires_fresh_settled_status(self):
+        f, c, s, clock, events, table = self.fixture(harmonics=(1,))
+        f.xx.responses['LIAS?'] = '13'
+        f.xy.responses['LIAS?'] = '1819'
+        f.xy.responses['CUROVLDSTAT?'] = '8'
+        s.open()
+        baseline = [v for k, v in events if k == 'external_lockin_status'][-1]
+        self.assertTrue(baseline['initial_latch_baseline'])
+        self.assertEqual(baseline['roles']['lockin_xx']['lia_status']['raw'], 13)
+        self.assertFalse(f.xx.writes or f.xy.writes)
+        s.configure()
+        s.source_changed(1e-6, 17.777, source_record={'source_kind': 'keithley6221_ac'})
+        with self.assertRaisesRegex(Sr830Error, 'baseline'):
+            s._status(allow_unlock=True, initial_baseline=True)
+        # Unlocked after the settling window must still reject acquisition.
+        with self.assertRaises(Sr830Error): s.qualify()
+        f.xx.responses['LIAS?'] = '0'
+        f.xy.responses['LIAS?'] = '0'
+        f.xy.responses['CUROVLDSTAT?'] = '0'
+        s.qualify()
+        self.assertTrue(s.sample_point()['clean'])
+
+    def test_initial_baseline_does_not_excuse_present_sr865a_input_overload(self):
+        f, c, s, clock, events, table = self.fixture()
+        f.xy.responses['CUROVLDSTAT?'] = '16'
+        with self.assertRaisesRegex(Sr830Error, 'current input overload'):
+            s.open()
+        self.assertFalse(f.xx.writes or f.xy.writes)
+
     def test_reference_drift_and_mode_change_reject_before_formal(self):
         f, c, s, clock, events, table = self.fixture(harmonics=(1,))
         self.start(f, s)
