@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: External reference frequency qualification (2026-11-13)
+
+- Reproduce an early relock observation of 1217.13 Hz against a 1217 Hz source
+  target, before the shared settling window. Preserve the original tolerance.
+- Allow only a typed, finite, in-range frequency mismatch to remain pending in
+  the original 30 s / 301-poll window with clean status and unchanged settings.
+  Persist observations/times and timeout/failure evidence; no corrective writes.
+- Complete qualification only after strict coordinate matching and the original
+  full settle. Other faults, post-settle/formal checks and source protection keep
+  their existing rejection behavior. Ordinary point I/O/waits remain unchanged.
+- Verification: 233 hardware-blocked offline tests passed in 76.468 s, including
+  16 new qualification cases and existing detector/source/overload regressions.
+
 ## Current: Recovered SR865A output-overload latches (2026-11-13)
 
 - Reproduce the 20-to-419 Hz transition with current status 0 and LIAS 1537;

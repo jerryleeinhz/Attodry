@@ -196,6 +196,18 @@ interlock, DC zero, unknown/error status and transport failures remain blocking.
 Preflight still requires an immediately known inactive source. Neither timeout
 certifies lock or OFF. Historical rejected data remains excluded by default.
 
+If the first locked detector frequency observation is finite and in range but
+outside the requested-target tolerance, keep it as a pending qualification
+observation inside that same 30 s / 301-poll window. Re-observe only with clean
+native status and unchanged detector settings, preserving actual values and
+query times. A later reading must satisfy the original 100 ppm / 0.00101 Hz rule
+before the original full shared settle. Unknown/invalid readings, other faults
+and changed settings reject; settled/formal target mismatches are not retried.
+Known transition-unlock latches remain archived, while current reference lock is
+required during frequency re-observation. No frequency rewrite or tolerance
+expansion is performed. The separate SR865A detection/reference consistency check
+retains its own documented 5 mHz floor.
+
 ### Recovered output-scale latches under record_continue
 
 After a controlled source transition and the existing settle, `record_continue`

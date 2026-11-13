@@ -1,5 +1,21 @@
 # Hardware and safety guide
 
+## Pending external frequency qualification (2026-11-13)
+
+Immediately after an external-source transition, a locked detector's frequency
+counter may not yet match the source target. A typed, finite, in-range mismatch
+may be observed again within the existing 30 s / 301-poll relock window, only
+with known clean current status, no other detector faults and unchanged settings.
+Keep every observed frequency and its original acquisition time; do not rewrite
+the target or replace actual readings with source settings.
+
+The existing target tolerance still must pass before the original complete
+shared settle and strict post-settle/formal checks. Malformed/unknown frequency,
+transport errors, input/output/filter faults, changed settings or exhausted
+qualification bounds reject. No source rewrite, status reset, tolerance increase
+or automatic scan restart is introduced. The source's compliance and interlock
+checks retain their existing behavior.
+
 ## Recovered output-overload latch qualification (2026-11-13)
 
 For the explicit external-6221 topology only, `record_continue` permits one

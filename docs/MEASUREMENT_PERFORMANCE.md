@@ -4,6 +4,26 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Pending external reference frequency (2026-11-13)
+
+The normal relock path retains its status/coordinate query order and existing
+shared settling deadline. A typed early frequency mismatch can use the remaining
+original 30 s / 301-poll budget for serial status/coordinate re-observations,
+exceptional setting verification and the existing bounded poll wait. It adds no
+source/detector writes or extra instrument owner. Persist every mismatch and
+eventual success/timeout in the nonformal relock proof.
+
+Strict target matching must succeed before the original full shared settle;
+post-settle and formal mismatch behavior is unchanged. Persistent mismatches
+exhaust one qualification window and fail rather than reopening it. Additional
+query/audit cost is limited to affected transitions; an ordinary point gains no
+new instrument query or wait. These bounds do not establish physical convergence.
+
+Verification: 233 hardware-blocked offline regressions passed in 76.468 s,
+including 16 new cases for pending/recovered observations, unchanged ordinary
+I/O/waits, finite deadlines (including a late query return), raw archive integrity,
+and source compliance during the exceptional wait.
+
 ## Recovered output-overload latch recheck (2026-11-13)
 
 Ordinary external-source qualification reuses its existing status read and adds

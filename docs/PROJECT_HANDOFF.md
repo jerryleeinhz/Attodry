@@ -4,6 +4,21 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### External reference frequency qualification (2026-11-13)
+
+- A finite, in-range detector frequency mismatch during external-source relock
+  remains pending within the existing 30 s / 301-poll qualification window.
+  Keep the 100 ppm / 0.00101 Hz target check and all actual frequency observations.
+- Re-observation requires clean native status and unchanged detector settings;
+  errors, unknown/malformed frequencies, other faults and setting changes reject.
+  Strict target matching precedes the original full shared settle. Post-settle
+  and formal frequency checks remain strict, without target-tolerance expansion.
+- Normal qualification adds no I/O or wait. Only the exceptional pending path
+  uses bounded status/coordinate reads and the existing poll interval; no writes.
+- Verification: 233 hardware-blocked offline tests passed, including 16 new
+  pending-frequency, timeout/fault, unchanged-path I/O, archive and source-
+  compliance cases. Original output-latch requalification regressions also pass.
+
 ### Recovered SR865A output-overload latches (2026-11-13)
 
 - External 6221 detector qualification under `record_continue` may recheck an

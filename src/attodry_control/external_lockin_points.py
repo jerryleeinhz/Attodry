@@ -24,6 +24,13 @@ from .models import LockinRole
 from .sr830 import Sr830, Sr830Error, AuthorizationRequired
 
 
+class _ExternalReferenceFrequencyMismatch(Sr830Error):
+    """A finite in-range coordinate is not yet within the existing target gate."""
+    def __init__(self, message, evidence):
+        super().__init__(message)
+        self.frequency_evidence = evidence
+
+
 @dataclass(frozen=True)
 class ExternalLockinAcquisitionConfig:
     xx_harmonics: tuple[int, ...]
@@ -366,6 +373,10 @@ class ExternalLockinPointSession(LockinPointSession):
         prior_recheck = self.point_record.get("output_latch_requalification")
         if prior_recheck is not None and prior_recheck.get("completed") is not True:
             raise Sr830Error("Recovered output latch requalification failed or incomplete; point cannot be reused")
+        prior_reference = self.point_record.get("reference_requalification")
+        if (prior_reference is not None and prior_reference.get("frequency_pending_observed")
+                and prior_reference.get("completed") is not True):
+            raise Sr830Error("External reference frequency qualification failed or incomplete; point cannot be reused")
         controlled_transition = self.harmonic_control.source_transition_pending
         # Choose final detector settings before the shared deadline. Controlled
         # source-change unlock is permitted only in this nonformal window.
@@ -462,9 +473,10 @@ class ExternalLockinPointSession(LockinPointSession):
         history = [self.point_record['source_transition_status']['roles']]
         history += [w['status'] for w in self.point_record.get('settling_transition_windows', [])]
         observed = any(r['lia_status']['reference_unlocked'] for h in history for r in h.values())
-        proof = {'policy': 'external-reference-relock-v1', 'formal_sample': False,
+        proof = {'policy': 'external-reference-relock-v2', 'formal_sample': False,
                  'started_monotonic_s': started, 'timeout_s': 30.0, 'polls': [],
-                 'transition_unlock_observed': observed, 'completed': False}
+                 'transition_unlock_observed': observed, 'completed': False,
+                 'frequency_pending_observed': False, 'frequency_checks': []}
         self.point_record['reference_requalification'] = proof
         try:
             for poll in range(301):
@@ -473,19 +485,38 @@ class ExternalLockinPointSession(LockinPointSession):
                 roles = evidence['roles']
                 proof['transition_unlock_observed'] |= any(
                     r['lia_status']['reference_unlocked'] for r in roles.values())
+                if proof['frequency_pending_observed']:
+                    self._verify_frequency_pending_status(evidence)
+                    self.harmonic_control.verify(*self.pair,
+                        self.harmonic_control.current_harmonics, self.point_record)
                 # Unknown native current/error bits have already failed in _status.
                 locked = (not roles['lockin_xx']['lia_status']['reference_unlocked']
                           and roles['lockin_xy']['lia_status']['native_status']['locked'] is True)
                 if locked and settling.monotonic() <= started + proof['timeout_s']:
-                    self._read_coordinates()  # Mode, slope and actual frequency must agree.
-                    if proof['transition_unlock_observed']:
-                        settling.changed('external_reference.relocked')
-                    # The latches above are the final transitional baseline. Do
-                    # not clear them again after the fresh settling window starts.
-                    settling.window_generation = len(settling.changes)
-                    self.harmonic_control.source_transition_pending = False
-                    proof.update(completed=True, confirmed_monotonic_s=settling.monotonic())
-                    return
+                    try:
+                        self._read_coordinates(
+                            capture_frequency_evidence=proof['frequency_pending_observed'])
+                    except _ExternalReferenceFrequencyMismatch as exc:
+                        proof['frequency_pending_observed'] = True
+                        proof['frequency_checks'].append(deepcopy(exc.frequency_evidence))
+                        self._verify_frequency_pending_status(evidence)
+                        self.harmonic_control.verify(*self.pair,
+                            self.harmonic_control.current_harmonics, self.point_record)
+                    else:
+                        if proof['frequency_pending_observed']:
+                            proof['frequency_checks'].append(
+                                deepcopy(self.point_record['frequency_readback_evidence']))
+                            if settling.monotonic() > started + proof['timeout_s']:
+                                raise Sr830Error('External reference relock timeout; no formal acquisition')
+                        if proof['transition_unlock_observed'] or proof['frequency_pending_observed']:
+                            settling.changed('external_reference.frequency_confirmed'
+                                if proof['frequency_pending_observed'] else 'external_reference.relocked')
+                        # The latches above are the final transitional baseline. Do
+                        # not clear them again after the fresh settling window starts.
+                        settling.window_generation = len(settling.changes)
+                        self.harmonic_control.source_transition_pending = False
+                        proof.update(completed=True, confirmed_monotonic_s=settling.monotonic())
+                        return
                 remaining = started + proof['timeout_s'] - settling.monotonic()
                 if remaining <= 0 or poll == 300:
                     raise Sr830Error('External reference relock timeout; no formal acquisition')
@@ -494,28 +525,67 @@ class ExternalLockinPointSession(LockinPointSession):
             proof['error'] = str(exc) or type(exc).__name__
             raise
         finally:
-            self.event('external_reference_requalification', deepcopy(proof))
+            try:
+                self.event('external_reference_requalification', deepcopy(proof))
+            except BaseException as exc:
+                if proof['frequency_pending_observed']:
+                    proof['completed'] = False
+                    proof['audit_error'] = str(exc) or type(exc).__name__
+                raise
 
-    def _read_coordinates(self, *, verify_companion=True):
+    @staticmethod
+    def _verify_frequency_pending_status(evidence):
+        """Reobserve only a clean current state, with optional old XY unlock."""
+        xx, xy = (evidence['roles'][role] for role in ('lockin_xx', 'lockin_xy'))
+        native = xy['lia_status']['native_status']
+        if (evidence['problems'] or xx['error_status'] != 0 or xx['lia_status']['raw'] != 0
+                or xy['error_status'] != 0 or native['current_status_raw'] != 0
+                or native['lia_status_raw'] not in (0, 8)
+                or native['error_status_raw'] != 0 or native['standard_event_status_raw'] != 0
+                or native['unknown_status_bits'] != 0 or native['locked'] is not True
+                or native['consumed_status_latches'] is not True):
+            raise Sr830Error("External reference frequency recheck blocked by unsafe/unknown detector status")
+
+    def _read_coordinates(self, *, verify_companion=True, capture_frequency_evidence=False):
         if not self.source_active:
             raise Sr830Error("Cannot acquire without established external source")
-        frequencies = {}
+        frequencies, observations = {}, {}
         for role, instrument in zip(("lockin_xx", "lockin_xy"), self.pair):
+            began = utc_now()
             target = getattr(self.config, role)
             expected_mode = 0 if role == "lockin_xx" else 1
             edge = 1 if target.external_reference_edge.value == "rising" else 2
             if instrument.read_fixed_setting("reference_mode") != expected_mode or instrument.read_fixed_setting("reference_slope") != edge:
                 raise Sr830Error(role + " external reference setting changed")
             frequencies[role] = instrument.read_reference_frequency()
-        daily._verify_frequency_readbacks(self.target_frequency_hz, *frequencies.values(),
-            rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
-            absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+            observations[role] = {'started_at_utc': began, 'completed_at_utc': utc_now(),
+                'frequency_hz': frequencies[role]}
+        # Only a valid coordinate mismatch can remain pending during controlled
+        # relock. Invalid values and transport/setting faults still fail at once.
+        daily._validate_frequency_observations(self.target_frequency_hz, *frequencies.values())
+        evidence = {'captured_at_utc': utc_now(), 'requested_frequency_hz': self.target_frequency_hz,
+                    'frequency_readback_hz': deepcopy(frequencies), 'observations': observations,
+                    'matched': False}
+        try:
+            daily._verify_frequency_readbacks(self.target_frequency_hz, *frequencies.values(),
+                rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
+                absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+        except Sr830Error as exc:
+            # Read the native audit only on a mismatch; normal coordinate reads
+            # must not copy the driver's growing history on every point.
+            observations['lockin_xy']['raw'] = [asdict(r)
+                for r in self.detectors[1]._driver.audit[-2:]]
+            evidence['error'] = str(exc)
+            raise _ExternalReferenceFrequencyMismatch(str(exc), evidence) from exc
+        evidence['matched'] = True
         self.point_harmonics, skipped = daily._harmonics_for_frequency(
             max(self.target_frequency_hz, *frequencies.values()), self.harmonics,
             skip_unsupported=self.skip_unsupported, config=self.config,
             harmonics_by_role=self.harmonics_by_role)
         self.point_record["skipped_harmonics"] = skipped
         self.point_record["frequency_readback_hz"] = frequencies
+        if capture_frequency_evidence:
+            self.point_record["frequency_readback_evidence"] = evidence
         self.point_record["actual_frequency_hz"] = frequencies["lockin_xx"]
         return {}  # Source module owns the two excitation coordinates.
 
