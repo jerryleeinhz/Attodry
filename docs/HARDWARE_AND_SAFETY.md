@@ -1,5 +1,20 @@
 # Hardware and safety guide
 
+## Recovered output-overload latch qualification (2026-11-13)
+
+For the explicit external-6221 topology only, `record_continue` permits one
+nonformal requalification of an SR865A output-scale latch after a controlled
+source transition. Current native status must be known clean, with reference
+locked and no input/output fault or other detector error/unknown status. The
+original latch and raw query times remain archived; no `*CLS` or reset is sent.
+
+Start one fresh complete shared settling window, then require strict clean
+native status, unchanged detector settings and matching coordinates. Repeated
+latches, ongoing faults, transport/audit failures and changed settings reject;
+repeated qualification cannot reset the budget. This is not permission to accept
+an output-overloaded formal sample. Formal capture, cleanup, other topologies
+and policies, and 6221 compliance/interlock protections retain their checks.
+
 ## Explicit external AC topology (offline implementation, 2026-11-13)
 
 6221 live interlock permission uses `OUTP:INT:TRIP?`: strict `1` is closed,

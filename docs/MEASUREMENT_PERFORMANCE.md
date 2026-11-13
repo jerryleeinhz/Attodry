@@ -4,6 +4,28 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Recovered output-overload latch recheck (2026-11-13)
+
+Ordinary external-source qualification reuses its existing status read and adds
+no query, write or wait. Only a known-current-clean, output-only SR865A latch
+under `record_continue`, after a controlled source change, may request one new
+complete shared settling window. Both detectors wait together; their existing
+serial owner then verifies coordinates, detector settings and strict native
+status. There are no corrective setting writes, source commands, status-reset
+commands or new instrument sessions. Persist raw candidate/recheck evidence,
+requested wait and failure outcome, including an exhausted per-point budget.
+
+The exceptional path costs at most one configured shared settle plus its bounded
+verification queries and synchronous audit writes. A repeated fault ends the
+attempt; it does not start a retry loop. The existing source before/after capture
+checks still govern formal data. Software tests of command/wait budgets do not
+establish physical convergence or real acquisition throughput.
+
+Verification: 205 hardware-blocked offline regressions passed in 70.255 s,
+including 16 new cases asserting normal-path I/O parity, one extra full shared
+wait only for an eligible candidate, no corrective writes, strict final checks
+and preserved source protection during the added wait.
+
 ## 6221 terminal-prefix fitting (2026-11-13)
 
 Terminal-prefix selection uses the existing read-only snapshot. Accepted-record

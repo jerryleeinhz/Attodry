@@ -4,6 +4,20 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### Recovered SR865A output-overload latches (2026-11-13)
+
+- External 6221 detector qualification under `record_continue` may recheck an
+  output-only SR865A latch after a controlled source transition, provided current
+  native status is known clean. Keep the original raw status and timestamps.
+- Permit one fresh complete shared settling window per point, followed by strict
+  native status, coordinate and detector-setting verification. A repeated latch,
+  current fault, unknown/error/unlock or setting mismatch still rejects the point.
+- Formal acquisition, cleanup, other overload policies and 6221 protections keep
+  their existing checks. Normal points add no instrument query/write or wait.
+- Verification: 205 hardware-blocked offline tests passed, including 16 new
+  recheck, timing/I/O parity, failure-budget, formal/cleanup and source-compliance
+  cases. A fake multi-frequency scan retains a valid accepted-record archive.
+
 ### 6221 terminal-prefix fitting (2026-11-13)
 
 - The commissioning 6221 panel fits accepted, clean formal samples from failed or

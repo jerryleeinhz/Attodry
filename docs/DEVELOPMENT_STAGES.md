@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: Recovered SR865A output-overload latches (2026-11-13)
+
+- Reproduce the 20-to-419 Hz transition with current status 0 and LIAS 1537;
+  qualify this output-only latch through one fresh shared stable window under
+  external-source `record_continue`, retaining its nonformal raw evidence.
+- Require known clean current status and strict clean status/settings/coordinates
+  after the recheck. Persist the one-shot budget so repeated qualification cannot
+  obtain another attempt. Later formal faults and cleanup remain strict.
+- Preserve source compliance/interlock, all other overload policies and ordinary
+  point timing/I/O; add no status-reset or corrective setting commands.
+- Verification: 205 hardware-blocked offline tests passed in 70.255 s, including
+  16 new bounded-recheck, protection, archive and unchanged-path I/O cases.
+
 ## Current: 6221 terminal-prefix fitting (2026-11-13)
 
 - Fit clean accepted formal data from failed/interrupted 6221 runs, keeping the

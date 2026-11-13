@@ -212,7 +212,9 @@ class ExternalLockinPointSession(LockinPointSession):
                     "formal_sample": False, "roles": result, "problems": problems}
         self.event("external_lockin_status", evidence)
         if problems:
-            raise Sr830Error("External detector status rejected: " + "; ".join(problems))
+            error = Sr830Error("External detector status rejected: " + "; ".join(problems))
+            error.status_evidence = deepcopy(evidence)
+            raise error
         return evidence
 
     def _settings(self, instrument, role):
@@ -361,6 +363,10 @@ class ExternalLockinPointSession(LockinPointSession):
     def qualify(self):
         if not self.source_active or self.point_record is None:
             raise Sr830Error("External source has not been established")
+        prior_recheck = self.point_record.get("output_latch_requalification")
+        if prior_recheck is not None and prior_recheck.get("completed") is not True:
+            raise Sr830Error("Recovered output latch requalification failed or incomplete; point cannot be reused")
+        controlled_transition = self.harmonic_control.source_transition_pending
         # Choose final detector settings before the shared deadline. Controlled
         # source-change unlock is permitted only in this nonformal window.
         self.harmonic_control.enter(*self.pair,
@@ -371,8 +377,78 @@ class ExternalLockinPointSession(LockinPointSession):
         self.harmonic_control.ensure_settled(*self.pair, self.args.settle_s, self.point_record)
         self.harmonic_control.source_transition_pending = False
         self._read_coordinates()
-        self._status(acquisition=True)
+        try:
+            self._status(acquisition=True)
+        except Sr830Error as exc:
+            evidence = getattr(exc, "status_evidence", None)
+            if (not controlled_transition or "output_latch_requalification" in self.point_record
+                    or not self._recovered_output_latch_candidate(evidence)):
+                raise
+            self._requalify_recovered_output_latch(evidence)
         self.event("lockin_point_qualification", deepcopy(self.point_record))
+
+    def _recovered_output_latch_candidate(self, evidence):
+        """Only a known recovered SR865A output latch may open one new window."""
+        if (self.config.lockin_acquisition.overload_policy != "record_continue"
+                or not isinstance(evidence, dict)
+                or evidence.get("problems") != ["lockin_xy output overload"]):
+            return False
+        roles = evidence["roles"]
+        xx, xy = roles["lockin_xx"], roles["lockin_xy"]
+        native = xy["lia_status"].get("native_status")
+        if (xx["error_status"] != 0 or xx["lia_status"]["raw"] != 0
+                or xy["error_status"] != 0 or not isinstance(native, dict)):
+            return False
+        latch = native["lia_status_raw"]
+        # CH1/CH2 and the four data-channel scale bits are the only eligible
+        # history. In particular, do not borrow record_continue's input/filter
+        # exception or treat a current overload, unlock or unknown as recovered.
+        return (type(latch) is int and latch > 0 and not latch & ~0xF03
+                and native["current_status_raw"] == 0
+                and native["locked"] is True
+                and native["input_overload"] is False
+                and native["output_scale_overload"] is False
+                and native["instrument_error"] is False
+                and native["error_status_raw"] == 0
+                and native["standard_event_status_raw"] == 0
+                and native["unknown_status_bits"] == 0
+                and native["consumed_status_latches"] is True)
+
+    def _requalify_recovered_output_latch(self, evidence):
+        """One fresh full settled window, without reopening a clearing loop."""
+        settling = self.harmonic_control.settling
+        proof = {"policy": "external-recovered-output-latch-once-v1",
+                 "formal_sample": False, "overload_policy": "record_continue",
+                 "candidate": deepcopy(evidence), "completed": False,
+                 "started_at_utc": utc_now(), "started_monotonic_s": settling.monotonic(),
+                 "required_settle_s": self.args.settle_s}
+        # Consume the point's one-shot budget before any wait or further I/O.
+        self.point_record["output_latch_requalification"] = proof
+        wait_start = len(self.point_record.get("settling_waits", []))
+        try:
+            settling.changed("external_output_latch.recovered")
+            # The candidate read already consumed and archived the old latch.
+            # Do not let open_transition_window consume new faults in this window.
+            settling.window_generation = len(settling.changes)
+            self.harmonic_control.ensure_settled(*self.pair, self.args.settle_s, self.point_record)
+            self._read_coordinates()
+            proof["recheck"] = self._status()
+            proof["completed"] = True
+        except BaseException as exc:
+            proof["error"] = str(exc) or type(exc).__name__
+            if getattr(exc, "status_evidence", None) is not None:
+                proof["recheck"] = deepcopy(exc.status_evidence)
+            raise
+        finally:
+            proof["settling_waits"] = deepcopy(self.point_record.get("settling_waits", [])[wait_start:])
+            proof["finished_at_utc"] = utc_now()
+            proof["finished_monotonic_s"] = settling.monotonic()
+            try:
+                self.event("external_output_latch_requalification", deepcopy(proof))
+            except BaseException as exc:
+                proof["completed"] = False
+                proof["audit_error"] = str(exc) or type(exc).__name__
+                raise
 
     def _requalify_reference(self):
         """Bound the deliberate source transition, then begin a clean window.

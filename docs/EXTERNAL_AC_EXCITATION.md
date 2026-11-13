@@ -196,6 +196,21 @@ interlock, DC zero, unknown/error status and transport failures remain blocking.
 Preflight still requires an immediately known inactive source. Neither timeout
 certifies lock or OFF. Historical rejected data remains excluded by default.
 
+### Recovered output-scale latches under record_continue
+
+After a controlled source transition and the existing settle, `record_continue`
+may requalify an output-only SR865A latch when its current status is known clean.
+For example, `CUROVLDSTAT?=0` with `LIAS?=1537` records CH1 and data-channel output
+scale overloads that occurred since the preceding latch read; it does not prove
+a currently persisting overload or establish the physical transient mechanism.
+
+Keep the candidate's raw responses and acquisition times, then observe one fresh
+complete shared settling window. Continue only after strict clean native status,
+settings and coordinate verification. Repeated output latches, current overload,
+other faults or unknown evidence still reject. The budget belongs to the current
+point; another qualification call cannot reopen it. No status reset or setting
+rewrite is used. Other policies and formal/cleanup validation remain unchanged.
+
 ### Commissioning Notebook support
 
 `sr830_commissioning_sweeps.ipynb` now includes an explicit SQLite/run selector
