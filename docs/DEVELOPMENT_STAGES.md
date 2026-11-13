@@ -19,6 +19,9 @@
   exact channel/current mapping, quality/audit/preview, grouping, UI/export and
   legacy plotting/report/progress/temperature/unified regressions. Correct the
   old report test fixtures to supply their already-existing f x e globals.
+- Target compatibility: explicitly select the loaded curve group across ipywidgets
+  versions. Isolate legacy catalog-test fixtures in temporary directories so
+  target offline tests never crawl the station's experimental data tree.
 - Performance: zero hardware calls or acquisition changes; one read-only snapshot
   per explicit Load, one set of fits reused by report overlays.
 

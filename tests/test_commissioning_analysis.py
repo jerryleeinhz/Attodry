@@ -37,6 +37,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class CommissioningAnalysisTests(unittest.TestCase):
     def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
         self.paths: list[Path] = []
         self.addCleanup(self._cleanup_files)
 
@@ -141,18 +144,18 @@ class CommissioningAnalysisTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        catalog = discover_commissioning_records(PROJECT_ROOT)
+        catalog = discover_commissioning_records(self.directory)
         by_path = {record.path: record for record in catalog}
         self.assertEqual(by_path[completed].record_status, "completed")
         self.assertEqual(by_path[diagnostic].record_status, "diagnostic")
         accepted = discover_commissioning_records(
-            PROJECT_ROOT,
+            self.directory,
             record_statuses={"completed"},
             scan_types={"frequency"},
         )
         self.assertIn(completed, [record.path for record in accepted])
         diagnostics = discover_commissioning_records(
-            PROJECT_ROOT, record_statuses={"diagnostic"}
+            self.directory, record_statuses={"diagnostic"}
         )
         self.assertIn(diagnostic, [record.path for record in diagnostics])
 
@@ -1562,7 +1565,7 @@ class CommissioningAnalysisTests(unittest.TestCase):
 
     def _temporary_path(self, suffix: str) -> Path:
         temporary = tempfile.NamedTemporaryFile(
-            dir=PROJECT_ROOT,
+            dir=self.directory,
             prefix="commissioning_analysis_",
             suffix=suffix,
             delete=False,

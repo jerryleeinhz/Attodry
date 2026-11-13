@@ -130,6 +130,8 @@ def build_6221_panel(database, *, output_directory, rules=None, methods=("log", 
                 options.append((f"{binding['requested_frequency_hz']:g} Hz · {len(rows)} channel rows · "
                                 f"{outer} · {key}", key))
             groups.options = options
+            # ipywidgets versions differ on auto-selection after empty options.
+            groups.value = options[0][1] if options else None
             select_group()
             message.value = (f"Loaded {snapshot.metadata['selected_channel_rows']} channel rows; "
                 f"excluded {len(snapshot.metadata['quality_exclusions'])} flagged channels. "

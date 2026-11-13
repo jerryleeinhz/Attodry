@@ -198,6 +198,7 @@ class CurrentCommissioningTests(unittest.TestCase):
         c["runs"].value = "current-run"
         c["load"].click()
         self.assertIsNotNone(c["state"]["snapshot"], c["message"].value)
+        self.assertIsNotNone(c["groups"].value, "Load must explicitly select an available curve group")
         with patch("IPython.display.display"):
             c["apply"].click()
         self.assertIsNotNone(c["state"]["report"], c["message"].value)
