@@ -4,6 +4,22 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 D04 frequency readback precision (2026-11-13)
+
+- The 10 nA / 17–7000 Hz log scan accepted its first point, then rejected the
+  second because FREQ? returned 20.77801 Hz for 20.7780071796435 Hz. This is
+  observed seven-digit serialization, not a compliance event or a known DDS LSB.
+- Extend the shared live/archive validator to accept the exact seven-digit
+  rounding of requested frequency; retain existing tolerances and all protection.
+  Keep the requested grid, source readback coordinates, I/O and wait budgets.
+- Raw failed-run source OFF/wave stopped and both module resets were verified;
+  overall failure/manual-review flags remain unchanged. No real restart is part
+  of this correction. Existing source fingerprint checks still govern recovery.
+- Verification covers the exact failure, all 31 frequencies, decimal carry and
+  limits, wrong settings, transport failures, archive corruption and analysis.
+  All 110 guarded regression cases and the 4 frequency-specific cases passed
+  locally, without hardware imports or instrument DLL loading.
+
 ### 6221 amplitude programming and readback quantization (2026-11-13)
 
 - Compile RMS targets to the documented source-range grid before instrument I/O;

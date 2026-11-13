@@ -238,6 +238,51 @@ class Combination6221Tests(unittest.TestCase):
         with closing(open_readonly(self.database)) as db:
             self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 4)
 
+    def test_31_log_frequencies_with_seven_digit_readback_reach_analysis(self):
+        import sqlite3
+        from attodry_control.combination_analysis import load_combination_snapshot
+        from attodry_control.commissioning_6221_analysis import load_6221_sweep
+        text = self.text.replace('current_rms_points_a = [0.000001, 0.000002]',
+                                 'current_rms_points_a = [10e-9]')
+        text = text.replace('frequency_points_hz = [17.777, 200.0]',
+            'frequency_ranges_hz = [{ min = 17, max = 7000, scale = "log", points = 31 }]')
+        text = text.replace('xx_harmonics = [1, 2]', 'xx_harmonics = [1]')
+        text = text.replace('xy_harmonics = [1, 2]', 'xy_harmonics = [2]')
+        self.path.write_text(text, encoding="utf-8")
+        query = self.source.query
+        def rounded(command):
+            value = query(command)
+            return format(float(value), '.6e') if command == 'SOUR:WAVE:FREQ?' else value
+        self.source.query = rounded
+        config = self.config()
+        self.assertEqual(self.execute(config)["status"], "completed")
+        with closing(open_readonly(self.database)) as db:
+            self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 31)
+        rows = load_combination_snapshot(self.database).rows
+        self.assertEqual(len(rows), 31)
+        for row, requested in zip(rows, config.excitation.frequency_points_hz):
+            self.assertEqual(row["requested.excitation_frequency_hz"], requested)
+            self.assertEqual(row["actual.excitation_frequency_hz"], float(format(requested, '.6e')))
+        self.assertEqual(rows[1]["actual.excitation_frequency_hz"], 20.77801)
+        self.assertEqual(load_6221_sweep(self.database, "current-run").metadata["selected_channel_rows"], 62)
+        self.assertEqual(len([c for c in self.source.commands if c.startswith('SOUR:WAVE:FREQ ')]),31)
+        # Make coordinates internally consistent but wrong for the target.
+        with closing(sqlite3.connect(self.database)) as db, db:
+            identity, raw = db.execute("SELECT rowid,payload_json FROM combination_samples "
+                                      "WHERE condition_id='condition-000001'").fetchone()
+            sample = json.loads(raw)
+            sample['actual']['excitation_frequency_hz'] = 207.7801
+            source = next(r for r in sample['reads'] if r['module'] == 'excitation')
+            source['actual']['excitation_frequency_hz'] = 207.7801
+            for state in (source['status'],source['status']['after_sample']):
+                state['frequency_hz'] = 207.7801
+                state['actual']['excitation_frequency_hz'] = 207.7801
+            db.execute('UPDATE combination_samples SET payload_json=? WHERE rowid=?', (json.dumps(sample),identity))
+        with closing(open_readonly(self.database)) as db, self.assertRaisesRegex(ValueError,'source setting differs'):
+            validate_accepted_records(db, "current-run")
+        with self.assertRaisesRegex(ValueError,'source setting differs'):
+            load_combination_snapshot(self.database)
+
     def test_analysis_and_recovery_both_reject_tampered_quantization(self):
         import sqlite3
         from attodry_control.combination_analysis import load_combination_snapshot

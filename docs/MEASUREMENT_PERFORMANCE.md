@@ -6,6 +6,11 @@ feature. Offline timings do not establish instrument settling or real throughput
 
 ## External 6221 AC excitation (2026-11-13)
 
+The D04 frequency serialization fix only adds an exact seven-significant-digit
+comparison to the shared live/archive setting validator. It adds no I/O, audit
+event, rewrite, retry, sleep or per-point verification. The original 17–7000 Hz
+31-point grid stays unchanged, with source-setting readbacks kept separately.
+
 V4 amplitude quantization is pure CPU work: compile before connection, send one
 decimal amplitude command in the existing point transition, and validate existing
 readbacks against that setting. Command/query budgets below are unchanged. There

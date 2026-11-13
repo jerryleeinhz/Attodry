@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: 6221 D04 frequency readback precision (2026-11-13)
+
+- Accept only the exact seven-significant-digit rounded frequency in addition to
+  existing narrow setting tolerances, using the shared live/archive validator.
+- Reproduce the actual 20.7780071796435 → 20.77801 Hz false rejection; preserve
+  requested coordinates and use actual source-setting readback in analysis.
+- Guarded fake coverage includes all 31 log points with mixed detectors, archive
+  validation/analysis, boundaries, false settings and unchanged I/O/wait budgets.
+- Verification: 110 guarded regression cases and 4 frequency-specific cases
+  passed locally; real hardware access was blocked.
+- Failed historical attempts and cleanup flags remain raw; no hardware restart
+  or source-compatibility exception is introduced.
+
 ## Current: 6221 amplitude quantization (2026-11-13)
 
 - Add shared pure source-range-grid compilation and independently bounded AMPL?

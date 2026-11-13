@@ -108,9 +108,10 @@ _SETTING_ABS_TOLERANCES = {
 
 def _setting_matches(key, value, expected):
     """Use the same readback tolerances for live and archived evidence."""
-    # D04 AMPL? serializes seven significant digits. Accept its exact rounded
-    # representation, not a broadly enlarged tolerance or a new current ceiling.
-    if (key == "current_peak_a" and type(value) in (int, float)
+    # Observed D04 AMPL? and FREQ? serialize seven significant digits. Accept
+    # that exact rounded value separately from the existing narrow tolerance;
+    # serialization precision does not define a hardware programming step.
+    if (key in {"current_peak_a", "frequency_hz"} and type(value) in (int, float)
             and math.isfinite(value) and math.isfinite(expected)
             and value == float(format(expected, ".6e"))):
         return True
