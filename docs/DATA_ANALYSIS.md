@@ -5,6 +5,19 @@ uses accepted attempts by default. `--include-rejected` exists only for audit;
 the publication generator filters nonaccepted rows again and reports their count
 in its manifest.
 
+## Personal Notebook working copies
+
+Use same-directory copies such as
+`notebooks/sr830_commissioning_sweeps.local.ipynb` and
+`notebooks/unified_plotting.local.ipynb` for local data directories, explicit fit
+threshold changes and saved outputs. These copies are ignored by Git; keeping
+them beside the templates preserves the existing project-root resolution.
+The tracked Notebooks remain shared templates with their documented defaults.
+Before restoring a modified template, preserve its entire file, including outputs,
+under a distinct local name or a verified backup. Never overwrite an existing
+working copy with different content. Generated checkpoints and snapshot copies
+are also ignored; ignoring them does not delete files or experimental data.
+
 ## Install
 
 ```powershell

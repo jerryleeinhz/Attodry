@@ -6,6 +6,11 @@ __pycache__/
 .firecrawl/
 .venv/
 .test-tmp/
+.test-temp/
+notebooks/.ipynb_checkpoints/
+notebooks/*.local*.ipynb
+notebooks/*_snapshot_*.ipynb
+/commissioning_analysis_*.json
 tmp/
 build/
 dist/

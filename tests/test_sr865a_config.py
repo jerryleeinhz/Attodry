@@ -121,7 +121,7 @@ class Sr865aConfigurationTests(unittest.TestCase):
 
     def test_full_scale_and_autorange_keep_existing_safety_allowlists(self):
         document = self.document()
-        document["lockin_xy"]["sensitivity_full_scale_v"] = 0.5
+        document["lockin_xy"]["sensitivity_full_scale_v"] = 0.2
         with self.assertRaisesRegex(ConfigError, "lockin_safety"):
             self.load(document)
         document = self.document()
@@ -151,7 +151,7 @@ class Sr865aConfigurationTests(unittest.TestCase):
         self.assertEqual([s.harmonic for s in xy.harmonic_settings], [1, 2])
         self.assertTrue(all(s.reserve_mode is None for s in xy.harmonic_settings))
         self.assertEqual(xy.harmonic_settings[1].autorange_full_scales_v, (.002, .01))
-        document["lockin_xy"]["harmonic_settings"]["h1"]["sensitivity_full_scale_v"] = .5
+        document["lockin_xy"]["harmonic_settings"]["h1"]["sensitivity_full_scale_v"] = .2
         with self.assertRaisesRegex(ConfigError, "lockin_safety"):
             self.load(document)
 
@@ -160,7 +160,7 @@ class Sr865aConfigurationTests(unittest.TestCase):
         document["lockin_sweep"]["frequency_ranges"][0]["xy_full_scale_v"] = .002
         config = self.load(document)
         self.assertEqual(config.lockin_sweep.frequency_point_specs[0].xy_full_scale_v, .002)
-        document["lockin_sweep"]["frequency_ranges"][0]["xy_full_scale_v"] = .5
+        document["lockin_sweep"]["frequency_ranges"][0]["xy_full_scale_v"] = .2
         with self.assertRaisesRegex(ConfigError, "project-confirmed SR865A"):
             self.load(document)
 

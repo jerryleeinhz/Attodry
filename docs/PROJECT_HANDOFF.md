@@ -4,6 +4,21 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### LK_setup working-copy cleanup (2026-11-13)
+
+- Preserve the operator's existing XX/XY fixed detector full-scale allowlists;
+  validate model support and retain every other source/protection/cleanup field.
+  Recording these existing choices does not authorize instrument operation.
+- Ignore generated timing fixtures, test-analysis JSON, Notebook checkpoints and
+  local/snapshot Notebooks. Keep originals and hash-verified cleanup backups.
+- Preserve personal Notebook paths, fit thresholds and outputs in same-directory
+  `.local.ipynb` working copies before restoring shared Notebook templates.
+  Shared scientific defaults and active acquisition source/configuration stay intact.
+- Verification: 118 hardware-blocked config, range, mixed-detector and setting
+  tests passed. Policy-boundary tests still reject an unapproved valid full scale.
+  Cleanup adds no instrument I/O, wait, retry or data rewrite. Delivery uses file
+  hashes and Notebook idle checks and never stops acquisitions or kernels.
+
 ### Unified filter stacks and condition-aware exclusions (2026-11-13)
 
 - Curve and four-channel filters retain their multi-select Keep control and add

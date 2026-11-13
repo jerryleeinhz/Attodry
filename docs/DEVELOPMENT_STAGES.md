@@ -1,5 +1,16 @@
 # Development stages
 
+## Current: LK_setup working-copy cleanup (2026-11-13)
+
+- Retain and version existing operator XX/XY detector range permissions; all other
+  policy fields remain unchanged. No new hardware operation is part of cleanup.
+- Ignore generated fixtures/checkpoints and preserve personal Notebook edits and
+  outputs in `.local.ipynb` copies beside the clean shared templates.
+- Keep hash-verified original files before cleanup; never delete measurement data
+  or replace active acquisition source/configuration.
+- Verification: 118 hardware-blocked offline tests passed. Baseline, harmonic and
+  segment tests continue to reject a valid but unapproved 0.2 V XY range.
+
 ## Current: Unified filter stacks and condition-aware exclusions (2026-11-13)
 
 - Add explicit Stack retained values to curve/four-channel filters; combine with

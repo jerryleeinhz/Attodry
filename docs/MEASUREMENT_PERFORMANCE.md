@@ -4,6 +4,15 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## LK_setup working-copy cleanup (2026-11-13)
+
+Recording existing detector allowlists and ignoring generated artifacts adds no
+instrument query/write, qualification, settle, retry or acquisition database I/O.
+Personal Notebook copies retain explicit analysis parameters without changing
+shared fit defaults. Verification: 118 hardware-blocked offline configuration,
+range, mixed-detector and settings tests passed. This maintenance does not provide
+new real measurement timing evidence or authorize a hardware run.
+
 ## Unified filter stacks and exclusions (2026-11-13)
 
 Filter stack resolution and readable exclusion labels operate on the existing
