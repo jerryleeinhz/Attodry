@@ -62,12 +62,20 @@ class FrequencyReadbackTests(unittest.TestCase):
             with self.subTest(value=value),self.assertRaises(ValueError):
                 validate_active_state(bad,config,10e-9,frequency,require_quantization=True)
         for value in ('17.0','20.77800','207.7801'):
+            resource=DecimalFrequency6221();driver=self.driver(resource,config)
+            driver.set_point(10e-9,frequency)
             resource.state['SOUR:WAVE:FREQ']=value
+            before=len(resource.queries)
             with self.subTest(value=value),self.assertRaises(Keithley6221Error):
                 driver.readback()
+            self.assertIn('SOUR:WAVE:FREQ?',resource.queries[before:])
+        resource=DecimalFrequency6221();driver=self.driver(resource,config)
+        driver.set_point(10e-9,frequency)
         resource.fail_query='SOUR:WAVE:FREQ?'
+        before=len(resource.queries)
         with self.assertRaises((OSError,Keithley6221Error)):
             driver.readback()
+        self.assertIn('SOUR:WAVE:FREQ?',resource.queries[before:])
 
     def test_frequency_endpoints_and_decimal_carry(self):
         frequencies=[.001,9.9999996,99.999996,999.99996,99999.996,100000.]
