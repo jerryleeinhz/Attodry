@@ -1,5 +1,14 @@
 # Development stages
 
+## Current: D04 seven-digit amplitude readback (2026-11-13)
+
+- Accept exact seven-significant-digit serialization of the requested peak in
+  live and archived evidence. Keep recorded actual RMS, narrow existing tolerance
+  and the independent source current ceiling. No commands/waits added.
+- Regression checks use station 8.5/10.5 uA readbacks and reject an adjacent
+  incorrect serialized value. Output-OFF probe verified the complete six-point grid.
+- Verification: 75 guarded source/combination/analysis tests passed in 24.419 s.
+
 ## Current: D04 duration encoding (2026-11-13)
 
 - Support exact numeric SCPI infinity `+9.9e37` for WAVE duration, as actually

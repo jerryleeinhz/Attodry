@@ -4,6 +4,17 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### D04 amplitude serialization (2026-11-13)
+
+- Output-OFF verification of all six approved amplitudes confirmed AMPL? uses
+  seven significant digits. The 8.5/10.5 uA RMS peaks read 1.202082E-05 and
+  1.484924E-05; prior 1e-7 relative comparison rejected correct serialization.
+- Accept the exact seven-digit rounded expected peak, alongside existing narrow
+  tolerances. Share this check with archives; retain actual readback and RMS
+  derivation. No broad tolerance, other setting, current ceiling, command or wait
+  changed. The probe returned to the first point with output still OFF.
+- Verification: 75 guarded source/combination/analysis tests passed in 24.419 s.
+
 ### D04 waveform duration encoding (2026-11-13)
 
 - Station D04 /700x accepts `SOUR:WAVE:DUR:TIME INF` with error0 and reads it

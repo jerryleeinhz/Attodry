@@ -584,6 +584,22 @@ class DriverTests(unittest.TestCase):
         d.cleanup()
         self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (11, 2))
 
+    def test_d04_seven_digit_amplitudes_validate_live_and_archived_without_relaxing_ceiling(self):
+        for current, raw in ((8.5e-6, '1.202082E-05'), (10.5e-6, '1.484924E-05')):
+            resource = Fake6221()
+            config = source_config(current_rms_points_a=[current], frequency_points_hz=[25.])
+            driver = Keithley6221Ac(resource, config, authorize_writes=True)
+            driver.preflight(); driver.configure(); driver.set_point(current, 25.)
+            resource.state['SOUR:WAVE:AMPL'] = raw
+            state = driver.readback()
+            self.assertTrue(validate_active_state(state, config, current, 25.))
+            resource.state['SOUR:WAVE:AMPL'] = str(float(raw) + 1e-11)
+            with self.assertRaises(Keithley6221Error): driver.readback()
+        from attodry_control.keithley6221_ac import _setting_matches
+        self.assertFalse(_setting_matches('frequency_hz', 1.202082e-5, 1.2020815280171309e-5 + .001))
+        with self.assertRaises(ValueError):
+            source_config(max_current_peak_a=1e-6).validate_point(8.5e-6, 25.)
+
     def test_failed_query_retains_primary_when_audit_also_fails(self):
         r, d, _ = self.active()
         r.fail_query = "OUTP:STAT?"
