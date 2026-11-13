@@ -65,6 +65,14 @@ class Combination6221Tests(unittest.TestCase):
     def config(self):
         return load_hardware_combination(self.path)
 
+    def range_configuration(self):
+        return self.text.replace(
+            'current_rms_points_a = [0.000001, 0.000002]',
+            'current_rms_ranges_a = [{ min = 0.000001, max = 0.000002, scale = "linear", points = 2 }]'
+        ).replace(
+            'frequency_points_hz = [17.777, 200.0]',
+            'frequency_ranges_hz = [{ min = 17.777, max = 200.0, scale = "linear", points = 2 }]')
+
     def execute(self, config=None, recovery=None, **kwargs):
         with CombinationStore(self.database) as store:
             return run_hardware_combination(config or self.config(), store, "current-run",
@@ -112,6 +120,24 @@ class Combination6221Tests(unittest.TestCase):
         self.assertIn("Arms", text)
         self.assertEqual(len(config.plan.axes[-1].points), 1)
 
+    def test_ranges_preserve_exact_plan_and_recovery_settings(self):
+        explicit = self.config()
+        ranges = self.range_configuration()
+        self.path.write_text(ranges, encoding="utf-8")
+        generated = self.config()
+        self.assertEqual(generated.plan.conditions(), explicit.plan.conditions())
+        self.assertEqual(generated.snapshot["axes"], explicit.snapshot["axes"])
+        self.assertEqual(generated.snapshot["hardware"]["excitation"],
+                         explicit.snapshot["hardware"]["excitation"])
+        self.assertEqual(configuration_changes(explicit.snapshot, generated.snapshot), [])
+        self.assertNotEqual(generated.snapshot["config_sha256"], explicit.snapshot["config_sha256"])
+        for changed in (ranges.replace('max = 0.000002', 'max = 0.000003'),
+                        ranges.replace('points = 2', 'points = 3', 1)):
+            self.path.write_text(changed, encoding="utf-8")
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "new run"):
+                configuration_changes(explicit.snapshot, self.config().snapshot)
+        self.assertEqual(self.manager.opened, [])
+
     def test_topology_wiring_and_duplicate_resources_rejected_offline(self):
         bad = [self.text.replace('excitation_source = "keithley6221"', 'excitation_source = "sr830"'),
                self.text.replace('order = ["excitation", "lockin"]', 'order = ["lockin", "excitation"]'),
@@ -139,6 +165,10 @@ class Combination6221Tests(unittest.TestCase):
         safety.write_text(re.sub(r"allowed_fixed_full_scales_v = (\[[^\]]+\])",
             lambda m: "allowed_fixed_full_scales_v = " + json.dumps(sorted(set(json.loads(m[1])) | {0.5})),
             safety.read_text()), encoding="utf-8")
+        config = self.config()
+        self.assertEqual(config.excitation.current_rms_points_a,
+                         (0.5e-6, 2.5e-6, 4.5e-6, 6.5e-6, 8.5e-6, 10.5e-6))
+        self.assertEqual(config.excitation.frequency_points_hz, (25.0,))
         result = self.execute()
         self.assertEqual(result["status"], "completed", result)
         with closing(open_readonly(self.database)) as db:
@@ -180,10 +210,15 @@ class Combination6221Tests(unittest.TestCase):
             first = self.execute(config)
         self.assertEqual(first["status"], "failed", first)
         self.devices()
-        review = build_recovery(config, self.database, "current-run", acknowledge_failure=True,
+        # The first segment used literal points. The next process may use an
+        # equivalent ranges spelling, retaining the original accepted prefix.
+        self.path.write_text(self.range_configuration(), encoding="utf-8")
+        recovered_config = self.config()
+        self.assertEqual(configuration_changes(config.snapshot, recovered_config.snapshot), [])
+        review = build_recovery(recovered_config, self.database, "current-run", acknowledge_failure=True,
                                 manual_verification=True)
         self.assertEqual(review["next_condition"]["condition_id"], "condition-000001")
-        second = self.execute(config, recovery=review)
+        second = self.execute(recovered_config, recovery=review)
         self.assertEqual(second["status"], "completed", second)
         self.assertEqual(self.source.commands.count("SOUR:WAVE:INIT"), 3)
         with closing(open_readonly(self.database)) as db:
@@ -192,6 +227,8 @@ class Combination6221Tests(unittest.TestCase):
         self.assertIn(("condition-000001", 0, "rejected"), attempts)
         self.assertIn(("condition-000001", 1, "accepted"), attempts)
         self.assertEqual(sum(r[0] == "condition-000000" for r in attempts), 1)
+        with closing(open_readonly(self.database)) as db:
+            self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 4)
 
     def test_raw_source_tamper_blocks_recovery_validation(self):
         config = self.config()

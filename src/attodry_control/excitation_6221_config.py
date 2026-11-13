@@ -6,6 +6,7 @@ neither these coordinates nor their setting readbacks are measured current.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+from decimal import Decimal
 import math
 from collections.abc import Mapping
 
@@ -93,10 +94,76 @@ class Excitation6221Config:
 
 def parse_excitation_6221(table):
     names = {field.name for field in fields(Excitation6221Config)}
-    if not isinstance(table, Mapping) or set(table) != names:
+    coordinates = (("current_rms_points_a", "current_rms_ranges_a", 2e-12 / math.sqrt(2), .105 / math.sqrt(2)),
+                   ("frequency_points_hz", "frequency_ranges_hz", .001, 100000))
+    required = names - {point_name for point_name, *_ in coordinates}
+    allowed = names | {range_name for _, range_name, *_ in coordinates}
+    if not isinstance(table, Mapping) or not required <= set(table) or set(table) - allowed:
         present = set(table) if isinstance(table, Mapping) else set()
-        raise ValueError(f"excitation_6221 fields: missing={sorted(names - present)}, "
-                         f"unknown={sorted(present - names)}")
-    config = Excitation6221Config(**table)
+        raise ValueError(f"excitation_6221 fields: missing={sorted(required - present)}, "
+                         f"unknown={sorted(present - allowed)}")
+    normalized = dict(table)
+    segments_by_coordinate = {}
+    counts = []
+    for point_name, range_name, low, high in coordinates:
+        if (point_name in table) == (range_name in table):
+            raise ValueError(f"excitation_6221 requires exactly one of {point_name} or {range_name}")
+        if point_name in table:
+            points = table[point_name]
+            if not isinstance(points, (tuple, list)) or not points:
+                raise ValueError(f"{point_name} must be a nonempty ordered list")
+            counts.append(len(points))
+        else:
+            segments = _parse_ranges(table[range_name], range_name, low, high)
+            segments_by_coordinate[point_name] = segments
+            counts.append(sum(segment[3] for segment in segments))
+            del normalized[range_name]
+    # Count both axes before allocating any generated coordinate points.
+    if counts[0] * counts[1] > 100000:
+        raise ValueError("6221 grid exceeds 100000 conditions")
+    for point_name, segments in segments_by_coordinate.items():
+        normalized[point_name] = _expand_ranges(segments)
+    config = Excitation6221Config(**normalized)
     config.require_output_contract()
     return config
+
+
+def _parse_ranges(value, name, low, high):
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{name} must be a nonempty array of range tables")
+    segments = []
+    total = 0
+    for index, raw in enumerate(value):
+        segment_name = f"{name}[{index}]"
+        if not isinstance(raw, Mapping) or set(raw) != {"min", "max", "scale", "points"}:
+            raise ValueError(f"{segment_name} requires exactly min, max, scale and points")
+        minimum = finite_number(raw["min"], segment_name + ".min", low, high)
+        maximum = finite_number(raw["max"], segment_name + ".max", low, high)
+        if maximum <= minimum:
+            raise ValueError(f"{segment_name}.max must be greater than min")
+        scale, count = raw["scale"], raw["points"]
+        if scale not in ("linear", "log"):
+            raise ValueError(f"{segment_name}.scale must be linear or log")
+        if type(count) is not int or count < 2:
+            raise ValueError(f"{segment_name}.points must be an integer at least 2")
+        total += count
+        if total > 100000:
+            raise ValueError("6221 grid exceeds 100000 conditions")
+        segments.append((minimum, maximum, scale, count))
+    return tuple(segments)
+
+
+def _expand_ranges(segments):
+    """Keep declared segment order and repeated endpoints; never sort/deduplicate."""
+    values = []
+    for minimum, maximum, scale, count in segments:
+        if scale == "linear":
+            start = Decimal(str(minimum))
+            span = Decimal(str(maximum)) - start
+            interior = (float(start + span * index / (count - 1)) for index in range(1, count - 1))
+        else:
+            start = math.log(minimum)
+            span = math.log(maximum) - start
+            interior = (math.exp(start + span * index / (count - 1)) for index in range(1, count - 1))
+        values.extend((minimum, *interior, maximum))
+    return tuple(values)

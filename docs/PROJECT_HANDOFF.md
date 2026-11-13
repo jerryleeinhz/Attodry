@@ -4,6 +4,27 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 range coordinates (2026-11-13)
+
+- Add `current_rms_ranges_a` / `frequency_ranges_hz`, mutually exclusive with the
+  corresponding original explicit lists. Strict `min` / `max` / `scale` / integer
+  `points` expand offline; preserve order/repeats and precheck the 100000 grid cap.
+  Dataclass, runtime/analysis archives and safety protections retain the resolved
+  point fields. Equivalent formats preserve whole-condition recovery.
+- The 25 Hz public/review preset uses six inclusive linear RMS current points.
+  Preserve station private addresses, limits, settling and Notebook changes.
+  No second scan is authorized by deployment or by converting the review file.
+- Hardware status/cleanup protections are not changed by this format extension.
+  A preflight rejection is not a successful scan or commissioning. Keep actual
+  station run identities, raw diagnostics and failure/launch evidence on station;
+  a configuration-format update must never replay a prior launch.
+- Verification: 100 guarded release regressions passed in 49.300 s, covering
+  range/list identity, malformed/oversized plans, native driver command/wait
+  equivalence, six-point fake capture, accepted archives, mixed detectors,
+  analysis and list-to-range whole-condition recovery. Source-only and focused
+  combination suites passed 41 and 15 cases respectively (overlapping suites).
+  Delivery repeats the release suite from an isolated target archive.
+
 ### 6221 explicit output connections and 25 Hz review preset (2026-11-13)
 
 - Add required `inner_shield`, `output_low_grounding`, `phase_marker_enabled` to new

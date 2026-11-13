@@ -3,6 +3,7 @@ from copy import deepcopy
 import math
 import unittest
 from dataclasses import asdict
+from unittest.mock import patch
 
 from attodry_control.excitation_6221_config import parse_excitation_6221
 from attodry_control.keithley6221_ac import Keithley6221Ac, Keithley6221Error, validate_active_state
@@ -61,6 +62,105 @@ class Fake6221:
 
 
 class ConfigTests(unittest.TestCase):
+    def test_six_point_range_is_exactly_the_existing_rms_list(self):
+        expected = source_config(current_rms_points_a=[.5e-6, 2.5e-6, 4.5e-6, 6.5e-6, 8.5e-6, 10.5e-6],
+                                 frequency_points_hz=[25.])
+        table = asdict(expected)
+        del table["current_rms_points_a"]
+        table["current_rms_ranges_a"] = [{"min": .5e-6, "max": 10.5e-6, "scale": "linear", "points": 6}]
+        actual = parse_excitation_6221(table)
+        self.assertEqual(asdict(actual), asdict(expected))
+        self.assertEqual(actual.grid(), expected.grid())
+        self.assertNotIn("current_rms_ranges_a", asdict(actual))
+        from attodry_control.excitation_6221_config import Excitation6221Config
+        self.assertEqual(actual, Excitation6221Config(**asdict(actual)))
+
+    def test_frequency_log_ranges_and_literal_current_list_keep_outer_order(self):
+        table = asdict(source_config())
+        del table["frequency_points_hz"]
+        table["frequency_ranges_hz"] = [{"min": 25., "max": 2500., "scale": "log", "points": 3}]
+        actual = parse_excitation_6221(table)
+        self.assertEqual(actual.frequency_points_hz[0], 25.)
+        self.assertEqual(actual.frequency_points_hz[-1], 2500.)
+        self.assertAlmostEqual(actual.frequency_points_hz[1], 250.)
+        self.assertEqual(len(actual.grid()), 6)
+        self.assertEqual([p["excitation_current_rms_a"] for p in actual.grid()], [1e-6, 2e-6] * 3)
+        self.assertEqual(actual.grid()[2]["excitation_frequency_hz"], actual.frequency_points_hz[1])
+
+    def test_ranges_keep_segment_order_and_repeated_boundaries(self):
+        table = asdict(source_config(frequency_points_hz=[200., 200.]))
+        del table["current_rms_points_a"]
+        table["current_rms_ranges_a"] = [
+            {"min": 1e-6, "max": 2e-6, "scale": "linear", "points": 2},
+            {"min": 2e-6, "max": 3e-6, "scale": "linear", "points": 2},
+            {"min": 1e-6, "max": 2e-6, "scale": "linear", "points": 2}]
+        actual = parse_excitation_6221(table)
+        self.assertEqual(actual.current_rms_points_a, (1e-6, 2e-6, 2e-6, 3e-6, 1e-6, 2e-6))
+        self.assertEqual(len(actual.grid()), 12)
+
+    def test_each_coordinate_requires_exactly_one_points_or_ranges_form(self):
+        for point_name, range_name, segment in (
+            ("current_rms_points_a", "current_rms_ranges_a", {"min": 1e-6, "max": 2e-6, "scale": "linear", "points": 2}),
+            ("frequency_points_hz", "frequency_ranges_hz", {"min": 25., "max": 50., "scale": "linear", "points": 2})):
+            for both in (False, True):
+                table = asdict(source_config())
+                if both:
+                    table[range_name] = [segment]
+                else:
+                    del table[point_name]
+                with self.subTest(coordinate=point_name, both=both), self.assertRaisesRegex(ValueError, "exactly one"):
+                    parse_excitation_6221(table)
+        with self.assertRaisesRegex(ValueError, "unknown"):
+            source_config(current_ranges=[1, 2])
+
+    def test_ranges_reject_malformed_segments_counts_scales_and_endpoints(self):
+        valid = {"min": 1e-6, "max": 2e-6, "scale": "linear", "points": 2}
+        invalid = [None, {}, [], [None], [1],
+                   [{key: value for key, value in valid.items() if key != "scale"}],
+                   [dict(valid, step=1e-6)], [dict(valid, point=6)],
+                   *[[dict(valid, points=value)] for value in (True, False, 1, 0, -1, 6., "6")],
+                   *[[dict(valid, scale=value)] for value in ("LINEAR", "unknown", True, [])],
+                   *[[dict(valid, min=value)] for value in (0, -1e-6, True, float("nan"), float("inf"), 2e-6, 3e-6)],
+                   *[[dict(valid, max=value)] for value in (float("nan"), float("inf"), 0, 1e-6)]]
+        for value in invalid:
+            table = asdict(source_config())
+            del table["current_rms_points_a"]
+            table["current_rms_ranges_a"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_excitation_6221(table)
+
+    def test_range_counts_and_cartesian_limit_checked_before_generating_points(self):
+        current = {"min": 1e-6, "max": 2e-6, "scale": "linear", "points": 501}
+        frequency = {"min": 25., "max": 50., "scale": "linear", "points": 200}
+        table = asdict(source_config())
+        del table["current_rms_points_a"], table["frequency_points_hz"]
+        cases = [([dict(current, points=10**12)], [frequency]),
+                 ([dict(current, points=50001), dict(current, points=50000)], [frequency]),
+                 ([current], [frequency])]
+        with patch("attodry_control.excitation_6221_config._expand_ranges", side_effect=AssertionError("must not allocate")):
+            for currents, frequencies in cases:
+                with self.subTest(currents=currents), self.assertRaisesRegex(ValueError, "100000"):
+                    parse_excitation_6221(dict(table, current_rms_ranges_a=currents, frequency_ranges_hz=frequencies))
+        table["current_rms_ranges_a"] = [dict(current, points=100000)]
+        table["frequency_points_hz"] = [25.]
+        actual = parse_excitation_6221(table)
+        self.assertEqual(len(actual.current_rms_points_a), 100000)
+        self.assertEqual(actual.current_rms_points_a[-1], 2e-6)
+
+    def test_range_points_retain_peak_plus_offset_and_frequency_limits(self):
+        table = asdict(source_config(max_current_peak_a=3e-6, offset_a=1e-6,
+                                    current_rms_points_a=[1e-6], frequency_points_hz=[25.]))
+        del table["current_rms_points_a"]
+        table["current_rms_ranges_a"] = [{"min": 1e-6, "max": 2e-6, "scale": "log", "points": 3}]
+        with self.assertRaisesRegex(ValueError, "peak current"):
+            parse_excitation_6221(table)
+        for endpoint in (0., 100001., float("inf"), True):
+            table = asdict(source_config())
+            del table["frequency_points_hz"]
+            table["frequency_ranges_hz"] = [{"min": .001, "max": endpoint, "scale": "linear", "points": 2}]
+            with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
+                parse_excitation_6221(table)
+
     def test_output_contract_is_explicit_and_rejects_unsupported_values(self):
         for key, value in (("inner_shield", "unknown"), ("output_low_grounding", "ground"),
                            ("phase_marker_enabled", False), ("phase_marker_enabled", 1)):
@@ -113,6 +213,24 @@ class ConfigTests(unittest.TestCase):
 
 
 class DriverTests(unittest.TestCase):
+    def test_ranges_and_explicit_lists_have_identical_source_actions_and_reads(self):
+        expected = source_config(current_rms_points_a=[.5e-6, 2.5e-6, 4.5e-6, 6.5e-6, 8.5e-6, 10.5e-6],
+                                 frequency_points_hz=[25.])
+        table = asdict(expected)
+        del table["current_rms_points_a"]
+        table["current_rms_ranges_a"] = [{"min": .5e-6, "max": 10.5e-6, "scale": "linear", "points": 6}]
+        traces = []
+        for config in (expected, parse_excitation_6221(table)):
+            resource = Fake6221()
+            driver = Keithley6221Ac(resource, config, authorize_writes=True)
+            driver.preflight(); driver.configure()
+            for point in config.grid():
+                driver.set_point(point["excitation_current_rms_a"], point["excitation_frequency_hz"])
+                driver.readback()
+            self.assertTrue(driver.cleanup()["verified"])
+            traces.append((resource.commands, resource.queries))
+        self.assertEqual(traces[0], traces[1])
+
     def test_connection_options_and_cleanup_never_change_grounding(self):
         for shield, command in (("output_low", "OLOW"), ("guard", "GUAR")):
             for ground, value in (("floating", "OFF"), ("earth", "ON")):

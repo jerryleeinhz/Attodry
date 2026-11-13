@@ -47,8 +47,15 @@ This feature does not change their hardware capabilities or environmental
 qualification policies. The source must occur before the Lock-in detector stage;
 invalid orders reject offline, without silently reordering the plan.
 
-`[excitation_6221]` contains explicit ordered `frequency_points_hz` and
-`current_rms_points_a`: frequency outer, current inner, repeated values retained.
+`[excitation_6221]` accepts ordered `frequency_points_hz` / `current_rms_points_a`
+or corresponding `frequency_ranges_hz` / `current_rms_ranges_a`. Each coordinate
+uses exactly one form. Ranges contain exactly `min`, `max`, `scale` (`linear` or
+`log`) and integer `points >= 2`, including endpoints. A fixed frequency uses a
+one-element explicit list. Ranges expand offline before connection into the same
+point contract: frequency outer, current inner, declared order and repeated
+endpoints retained. Counts and the 100000-condition source grid are checked before
+allocation. Equivalent list/range forms retain same-run recovery compatibility;
+changing the actual grid requires a new run. See [range choices](KEITHLEY6221_PARAMETERS.md#列表与-ranges--points).
 `lockin` is a single detector stage with no source coordinate/grid of its own.
 For example, 18 temperatures × 2 frequencies × 3 currents produce 108 conditions,
 not another Cartesian product with the old Lock-in sweep. `[lockin_acquisition]`

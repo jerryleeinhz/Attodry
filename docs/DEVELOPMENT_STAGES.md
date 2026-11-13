@@ -1,5 +1,20 @@
 # Development stages
 
+## Current: 6221 list/range coordinate compatibility (2026-11-13)
+
+- Add strict current/frequency `ranges + points` while retaining explicit lists.
+  Resolve before hardware access, cap allocation and preserve repeated visits.
+  Runtime evidence/driver commands and waits remain unchanged. Equivalent grids
+  can recover across list/range syntax, with every real grid change rejected.
+- Update the 25 Hz six-point preset and parameter/operation/performance docs.
+  Delivery deploys source and review configuration only, without another scan.
+- No hardware guard relaxation, event clearing, automatic retry or new setting is
+  part of this parser feature; station failure/cleanup evidence remains on station.
+- Verification: 100 guarded release regressions passed in 49.300 s; overlapping
+  source and combination suites passed 41 and 15 cases. Coverage includes exact
+  expanded coordinates, command/wait equivalence, strict limits, real grid-change
+  rejection, accepted archives and same-run list-to-range recovery.
+
 ## Current: 6221 output connections and documented preset (2026-11-13)
 
 - Explicit Output Low/Guard and Floating/Earth set/readback while output is OFF;

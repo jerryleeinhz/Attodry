@@ -6,6 +6,13 @@ feature. Offline timings do not establish instrument settling or real throughput
 
 ## External 6221 AC excitation (2026-11-13)
 
+Optional current/frequency `ranges + points` compile only during file parsing,
+before any resource connection. Generated points use the existing immutable
+coordinate fields. No per-point runtime matcher, query, write, thread or wait is
+added. Equivalent list/range configurations have identical fake driver traces;
+recovery compares the expanded grid rather than the TOML syntax. Counts are
+bounded before point allocation, including the Cartesian source-grid product.
+
 The new source driver uses one serial owner with injected transport. Its command
 budget is asserted by fake-transport tests: preflight 12 queries / 0 writes,
 configuration 57 / 13, changed source point 59 / 5, unchanged point or formal readback
