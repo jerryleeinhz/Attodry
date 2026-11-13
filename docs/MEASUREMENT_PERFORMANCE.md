@@ -4,6 +4,26 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Pre-capture external coordinate re-observation (2026-11-13)
+
+The shared pre-capture hook delegates to the original one-read implementation.
+Normal external points retain their original coordinate/status/read counts and
+waits. Only a typed frequency coordinate mismatch before formal capture adds
+strict status/settings checks and at most two additional coordinate observations,
+with two 1 s waits. Every query uses the existing serial owner; no setting write,
+source command, extra session or repeat of acquired detector data is introduced.
+
+Exceptional proofs retain actual coordinates, raw query times, wait/outcome and
+failure evidence. Per-sample failed-proof guards prevent repeated calls from
+resetting the observation budget. Existing source before/after formal brackets
+still reject compliance or invalid source state. This bounded counter check does
+not claim a new instrument accuracy or signal-settling performance.
+
+Verification: 281 hardware-blocked offline regressions passed in 89.639 s,
+including 17 new cases for the three-observation budget, unchanged normal I/O,
+status/settings/source identity, audit-failure reuse, strict actual formal reads,
+valid archives and compliance during the exceptional wait.
+
 ## Pending external reference frequency (2026-11-13)
 
 The normal relock path retains its status/coordinate query order and existing

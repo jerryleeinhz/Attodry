@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: Pre-capture external frequency coordinates (2026-11-13)
+
+- Real verification exposed a second counter gate: 818 Hz / 0.9 uA failed the
+  mutual XX/XY check before any formal detector read, after relock and settling.
+- Add an external-only pre-capture coordinate hook with at most three total
+  observations and two 1 s waits, retaining strict target/pair tolerances.
+  Require clean status/settings around waits and preserve raw mismatch evidence.
+- Default shared behavior remains one coordinate read; acquired formal detector
+  data is never retried. Failed/unaudited proofs cannot be reused; 6221 compliance
+  and source bracketing remain in force.
+- Verification: 281 hardware-blocked offline tests passed in 89.639 s, including
+  17 new pre-capture cases and all shared combination/protection regressions.
+
 ## Current: External reference frequency qualification (2026-11-13)
 
 - Reproduce an early relock observation of 1217.13 Hz against a 1217 Hz source

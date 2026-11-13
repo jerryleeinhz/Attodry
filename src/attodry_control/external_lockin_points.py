@@ -29,6 +29,9 @@ class _ExternalReferenceFrequencyMismatch(Sr830Error):
     def __init__(self, message, evidence):
         super().__init__(message)
         self.frequency_evidence = evidence
+        self.evidence = evidence
+        self.raw = tuple(record for observation in evidence.get('observations', {}).values()
+                         for record in observation.get('raw', ()))
 
 
 @dataclass(frozen=True)
@@ -576,8 +579,19 @@ class ExternalLockinPointSession(LockinPointSession):
             observations['lockin_xy']['raw'] = [asdict(r)
                 for r in self.detectors[1]._driver.audit[-2:]]
             evidence['error'] = str(exc)
-            raise _ExternalReferenceFrequencyMismatch(str(exc), evidence) from exc
+            mismatch = _ExternalReferenceFrequencyMismatch(str(exc), evidence)
+            try:
+                self.event('external_reference_frequency_mismatch', deepcopy(evidence))
+            except BaseException as audit_exc:
+                audit_exc.frequency_audit_failed = True
+                audit_exc.frequency_evidence = mismatch.frequency_evidence
+                audit_exc.evidence, audit_exc.raw = mismatch.evidence, mismatch.raw
+                raise
+            raise mismatch from exc
         evidence['matched'] = True
+        if capture_frequency_evidence:
+            observations['lockin_xy']['raw'] = [asdict(r)
+                for r in self.detectors[1]._driver.audit[-2:]]
         self.point_harmonics, skipped = daily._harmonics_for_frequency(
             max(self.target_frequency_hz, *frequencies.values()), self.harmonics,
             skip_unsupported=self.skip_unsupported, config=self.config,
@@ -588,6 +602,99 @@ class ExternalLockinPointSession(LockinPointSession):
             self.point_record["frequency_readback_evidence"] = evidence
         self.point_record["actual_frequency_hz"] = frequencies["lockin_xx"]
         return {}  # Source module owns the two excitation coordinates.
+
+    def _read_pre_capture_coordinates(self):
+        """Reobserve counters before capture; never replay a formal measurement."""
+        point, ordinal = self.point_record, self.sample_count
+        prior = next((p for p in point.get('pre_capture_frequency_rechecks', ())
+                      if p['sample_index'] == ordinal), None)
+        if prior is not None and prior.get('completed') is not True:
+            raise Sr830Error('Pre-capture frequency recheck failed or incomplete; sample cannot be reused')
+        try:
+            return self._read_coordinates()
+        except _ExternalReferenceFrequencyMismatch as exc:
+            if prior is not None:
+                raise
+            initial = exc.frequency_evidence
+            last_mismatch = exc
+        except BaseException as exc:
+            if getattr(exc, 'frequency_audit_failed', False):
+                point.setdefault('pre_capture_frequency_rechecks', []).append({
+                    'policy': 'external-pre-capture-frequency-recheck-v1',
+                    'formal_sample': False, 'sample_index': ordinal, 'completed': False,
+                    'checks': [deepcopy(exc.frequency_evidence)],
+                    'error': str(exc) or type(exc).__name__,
+                    'audit_error': str(exc) or type(exc).__name__, 'failed_at_utc': utc_now()})
+            raise
+
+        settling = self.harmonic_control.settling
+        context = {'point_index': point['point_index'],
+                   'current_rms_a': point['excitation_current_rms_a'],
+                   'frequency_hz': self.target_frequency_hz,
+                   'source': deepcopy(point['excitation_source']),
+                   'harmonics': dict(self.harmonic_control.current_harmonics),
+                   'setting_generation': len(settling.changes)}
+        proof = {'policy': 'external-pre-capture-frequency-recheck-v1',
+                 'formal_sample': False, 'sample_index': ordinal,
+                 'maximum_additional_observations': 2, 'retry_wait_s': 1.0,
+                 'checks': [deepcopy(initial)], 'status_checks': [], 'waits': [],
+                 'completed': False, 'source_context': deepcopy(context),
+                 'started_at_utc': utc_now(), 'started_monotonic_s': settling.monotonic()}
+        point.setdefault('pre_capture_frequency_rechecks', []).append(proof)
+        setting_start = len(point.get('harmonic_setting_checks', ()))
+
+        def verify_context():
+            if (self.point_record is not point or self.sample_count != ordinal or not self.source_active
+                    or self.target_frequency_hz != context['frequency_hz']
+                    or point['point_index'] != context['point_index']
+                    or point['excitation_current_rms_a'] != context['current_rms_a']
+                    or point['excitation_source'] != context['source']
+                    or self.harmonic_control.current_harmonics != context['harmonics']
+                    or len(settling.changes) != context['setting_generation']):
+                raise Sr830Error('Source or point changed during pre-capture frequency recheck')
+
+        try:
+            for _ in range(proof['maximum_additional_observations']):
+                verify_context()
+                proof['status_checks'].append(self._status())
+                self.harmonic_control.verify(*self.pair, context['harmonics'], point)
+                wait = {'requested_s': 1.0, 'completed': False,
+                        'started_monotonic_s': settling.monotonic()}
+                proof['waits'].append(wait)
+                self._wait(1.0)
+                wait.update(completed=True, finished_monotonic_s=settling.monotonic())
+                verify_context()
+                proof['status_checks'].append(self._status())
+                self.harmonic_control.verify(*self.pair, context['harmonics'], point)
+                try:
+                    result = self._read_coordinates(capture_frequency_evidence=True)
+                except _ExternalReferenceFrequencyMismatch as exc:
+                    last_mismatch = exc
+                    proof['checks'].append(deepcopy(exc.frequency_evidence))
+                else:
+                    proof['checks'].append(deepcopy(point['frequency_readback_evidence']))
+                    verify_context()
+                    proof['completed'] = True
+                    return result
+            raise last_mismatch
+        except BaseException as exc:
+            proof['error'] = str(exc) or type(exc).__name__
+            if getattr(exc, 'status_evidence', None) is not None:
+                proof['status_checks'].append(deepcopy(exc.status_evidence))
+            audit = daily._native_error_audit(exc)
+            if audit:
+                proof.update(audit)
+            raise
+        finally:
+            proof['setting_checks'] = deepcopy(point.get('harmonic_setting_checks', ())[setting_start:])
+            proof['finished_at_utc'] = utc_now()
+            proof['finished_monotonic_s'] = settling.monotonic()
+            try:
+                self.event('external_pre_capture_frequency_recheck', deepcopy(proof))
+            except BaseException as exc:
+                proof['completed'] = False
+                proof['audit_error'] = str(exc) or type(exc).__name__
+                raise
 
     def _capture_frequency(self, actual):
         return self.target_frequency_hz

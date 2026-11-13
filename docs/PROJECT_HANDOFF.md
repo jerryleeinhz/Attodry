@@ -4,6 +4,21 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### Pre-capture external frequency coordinates (2026-11-13)
+
+- A typed finite/in-range frequency mismatch in the coordinate check before
+  formal detector capture may use at most two additional observations, 1 s apart.
+  Preserve the original target/pair tolerances and all actual reads/timestamps.
+- Require clean native status and unchanged settings around the exceptional
+  waits. Repeated mismatch, other faults, transport/audit errors and failed-proof
+  reuse reject; no formal detector data is reacquired or relabeled.
+- Shared default behavior delegates to the existing single coordinate read;
+  normal point I/O/waits remain unchanged. Early 30 s relock, output-latch
+  requalification, source protection and strict formal checks retain their scopes.
+- Verification: 281 hardware-blocked offline tests passed, including 17 new
+  pre-capture counter/identity/audit cases, shared combination regressions, and
+  all earlier reference/output-latch/source-protection tests.
+
 ### External reference frequency qualification (2026-11-13)
 
 - A finite, in-range detector frequency mismatch during external-source relock

@@ -225,13 +225,13 @@ class ExternalFrequencyPendingTests(unittest.TestCase):
         self.assertEqual(seen, ["1217.0", "1217.13"])
         self.assertFalse(self.proof(events).get("frequency_pending_observed", False))
 
-    def test_formal_frequency_drift_does_not_reopen_reference_qualification(self):
+    def test_pre_capture_frequency_drift_does_not_reopen_reference_qualification(self):
         f, _, session, clock, events, _ = self.ready()
         session.qualify()
         self.counter(f.xy, [1217.13])
         with self.assertRaisesRegex(Sr830Error, "1217.13"):
             session.sample_point()
-        self.assertEqual(clock.waits, [4.5])
+        self.assertEqual(clock.waits, [4.5, 1.0, 1.0])
         self.assertEqual(len([p for k, p in events if k == "external_reference_requalification"]), 1)
 
 

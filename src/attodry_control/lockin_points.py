@@ -490,11 +490,14 @@ class LockinPointSession:
                 (("xx", self.config.lockin_xx), ("xy", self.config.lockin_xy))
                 if settings.channel_label}
 
+    def _read_pre_capture_coordinates(self):
+        return self._read_coordinates()
+
     def sample_point(self, *, measurement_context=None):
         self._require_range_profile_ready()
         if self.sample_count:
             self._wait(self.args.sample_interval_s)
-        actual = self._read_coordinates()
+        actual = self._read_pre_capture_coordinates()
         record = {**self.point_record, "samples": [], "harmonic_transition_status": []}
         if self.channel_labels:
             record["channel_labels"] = self.channel_labels

@@ -1,5 +1,20 @@
 # Hardware and safety guide
 
+## Pre-capture external frequency observations (2026-11-13)
+
+The external-6221 detector path may re-observe a typed finite/in-range frequency
+coordinate mismatch before formal detector capture: at most three observations
+total, with two 1 s waits. The original target and XX/XY pair tolerances still
+must pass, together with strict clean native status and unchanged detector
+settings around the waits. No source or detector setting is rewritten.
+
+All observations and raw native frequency query times remain audited, including
+exhausted attempts. Persistent mismatch, unknown/malformed readbacks, detector
+faults, changed settings, transport or audit failure reject. A failed proof cannot
+be reused. This only gates the first detector read; it does not retry an acquired
+formal sample, relax overload/cleanup checks or replace source before/after
+capture protection. Other topologies retain the original single coordinate read.
+
 ## Pending external frequency qualification (2026-11-13)
 
 Immediately after an external-source transition, a locked detector's frequency

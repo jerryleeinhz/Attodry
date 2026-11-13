@@ -223,6 +223,17 @@ other faults or unknown evidence still reject. The budget belongs to the current
 point; another qualification call cannot reopen it. No status reset or setting
 rewrite is used. Other policies and formal/cleanup validation remain unchanged.
 
+### Frequency coordinates before formal capture
+
+After qualification, the coordinate gate immediately before formal detector
+capture can encounter a new counter observation outside the original target or
+XX/XY pair tolerance. Only a finite, in-range mismatch can use up to two further
+observations, 1 s apart, with strict clean status and unchanged settings around
+the waits. The same original tolerances must pass before any formal detector
+read; no acquired sample is retried. Preserve every mismatch/value/native query
+time and reject persistent, unknown, faulted or unaudited outcomes. Failed proof
+budgets cannot be reused. Other topologies retain their single-read behavior.
+
 ### Commissioning Notebook support
 
 `sr830_commissioning_sweeps.ipynb` now includes an explicit SQLite/run selector
