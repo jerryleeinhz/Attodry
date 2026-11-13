@@ -91,6 +91,10 @@ class Excitation6221Config:
                      for frequency in self.frequency_points_hz
                      for current in self.current_rms_points_a)
 
+    def amplitude_setting(self, current_rms_a):
+        from .excitation_quantization import quantize_amplitude
+        return quantize_amplitude(current_rms_a, self.offset_a, self.max_current_peak_a)
+
 
 def parse_excitation_6221(table):
     names = {field.name for field in fields(Excitation6221Config)}

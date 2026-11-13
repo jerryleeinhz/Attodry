@@ -4,6 +4,24 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 amplitude programming and readback quantization (2026-11-13)
+
+- Compile RMS targets to the documented source-range grid before instrument I/O;
+  nearest legal value includes DC offset and the original approved peak ceiling.
+  Keep requested coordinates/condition IDs and annotate duplicate effective points.
+- Separate the programming grid from AMPL? serialization and waveform DAC bits.
+  The manual does not specify a WAVE:AMPL parameter LSB; the explicit conservative
+  software policy and bounded readback verification do not claim that knowledge.
+- Record requested RMS, decimal command/peak setting, actual peak/RMS readbacks
+  and rule. V4 live/archive/recovery/analysis share validation; v1–v3 stay readable.
+  Protocol migration requires a new run; no old rejected row becomes accepted.
+- Preserve compliance/interlock/true-unlock/transport protection, serial ownership
+  and existing command/wait counts. Normal rounding adds only an audit event.
+- Verification: 281 guarded offline tests passed, covering targeted fake transport, full six-point mixed detector scans,
+  whole-condition recovery, analysis, duplicate/limit boundaries and forged-evidence
+  checks; all 22 mixed-detector cases passed again after wiring the CLI offline
+  preview. Hardware imports and instrument DLL loading were blocked throughout.
+
 ### 6221 commissioning Notebook compatibility (2026-11-13)
 
 - Add an explicit SQLite/run panel to `sr830_commissioning_sweeps.ipynb`;

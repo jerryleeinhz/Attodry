@@ -107,8 +107,12 @@ def run(argv: list[str] | None = None) -> int:
         from .combination_hardware import load_hardware_combination, run_hardware_combination
         config = load_hardware_combination(args.config)
         if args.command == "describe-hardware":
-            print(json.dumps({"plan": config.snapshot, "conditions": config.plan.conditions()},
-                             ensure_ascii=False, indent=2))
+            description = {"plan": config.snapshot, "conditions": config.plan.conditions()}
+            if config.excitation is not None:
+                from .combination_launch import launch_summary
+                description["excitation_amplitude_programming"] = launch_summary(
+                    config, config.database_path, "offline-preview")["excitation_amplitude_programming"]
+            print(json.dumps(description, ensure_ascii=False, indent=2))
             return 0
         from .combination_launch import resolve_launch, check_run_destination, launch_summary
         database, run_id = resolve_launch(config, args.database, args.run_id)

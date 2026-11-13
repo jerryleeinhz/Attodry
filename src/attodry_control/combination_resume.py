@@ -255,7 +255,8 @@ def external_relock_cleanup_resolution(state, parent, connection):
         config = parse_excitation_6221({f.name: parent['hardware']['excitation'][f.name]
                                         for f in fields(Excitation6221Config)})
         last = source['last_confirmed']
-        validate_active_state(last, config, last['actual']['excitation_current_rms_a'],
+        validate_active_state(last, config, last.get('amplitude_quantization', {}).get(
+                                  'requested_current_rms_a', last['actual']['excitation_current_rms_a']),
                               last['actual']['excitation_frequency_hz'], require_direct_interlock=True)
         if (final['compliance_voltage_v'] != config.compliance_voltage_v
                 or any(final[k] != last[k] for k in ('inner_shield', 'inner_shield_raw',

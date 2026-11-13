@@ -1,5 +1,20 @@
 # Development stages
 
+## Current: 6221 amplitude quantization (2026-11-13)
+
+- Add shared pure source-range-grid compilation and independently bounded AMPL?
+  serialization validation. Use exact decimal commands without extra I/O or waits.
+- Preserve original RMS coordinates, record programmed and readback values/rules,
+  and expose duplicate effective points in offline JSON/terminal previews.
+- Require v4 quantization evidence in live/archive/recovery/analysis paths; retain
+  original legacy contracts. No forged measured-current values or silent source
+  tolerance/ceiling changes. New protocol means a new run, not rewriting history.
+- Offline coverage includes the actual six-point 1–51 nA RMS plan, all source
+  ranges, ties/endpoints/offset limits, equal settings, fake native serialization,
+  whole-condition recovery, and wrong settings/compliance/transport rejection.
+- Verification: 281 guarded offline tests passed, plus all 22 mixed-detector
+  cases rerun after the CLI preview addition; no real instrument I/O.
+
 ## Current: 6221 commissioning Notebook compatibility (2026-11-13)
 
 - Add an explicit SQLite/run panel to `sr830_commissioning_sweeps.ipynb`;

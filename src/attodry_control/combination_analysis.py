@@ -250,6 +250,16 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
         for reading in sample["reads"]:
             record[f"timestamps.{reading['module']}"] = reading["captured_at_utc"]
             record[f"status.{reading['module']}"] = reading.get("status")
+            if (reading["module"] == "excitation"
+                    and execution_plan.get("measurement_contract") == "electrical-excitation-detectors-v4"):
+                status = reading.get("status") or {}
+                if accepted or preliminary:
+                    from .combination_store import _validate_excitation_context
+                    for evidence in (status, status.get("after_sample")):
+                        _validate_excitation_context(evidence, execution_plan, context)
+                        if any(sample["actual"].get(k) != v for k, v in evidence["actual"].items()):
+                            raise ValueError("6221 RMS current readback/frequency contradicts source evidence")
+                record.update(_flatten("excitation_programming", status.get("amplitude_quantization") or {}))
             if reading["module"] == "lockin":
                 record.update(_lockin_range_columns(range_bindings, row["condition_id"], reading))
                 record.update(_channel_label_columns(execution_plan, reading))

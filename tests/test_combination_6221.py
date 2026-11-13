@@ -185,6 +185,74 @@ class Combination6221Tests(unittest.TestCase):
         self.assertEqual(self.xx.writes + self.xy.writes + self.source.commands, [])
         self.assertEqual(self.manager.opened, ["FAKE::SOURCE"])
 
+    def test_six_nanamp_points_quantize_before_write_and_validate_in_analysis(self):
+        import math
+        import struct
+        from attodry_control.combination_analysis import load_combination_snapshot
+        text = self.text.replace('current_rms_points_a = [0.000001, 0.000002]',
+            'current_rms_points_a = [1e-9, 11e-9, 21e-9, 31e-9, 41e-9, 51e-9]')
+        text = text.replace('frequency_points_hz = [17.777, 200.0]', 'frequency_points_hz = [25.0]')
+        self.path.write_text(text, encoding="utf-8")
+        query = self.source.query
+        def rounded(command):
+            value = query(command)
+            return format(struct.unpack("f", struct.pack("f", float(value)))[0], ".6e") if command == "SOUR:WAVE:AMPL?" else value
+        self.source.query = rounded
+        config = self.config()
+        result = self.execute(config)
+        self.assertEqual(result["status"], "completed", result)
+        with closing(open_readonly(self.database)) as db:
+            self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 6)
+        rows = load_combination_snapshot(self.database).rows
+        self.assertEqual(len(rows), 6)
+        for row, target in zip(rows, config.excitation.current_rms_points_a):
+            self.assertEqual(row["requested.excitation_current_rms_a"], target)
+            self.assertEqual(row["excitation_programming.requested_current_rms_a"], target)
+            self.assertEqual(row["actual.excitation_current_rms_a"], row["status.excitation"]["current_peak_a"]/math.sqrt(2))
+        self.assertEqual(len([c for c in self.source.commands if c.startswith("SOUR:WAVE:AMPL ")]), 6)
+        self.assertEqual(len([v for k, v in self.events() if k == "excitation_amplitude_quantized"]), 6)
+
+    def test_preview_marks_quantized_duplicate_coordinates_without_merging_conditions(self):
+        import contextlib
+        import io
+        from attodry_control.combination_cli import run
+        text = self.text.replace('current_rms_points_a = [0.000001, 0.000002]',
+                                 'current_rms_points_a = [21e-9, 21.00001e-9]')
+        self.path.write_text(text, encoding="utf-8")
+        config = self.config()
+        summary = launch_summary(config, self.database, "preview")
+        points = summary["excitation_amplitude_programming"]
+        self.assertEqual(summary["total_conditions"], 4)
+        self.assertEqual(points[0]["same_effective_source_point_indices"], [0, 1])
+        self.assertEqual(points[2]["same_effective_source_point_indices"], [2, 3])
+        self.assertNotEqual(points[0]["requested_current_rms_a"], points[1]["requested_current_rms_a"])
+        self.assertIn("Programmed A peak", launch_text(summary, width=180))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(run(["describe-hardware", "--config", str(self.path)]), 0)
+        self.assertEqual(json.loads(output.getvalue())["excitation_amplitude_programming"], points)
+        self.assertEqual(self.manager.opened, [])
+        self.assertFalse(self.database.exists())
+        result = self.execute(config)
+        self.assertEqual(result["status"], "completed", result)
+        with closing(open_readonly(self.database)) as db:
+            self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 4)
+
+    def test_analysis_and_recovery_both_reject_tampered_quantization(self):
+        import sqlite3
+        from attodry_control.combination_analysis import load_combination_snapshot
+        self.assertEqual(self.execute()["status"], "completed")
+        with closing(sqlite3.connect(self.database)) as db, db:
+            identity, raw = db.execute("SELECT rowid,payload_json FROM combination_samples LIMIT 1").fetchone()
+            sample = json.loads(raw)
+            source = next(r for r in sample["reads"] if r["module"] == "excitation")
+            source["status"]["amplitude_quantization"]["programmed_current_peak_a"] *= 10
+            db.execute("UPDATE combination_samples SET payload_json=? WHERE rowid=?", (json.dumps(sample), identity))
+        with closing(open_readonly(self.database)) as db, self.assertRaises(ValueError):
+            validate_accepted_records(db, "current-run")
+        with self.assertRaisesRegex(ValueError, "quantization"):
+            load_combination_snapshot(self.database)
+
     def test_changed_source_contract_cannot_resume_old_topology(self):
         snapshot = self.config().snapshot
         changed = deepcopy(snapshot)

@@ -6,6 +6,17 @@ feature. Offline timings do not establish instrument settling or real throughput
 
 ## External 6221 AC excitation (2026-11-13)
 
+V4 amplitude quantization is pure CPU work: compile before connection, send one
+decimal amplitude command in the existing point transition, and validate existing
+readbacks against that setting. Command/query budgets below are unchanged. There
+is one extra `excitation_amplitude_quantized` audit event per changed source point,
+no extra VISA command, no extra settle, no corrective rewrite and no retry loop.
+Duplicate effective settings preserve original conditions and the existing source
+transition policy. Analysis validates materialized source evidence without any
+additional database query or instrument access. Fake transport tests exercise all
+six 1–51 nA RMS targets, binary32/seven-digit serialization, range/limit boundaries,
+whole-condition recovery and true configuration/protection failures.
+
 Initial detector latches form an archived nonformal baseline before configuration.
 This classification reuses the existing reads: no extra queries, writes or waits.
 Instantaneous SR865A faults still reject, and post-settle qualification/cleanup

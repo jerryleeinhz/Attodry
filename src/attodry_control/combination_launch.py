@@ -133,6 +133,16 @@ def launch_summary(config, database, run_id):
     if getattr(config, "excitation", None) is not None:
         summary["excitation"] = config.snapshot["hardware"]["excitation"]
         summary["lockin"]["reference_source"] = "external_6221_phase_marker"
+        points, equal_settings = [], {}
+        for index, point in enumerate(config.excitation.grid()):
+            setting = config.excitation.amplitude_setting(point["excitation_current_rms_a"])
+            frequency = point["excitation_frequency_hz"]
+            points.append({"source_point_index": index, "frequency_hz": frequency, **setting})
+            equal_settings.setdefault((frequency, setting["programmed_current_peak_a"]), []).append(index)
+        for point in points:
+            peers = equal_settings[(point["frequency_hz"], point["programmed_current_peak_a"])]
+            point["same_effective_source_point_indices"] = peers if len(peers) > 1 else []
+        summary["excitation_amplitude_programming"] = points
     if "lockin_range_rules" in config.snapshot:
         summary["lockin_range_rules"] = config.snapshot["lockin_range_rules"]
     return summary

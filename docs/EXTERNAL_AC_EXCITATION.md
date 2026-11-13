@@ -156,6 +156,13 @@ enabled by adding the 6221 source module.
 
 ## References and verification
 
+New scans use `electrical-excitation-detectors-v4`: RMS targets remain immutable,
+while amplitude commands use the documented source-range programming grid.
+The archived quantization policy is checked by live acquisition, recovery and
+analysis. Seven-digit AMPL? serialization is a separate bounded comparison;
+neither it nor the 16-bit waveform DAC is claimed to be the SCPI parameter LSB.
+See [the grid, limits, preview and legacy compatibility](KEITHLEY6221_PARAMETERS.md#幅值量化设置读回与真实电流).
+
 The waveform amplitude convention, phase marker and lifecycle/status commands
 were checked against the manufacturer's [6221 reference manual](https://download.tek.com/manual/622x-901-01(B-Jun2005)(Ref).pdf)
 and [6221 user manual](https://download.tek.com/manual/622x-900-01%20(C%20-%20Oct%202008)(User).pdf).

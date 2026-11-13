@@ -16,6 +16,7 @@ import re
 import time
 
 from .excitation_6221_config import Excitation6221Config
+from .excitation_quantization import validate_quantized_amplitude
 
 
 class Keithley6221Error(RuntimeError):
@@ -357,10 +358,15 @@ class Keithley6221Ac:
             raise Keithley6221Error("6221 waveform duration is not infinite")
         if active:
             current, frequency = self.current_point
-            if (not _setting_matches("current_peak_a", state["current_peak_a"], current * math.sqrt(2))
-                    or not _setting_matches("frequency_hz", state["frequency_hz"], frequency)):
+            state["amplitude_quantization"] = self.config.amplitude_setting(current)
+            try:
+                validate_quantized_amplitude(state, current, self.config.offset_a,
+                                             self.config.max_current_peak_a)
+            except ValueError as exc:
+                raise Keithley6221Error("6221 current/frequency setting differs from this condition: " + str(exc)) from exc
+            if not _setting_matches("frequency_hz", state["frequency_hz"], frequency):
                 raise Keithley6221Error("6221 current/frequency setting differs from this condition")
-            self.config.validate_point(state["current_peak_a"] / math.sqrt(2), state["frequency_hz"])
+            self.config.validate_point(current, state["frequency_hz"])
             state["actual"] = {"excitation_current_rms_a": state["current_peak_a"] / math.sqrt(2),
                                "excitation_frequency_hz": state["frequency_hz"]}
         self.last_confirmed_state = deepcopy(state)
@@ -371,17 +377,19 @@ class Keithley6221Ac:
         self._require_authorized()
         if not self.ready:
             raise Keithley6221Error("6221 is not configured")
-        current, frequency, peak = self.config.validate_point(current_rms_a, frequency_hz)
+        current, frequency, _ = self.config.validate_point(current_rms_a, frequency_hz)
         if current not in self.config.current_rms_points_a or frequency not in self.config.frequency_points_hz:
             raise Keithley6221Error("6221 point is outside the archived grid")
         if self.current_point == (current, frequency):
             return self._read_settings(active=True)
+        quantization = self.config.amplitude_setting(current)
         # No assumption that amplitude/frequency updates preserve waveform phase
         # or settled state. A later commissioning may optimize this explicit path.
         self._read_settings(active=self.current_point is not None)
         self._write("SOUR:WAVE:ABOR")
         self._confirm_stopped([])
-        self._setting("SOUR:WAVE:AMPL", peak)
+        self._emit("excitation_amplitude_quantized", quantization)
+        self._setting("SOUR:WAVE:AMPL", quantization["programmed_current_peak_scpi"])
         self._setting("SOUR:WAVE:FREQ", frequency)
         self._write("SOUR:WAVE:ARM")
         self._error()
@@ -429,7 +437,8 @@ class Keithley6221Ac:
         return deepcopy(result)
 
 
-def validate_active_state(state, config, current_rms_a, frequency_hz, *, require_direct_interlock=False):
+def validate_active_state(state, config, current_rms_a, frequency_hz, *, require_direct_interlock=False,
+                          require_quantization=False):
     """Independently validate archived source evidence without instrument I/O."""
     if not isinstance(config, Excitation6221Config) or not isinstance(state, dict):
         raise ValueError("6221 source evidence/config is missing")
@@ -489,6 +498,10 @@ def validate_active_state(state, config, current_rms_a, frequency_hz, *, require
     expected = {"current_peak_a": peak, "frequency_hz": frequency, "offset_a": config.offset_a,
                 "compliance_voltage_v": config.compliance_voltage_v,
                 "phase_marker_phase_deg": config.phase_marker_phase_deg}
+    quantized = require_quantization or "amplitude_quantization" in state
+    if quantized:
+        validate_quantized_amplitude(state, current, config.offset_a, config.max_current_peak_a)
+        del expected["current_peak_a"]
     for key, target in expected.items():
         value = state.get(key)
         if not _setting_matches(key, value, target):
@@ -499,7 +512,8 @@ def validate_active_state(state, config, current_rms_a, frequency_hz, *, require
         if (type(value) not in (int, float) or not math.isfinite(value)
                 or not math.isclose(value, expected_value, rel_tol=1e-12, abs_tol=1e-18)):
             raise ValueError("6221 coordinates contradict source settings: " + key)
-    config.validate_point(actual["excitation_current_rms_a"], actual["excitation_frequency_hz"])
+    config.validate_point(current if quantized else actual["excitation_current_rms_a"],
+                          actual["excitation_frequency_hz"])
     if not _infinite_wave_duration(state.get("duration_time_s")):
         raise ValueError("6221 duration evidence is not infinite")
     return True

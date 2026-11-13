@@ -107,6 +107,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if external:
         from .excitation_6221_config import parse_excitation_6221
         excitation = parse_excitation_6221(configuration._table(document, "excitation_6221"))
+        for current in excitation.current_rms_points_a:
+            excitation.amplitude_setting(current)  # Compile every point before any hardware I/O.
         axes["excitation"] = ScanAxis("excitation", tuple(
             AxisPoint(point, metadata={"source_kind": "ac_current_sine", "source_point_index": i,
                 "frequency_index": i // len(excitation.current_rms_points_a),
@@ -258,7 +260,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                     hardware_resume_contract="whole-condition-reviewed-executions-v1")
     if external:
         snapshot.update(excitation_source="keithley6221",
-                        measurement_contract="electrical-excitation-detectors-v3",
+                        measurement_contract="electrical-excitation-detectors-v4",
                         hardware_scope="external-current-lockin-detectors-v1")
         snapshot["cleanup_policy"].update(excitation="wave_abort_verified_dc_zero_output_off",
                                          lockin="detector_h1_restore_ranges_reserve_no_source_writes")

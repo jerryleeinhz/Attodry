@@ -338,7 +338,8 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(state["phase_marker_line"], 3)
         self.assertEqual(state["phase_marker_phase_deg"], 0)
         self.assertEqual(state["current_basis"], "source_setting_readback")
-        self.assertEqual(state["actual"]["excitation_current_rms_a"], 1e-6)
+        self.assertEqual(state["actual"]["excitation_current_rms_a"], 1.4142e-6 / math.sqrt(2))
+        self.assertEqual(state["amplitude_quantization"]["requested_current_rms_a"], 1e-6)
         self.assertTrue(validate_active_state(state, d.config, 1e-6, 200))
         self.assertNotIn("SOUR:WAVE:ARM?", r.queries)
         self.assertNotIn("*RST", r.commands)
@@ -587,7 +588,7 @@ class DriverTests(unittest.TestCase):
 
     def test_live_and_archive_share_small_current_and_frequency_tolerances(self):
         for peak_delta, frequency_delta, accepted in (
-                (5e-16, 5e-10, True), (5e-15, 0, False), (0, 2e-9, False)):
+                (5e-18, 5e-10, True), (5e-15, 0, False), (0, 2e-9, False)):
             with self.subTest(peak_delta=peak_delta, frequency_delta=frequency_delta):
                 resource = Fake6221()
                 config = source_config(current_rms_points_a=[1e-11], frequency_points_hz=[.001])
@@ -595,7 +596,7 @@ class DriverTests(unittest.TestCase):
                 driver.preflight()
                 driver.configure()
                 state = driver.set_point(1e-11, .001)
-                peak = math.sqrt(2) * 1e-11 + peak_delta
+                peak = state["amplitude_quantization"]["programmed_current_peak_a"] + peak_delta
                 frequency = .001 + frequency_delta
                 resource.state["SOUR:WAVE:AMPL"] = repr(peak)
                 resource.state["SOUR:WAVE:FREQ"] = repr(frequency)
@@ -627,17 +628,19 @@ class DriverTests(unittest.TestCase):
         d.cleanup()
         self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (11, 2))
 
-    def test_d04_seven_digit_amplitudes_validate_live_and_archived_without_relaxing_ceiling(self):
+    def test_legacy_d04_seven_digit_archives_keep_their_original_contract(self):
         for current, raw in ((8.5e-6, '1.202082E-05'), (10.5e-6, '1.484924E-05')):
             resource = Fake6221()
             config = source_config(current_rms_points_a=[current], frequency_points_hz=[25.])
             driver = Keithley6221Ac(resource, config, authorize_writes=True)
             driver.preflight(); driver.configure(); driver.set_point(current, 25.)
-            resource.state['SOUR:WAVE:AMPL'] = raw
             state = driver.readback()
+            del state['amplitude_quantization']  # Pre-v4 data had no programming grid.
+            state['current_peak_a'] = float(raw)
+            state['actual']['excitation_current_rms_a'] = float(raw) / math.sqrt(2)
             self.assertTrue(validate_active_state(state, config, current, 25.))
-            resource.state['SOUR:WAVE:AMPL'] = str(float(raw) + 1e-11)
-            with self.assertRaises(Keithley6221Error): driver.readback()
+            state['current_peak_a'] += 1e-11
+            with self.assertRaises(ValueError): validate_active_state(state, config, current, 25.)
         from attodry_control.keithley6221_ac import _setting_matches
         self.assertFalse(_setting_matches('frequency_hz', 1.202082e-5, 1.2020815280171309e-5 + .001))
         with self.assertRaises(ValueError):

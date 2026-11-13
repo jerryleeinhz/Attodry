@@ -320,7 +320,9 @@ def _validate_excitation_context(state, snapshot, condition):
     frequency = condition["requested"]["excitation_frequency_hz"]
     try:
         validate_active_state(state, config, current, frequency,
-                              require_direct_interlock=snapshot.get("measurement_contract") == "electrical-excitation-detectors-v3")
+            require_direct_interlock=snapshot.get("measurement_contract") in {
+                "electrical-excitation-detectors-v3", "electrical-excitation-detectors-v4"},
+            require_quantization=snapshot.get("measurement_contract") == "electrical-excitation-detectors-v4")
     except Keithley6221Error as exc:
         raise ValueError(str(exc)) from exc
 
@@ -328,7 +330,7 @@ def _validate_excitation_context(state, snapshot, condition):
 def _validate_excitation_record(reading, snapshot, condition, start, finish):
     """Rebuild current-source evidence from raw before/after states on resume."""
     if (snapshot.get("excitation_source") != "keithley6221"
-            or snapshot.get("measurement_contract") not in {"electrical-excitation-detectors-v1", "electrical-excitation-detectors-v2", "electrical-excitation-detectors-v3"}
+            or snapshot.get("measurement_contract") not in {"electrical-excitation-detectors-v1", "electrical-excitation-detectors-v2", "electrical-excitation-detectors-v3", "electrical-excitation-detectors-v4"}
             or reading["measurements"]):
         raise ValueError("Unknown excitation contract or fabricated measured current")
     before = reading["status"]

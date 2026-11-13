@@ -99,6 +99,13 @@ def launch_text(summary, width=None):
                      f"phase marker={source.get('phase_marker_enabled', 'unknown')}, "
                      f"Link #{source['phase_marker_line']}, {source['phase_marker_phase_deg']:g} deg.")
         lines.append("Wave: sine; ranging=BEST; duration=infinite; software start; external trigger OFF.")
+        programmed = summary.get("excitation_amplitude_programming", [])
+        if programmed:
+            lines.append("Amplitude: documented source-range grid; nearest legal setting within peak+offset limit.")
+            lines += _table(("Source point", "Hz", "Requested Arms", "Programmed A peak", "Effective Arms", "Step A", "Equal points"),
+                [(p["source_point_index"], p["frequency_hz"], p["requested_current_rms_a"],
+                  p["programmed_current_peak_a"], p["programmed_current_rms_a"], p["programming_step_a"],
+                  str(p["same_effective_source_point_indices"])) for p in programmed], width)
     for role, settings in summary.get("smu", {}).items():
         hardware.append((role, settings["source_mode"], "AUTO", "-",
             _number(settings["max_abs_current_a"], "A") + " / " +
