@@ -4,6 +4,18 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Unified filter stacks and exclusions (2026-11-13)
+
+Filter stack resolution and readable exclusion labels operate on the existing
+materialized plotting snapshot. Changing Keep values, stack checkboxes, labels
+or manual exclusions adds no database query, instrument call, acquisition wait,
+retry or background poll. Source loading and explicit refresh keep their existing
+read-only transaction boundaries. Group normalization and exclusion bookkeeping
+add only local CPU work; exact observation identities and repeat counts remain
+separate from their human-readable labels. Verification: 139 instrument-blocked
+offline tests passed, including cached-source query-count checks and 21 new
+grouping/UI regressions. This is not a real acquisition-speed measurement.
+
 ## External 6221 AC excitation (2026-11-13)
 
 The D04 frequency serialization fix only adds an exact seven-significant-digit

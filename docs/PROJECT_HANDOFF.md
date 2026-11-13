@@ -4,6 +4,26 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### Unified filter stacks and condition-aware exclusions (2026-11-13)
+
+- Curve and four-channel filters retain their multi-select Keep control and add
+  explicit Stack retained values. Combine enabled filter dimensions with the
+  existing Stack/group control using one effective grouping contract.
+- New readback-based filter stacks use the complete archived target coordinate
+  when available; the chosen plot axes and actual readings remain unchanged.
+  Separate observed condition combinations, runs/configurations, segments and
+  repeats rather than inventing missing Cartesian combinations or pooling data.
+- Exclude IDs labels identify source/run, archived conditions and sample identity.
+  Visible choices follow filters; exclusions outside the temporary filter remain
+  selected and counted. Display labels never replace the exact stored sample ID.
+- Save/load and export retain stack choices, exclusion identities and group keys;
+  old setups default to filter-only behavior. Cached snapshots remain read-only.
+- Verification: 139 instrument-blocked offline tests passed, including 21 new
+  backend/UI cases, cached SQLite/export, legacy setups and heatmap regressions.
+  The target guard found no project acquisition process and four idle Notebook
+  kernels before backup; local delivery receipts record final file verification.
+  User configurations and Notebook changes are preserved without kernel restarts.
+
 ### 6221 range point counts and steps (2026-11-13)
 
 - Linear current/frequency ranges accept exactly one of `points` or a positive

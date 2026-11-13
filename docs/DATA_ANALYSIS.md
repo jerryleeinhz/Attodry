@@ -109,14 +109,30 @@ Restart an existing notebook kernel after updating the code, then run both cells
    Unknown status is retained and counted, never inferred to be clear.
    **AUDIT: include flagged** shows suspect values with visible labels. Loading a
    rejected/problem source additionally requires the top-level audit checkbox.
-5. Group a varying condition with **Stack/group** or constrain it with **Add
-   fixed-condition filter**; unresolved changing acquisition coordinates stop
-   rendering. Empty Keep means no retained values. **Exclude IDs** removes exact
-   observations from the plot only. Exclusions/missing values break lines rather
-   than bridging them; no missing datum is filled with zero. Logs reject nonpositive
-   values and error intervals crossing zero. XY–Z shows raw measured points only,
-   reports overlaps and applies no interpolation. Generic CSV units/independent
-   dimensions are not inferred; without recorded condition IDs it supports Raw only.
+5. Group a varying condition with **Stack/group** or add a filter. **Keep**
+   accepts multiple values; for curve/four-channel cards, enable **Stack retained
+   values** to draw the retained conditions as separate curves. This checkbox is
+   off by default. Several enabled filters group the condition combinations
+   actually recorded; they do not invent a Cartesian grid. Their groups combine
+   with Stack/group. New stacks of setting-readback coordinates use the complete
+   archived target coordinate when available, so ordinary readback variation does
+   not fragment a planned curve. The selected plot axes still use their chosen
+   values. Missing target correspondence is never invented. Other unresolved
+   changing acquisition coordinates still stop rendering. XY–Z and heatmap keep
+   their existing coordinate/panel rules; filter stacking is disabled there.
+   Empty Keep means no retained values.
+   **Exclude IDs** shows the source/run, frequency/current or other archived
+   conditions, condition, attempt and sample. Units and target/readback labels
+   distinguish the displayed values; missing values remain unrecorded. Labels are
+   for display only: exclusions retain the exact source/run/condition/attempt/sample
+   identity, so an equal current in another frequency or run is not excluded.
+   Choices follow the current filter, while already-excluded observations outside
+   it remain selected and are counted. Removing a temporary filter cannot silently
+   re-enable them. Exclusions/missing values break lines rather than bridging
+   them; no missing datum is filled with zero. Logs reject nonpositive values and
+   error intervals crossing zero. XY–Z shows raw measured points only, reports
+   overlaps and applies no interpolation. Generic CSV units/independent dimensions
+   are not inferred; without recorded condition IDs it supports Raw only.
    **Show curve legend** is enabled by default; stacked curves retain every entry,
    with units and recorded group identities, including more than 12 curves.
    Large legends expand the figure and use multiple columns. Hiding the legend
@@ -126,9 +142,11 @@ Restart an existing notebook kernel after updating the code, then run both cells
    loaded snapshot even while acquisition appends new records. Click **Refresh
    records** and render again when you want newer data. Changed static CSV/JSON
    sources still require refresh and re-render; failed refresh cannot keep stale sources.
-7. **Save/Load setup** records sources, axes, filters, statistics, exclusions, legend and audit
-   choices. Missing source files produce an error. Setup/export files are never
-   overwritten.
+7. **Save/Load setup** records sources, axes, filters, filter-stack choices,
+   statistics, exact exclusion identities, legend and audit choices. Old setups
+   without filter stacks load with the new checkboxes off. Grouped exports retain
+   the resolved curve conditions and the full observation identity. Missing source
+   files produce an error. Setup/export files are never overwritten.
 
 Sources: combination SQLite, archived Three-SMU metadata+CSV, electrical Lock-in sweep JSON,
 temperature–excitation summaries/formal CSV, and ordinary CSV. Project loaders

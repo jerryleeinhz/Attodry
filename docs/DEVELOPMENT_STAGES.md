@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: Unified filter stacks and condition-aware exclusions (2026-11-13)
+
+- Add explicit Stack retained values to curve/four-channel filters; combine with
+  legacy Stack/group and preserve archived target/readback distinctions.
+- Improve exact observation labels with run and experimental conditions, retain
+  hidden manual exclusions across temporary filters, and save these selections.
+- Keep source/run/configuration/segment/repeat partitions, quality rules, statistics and
+  missing-point line gaps. Filtering/rendering reuse the loaded read-only snapshot.
+- Verification: 139 instrument-blocked offline tests passed, including 21 new
+  grouping/UI cases, setup/export and cached-read regressions. No acquisition code,
+  settings or instrument I/O is part of this feature. Target delivery is gated by
+  no active project process and idle analysis kernels, with user changes backed up.
+
 ## Current: 6221 range point counts and steps (2026-11-13)
 
 - Add linear `step` alongside `points` for current/frequency range tables, with

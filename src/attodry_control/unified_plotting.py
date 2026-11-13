@@ -11,6 +11,7 @@ import copy
 import csv
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 import hashlib
 import html
 import json
@@ -686,6 +687,58 @@ def _canonical_sample_token(token):
     return _sample_token(identity) if isinstance(identity, Mapping) else token
 
 
+def _stacked_filter_keys(spec) -> tuple[str, ...]:
+    """Validate saved filter stacking before changing UI or rendering state."""
+    stacked = spec.get("stack_filters", ())
+    if not isinstance(stacked, (list, tuple)) or any(not isinstance(key, str) or not key for key in stacked):
+        raise ValueError("Stacked filters must be a list of filter dimensions.")
+    if stacked and spec.get("mode", "curve") not in ("curve", "field"):
+        raise ValueError("Filter stacking is available for curve and four-channel plots only.")
+    filters = spec.get("filters") or {}
+    if stacked and (not isinstance(filters, Mapping) or any(key not in filters for key in stacked)):
+        raise ValueError("Every stacked dimension must have a retained-values filter.")
+    return tuple(dict.fromkeys(stacked))
+
+
+def _effective_group_keys(rows, spec) -> tuple[str, ...]:
+    """Combine explicit stacking choices without grouping readback noise.
+
+    Existing Stack/group retains its meaning unless a newly stacked filter
+    names the same coordinate. New readback filters use their archived target
+    for curve identity; actual values and the original filter stay unchanged.
+    """
+    group = spec.get("group_by")
+    keys = [group] if group else []
+    stacked = _stacked_filter_keys(spec)
+    if not stacked:
+        return tuple(keys)
+    from .combination_analysis import _coordinate_for_x
+    requested = {key[10:] for row in rows for key in row if key.startswith("requested.")}
+    canonical = []
+    for key in stacked:
+        if any(not _scalar(row.get(key)) for row in rows):
+            raise ValueError("Missing stacked condition: " + column_label(key))
+        target = key
+        if key.startswith("actual."):
+            bare = key.split(".", 1)[1]
+            if bare not in requested and any(
+                    bare.startswith(role + "_") and {role + "_v", role + "_a"} <= requested
+                    for role in _SMU_ROLES):
+                raise ValueError("Ambiguous archived target for stacked readback: " + column_label(key))
+            coordinate = _coordinate_for_x(key, requested)
+            if coordinate and coordinate in requested:
+                target = "requested." + coordinate
+                if any(not _scalar(row.get(target)) for row in rows):
+                    raise ValueError("Incomplete archived target for stacked readback: " + column_label(key))
+        canonical.append(target)
+    if group and group.startswith("actual."):
+        coordinate = _coordinate_for_x(group, requested)
+        target = "requested." + coordinate if coordinate else None
+        if target in canonical:
+            keys = [target]
+    return tuple(dict.fromkeys((*keys, *canonical)))
+
+
 def _audit_title(rows):
     flags = []
     if any(r.get("preview") is True for r in rows):
@@ -705,13 +758,17 @@ def _draw_curve(axis, rows, spec, x, y):
     kept_ids = {token(row) for row in kept}
     # Retain excluded/missing positions as NaN gaps; never join across them.
     masked = [{**row, y: None} if token(row) not in kept_ids else row for row in rows]
-    groups = _curve_groups(masked, spec.get("group_by"), separate_samples=mode == "raw")
+    group_keys = spec.get("_effective_group_keys")
+    if group_keys is None:
+        group_keys = _effective_group_keys(rows, spec)
+    groups = _curve_groups(masked, group_keys, separate_samples=mode == "raw")
     summaries = []
     valid = [row for row in kept if _is_numeric(row.get(x)) and _is_numeric(row.get(y))]
     for index, (identity, group) in enumerate(groups.items()):
         points = repeat_statistics(group, x=x, y=y, mode=mode)
         summaries.extend({**p, "group": dict(identity), "channel": y} for p in points)
-        label = _series_label(identity, bool(identity))
+        label = _series_label(identity, bool(identity),
+                              precise_keys=group_keys if spec.get("stack_filters") else ())
         captions = list(dict.fromkeys(caption for key in (x, y)
                                      if (caption := _channel_caption(key, group))))
         if captions:
@@ -753,7 +810,7 @@ def _draw_curve(axis, rows, spec, x, y):
             axis.set_xlim(min(measured_x), max(measured_x))
     style_axis(axis)
     legend_labels = []
-    if spec.get("show_legend", True) and (len(groups) > 1 or spec.get("group_by")):
+    if spec.get("show_legend", True) and (len(groups) > 1 or group_keys):
         handles, labels = axis.get_legend_handles_labels()
         legend_labels = labels
         columns = max(1, math.ceil(len(labels) / 16))
@@ -773,6 +830,7 @@ def _draw_curve(axis, rows, spec, x, y):
               "omitted_missing_or_nonfinite_count": len(kept)-len(valid),
               "displayed_point_count": sum(_is_numeric(p["y"]) for p in summaries),
               "statistics": mode, "legend_labels": legend_labels,
+              "group_keys": list(group_keys),
               "show_legend": bool(spec.get("show_legend", True)),
               "replication_unit": "formal repeats within the same source/run/condition/attempt",
               "uncertainty": "sample SD (ddof=1); SEM=SD/sqrt(n), independence assumed; undefined for n<2",
@@ -797,6 +855,8 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
     eligible = tuple(r for r in selected if not r.get("_manual_excluded"))
     if not eligible:
         raise ValueError("No data rows remain after the selected filters.")
+    effective_groups = _effective_group_keys(selected, spec)
+    spec = {**spec, "_effective_group_keys": effective_groups}
     if mode == "heatmap":
         from .plotting_heatmap import render_heatmap
         return render_heatmap(selected, spec)
@@ -807,7 +867,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
         if field not in ("amplitude_v", "x_v", "y_v", "phase_deg"):
             raise ValueError("Unsupported channel component")
         plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in ("xx", "xy") for h in (1, 2)]
-    group_keys = [spec["group_by"]] if spec.get("group_by") else []
+    group_keys = list(effective_groups)
     # XY-Z separates these contracts with markers; curve/field use series.
     group_keys += ["excitation_source", "measurement_contract"]
     if mode != "xy_z":
@@ -834,6 +894,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                           "plotted_row_count": len(raw), "excluded_quality_count": sum(r['excluded_quality_count'] for r in reports.values()),
                           "omitted_missing_or_nonfinite_count": sum(r['omitted_missing_or_nonfinite_count'] for r in reports.values()),
                           "statistics": spec.get("statistics", "raw"),
+                          "group_keys": list(effective_groups),
                           "source_paths": sorted({p for r in reports.values() for p in r['source_paths']})}
                 return figure, {"rows": tuple(raw), "summary_rows": summary, "report": report}
             figure, axis = plt.subplots(figsize=PUBLICATION_WIDE_FIGSIZE, layout="constrained")
@@ -892,7 +953,7 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
             raise
 
 def _curve_groups(
-    rows: Sequence[Mapping[str, Any]], group_by: str | None, *, separate_samples=True
+    rows: Sequence[Mapping[str, Any]], group_by: str | Sequence[str] | None, *, separate_samples=True
 ) -> dict[tuple[tuple[str, Any], ...], list[Mapping[str, Any]]]:
     automatic_keys = [
         "source_path", "simulated", "run_id", "configuration_revision", "lockin_range_configuration", "segment", "direction", "repeat_index", "role",
@@ -907,7 +968,8 @@ def _curve_groups(
                 if _scalar(row.get(key)) or key in {"lockin_range_configuration",
                     "excitation_source", "measurement_contract"}}) > 1
     ]
-    keys = list(dict.fromkeys(([group_by] if group_by else []) + automatic_keys))
+    explicit_keys = [group_by] if isinstance(group_by, str) else list(group_by or ())
+    keys = list(dict.fromkeys(explicit_keys + automatic_keys))
     result: dict[tuple[tuple[str, Any], ...], list[Mapping[str, Any]]] = {}
     for row in rows:
         identity = tuple((key, row.get(key)) for key in keys)
@@ -915,7 +977,7 @@ def _curve_groups(
     return result
 
 
-def _series_label(identity: tuple[tuple[str, Any], ...], show: bool) -> str:
+def _series_label(identity: tuple[tuple[str, Any], ...], show: bool, *, precise_keys=()) -> str:
     if not show:
         return "observations"
     parts = []
@@ -935,7 +997,8 @@ def _series_label(identity: tuple[tuple[str, Any], ...], show: bool) -> str:
         elif key in {"segment", "direction"}:
             parts.append(f"{column_label(key)}={value}")
         else:
-            parts.append(f"{column_label(key)}={_format_value(value)}")
+            text = repr(value) if key in precise_keys and isinstance(value, float) else _format_value(value)
+            parts.append(f"{column_label(key)}={text}")
     return ", ".join(parts) or "observations"
 
 
@@ -1181,6 +1244,7 @@ class UnifiedPlotDashboard:
         card_id = self._next_card_id
         self._next_card_id += 1
         default_spec = dict(saved or {})
+        stacked = _stacked_filter_keys({**default_spec, "mode": mode})
         title = widgets.Text(
             value=str(default_spec.get("title", "")), description="Title:",
             layout=widgets.Layout(width="100%"),
@@ -1218,6 +1282,7 @@ class UnifiedPlotDashboard:
         component = widgets.Dropdown(options=[("R (V RMS)", "amplitude_v"), ("X (V)", "x_v"), ("Y (V)", "y_v"), ("Phase (deg)", "phase_deg")],
                                      value=default_spec.get("field_component", "amplitude_v"), description="Component:")
         excluded = widgets.SelectMultiple(options=[], description="Exclude IDs:", rows=4, layout=widgets.Layout(width="100%"))
+        exclusion_status = widgets.HTML()
         filter_box = widgets.VBox([])
         add_filter_button = widgets.Button(description="Add fixed-condition filter", icon="filter")
         add_filter_button.layout.width = "auto"
@@ -1237,6 +1302,9 @@ class UnifiedPlotDashboard:
             "filter_box": filter_box, "filters": [], "output": output,
             "figure": None, "rendered": None, "updating": False,
             "statistics": statistics, "quality": quality, "component": component, "excluded": excluded,
+            "excluded_ids": tuple(dict.fromkeys(_canonical_sample_token(v)
+                for v in default_spec.get("excluded_sample_ids", ()))),
+            "exclusion_status": exclusion_status,
             "image": figure_image,
             "snapshot_status": snapshot_status,
         }
@@ -1257,8 +1325,9 @@ class UnifiedPlotDashboard:
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
             widgets.HTML("SD: scatter of formal repeats; SEM: SD/√n assumes independent repeats. Missing status stays unknown. n and exclusions are exported."),
             excluded,
+            exclusion_status,
             widgets.HBox([curve_style, x_scale, y_scale], layout=widgets.Layout(width="100%")),
-            widgets.HTML("<b>Fix other changing conditions to avoid mixing dimensions</b>"),
+            widgets.HTML("<b>Filter other conditions; stack retained values into separate curves</b>"),
             add_filter_button,
             filter_box,
             widgets.HBox([render_card_button, remove_button]),
@@ -1268,14 +1337,15 @@ class UnifiedPlotDashboard:
         remove_button.on_click(lambda _button, target=card: self._remove_card(target))
         render_card_button.on_click(lambda _button, target=card: self._render_card(target))
         add_filter_button.on_click(lambda _button, target=card: self._add_filter(target))
-        for control in (runs, x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, excluded, show_legend):
+        for control in (runs, x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, show_legend):
             control.observe(lambda _change, target=card: self._card_changed(target), names="value")
+        excluded.observe(lambda _change, target=card: self._exclusions_changed(target), names="value")
         self.cards.append(card)
         self.card_box.children = tuple(item["widget"] for item in self.cards)
         checklist.set_sources(self.catalog, default_spec.get("source_paths", ()))
         self._update_card_options(card)
         for key, value in default_spec.get("filters", {}).items():
-            self._add_filter(card, str(key), value)
+            self._add_filter(card, str(key), value, stack=key in stacked)
         self._update_card_options(card)
         card["updating"] = True
         for key in ("x", "y", "z"):
@@ -1290,6 +1360,7 @@ class UnifiedPlotDashboard:
             if _canonical_sample_token(v) in {value for _, value in excluded.options}
         ))
         card["updating"] = False
+        self._update_card_options(card)
 
     def _remove_card(self, card: dict[str, Any]) -> None:
         if card in self.cards:
@@ -1455,10 +1526,16 @@ class UnifiedPlotDashboard:
             group.value = old_group if old_group in {value for _, value in scalars} else ""
             for filter_row in card["filters"]:
                 self._update_filter_row(card, filter_row, force=True)
-            old_excluded = card["excluded"].value
-            card["excluded"].options = [(f"{r.get('source_name', '')} · condition {r.get('condition_id', r.get('row_index'))} · sample {r.get('sample_index', '')} {r.get('role', '')} {r.get('harmonic', '')}", _sample_token(r)) for r in rows]
+            visible = _filter_rows(rows, self._selected_filters(card))
+            context = self._exclusion_context_keys(rows, card)
+            card["excluded"].options = [(self._exclusion_label(r, context), _sample_token(r)) for r in visible]
             available_ids = {v for _, v in card["excluded"].options}
-            card["excluded"].value = tuple(v for v in old_excluded if v in available_ids)
+            card["excluded"].value = tuple(v for v in card["excluded_ids"] if v in available_ids)
+            hidden = sum(v not in available_ids for v in card["excluded_ids"])
+            card["exclusion_status"].value = (
+                f"{len(visible)} observations in the current filters; {len(card['excluded_ids'])} excluded. "
+                + (f"{hidden} excluded observations outside the current selection are retained; "
+                   "change filters/run selection to review them." if hidden else ""))
         except Exception as exc:
             card["snapshot_status"].value = ""
             card["output"].clear_output(wait=False)
@@ -1473,24 +1550,88 @@ class UnifiedPlotDashboard:
         self._invalidate_card(card)
         self._update_card_options(card)
 
+    def _selected_filters(self, card):
+        return {row["field"].value: list(row["choices"].value)
+                for row in card["filters"] if row["field"].value}
+
+    def _exclusions_changed(self, card):
+        if card.get("updating"):
+            return
+        visible = {token for _, token in card["excluded"].options}
+        hidden = [token for token in card["excluded_ids"] if token not in visible]
+        card["excluded_ids"] = tuple(dict.fromkeys((*hidden, *card["excluded"].value)))
+        self._card_changed(card)
+
+    def _exclusion_context_keys(self, rows, card):
+        keys = [card["group"].value]
+        keys += [row["field"].value for row in card["filters"] if row["stack"].value]
+        try:
+            keys = list(_effective_group_keys(rows, {"group_by": card["group"].value or None,
+                "filters": self._selected_filters(card), "stack_filters": [k for k in keys[1:] if k]}))
+        except ValueError:
+            pass  # Render reports invalid grouping; point labels remain available.
+        keys += [card["x"].value]
+        available = {key for row in rows for key in row}
+        candidates = [key for key in sorted(available) if key.startswith("requested.")
+                      and len(column_values(rows, key)) > 1]
+        for bare in ("excitation_frequency_hz", "excitation_current_rms_a", "lockin_frequency_hz"):
+            candidates.append(next((prefix + bare for prefix in ("actual.", "requested.")
+                                    if prefix + bare in available), ""))
+        covered = {_dimension_token(key) for key in keys if key}
+        for key in candidates:
+            if key and _dimension_token(key) not in covered:
+                keys.append(key)
+                covered.add(_dimension_token(key))
+        return tuple(dict.fromkeys(key for key in keys if key))
+
+    def _exclusion_label(self, row, context):
+        parts = [str(row.get("source_name") or Path(str(row.get("source_path", "source"))).name),
+                 "Run " + str(row.get("run_id") or "not recorded")]
+        for key in context:
+            value = row.get(key)
+            prefix, _, bare = key.partition(".")
+            basis = "target" if prefix == "requested" else "readback" if prefix == "actual" else ""
+            if bare in {"excitation_frequency_hz", "lockin_frequency_hz"}:
+                text = f"f {basis}=" + (f"{value!r} Hz" if _is_numeric(value) else "not recorded")
+            elif bare == "excitation_current_rms_a":
+                current = format((Decimal(str(value)) * 1000000).normalize(), "g") if _is_numeric(value) else None
+                text = f"I {basis}=" + (f"{current} µA RMS" if current is not None else "not recorded")
+            else:
+                text = column_label(key) + "=" + (str(value) if _scalar(value) else "not recorded")
+            parts.append(text)
+        for field, title in (("condition_id", "condition"), ("attempt_index", "attempt"),
+                             ("sample_index", "sample"), ("repeat_index", "repeat"),
+                             ("role", "role"), ("harmonic", "h")):
+            if field in row or field in {"condition_id", "attempt_index", "sample_index"}:
+                value = row.get(field)
+                parts.append(f"{title} {value if value is not None else 'not recorded'}")
+        return " · ".join(parts)
+
     def _add_filter(
-        self, card: dict[str, Any], key: str | None = None, values: Sequence[Any] | None = None
+        self, card: dict[str, Any], key: str | None = None, values: Sequence[Any] | None = None,
+        *, stack: bool = False,
     ) -> None:
         widgets = self.widgets
         field = widgets.Dropdown(options=[("Choose dimension", "")], value="", description="Dimension:", layout=widgets.Layout(width="45%"))
         choices = widgets.SelectMultiple(options=[], value=(), rows=5, description="Keep:", layout=widgets.Layout(width="55%"))
         remove = widgets.Button(description="Remove", icon="trash", layout=widgets.Layout(width="100px"))
-        row: dict[str, Any] = {"field": field, "choices": choices, "remove": remove, "saved_values": tuple(values) if values is not None else None, "last_key": None}
+        stack_control = widgets.Checkbox(value=bool(stack) if card["mode"] in {"curve", "field"} else False,
+            description="Stack retained values", disabled=card["mode"] not in {"curve", "field"},
+            layout=widgets.Layout(width="auto"))
+        row: dict[str, Any] = {"field": field, "choices": choices, "stack": stack_control,
+            "remove": remove, "saved_values": tuple(values) if values is not None else None, "last_key": None}
         row["widget"] = widgets.VBox([
-            widgets.HBox([field, remove], layout=widgets.Layout(width="100%")), choices,
+            widgets.HBox([field, remove], layout=widgets.Layout(width="100%")), choices, stack_control,
         ], layout=widgets.Layout(width="100%", padding="6px", border="1px solid #dedede"))
         card["filters"].append(row)
         field.observe(lambda _change, target=card, entry=row: self._update_filter_row(target, entry), names="value")
         field.observe(lambda _change, target=card: self._card_changed(target), names="value")
         choices.observe(lambda _change, target=card: self._card_changed(target), names="value")
+        stack_control.observe(lambda _change, target=card: self._card_changed(target), names="value")
         remove.on_click(lambda _button, target=card, entry=row: self._remove_filter(target, entry))
         card["filter_box"].children = tuple(item["widget"] for item in card["filters"])
         self._update_filter_row(card, row, preferred_key=key)
+        self._card_changed(card)
 
     def _remove_filter(self, card: dict[str, Any], row: dict[str, Any]) -> None:
         if row in card["filters"]:
@@ -1526,11 +1667,7 @@ class UnifiedPlotDashboard:
             card["updating"] = was_updating
 
     def _card_spec(self, card: dict[str, Any]) -> dict[str, Any]:
-        filters: dict[str, list[Any]] = {}
-        for row in card["filters"]:
-            key = row["field"].value
-            if key:
-                filters[key] = list(row["choices"].value)
+        filters = self._selected_filters(card)
         group = card["group"].value
         return {
             "mode": card["mode"], "title": card["title"].value,
@@ -1540,9 +1677,11 @@ class UnifiedPlotDashboard:
             "show_legend": bool(card["show_legend"].value),
             "x_scale": card["x_scale"].value, "y_scale": card["y_scale"].value,
             "filters": filters,
+            "stack_filters": list(dict.fromkeys(row["field"].value for row in card["filters"]
+                if row["field"].value and row["stack"].value)),
             "statistics": card["statistics"].value, "quality_policy": card["quality"].value,
             "field_component": card["component"].value,
-            "excluded_sample_ids": list(card["excluded"].value),
+            "excluded_sample_ids": list(card["excluded_ids"]),
             "run_ids_by_source": {
                 path: [run_id for selected_path, run_id in card["runs"].value if selected_path == path]
                 for path in card["sources"].value
@@ -1648,6 +1787,8 @@ class UnifiedPlotDashboard:
                 raise ValueError("Setup sources are missing: " + ", ".join(sorted(missing)))
             if any(spec.get("mode") not in ("curve", "xy_z", "field", "heatmap") for spec in payload.get("plots", [])):
                 raise ValueError("Unsupported plot mode in setup.")
+            for spec in payload.get("plots", []):
+                _stacked_filter_keys(spec)
             from .combination_analysis import list_combination_runs
             run_catalog = {}
             for spec in payload.get("plots", []):
