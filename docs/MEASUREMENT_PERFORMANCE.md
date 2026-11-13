@@ -14,15 +14,18 @@ recovery compares the expanded grid rather than the TOML syntax. Counts are
 bounded before point allocation, including the Cartesian source-grid product.
 
 The new source driver uses one serial owner with injected transport. Its command
-budget is asserted by fake-transport tests: preflight 12 queries / 0 writes,
-configuration 57 / 13, changed source point 59 / 5, unchanged point or formal readback
-23 / 0, and cleanup 10 / 2. A formal sample group brackets its entire h1/h2 detector
-capture with two source readbacks (46 queries); it does not repeat source setup
+budget is asserted by fake-transport tests: preflight 13 queries / 0 writes,
+configuration 60 / 13, changed source point 62 / 5, unchanged point or formal readback
+24 / 0, and cleanup 11 / 2. A formal sample group brackets its entire h1/h2 detector
+capture with two source readbacks (48 queries); it does not repeat source setup
 per harmonic. Source command/status/error responses remain auditable. No source
 sleep, concurrent reads, OS process scans or additional instrument reader exists.
 The v2 connection contract adds two queries per core state, two connection writes
 once during configuration, and an immediate connection readback before WAVE setup.
 It adds no settling sleeps or connection writes per harmonic/condition/cleanup.
+V3 adds one serial dedicated interlock query per core state; no new writes or
+waits. Raw direct evidence prevents the D04 COND-bit inference from rejecting a
+closed interlock. Failed queries/events still end the attempt; no retry loop.
 
 Changed points conservatively abort/verify OFF, program, arm and initiate the
 waveform. Live amplitude/frequency update optimization is deferred until physical

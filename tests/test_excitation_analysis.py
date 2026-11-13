@@ -239,7 +239,7 @@ class ExcitationPlotTests(unittest.TestCase):
         self.assertEqual(len(snapshot.rows), 4)
         for row in snapshot.rows:
             self.assertEqual(row["excitation_source"], "keithley6221")
-            self.assertEqual(row["measurement_contract"], "electrical-excitation-detectors-v2")
+            self.assertEqual(row["measurement_contract"], "electrical-excitation-detectors-v3")
             self.assertEqual(row["status.excitation"]["current_basis"], "source_setting_readback")
             self.assertEqual(row["status.excitation"]["source_kind"], "keithley6221_ac")
             self.assertGreater(row[CURRENT], 0.)

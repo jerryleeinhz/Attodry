@@ -2,6 +2,13 @@
 
 ## Explicit external AC topology (offline implementation, 2026-11-13)
 
+6221 live interlock permission uses `OUTP:INT:TRIP?`: strict `1` is closed,
+`0` is open; missing/unknown/failed reads reject. Measurement COND bit1 is kept
+raw but does not substitute for the direct query. New v3 archives require this
+evidence. A latched compliance event remains a stop even if current COND is zero;
+it is reported as a latch, not proof of a currently persisting fault. No automatic
+status reset, repeated preflight or protection bypass is introduced.
+
 New 6221 configurations explicitly declare inner shield (Output Low/Guard),
 output low grounding (Floating/Earth) and Phase Marker enabled. The driver
 changes connections only after verified output OFF and reads them back before

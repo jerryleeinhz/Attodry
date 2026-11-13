@@ -70,6 +70,14 @@ def _flag(raw):
     return value in {"1", "ON"}
 
 
+def _interlock_closed(raw):
+    # Rev B Table 14-2: despite TRIPped in the query name, 1 means CLOSED.
+    # Do not substitute MEAS:COND bit 1 (D04 can report COND=0 while closed).
+    if not isinstance(raw, str) or raw.strip() not in {"0", "1"}:
+        raise Keithley6221Error(f"Unknown 6221 interlock response: {raw!r}")
+    return raw.strip() == "1"
+
+
 _SETTING_ABS_TOLERANCES = {
     "current_peak_a": 1e-15,
     "frequency_hz": 1e-9,
@@ -176,11 +184,13 @@ class Keithley6221Ac:
                  # model does not document programmable PTR/NTR filters.
                  "measurement_event": (_word(self._query("STAT:MEAS:EVEN?"))
                                        if self.authorize_writes else None),
-                 "questionable_condition": _word(self._query("STAT:QUES:COND?"))}
+                 "questionable_condition": _word(self._query("STAT:QUES:COND?")),
+                 "status_contract": "6221-direct-interlock-v1",
+                 "interlock_raw": self._query("OUTP:INT:TRIP?")}
         state.update(self._read_connections())
         state["wave_started"] = bool(state["operation_condition"] & 16)
         state["compliance_tripped"] = bool(state["measurement_condition"] & 8)
-        state["interlock_asserted"] = bool(state["measurement_condition"] & 2)
+        state["interlock_asserted"] = _interlock_closed(state["interlock_raw"])
         self._emit("excitation_raw_state", deepcopy(state))
         state["error_queue"] = self._error()
         return state
@@ -191,10 +201,10 @@ class Keithley6221Ac:
         # sweep/delta/calibration/RS232/unknown modes cannot be taken over.
         if state["operation_condition"] & ~(1024 | 128 | 16):
             raise Keithley6221Error("6221 unknown or incompatible operation state")
-        if (state["measurement_condition"] & ~2
-                or (state["measurement_event"] is not None and state["measurement_event"] & ~2)
-                or state["questionable_condition"]):
+        if state["measurement_condition"] & ~2 or state["questionable_condition"]:
             raise Keithley6221Error("6221 compliance, unsafe or unknown condition")
+        if state["measurement_event"] is not None and state["measurement_event"] & ~2:
+            raise Keithley6221Error("6221 latched compliance, unsafe or unknown event; current condition may be clear")
         if not state["interlock_asserted"]:
             raise Keithley6221Error("6221 interlock is not asserted")
         # ARM clears the prior DC source value (Rev B section 7, item 12).
@@ -373,7 +383,7 @@ class Keithley6221Ac:
         return deepcopy(result)
 
 
-def validate_active_state(state, config, current_rms_a, frequency_hz):
+def validate_active_state(state, config, current_rms_a, frequency_hz, *, require_direct_interlock=False):
     """Independently validate archived source evidence without instrument I/O."""
     if not isinstance(config, Excitation6221Config) or not isinstance(state, dict):
         raise ValueError("6221 source evidence/config is missing")
@@ -397,9 +407,18 @@ def validate_active_state(state, config, current_rms_a, frequency_hz):
                  "external_trigger_enabled", "phase_marker_enabled"):
         if type(state.get(name)) is not bool:
             raise ValueError("6221 decoded flag is missing: " + name)
+    contract = state.get("status_contract")
+    if contract is not None or require_direct_interlock:
+        if contract != "6221-direct-interlock-v1":
+            raise ValueError("6221 direct interlock evidence contract is missing or unknown")
+        interlock = _interlock_closed(state.get("interlock_raw"))
+    else:
+        # Preserve the original meaning of v1/v2 archives, without inventing
+        # direct-query evidence or relaxing their original acceptance criteria.
+        interlock = bool(state["measurement_condition"] & 2)
     if (state["wave_started"] != bool(state["operation_condition"] & 16)
             or state["compliance_tripped"] != bool(state["measurement_condition"] & 8)
-            or state["interlock_asserted"] != bool(state["measurement_condition"] & 2)):
+            or state["interlock_asserted"] != interlock):
         raise ValueError("6221 decoded flags contradict the raw status")
     Keithley6221Ac._healthy(state, active=True)
     queue = state.get("error_queue")

@@ -258,7 +258,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                     hardware_resume_contract="whole-condition-reviewed-executions-v1")
     if external:
         snapshot.update(excitation_source="keithley6221",
-                        measurement_contract="electrical-excitation-detectors-v2",
+                        measurement_contract="electrical-excitation-detectors-v3",
                         hardware_scope="external-current-lockin-detectors-v1")
         snapshot["cleanup_policy"].update(excitation="wave_abort_verified_dc_zero_output_off",
                                          lockin="detector_h1_restore_ranges_reserve_no_source_writes")

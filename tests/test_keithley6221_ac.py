@@ -28,7 +28,7 @@ class Fake6221:
         self.state = {
             "*IDN": "KEITHLEY INSTRUMENTS INC.,MODEL 6221,123456,A03",
             "OUTP:STAT": "0", "SOUR:CURR": "0", "SOUR:CURR:COMP": "1",
-            "OUTP:ISH": "OLOW", "OUTP:LTE": "0",
+            "OUTP:ISH": "OLOW", "OUTP:LTE": "0", "OUTP:INT:TRIP": "1",
             "STAT:OPER:COND": "1024", "STAT:MEAS:COND": "2", "STAT:MEAS:EVEN": "0",
             "STAT:QUES:COND": "0", "SYST:ERR": '0,"No error"', "TRIG:OLIN": "2",
             "SOUR:WAVE:FUNC": "SIN", "SOUR:WAVE:RANG": "BEST",
@@ -322,7 +322,7 @@ class DriverTests(unittest.TestCase):
     def test_preflight_requires_identity_exact_model_off_zero(self):
         for key, value in (("*IDN", "KEITHLEY,MODEL 6220,123,A03"), ("OUTP:STAT", "1"),
                            ("SOUR:CURR", "1e-10"), ("TRIG:OLIN", "3"),
-                           ("STAT:MEAS:COND", "0"), ("STAT:MEAS:COND", "10"),
+                           ("OUTP:INT:TRIP", "0"), ("STAT:MEAS:COND", "10"),
                            ("STAT:OPER:COND", "8"), ("STAT:QUES:COND", "1")):
             r, d, _ = self.make()
             r.state[key] = value
@@ -372,6 +372,58 @@ class DriverTests(unittest.TestCase):
         self.assertTrue(any(k == "excitation_raw_state" and p["measurement_event"] == 8 for k, p in events))
         with self.assertRaisesRegex(Keithley6221Error, "faulted"):
             d.set_point(2e-6, 300)
+
+    def test_d04_closed_interlock_with_zero_measurement_condition(self):
+        r, d, _ = self.make()
+        r.state.update({"*IDN": "KEITHLEY INSTRUMENTS INC.,MODEL 6221,FAKE,D04  /700x",
+                        "STAT:MEAS:COND": "0", "STAT:OPER:COND": "128"})
+        self.assertTrue(d.preflight()["interlock_asserted"])
+        self.assertEqual(r.commands, [])
+        d.configure(); d.set_point(1e-6, 200)
+        state = d.readback()
+        self.assertEqual(state["measurement_condition"], 0)
+        self.assertEqual(state["interlock_raw"], "1")
+        self.assertTrue(validate_active_state(state, d.config, 1e-6, 200, require_direct_interlock=True))
+        self.assertTrue(d.cleanup()["output_off_confirmed"])
+
+    def test_direct_interlock_open_unknown_and_transport_failure_fail_closed(self):
+        for raw in ("0", "2", "ON", "", "nan", None):
+            r, d, _ = self.make(); r.state["OUTP:INT:TRIP"] = raw
+            with self.subTest(raw=raw), self.assertRaises((Keithley6221Error, AttributeError)):
+                d.preflight()
+            self.assertEqual(r.commands, [])
+        r, d, _ = self.make(); r.fail_query = "OUTP:INT:TRIP?"
+        with self.assertRaises(OSError): d.preflight()
+        self.assertEqual(r.commands, [])
+        r, d, _ = self.active(); r.state["OUTP:INT:TRIP"] = "0"
+        with self.assertRaisesRegex(Keithley6221Error, "interlock"): d.readback()
+        self.assertTrue(d.faulted)
+
+    def test_historical_event_ten_is_retained_and_not_mistaken_for_current_compliance(self):
+        r, d, events = self.make()
+        r.state.update({"STAT:MEAS:COND": "0", "STAT:MEAS:EVEN": "10"})
+        with self.assertRaisesRegex(Keithley6221Error, "latched compliance"):
+            d.preflight()
+        raw = next(p for k, p in events if k == "excitation_raw_state")
+        self.assertFalse(raw["compliance_tripped"])
+        self.assertEqual(raw["measurement_event"], 10)
+        self.assertTrue(raw["interlock_asserted"])
+        self.assertEqual(r.commands, [])
+
+    def test_v3_archive_requires_direct_raw_proof_but_legacy_keeps_old_semantics(self):
+        _, d, _ = self.active(); original = d.readback()
+        for change in ({"interlock_raw": "0"}, {"interlock_raw": "ON"},
+                       {"interlock_raw": None}, {"interlock_asserted": False},
+                       {"status_contract": None}, {"status_contract": "unknown"}):
+            with self.subTest(change=change), self.assertRaises((ValueError, Keithley6221Error)):
+                validate_active_state({**original, **change}, d.config, 1e-6, 200, require_direct_interlock=True)
+        legacy = deepcopy(original)
+        del legacy["status_contract"]; del legacy["interlock_raw"]
+        self.assertTrue(validate_active_state(legacy, d.config, 1e-6, 200))
+        with self.assertRaises(ValueError):
+            validate_active_state(legacy, d.config, 1e-6, 200, require_direct_interlock=True)
+        legacy["measurement_condition"] = 0
+        with self.assertRaises(ValueError): validate_active_state(legacy, d.config, 1e-6, 200)
 
     def test_no_unknown_or_nonfinite_status_or_setting_accepted(self):
         cases = (("OUTP:STAT", "maybe"), ("STAT:OPER:COND", "65536"),
@@ -510,17 +562,17 @@ class DriverTests(unittest.TestCase):
     def test_serial_query_write_budget_and_no_driver_sleep(self):
         r, d, _ = self.make()
         d.preflight()
-        self.assertEqual((len(r.queries), len(r.commands)), (12, 0))
+        self.assertEqual((len(r.queries), len(r.commands)), (13, 0))
         d.configure()
-        self.assertEqual((len(r.queries), len(r.commands)), (69, 13))
+        self.assertEqual((len(r.queries), len(r.commands)), (73, 13))
         d.set_point(1e-6, 200)
-        self.assertEqual((len(r.queries), len(r.commands)), (128, 18))
+        self.assertEqual((len(r.queries), len(r.commands)), (135, 18))
         before = len(r.queries), len(r.commands)
         d.readback()
-        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (23, 0))
+        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (24, 0))
         before = len(r.queries), len(r.commands)
         d.cleanup()
-        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (10, 2))
+        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (11, 2))
 
     def test_failed_query_retains_primary_when_audit_also_fails(self):
         r, d, _ = self.active()

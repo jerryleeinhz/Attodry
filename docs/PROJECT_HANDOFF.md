@@ -4,6 +4,23 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 direct interlock evidence (2026-11-13)
+
+- D04 /700x station read-only verification found `OUTP:INT:TRIP?=1` with
+  `STAT:MEAS:COND?=0`, output OFF and exact DC zero. Use the dedicated documented
+  interlock query (1=closed, 0=open), not the measurement condition bit, in every
+  source bracket. Unknown responses/transport errors fail closed. No firmware update.
+- New measurement contract v3 requires raw direct-query evidence. V1/v2 retain
+  their original validation; recovery cannot silently migrate measurement contracts.
+- Latched compliance remains a stop condition, including when current conditions
+  are clear. Report it as historical/latched rather than present compliance.
+  Do not reset status, ignore events or automatically retry a failed preflight.
+- See the manual/firmware distinction in KEITHLEY6221_PARAMETERS.md. The prior
+  station run has zero accepted points and stays archived; the authorized rerun
+  uses a fresh identity and the unchanged user-reviewed six-point configuration.
+- Verification: 104 guarded offline regressions passed in 51.755 s; deployment
+  repeats this suite on the station before any new hardware preflight.
+
 ### 6221 range coordinates (2026-11-13)
 
 - Add `current_rms_ranges_a` / `frequency_ranges_hz`, mutually exclusive with the

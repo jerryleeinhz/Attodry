@@ -1,5 +1,19 @@
 # Development stages
 
+## Current: 6221 direct interlock status correction (2026-11-13)
+
+- Replace the live condition-bit interlock inference with the manufacturer query
+  `OUTP:INT:TRIP?`, retaining its raw response and strict closed/open decoding.
+  D04 /700x was verified read-only; its release notes do not document a change to
+  the interlock protocol, so do not describe the observation as a proven firmware bug.
+- V3 accepted archives require direct evidence; legacy archives retain their own
+  criteria. Compliance latches, unknown states and error/transport failures still stop.
+- Regression coverage includes D04 closed/COND-zero, raw-proof tampering/missing
+  evidence, legacy semantics, open/unknown/failed queries, event10 vs current state,
+  mixed-detector capture/analysis/recovery and exact serial command budgets.
+- Verification: 104 guarded release tests passed in 51.755 s locally; station
+  delivery repeats the same hardware-blocked suite before the authorized rerun.
+
 ## Current: 6221 list/range coordinate compatibility (2026-11-13)
 
 - Add strict current/frequency `ranges + points` while retaining explicit lists.
