@@ -99,20 +99,22 @@ def launch_summary(config, database, run_id):
             for role, device in config.smu.hardware.by_role().items()}
     if config.lockin is not None:
         hardware = config.snapshot["hardware"]["lockin"]
+        acquisition = (config.lockin.lockin_acquisition if getattr(config, "excitation", None) is not None
+                       else config.lockin.lockin_sweep)
         summary["lockin"] = {"mode": config.lockin_mode,
             "internal_order": (["frequency", "excitation"]
                                if config.lockin_mode == "frequency_excitation" else [config.lockin_mode]),
             "harmonics_by_role": hardware["harmonics_by_role"],
             "skipped_harmonics_by_frequency": {key: value for key, value in
                 hardware["skipped_harmonics_by_frequency"].items() if value},
-            "overload_policy": config.lockin.lockin_sweep.overload_policy,
-            "settle_time_constants": config.lockin.lockin_sweep.settle_time_constants,
+            "overload_policy": acquisition.overload_policy,
+            "settle_time_constants": acquisition.settle_time_constants,
             "baseline_frequency_hz": config.lockin.lockin_xx.frequency_hz,
             "segment_sensitivity_overrides": {
                 name: [{"segment_index": segment, "xx_full_scale_v": xx, "xy_full_scale_v": xy}
                        for segment, xx, xy in dict.fromkeys(
                            (p.segment_index, p.xx_full_scale_v, p.xy_full_scale_v)
-                           for p in getattr(config.lockin.lockin_sweep, name)
+                           for p in getattr(acquisition, name, ())
                            if p.xx_full_scale_v is not None or p.xy_full_scale_v is not None)]
                 for name in ("frequency_point_specs", "excitation_point_specs")
                 if config.lockin_mode == "frequency_excitation"
@@ -128,6 +130,9 @@ def launch_summary(config, database, run_id):
                 "harmonic_settings": [asdict(s) for s in device.harmonic_settings]}
                 for role, device in (("lockin_xx", config.lockin.lockin_xx),
                                      ("lockin_xy", config.lockin.lockin_xy))}}
+    if getattr(config, "excitation", None) is not None:
+        summary["excitation"] = config.snapshot["hardware"]["excitation"]
+        summary["lockin"]["reference_source"] = "external_6221_phase_marker"
     if "lockin_range_rules" in config.snapshot:
         summary["lockin_range_rules"] = config.snapshot["lockin_range_rules"]
     return summary

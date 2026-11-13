@@ -35,6 +35,11 @@ def scan_contract(snapshot):
         "harmonics_by_role": lockin.get("harmonics_by_role"),
         "skipped_harmonics_by_frequency": lockin.get("skipped_harmonics_by_frequency"),
     }
+    # Source topology is immutable across execution segments. Legacy archives
+    # retain their original contract without invented current coordinates.
+    if "excitation_source" in snapshot or "measurement_contract" in snapshot:
+        contract.update(excitation_source=snapshot.get("excitation_source"),
+                        measurement_contract=snapshot.get("measurement_contract"))
     return json.loads(encode(contract))
 
 
@@ -117,7 +122,7 @@ def _allowed(path, old, new, hardware):
             return "measurement"
         if "autorange_full_scales_v" in path:
             return "measurement"
-        if path[1] == "lockin_sweep" and leaf in {
+        if path[1] in {"lockin_sweep", "lockin_acquisition"} and leaf in {
                 "settle_time_constants", "sample_interval_time_constants", "overload_policy",
                 "xx_full_scale_v", "xy_full_scale_v"}:
             return "measurement"

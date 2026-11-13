@@ -229,7 +229,9 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
         config_sha256 = execution_plan.get("config_sha256")
         provenance.update(config_sha256=config_sha256, plan_sha256=plan_sha256,
             configuration_revision=config_sha256 or plan_sha256,
-            source_sha256=execution_plan.get("source_sha256", {}))
+            source_sha256=execution_plan.get("source_sha256", {}),
+            excitation_source=execution_plan.get("excitation_source"),
+            measurement_contract=execution_plan.get("measurement_contract"))
         record = {
             "schema_version": row["schema_version"], "source_path": source_path,
             "run_id": row["run_id"], "condition_id": row["condition_id"],
@@ -278,7 +280,8 @@ def execution_provenance(rows: Sequence[Mapping]) -> tuple[dict, ...]:
     segments = {}
     fields = ("source_path", "run_id", "execution_id", "execution_index", "execution_kind",
               "execution_status", "execution_error", "execution_cleanup", "configuration_revision",
-              "config_sha256", "plan_sha256", "source_sha256")
+              "config_sha256", "plan_sha256", "source_sha256", "excitation_source",
+              "measurement_contract")
     for row in rows:
         if "execution_kind" not in row:
             continue
@@ -406,7 +409,9 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
     requested = {key[10:] for row in selected for key in row if key.startswith("requested.")}
     x_coordinate = _coordinate_for_x(x, requested)
     covered = {key.split(".", 1)[-1] for key in (*group_by, *filters)}
-    protected = ["run_id", "configuration_revision", "lockin_range_configuration", "simulated", "repeat_index", "sample_index", "role", "harmonic"]
+    protected = ["run_id", "configuration_revision", "lockin_range_configuration",
+                 "excitation_source", "measurement_contract", "simulated", "repeat_index",
+                 "sample_index", "role", "harmonic"]
     protected += sorted({key for row in selected for key in row if
                          key.startswith("axes.") and key.endswith((".segment", ".direction"))})
     protected += sorted("requested." + key for key in requested
@@ -416,6 +421,7 @@ def select_series(rows: Sequence[dict], *, x: str, y: str,
         "temperature": {"temperature_k"}, "magnetic": {"field_x_t", "field_z_t"},
         "smu": {r + s for r in ("smu_bias", "gate_top", "gate_bottom") for s in ("_v", "_a")},
         "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
+        "excitation": {"excitation_current_rms_a", "excitation_frequency_hz"},
     }.items() if x_coordinate in keys), None)
     protected += sorted({key for row in selected for key in row
                          if key.startswith("axes.") and key.endswith(".index")
@@ -438,6 +444,8 @@ def _column_label(column: str) -> str:
         "temperature_k": "Temperature (K)", "field_x_t": "Bx (T)", "field_z_t": "Bz (T)",
         "lockin_excitation_v_rms": "Excitation (V RMS)", "lockin_frequency_hz": "Frequency (Hz)",
         "lockin_current_a_rms": "Excitation current (A RMS)",
+        "excitation_current_rms_a": "Excitation current (A RMS)",
+        "excitation_frequency_hz": "Excitation frequency (Hz)",
     }
     for role in ("smu_bias", "gate_top", "gate_bottom"):
         label = role.replace("_", " ").capitalize()
@@ -446,6 +454,8 @@ def _column_label(column: str) -> str:
                       role + "_v": label + " source (V)",
                       role + "_a": label + " source (A)"})
     prefix, _, key = column.partition(".")
+    if prefix == "actual" and key in {"excitation_current_rms_a", "excitation_frequency_hz"}:
+        return names[key] + " setting readback"
     suffix = " target" if prefix == "requested" else " readback" if prefix == "actual" else ""
     if key in names:
         return names[key] + suffix

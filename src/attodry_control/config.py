@@ -429,6 +429,8 @@ def load_config(
                     "temperature_excitation_scan",
                     "magnetic_field_run",
                     "combination_scan",
+                    "excitation_6221",
+                    "lockin_acquisition",
                 }
                 if project.mode is RunMode.HARDWARE
                 else set()
@@ -939,6 +941,8 @@ def load_temperature_operation_config(
         "temperature_excitation_scan",
         "magnetic_field_run",
         "combination_scan",
+        "excitation_6221",
+        "lockin_acquisition",
         "cleanup",
         "visa",
         "lockin_xx",
@@ -1024,6 +1028,8 @@ def load_temperature_excitation_operation_config(
     }
     known_tables = required_tables | {
         "combination_scan",
+        "excitation_6221",
+        "lockin_acquisition",
         "magnetic_field_run",
         "cleanup",
         "gate_top",
@@ -1207,6 +1213,8 @@ def load_magnetic_field_operation_config(
         raise ConfigError("Standalone magnetic-field operation requires hardware mode.")
     known_tables = {
         "combination_scan",
+        "excitation_6221",
+        "lockin_acquisition",
         "project",
         "cryostat",
         "magnet",
@@ -1417,6 +1425,7 @@ def _parse_lockin(
     name: str,
     safety_role: LockinSafetyRoleConfig,
     safety: LockinSafetyConfig,
+    *, external_excitation: bool = False,
 ) -> LockinConfig:
     model = _string(table.get("model"), f"{name}.model")
     supported_models = {"SR830"} if role is LockinRole.XX else {"SR830", "SR865A"}
@@ -1439,7 +1448,7 @@ def _parse_lockin(
         "sensitivity_full_scale_v",
     }
     expected.add("reserve_mode" if model == "SR830" else "sr865a")
-    if role is LockinRole.XY:
+    if role is LockinRole.XY or external_excitation:
         expected.add("external_reference_edge")
     if table.get("sensitivity_mode") == SensitivityMode.BOUNDED_AUTO.value:
         expected.update(
@@ -1466,13 +1475,16 @@ def _parse_lockin(
             table["external_reference_edge"],
             f"{name}.external_reference_edge",
         )
-        if role is LockinRole.XY
+        if role is LockinRole.XY or external_excitation
         else None
     )
     connected = _boolean(
         table["sine_output_connected"], f"{name}.sine_output_connected"
     )
-    if role is LockinRole.XX:
+    if external_excitation:
+        if reference_source is not ReferenceSource.EXTERNAL_TTL or connected:
+            raise ConfigError(f"{name} requires external_ttl and physically disconnected SINE OUT with external excitation.")
+    elif role is LockinRole.XX:
         if reference_source is not ReferenceSource.INTERNAL:
             raise ConfigError("lockin_xx reference_source must be 'internal'.")
         if not connected:
@@ -1700,10 +1712,14 @@ def _parse_harmonic_settings(
     return tuple(result)
 
 
-def _validate_lockin_pair(xx: LockinConfig, xy: LockinConfig) -> None:
+def _validate_lockin_pair(xx: LockinConfig, xy: LockinConfig, *, external_excitation=False) -> None:
     if xx.address == xy.address:
         raise ConfigError("lockin_xx and lockin_xy must have distinct addresses.")
-    if not math.isclose(xx.frequency_hz, xy.frequency_hz, rel_tol=0.0, abs_tol=1e-12):
+    if external_excitation:
+        for role in (xx, xy):
+            if role.reference_source is not ReferenceSource.EXTERNAL_TTL or role.sine_output_connected:
+                raise ConfigError("External excitation requires both detectors on external TTL with disconnected SINE OUT.")
+    elif not math.isclose(xx.frequency_hz, xy.frequency_hz, rel_tol=0.0, abs_tol=1e-12):
         raise ConfigError("lockin_xx and lockin_xy frequencies must match.")
 
 

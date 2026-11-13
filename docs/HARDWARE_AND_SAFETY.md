@@ -1,5 +1,22 @@
 # Hardware and safety guide
 
+## Explicit external AC topology (offline implementation, 2026-11-13)
+
+`combination_scan.excitation_source="keithley6221"` is a separate authorized
+topology: 6221 owns sine-current amplitude/frequency/output and provides an external
+TTL phase marker to SR830 XX and SR865A XY. Both detector SINE OUT connections
+must be physically disconnected and declared so; neither detector writes source
+amplitude/frequency/phase. The default topology remains SR830 XX internal source.
+
+The explicit source DUT ceiling is `abs(offset) + sqrt(2)*RMS current`, with a
+separate voltage compliance. Unknown source state, compliance/interlock/error or
+unconfirmed waveform startup rejects acquisition. Source setting readback is not
+measured current. Formal source before/after evidence and native detector settings/
+status are retained. Source abort/OFF/zero must be verified before detector cleanup;
+failed communication never establishes OFF. All existing cryostat/field/SMU
+protections remain in force. No real wiring, firmware or sample limits have been
+commissioned by this offline delivery. See [EXTERNAL_AC_EXCITATION.md](EXTERNAL_AC_EXCITATION.md).
+
 ## Stored progress, durations and channel labels (2026-10-25)
 
 Optional XX/XY channel labels identify wiring in archived status, analysis and

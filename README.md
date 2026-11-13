@@ -1,5 +1,10 @@
 # attoDRY Transport Control
 
+新增显式 **6221 交流电流激励 + SR830 XX / SR865A XY 外部参考探测**模式，
+保留原 SR830 电压激励。电流/频率网格属于 `excitation`，Lock-in 负责探测；
+支持原有外层条件、量程规则、整条件恢复和统一画图。当前仅完成离线实现，
+配置、单位和限制见 [外部交流激励](docs/EXTERNAL_AC_EXCITATION.md)。
+
 组合扫描现在支持显式、整条件恢复：修改允许的稳定性/量程等配置后，先用
 `combination_cli resume --run-id ORIGINAL_RUN_ID --check` 只读审核，再明确恢复。
 原点列和失败数据保留，每次启动单独归档配置。详见

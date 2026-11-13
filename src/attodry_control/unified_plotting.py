@@ -55,6 +55,8 @@ _COLUMN_LABELS = {
     "lockin_frequency_hz": ("Lock-in frequency", "Hz"),
     "lockin_excitation_v_rms": ("Lock-in excitation", "V RMS"),
     "lockin_current_a_rms": ("Estimated excitation current", "A RMS"),
+    "excitation_current_rms_a": ("Excitation current", "A RMS"),
+    "excitation_frequency_hz": ("Excitation frequency", "Hz"),
     "elapsed_s": ("Elapsed time", "s"),
     "sequence_index": ("Sequence index", ""),
     "sample_index": ("Sample index", ""),
@@ -483,6 +485,8 @@ def column_label(key: str, rows: Sequence[Mapping[str, Any]] = ()) -> str:
             return name
         label, unit = _known_label(suffix)
         qualifier = status.get(prefix, "")
+        if prefix == "actual" and suffix in {"excitation_current_rms_a", "excitation_frequency_hz"}:
+            qualifier = "setting readback"
         caption = _channel_caption(key, rows)
         if caption:
             label = re.sub(r"Lock-in (?:XX|XY)", caption, label)
@@ -498,6 +502,8 @@ def column_label(key: str, rows: Sequence[Mapping[str, Any]] = ()) -> str:
         "segment": "Scan segment",
         "direction": "Scan direction",
         "sample_status": "Sample status",
+        "excitation_source": "Excitation source",
+        "measurement_contract": "Measurement contract",
     }
     return names.get(key, key.replace("_", " ").replace(".", " "))
 
@@ -580,6 +586,8 @@ def _dimension_module(key: str) -> str | None:
         return "smu"
     if bare.startswith("lockin_"):
         return "lockin"
+    if bare in {"excitation_current_rms_a", "excitation_frequency_hz"}:
+        return "excitation"
     if bare.startswith("csv."):
         return "csv"
     return None
@@ -604,7 +612,8 @@ def _condition_columns(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
     }
     condition.update(
         key for key in keys
-        if key in {"role", "harmonic", "scan_type", "source_kind"}
+        if key in {"role", "harmonic", "scan_type", "source_kind",
+                   "excitation_source", "measurement_contract"}
     )
     return tuple(sorted(condition))
 
@@ -799,6 +808,8 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
             raise ValueError("Unsupported channel component")
         plot_keys = [x] + [f"measured.lockin_{r}_h{h}_{field}" for r in ("xx", "xy") for h in (1, 2)]
     group_keys = [spec["group_by"]] if spec.get("group_by") else []
+    # XY-Z separates these contracts with markers; curve/field use series.
+    group_keys += ["excitation_source", "measurement_contract"]
     if mode != "xy_z":
         group_keys += ["source_path", "run_id", "configuration_revision", "lockin_range_configuration", "segment", "direction", "repeat_index", "role", "harmonic", "scan_type", "source_kind"]
     unresolved = _unresolved_dimensions(eligible, plot_keys=plot_keys, filter_keys=filters, group_keys=group_keys)
@@ -851,7 +862,8 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
                 pad = abs(minimum)*.05 or 1
                 minimum, maximum = minimum-pad, maximum+pad
             norm = mpl.colors.TwoSlopeNorm(0, vmin=minimum, vmax=maximum) if minimum < 0 < maximum else mpl.colors.Normalize(minimum, maximum)
-            configuration_keys = ("configuration_revision", "lockin_range_configuration")
+            configuration_keys = ("configuration_revision", "lockin_range_configuration",
+                                  "excitation_source", "measurement_contract")
             revisions = tuple(dict.fromkeys(tuple(r.get(key) for key in configuration_keys) for r in valid))
             for index, revision in enumerate(revisions):
                 group = [r for r in valid if tuple(r.get(key) for key in configuration_keys) == revision]
@@ -884,7 +896,7 @@ def _curve_groups(
 ) -> dict[tuple[tuple[str, Any], ...], list[Mapping[str, Any]]]:
     automatic_keys = [
         "source_path", "simulated", "run_id", "configuration_revision", "lockin_range_configuration", "segment", "direction", "repeat_index", "role",
-        "harmonic", "scan_type", "source_kind",
+        "harmonic", "scan_type", "source_kind", "excitation_source", "measurement_contract",
     ]
     if separate_samples:
         automatic_keys.append("sample_index")
@@ -892,7 +904,8 @@ def _curve_groups(
     automatic_keys = [
         key for key in automatic_keys
         if len({_value_key(row.get(key)) for row in rows
-                if _scalar(row.get(key)) or key == "lockin_range_configuration"}) > 1
+                if _scalar(row.get(key)) or key in {"lockin_range_configuration",
+                    "excitation_source", "measurement_contract"}}) > 1
     ]
     keys = list(dict.fromkeys(([group_by] if group_by else []) + automatic_keys))
     result: dict[tuple[tuple[str, Any], ...], list[Mapping[str, Any]]] = {}

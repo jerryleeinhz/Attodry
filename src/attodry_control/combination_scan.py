@@ -25,6 +25,7 @@ MODULE_KEYS = {
     "smu": {"smu_bias_v", "smu_bias_a", "gate_top_v", "gate_top_a",
             "gate_bottom_v", "gate_bottom_a"},
     "lockin": {"lockin_excitation_v_rms", "lockin_frequency_hz"},
+    "excitation": {"excitation_current_rms_a", "excitation_frequency_hz"},
 }
 SMU_ROLES = ("smu_bias", "gate_top", "gate_bottom")
 COMBINATION_FIELD_LIMIT_POLICY = "planned-axis-configured-v2"
@@ -74,7 +75,10 @@ class CombinationPlan:
             raise ValueError("Run name and note must be strings")
         modules = [axis.module for axis in self.axes]
         if not modules or len(set(modules)) != len(modules):
-            raise ValueError("Provide one to four distinct module axes")
+            raise ValueError("Provide distinct module axes")
+        external = "excitation" in modules
+        if external and ("lockin" not in modules or modules.index("excitation") > modules.index("lockin")):
+            raise ValueError("External excitation must precede the lockin detector stage")
         for value in (self.samples_per_condition, self.repeats):
             if type(value) is not int or not 1 <= value <= 1000:
                 raise ValueError("Sample/repeat counts must be integers in 1..1000")
@@ -86,9 +90,13 @@ class CombinationPlan:
             if count * self.samples_per_condition > 100000:
                 raise ValueError("Offline plan exceeds 100000 formal samples")
             keys = set(axis.points[0].values)
+            if external and axis.module == "lockin":
+                if len(axis.points) != 1 or keys or axis.points[0].metadata != {"detector_only": True}:
+                    raise ValueError("External excitation requires one detector-only lockin stage")
+                continue
             if not keys or not keys <= MODULE_KEYS[axis.module]:
                 raise ValueError(f"Unsupported {axis.module} coordinate keys")
-            if axis.module in {"temperature", "magnetic", "lockin"}:
+            if axis.module in {"temperature", "magnetic", "lockin", "excitation"}:
                 if keys != MODULE_KEYS[axis.module]:
                     raise ValueError(f"Specify every {axis.module} coordinate (fixed values included)")
             for role in SMU_ROLES:
@@ -109,6 +117,11 @@ class CombinationPlan:
                         raise ValueError("SR830 excitation must be in 0.004..5 V RMS")
                     if not 0.001 <= point.values["lockin_frequency_hz"] <= 102000:
                         raise ValueError("SR830 frequency is out of range")
+                if axis.module == "excitation":
+                    if not 2e-12 / math.sqrt(2) <= point.values["excitation_current_rms_a"] <= 0.105 / math.sqrt(2):
+                        raise ValueError("6221 sine current is outside its RMS envelope")
+                    if not 0.001 <= point.values["excitation_frequency_hz"] <= 100000:
+                        raise ValueError("6221 waveform frequency is out of range")
         # Classify the complete ordered plan, never an individual pure-axis leaf.
         self.magnetic_readback_policy()
 
@@ -189,7 +202,8 @@ class SimulatedCombinationStation:
         self.operations.append(("read", module))
         actual = {k: v for k, v in self.values.items() if k in MODULE_KEYS[module]}
         measured: dict[str, float] = {}
-        excitation = self.values.get("lockin_excitation_v_rms", 0)
+        excitation = self.values.get("lockin_excitation_v_rms",
+                                     self.values.get("excitation_current_rms_a", 0))
         if module == "smu":
             for role in SMU_ROLES:
                 # Deliberately excitation-dependent: stale outer-loop readings
@@ -436,7 +450,9 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                         try:
                             other_axes = tuple(ScanAxis(module, (AxisPoint({
                                 key: value for key, value in actual.items() if key in MODULE_KEYS[module]
-                            }),)) for module in modules if module != "magnetic")
+                            }, metadata=({"detector_only": True} if module == "lockin"
+                                         and "excitation" in modules else {})),))
+                                for module in modules if module != "magnetic")
                             if other_axes:
                                 CombinationPlan(other_axes).validate()
                         except ValueError:
@@ -478,7 +494,9 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                 cleanup_errors.append(f"attempt audit: {audit_error}")
     finally:
         # An audit/presentation failure must not prevent later cleanup actions.
-        for module in ("lockin", "smu", "magnetic", "temperature"):
+        # Remove the external stimulus before restoring detector ranges. Legacy
+        # SR830-source scans retain their existing cleanup order.
+        for module in ("excitation", "lockin", "smu", "magnetic", "temperature"):
             if module not in modules:
                 continue
             try:

@@ -4,6 +4,32 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## External 6221 AC excitation (2026-11-13)
+
+The new source driver uses one serial owner with injected transport. Its command
+budget is asserted by fake-transport tests: preflight 10 queries / 0 writes,
+configuration 47 / 11, changed source point 53 / 5, unchanged point or formal readback
+21 / 0, and cleanup 8 / 2. A formal sample group brackets its entire h1/h2 detector
+capture with two source readbacks (42 queries); it does not repeat source setup
+per harmonic. Source command/status/error responses remain auditable. No source
+sleep, concurrent reads, OS process scans or additional instrument reader exists.
+
+Changed points conservatively abort/verify OFF, program, arm and initiate the
+waveform. Live amplitude/frequency update optimization is deferred until physical
+commissioning establishes its behavior. Repeated coordinates require no source
+write; recorded source visits still remain distinct. A source transition starts
+the detector shared monotonic deadline after source verification (conservative
+settling), final harmonic settings precede the remaining wait, and an already
+settled qualification does not restart that deadline. XX and XY wait together
+and read sequentially. Source-free detector cleanup runs only after source OFF.
+
+The existing coordinator still qualifies temperature once per axis visit and
+uses hard-protected temperature telemetry during later electrical samples. A
+partial setting or source/lock failure ends the condition; resume repeats it as
+a whole, retains earlier accepted conditions, and redoes fresh source preflight.
+Analysis changes perform no instrument queries or waits. These budgets are
+software call counts, not measured VISA latency or real scan-duration promises.
+
 ## Recorded stages and read-only progress (2026-10-25)
 
 The shared electrical coordinator reuses the published photonics

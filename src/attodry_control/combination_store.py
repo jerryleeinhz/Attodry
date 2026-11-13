@@ -174,7 +174,10 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
             raise ValueError("Formal Lock-in range context differs from its compiled condition")
     elif "lockin_range_rule" in status:
         raise ValueError("Formal Lock-in range context has no archived rule schedule")
-    requested_hz = condition["requested"]["lockin_frequency_hz"]
+    external = snapshot.get("excitation_source") == "keithley6221"
+    requested_hz = condition["requested"]["excitation_frequency_hz" if external else "lockin_frequency_hz"]
+    if external:
+        _validate_excitation_context(status.get("excitation_source"), snapshot, condition)
     skipped = config.get("skipped_harmonics_by_frequency", {}).get(str(requested_hz), [])
     skipped_keys = {(item.get("role"), item["harmonic"]) for item in skipped}
     expected = {(role, harmonic) for role, values in selections.items() for harmonic in values
@@ -184,6 +187,8 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
     actual_pairs = set()
     measured = {}
     for pair in status["samples"]:
+        if external:
+            _validate_excitation_context(pair.get("excitation_source"), snapshot, condition)
         if selection is not None:
             context = pair.get("lockin_range_rule", {})
             if (context.get("verified") is not True or context.get("rule_name") != selection["rule_name"]
@@ -298,6 +303,38 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
                 measured[f"{role}_h{harmonic}_{metric}"] = number
     if actual_pairs != expected or measured != reading["measurements"]:
         raise ValueError("formal Lock-in pairs do not reproduce the archived measurements")
+
+
+def _validate_excitation_context(state, snapshot, condition):
+    """Source provenance is checked as well as the independent formal brackets."""
+    from .excitation_6221_config import Excitation6221Config
+    from .keithley6221_ac import Keithley6221Error, validate_active_state
+    from dataclasses import fields
+    archived = snapshot["hardware"]["excitation"]
+    config = Excitation6221Config(**{f.name: archived[f.name] for f in fields(Excitation6221Config)})
+    current = condition["requested"]["excitation_current_rms_a"]
+    frequency = condition["requested"]["excitation_frequency_hz"]
+    try:
+        validate_active_state(state, config, current, frequency)
+    except Keithley6221Error as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _validate_excitation_record(reading, snapshot, condition, start, finish):
+    """Rebuild current-source evidence from raw before/after states on resume."""
+    if (snapshot.get("excitation_source") != "keithley6221"
+            or snapshot.get("measurement_contract") != "electrical-excitation-detectors-v1"
+            or reading["measurements"]):
+        raise ValueError("Unknown excitation contract or fabricated measured current")
+    before = reading["status"]
+    after = before["after_sample"]
+    for state in (before, after):
+        _record_time(state["captured_at_utc"], start, finish)
+        _validate_excitation_context(state, snapshot, condition)
+        if state["actual"] != reading["actual"]:
+            raise ValueError("Excitation settings changed within the formal window")
+    if datetime.fromisoformat(after["captured_at_utc"]) < datetime.fromisoformat(before["captured_at_utc"]):
+        raise ValueError("Excitation brackets are out of order")
 
 
 def _validate_environment_record(reading, module, snapshot, start, finish):
@@ -429,8 +466,11 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
                     actual.update(reading["actual"])
                     measured.update(reading["measurements"])
                     module = reading["module"]
+                    external = snapshot.get("excitation_source") == "keithley6221"
                     expected_actual = ({"temperature_k"} if module == "temperature" else
                         {"field_x_t", "field_z_t"} if module == "magnetic" else
+                        set() if module == "lockin" and external else
+                        {"excitation_current_rms_a", "excitation_frequency_hz"} if module == "excitation" else
                         {"lockin_excitation_v_rms", "lockin_frequency_hz"} if module == "lockin" else
                         {key for key in condition["requested"] if key.startswith(("smu_", "gate_"))})
                     if set(reading["actual"]) != expected_actual:
@@ -442,8 +482,18 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
                         _validate_environment_record(reading, module, snapshot, start, finish)
                     elif module == "smu":
                         _validate_smu_record(reading, condition, start, finish)
+                    elif module == "excitation":
+                        _validate_excitation_record(reading, snapshot, condition, start, finish)
                 if actual != sample["actual"] or measured != sample["measurements"]:
                     raise ValueError("sample summary does not reproduce its raw module readings")
+                if snapshot.get("excitation_source") == "keithley6221":
+                    source = next(r["status"] for r in sample["reads"] if r["module"] == "excitation")
+                    source_start = datetime.fromisoformat(source["captured_at_utc"])
+                    source_finish = datetime.fromisoformat(source["after_sample"]["captured_at_utc"])
+                    detector = next(r["status"] for r in sample["reads"] if r["module"] == "lockin")
+                    for pair in detector["samples"]:
+                        for role in ("lockin_xx", "lockin_xy"):
+                            _record_time(pair[role]["captured_at_utc"], source_start, source_finish)
                 sample_count += 1
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise ValueError(f"Accepted condition {attempt['condition_id']} has incomplete/invalid raw evidence: {exc}") from exc

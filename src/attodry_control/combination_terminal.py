@@ -38,6 +38,8 @@ def _table(headers, rows, width):
 def _coordinate(key, values, route=None):
     names = {"lockin_excitation_v_rms": ("U", "Vrms"),
              "lockin_frequency_hz": ("f", "Hz"),
+             "excitation_current_rms_a": ("I source setting", "Arms"),
+             "excitation_frequency_hz": ("f source", "Hz"),
              "field_x_t": ("Bx", "T"), "field_z_t": ("Bz", "T"),
              "temperature_k": ("T", "K")}
     name, unit = names.get(key, (key.rsplit("_", 1)[0], "V" if key.endswith("_v") else "A"))
@@ -85,6 +87,13 @@ def launch_text(summary, width=None):
                          segment["points"]))
     lines += ["", *_table(("Axis", "Segment/direction", "Requested scan", "Points"), axes, width)]
     hardware = []
+    if "excitation" in summary:
+        source = summary["excitation"]
+        hardware.append(("Keithley 6221", "AC sine source", "RMS coordinates", "-",
+            "peak limit " + _number(source["max_current_peak_a"], "A") +
+            "; compliance " + _number(source["compliance_voltage_v"], "V")))
+        lines.append("Excitation: 6221 current setting/readback (not measured current); "
+                     "both lock-ins use the external phase marker.")
     for role, settings in summary.get("smu", {}).items():
         hardware.append((role, settings["source_mode"], "AUTO", "-",
             _number(settings["max_abs_current_a"], "A") + " / " +

@@ -43,7 +43,8 @@ class ProcessGuardRemovalTests(unittest.TestCase):
         historical_sources = {k: v for k, v in self.current_sources.items()
                               if k not in {"lockin_settling.py", "lockin_range_rules.py",
                                            "measurement_timing.py", "monitor_progress.py",
-                                           "monitor_environment.py"}}
+                                           "monitor_environment.py", "excitation_6221_config.py",
+                                           "keithley6221_ac.py", "external_lockin_points.py"}}
         original_glob = Path.glob
         source_directory = Path(__file__).resolve().parents[1] / "src" / "attodry_control"
         def historical_glob(directory, pattern, *args, **kwargs):

@@ -500,7 +500,7 @@ class LockinPointSession:
             record["channel_labels"] = self.channel_labels
         try:
             daily._capture_sweep_point(
-                *self.pair, target_frequency_hz=actual["lockin_frequency_hz"],
+                *self.pair, target_frequency_hz=self._capture_frequency(actual),
                 harmonics=self.point_harmonics,
                 selected_roles_by_harmonic=daily._roles_by_harmonic(
                     self.point_harmonics, self.harmonics_by_role),
@@ -542,6 +542,9 @@ class LockinPointSession:
                 "measurements": measured, "clean": not problems,
                 "valid_for_analysis": clean, "overload_summary": summary,
                 "overload_continuation": continued, "problems": problems, "status": record}
+
+    def _capture_frequency(self, actual):
+        return actual["lockin_frequency_hz"]
 
     def cleanup(self):
         if not self.writes_started:

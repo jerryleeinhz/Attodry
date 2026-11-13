@@ -50,6 +50,7 @@ class HardwareCombinationConfig:
     run_id: str = "auto"
     lockin_mode: str = "excitation"
     lockin_range_schedule: object | None = None
+    excitation: object | None = None
 
 
 def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
@@ -59,7 +60,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     known = {"project", "cryostat", "magnet", "temperature_stability", "temperature_run",
              "temperature_scan", "temperature_excitation_scan", "magnetic_field_run",
              "cleanup", "visa", "lockin_xx", "lockin_xy", "lockin_sweep",
-             "smu_bias", "gate_top", "gate_bottom", "three_smu_run", "combination_scan"}
+             "smu_bias", "gate_top", "gate_bottom", "three_smu_run", "combination_scan",
+             "excitation_6221", "lockin_acquisition"}
     if set(document) - known:
         raise ValueError("Unknown top-level combination configuration table")
     project = configuration._parse_project(configuration._table(document, "project"))
@@ -69,9 +71,15 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     configuration._strict_keys_with_optional(
         table, "combination_scan",
         {"backend", "order", "samples_per_condition", "repeats", "run_name", "note"},
-        {"lockin_mode", "run_id", "lockin_range_rules"})
-    mode = table.get("lockin_mode", "excitation")
-    if not isinstance(mode, str) or mode not in {"excitation", "frequency", "frequency_excitation"}:
+        {"lockin_mode", "run_id", "lockin_range_rules", "excitation_source"})
+    source = table.get("excitation_source", "sr830")
+    if source not in ("sr830", "keithley6221"):
+        raise ValueError("combination_scan.excitation_source must be sr830 or keithley6221")
+    external = source == "keithley6221"
+    mode = table.get("lockin_mode", "detector" if external else "excitation")
+    if external and mode != "detector":
+        raise ValueError("6221 excitation requires lockin_mode='detector'")
+    if not external and (not isinstance(mode, str) or mode not in {"excitation", "frequency", "frequency_excitation"}):
         raise ValueError("combination_scan.lockin_mode must be excitation, frequency or frequency_excitation")
     run_id = table.get("run_id", "auto")
     if not isinstance(run_id, str) or not run_id.strip() or run_id != run_id.strip():
@@ -80,12 +88,33 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         raise ValueError("Hardware combination requires backend='hardware'")
     order = table["order"]
     if (not isinstance(order, list) or not order
-            or not all(isinstance(m, str) and m in {"temperature", "magnetic", "smu", "lockin"} for m in order)
+            or not all(isinstance(m, str) and m in {"temperature", "magnetic", "smu", "lockin", "excitation"} for m in order)
             or len(set(order)) != len(order)):
-        raise ValueError("Hardware order requires distinct temperature/magnetic/smu/lockin axes")
+        raise ValueError("Hardware order requires distinct temperature/magnetic/smu/excitation/lockin stages")
+    if external and ("excitation" not in order or "lockin" not in order
+                     or order.index("excitation") > order.index("lockin")):
+        raise ValueError("6221 excitation must precede the lockin detector stage")
+    if not external and "excitation" in order:
+        raise ValueError("The excitation axis requires excitation_source='keithley6221'")
+    if external and "lockin_sweep" in document:
+        raise ValueError("Use lockin_acquisition, not the SR830 voltage lockin_sweep, in 6221 mode")
+    if not external and ({"excitation_6221", "lockin_acquisition"} & set(document)):
+        raise ValueError("6221 tables require explicit excitation_source='keithley6221'")
     axes = {}
     smu = lockin = None
     hardware = {}
+    excitation = None
+    if external:
+        from .excitation_6221_config import parse_excitation_6221
+        excitation = parse_excitation_6221(configuration._table(document, "excitation_6221"))
+        axes["excitation"] = ScanAxis("excitation", tuple(
+            AxisPoint(point, metadata={"source_kind": "ac_current_sine", "source_point_index": i,
+                "frequency_index": i // len(excitation.current_rms_points_a),
+                "excitation_index": i % len(excitation.current_rms_points_a)})
+            for i, point in enumerate(excitation.grid())))
+        hardware["excitation"] = {**asdict(excitation), "source_kind": "ac_current_sine",
+            "amplitude_unit": "A_RMS", "instrument_amplitude_unit": "A_peak",
+            "current_basis": "source_setting_readback", "measured_current": False}
     temperature = magnetic = cryostat = None
     if "temperature" in order:
         temperature = configuration.load_temperature_operation_config(path)
@@ -148,21 +177,30 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         safety_path = path.with_name("lockin_safety.toml")
         safety = configuration._parse_lockin_safety(configuration._load_document(safety_path))
         xx = configuration._parse_lockin(configuration._table(document, "lockin_xx"),
-                                        LockinRole.XX, "lockin_xx", safety.lockin_xx, safety)
+                                        LockinRole.XX, "lockin_xx", safety.lockin_xx, safety,
+                                        external_excitation=external)
         xy = configuration._parse_lockin(configuration._table(document, "lockin_xy"),
-                                        LockinRole.XY, "lockin_xy", safety.lockin_xy, safety)
-        configuration._validate_lockin_pair(xx, xy)
-        sweep = configuration._parse_lockin_sweep(configuration._table(document, "lockin_sweep"),
-                                                  safety, xx, xy)
-        lockin = SimpleNamespace(
-            lockin_xx=xx, lockin_xy=xy, lockin_safety=safety, lockin_sweep=sweep,
+                                        LockinRole.XY, "lockin_xy", safety.lockin_xy, safety,
+                                        external_excitation=external)
+        configuration._validate_lockin_pair(xx, xy, external_excitation=external)
+        lockin = SimpleNamespace(lockin_xx=xx, lockin_xy=xy, lockin_safety=safety,
             visa=configuration._parse_visa(configuration._table(document, "visa")))
-        prepared = LockinPointSession(path, lockin, lambda *_: None, mode=mode)
-        axes["lockin"] = ScanAxis("lockin", tuple(AxisPoint({
-            "lockin_excitation_v_rms": point.source_v_rms, "lockin_frequency_hz": point.frequency_hz},
-            (f"f{point.frequency_segment}:e{point.excitation_segment}" if mode != "excitation"
-             else str(point.excitation_segment) if point.excitation_segment is not None else "main"),
-            "ascending", point.metadata()) for point in prepared.grid))
+        if external:
+            from .external_lockin_points import ExternalLockinPointSession, parse_external_lockin_acquisition
+            lockin.lockin_acquisition = parse_external_lockin_acquisition(
+                configuration._table(document, "lockin_acquisition"), xx, xy)
+            lockin.excitation_6221 = excitation
+            prepared = ExternalLockinPointSession(path, lockin, lambda *_: None)
+            axes["lockin"] = ScanAxis("lockin", (AxisPoint({}, metadata={"detector_only": True}),))
+        else:
+            lockin.lockin_sweep = configuration._parse_lockin_sweep(
+                configuration._table(document, "lockin_sweep"), safety, xx, xy)
+            prepared = LockinPointSession(path, lockin, lambda *_: None, mode=mode)
+            axes["lockin"] = ScanAxis("lockin", tuple(AxisPoint({
+                "lockin_excitation_v_rms": point.source_v_rms, "lockin_frequency_hz": point.frequency_hz},
+                (f"f{point.frequency_segment}:e{point.excitation_segment}" if mode != "excitation"
+                 else str(point.excitation_segment) if point.excitation_segment is not None else "main"),
+                "ascending", point.metadata()) for point in prepared.grid))
         hardware["lockin"] = {name: asdict(getattr(lockin, name)) for name in vars(lockin)}
         hardware["lockin"]["safety_sha256"] = hashlib.sha256(safety_path.read_bytes()).hexdigest()
         hardware["lockin"]["point_mode"] = mode
@@ -175,6 +213,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         addresses += [h.address.strip().upper() for h in smu.hardware.by_role().values()]
     if lockin is not None:
         addresses += [lockin.lockin_xx.address.strip().upper(), lockin.lockin_xy.address.strip().upper()]
+    if excitation is not None:
+        addresses.append(excitation.resource.strip().upper())
     if len(set(addresses)) != len(addresses):
         raise ValueError("All active resources, including SMU and SR830 roles, must be distinct")
     plan = CombinationPlan(tuple(axes[m] for m in order), table["samples_per_condition"],
@@ -194,7 +234,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                 raise ValueError("lockin_range_rules cannot combine with auto/per-harmonic sensitivity")
             allowed[role] = set(capabilities_for(device.model).sensitivity_full_scales_v).intersection(
                 getattr(lockin.lockin_safety, role).allowed_fixed_full_scales_v)
-        if any(point.xx_full_scale_v is not None or point.xy_full_scale_v is not None
+        if not external and any(point.xx_full_scale_v is not None or point.xy_full_scale_v is not None
                for name in ("frequency_point_specs", "excitation_point_specs")
                for point in getattr(lockin.lockin_sweep, name)):
             raise ValueError("lockin_range_rules cannot combine with segment sensitivity overrides")
@@ -214,6 +254,12 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                         "magnetic_failure": "monitored_zero_or_manual_verification"},
                     resume_supported=True,
                     hardware_resume_contract="whole-condition-reviewed-executions-v1")
+    if external:
+        snapshot.update(excitation_source="keithley6221",
+                        measurement_contract="electrical-excitation-detectors-v1",
+                        hardware_scope="external-current-lockin-detectors-v1")
+        snapshot["cleanup_policy"].update(excitation="wave_abort_verified_dc_zero_output_off",
+                                         lockin="detector_h1_restore_ranges_reserve_no_source_writes")
     # Include point engines and shared safety code, not just the Cartesian loop.
     snapshot["source_sha256"] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
                                 for p in Path(__file__).parent.glob("*.py")}
@@ -229,7 +275,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if not database.is_absolute():
         database = path.parent / database
     return HardwareCombinationConfig(path, plan, smu, lockin, snapshot, temperature, magnetic,
-                                     cryostat, database.resolve(), run_id, mode, range_schedule)
+                                     cryostat, database.resolve(), run_id, mode, range_schedule, excitation)
 
 
 class _Events:
@@ -264,6 +310,9 @@ class HardwareCombinationStation:
         self.manager_factory = manager_factory
         self.sleep = sleep
         self.smu = self.lockin = None
+        self.excitation = None
+        self.excitation_manager = self.excitation_resource = None
+        self.excitation_off_proof = None
         self.point = None
         self.open_completed = False
         self.cryo = None
@@ -299,6 +348,19 @@ class HardwareCombinationStation:
                 and not self.authorize_hardware):
             raise ValueError("Mixed lock-in hardware requires explicit run authorization before any instrument I/O")
         preflight = {}
+        if self.config.excitation is not None:
+            if not self.authorize_hardware:
+                raise ValueError("6221 excitation requires explicit run authorization before I/O")
+            from .keithley6221_ac import Keithley6221Ac
+            from .lockin_test import _load_resource_manager_factory, _open_resource
+            factory = self.manager_factory or _load_resource_manager_factory()
+            self.excitation_manager = factory()
+            self.excitation_resource = _open_resource(self.excitation_manager,
+                self.config.excitation.resource, self.config.lockin.visa.timeout_ms)
+            self.excitation = Keithley6221Ac(self.excitation_resource, self.config.excitation,
+                self.events.event, authorize_writes=self.authorize_hardware,
+                **({"monotonic": self.monotonic} if self.monotonic is not None else {}))
+            preflight["excitation"] = self.excitation.preflight()
         if self.config.cryostat is not None:
             self.cryo = CryostatPointSession(self.config.cryostat, self.config.temperature,
                 self.config.magnetic, self.events.event, dll=self.dll,
@@ -322,14 +384,21 @@ class HardwareCombinationStation:
             if self.recovery is not None:
                 self.smu.verify_recovery_zero_off(self.events)
         if self.config.lockin is not None:
-            self.lockin = LockinPointSession(
+            session = LockinPointSession
+            if self.config.excitation is not None:
+                from .external_lockin_points import ExternalLockinPointSession
+                session = ExternalLockinPointSession
+            self.lockin = session(
                 self.config.path, self.config.lockin, self.events.event,
-                manager_factory=self.manager_factory, mode=self.config.lockin_mode,
+                manager_factory=self.manager_factory,
+                **({"mode": self.config.lockin_mode} if self.config.excitation is None else {}),
                 authorize_writes=self.authorize_hardware, monotonic=self.monotonic, sleep=self.sleep)
             self.lockin.monitor_wait_context = self._monitor_lockin_wait
             preflight["lockin"] = (self.lockin.open(recovery=True) if self.recovery is not None
                                    else self.lockin.open())
         # All active preflights must succeed before any configuration writes.
+        if self.excitation is not None:
+            self.excitation.configure()
         if self.lockin is not None:
             if self.recovery is not None:
                 self.lockin.configure(recovery=True,
@@ -429,6 +498,14 @@ class HardwareCombinationStation:
             "requested": selection.requested, **result})
 
     def apply(self, module, point):
+        if module == "excitation":
+            frequency = point.values["excitation_frequency_hz"]
+            current = point.values["excitation_current_rms_a"]
+            self.lockin.prepare_source_change(frequency)
+            result = self.excitation.set_point(current, frequency)
+            axis = next(a for a in self.config.plan.axes if a.module == "excitation")
+            self.lockin.source_changed(current, frequency, axis.points.index(point), result)
+            return {"actual": result["actual"], "source": result}
         if module in {"temperature", "magnetic"}:
             result = self.cryo.apply(module, point)
             if self.lockin is not None:
@@ -442,6 +519,8 @@ class HardwareCombinationStation:
                                    if self.lockin is not None else None)
             # Actual sensed coordinates are produced only by the formal read.
             return {"requested": point.values}
+        if module == "lockin" and self.excitation is not None:
+            return {"actual": {}, "detector_only": True}
         lockin_axis = next(axis for axis in self.config.plan.axes if axis.module == "lockin")
         index = lockin_axis.points.index(point)
         return {"actual": self.lockin.set_point(point.values["lockin_excitation_v_rms"],
@@ -464,10 +543,39 @@ class HardwareCombinationStation:
             self.cryo.begin_sample()
 
     def end_sample(self, reads):
+        primary = None
+        try:
+            if self.excitation is not None:
+                final = self.excitation.readback()
+                self.events.event("excitation_after_sample", final)
+                for reading in reads:
+                    if reading["module"] == "excitation":
+                        reading["status"]["after_sample"] = final
+                        if final["actual"] != reading["actual"]:
+                            raise ValueError("Excitation settings changed during formal sample")
+        except BaseException as exc:
+            primary = exc
         if self.cryo is not None:
-            self.cryo.end_sample(reads)
+            try:
+                self.cryo.end_sample(reads)
+            except BaseException as exc:
+                if primary is None:
+                    raise
+                primary.add_note(f"Cryostat after-read also failed: {exc}")
+                try:
+                    self.events.event("environment_after_read_failed", {
+                        "error": str(exc), "primary_error": str(primary)})
+                except BaseException as audit_error:
+                    primary.add_note(f"Secondary-failure audit also failed: {audit_error}")
+        if primary is not None:
+            raise primary
 
     def read(self, module):
+        if module == "excitation":
+            state = self.excitation.readback()
+            return {"module": "excitation", "captured_at_utc": utc_now(),
+                    "actual": dict(state["actual"]), "measurements": {},
+                    "clean": True, "problems": [], "status": state}
         if module in {"temperature", "magnetic"}:
             return self.cryo.read(module)
         if module == "lockin":
@@ -507,7 +615,14 @@ class HardwareCombinationStation:
 
     def cleanup(self, module, failed):
         self.events.cleaning = True
-        if module == "lockin" and self.lockin is not None:
+        if module == "excitation" and self.excitation is not None:
+            result = self.excitation.cleanup()
+            clean = result.get("verified") is True
+            if clean and result.get("output_off_confirmed") is True:
+                self.excitation_off_proof = result
+                if self.lockin is not None:
+                    self.lockin.source_stopped(result)
+        elif module == "lockin" and self.lockin is not None:
             result = self.lockin.cleanup()
             clean = result["verified"]
         elif module == "smu" and self.smu is not None:
@@ -539,6 +654,12 @@ class HardwareCombinationStation:
             if device is not None:
                 try:
                     device.close()
+                except BaseException as exc:
+                    errors.append(f"{type(exc).__name__}: {exc}")
+        for resource in (self.excitation_resource, self.excitation_manager):
+            if resource is not None:
+                try:
+                    resource.close()
                 except BaseException as exc:
                     errors.append(f"{type(exc).__name__}: {exc}")
         if errors:

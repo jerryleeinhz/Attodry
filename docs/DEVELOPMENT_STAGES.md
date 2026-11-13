@@ -1,5 +1,31 @@
 # Development stages
 
+## Current: external 6221 AC source / mixed detectors (2026-11-13)
+
+- Add an explicitly selected 6221 sine-current source axis with frequency/current
+  coordinates, and a detector-only SR830 XX / SR865A XY stage. Preserve the
+  original SR830 excitation mode and existing two semantic detector roles.
+- Validate source limits, RMS/peak conversion, phase marker, distinct resources,
+  external-reference wiring and harmonic-frequency support offline. Verify source
+  OFF before configuration, waveform active before sampling, source before/after
+  formal states and source OFF before detector cleanup; retain partial evidence.
+- Reuse native detector settings/status, harmonic/range/settle machinery, axis-
+  entry temperature qualification, SQLite execution lineage and full-condition
+  recovery. Current/frequency-dependent range rules add no grid points. Reject
+  a source topology/settings change across a same-run recovery.
+- Add current setting axes/provenance to unified analysis, exports, curves,
+  heatmaps and repeat statistics while preserving legacy voltage/estimated-current
+  data and immutable live SQLite snapshots. No measured current is invented.
+- Offline injected-transport tests cover source faults, external lock, native
+  settings, shared waits, complete scans, temperature visits, range rules,
+  partial/failed attempts, archived evidence, resume and old/new analysis.
+  Related guarded regressions passed 161 cases; after independent review fixes,
+  the final overlapping 84-case release suite passed in 48.017 s. Source brackets
+  cover every native read, live/archive tolerances agree, secondary failures
+  preserve the primary error, and partial-open/TTL-edge cleanup is tested.
+  No instrument, remote workstation or deployment was accessed for this stage.
+  Scope and configuration: [EXTERNAL_AC_EXCITATION.md](EXTERNAL_AC_EXCITATION.md).
+
 ## Current: electrical progress, timing and channel labels (2026-10-25)
 
 - Reuse published photonics monitor/timing patterns while preserving electrical

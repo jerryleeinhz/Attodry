@@ -1,0 +1,460 @@
+"""Detector-only SR830 XX / SR865A XY session for an external AC source.
+
+The source module owns current, frequency, output and cleanup. This session owns
+only detector/reference settings and reuses the existing formal pair, sensitivity
+and settling engine. Construction and plan validation perform no instrument I/O.
+"""
+from __future__ import annotations
+
+from contextlib import ExitStack
+from copy import deepcopy
+from dataclasses import asdict, dataclass
+import math
+from pathlib import Path
+from types import SimpleNamespace
+
+from . import config as cfg
+from . import lockin_test as daily
+from .combination_store import utc_now
+from .electrical_lockin_backend import Sr865aReceiver, native_status_problems
+from .lockin_harmonics import HarmonicSensitivitySession
+from .lockin_points import LockinPointSession, _AuditedInstrument
+from .lockin_overload import OVERLOAD_POLICIES
+from .models import LockinRole
+from .sr830 import Sr830, Sr830Error, AuthorizationRequired
+
+
+@dataclass(frozen=True)
+class ExternalLockinAcquisitionConfig:
+    xx_harmonics: tuple[int, ...]
+    xy_harmonics: tuple[int, ...]
+    settle_time_constants: float
+    sample_interval_time_constants: float
+    overload_policy: str
+    skip_unsupported_harmonics: bool = False
+
+
+def parse_external_lockin_acquisition(table, xx, xy):
+    name = "lockin_acquisition"
+    fields = {"xx_harmonics", "xy_harmonics", "settle_time_constants",
+              "sample_interval_time_constants", "overload_policy", "skip_unsupported_harmonics"}
+    cfg._strict_keys_with_optional(table, name, fields, set())
+    selected = {}
+    for role in ("xx", "xy"):
+        values = table[role + "_harmonics"]
+        if (not isinstance(values, list) or any(type(h) is not int or h not in (1, 2, 3) for h in values)
+                or len(set(values)) != len(values)):
+            raise cfg.ConfigError(f"{name}.{role}_harmonics requires unique integers from 1, 2, 3")
+        selected[role] = tuple(values)
+    if not selected["xx"] and not selected["xy"]:
+        raise cfg.ConfigError("External acquisition must select at least one role/harmonic")
+    settle = cfg._positive_number(table["settle_time_constants"], name + ".settle_time_constants")
+    if settle < 5:
+        raise cfg.ConfigError("External acquisition requires at least 5 time constants of settling")
+    interval = cfg._number(table["sample_interval_time_constants"], name + ".sample_interval_time_constants")
+    if interval < 0:
+        raise cfg.ConfigError("External sample interval cannot be negative")
+    policy = table["overload_policy"]
+    if policy not in OVERLOAD_POLICIES:
+        raise cfg.ConfigError("Unknown external Lock-in overload policy")
+    skip = cfg._boolean(table["skip_unsupported_harmonics"], name + ".skip_unsupported_harmonics")
+    if xx.model != "SR830" or xy.model != "SR865A":
+        raise cfg.ConfigError("6221 acquisition currently requires SR830 XX and SR865A XY")
+    if not xy.sr865a.current_status_supported:
+        raise cfg.ConfigError("External SR865A acquisition requires known current-status query support")
+    for role in (xx, xy):
+        if role.reference_source.value != "external_ttl" or role.sine_output_connected:
+            raise cfg.ConfigError("Both external detectors require external TTL and disconnected SINE OUT")
+    return ExternalLockinAcquisitionConfig(selected["xx"], selected["xy"], settle, interval, policy, skip)
+
+
+class _ExternalSr830(Sr830):
+    """Explicit external topology; the legacy SR830 adapter remains unchanged."""
+    def set_fixed_setting(self, field, code):
+        if field in {"reference_mode", "reference_slope"}:
+            allowed = (0,) if field == "reference_mode" else (1, 2)
+            if type(code) is not int or code not in allowed:
+                raise ValueError("External SR830 requires external TTL reference")
+            self._resource.write(f"{'FMOD' if field == 'reference_mode' else 'RSLP'} {code}")
+            return
+        return super().set_fixed_setting(field, code)
+
+    def set_sine_output(self, *args, **kwargs):
+        raise Sr830Error("External detector cannot write source amplitude")
+
+    def set_minimum_sine_output(self, *args, **kwargs):
+        raise Sr830Error("External detector cannot write source amplitude")
+
+    def set_internal_reference_frequency(self, *args, **kwargs):
+        raise Sr830Error("External detector cannot write source frequency")
+
+
+class _ExternalSr865a(Sr865aReceiver):
+    source_active = False
+
+    def set_harmonic(self, harmonic):
+        # With the external source verified OFF, reference frequency may be zero.
+        # Only h1 parking is allowed then; no frequency-dependent measurement.
+        if not self.source_active and harmonic == 1:
+            self._authorized()
+            if self.read_harmonic() != 1:
+                self._call(self._driver._write_verified_code, "HARM", 1)
+            return 1
+        if not self.source_active:
+            raise Sr830Error("Cannot select measurement harmonics without the source reference")
+        return super().set_harmonic(harmonic)
+
+
+class _ExternalHarmonicSession(HarmonicSensitivitySession):
+    source_transition_pending = False
+    source_transition_status = None
+
+    def open_transition_window(self, xx, xy, record):
+        if not self.source_transition_pending:
+            return super().open_transition_window(xx, xy, record)
+        changes = list(self.settling.pending)
+        if not changes:
+            return None
+        evidence = self.source_transition_status()
+        event = {"changes": changes, "status": evidence["roles"],
+                 "formal_sample": False, "external_source_transition": True}
+        record.setdefault("settling_transition_windows", []).append(event)
+        self.settling.window_generation = len(self.settling.changes)
+        return event
+
+    def diagnose_overload(self, xx, xy, status, settle_s, record):
+        # The original optional diagnostic reads XX SINE OUT as the excitation.
+        # In external mode preserve the formal evidence without that false claim
+        # or any extra abort-time setting changes.
+        record.setdefault("pre_abort_diagnostics", []).append({
+            "captured_at_utc": utc_now(), "status": deepcopy(status),
+            "excitation_source": "keithley6221_ac", "valid_for_analysis": False,
+            "additional_instrument_commands": False})
+
+
+class ExternalLockinPointSession(LockinPointSession):
+    def __init__(self, config_path, config, event, *, manager_factory=None,
+                 authorize_writes=False, monotonic=None, sleep=None, **kwargs):
+        self.config, self.event = config, event
+        self.mode = "detector"
+        acquisition = config.lockin_acquisition
+        slowest = max(config.lockin_xx.time_constant_s, config.lockin_xy.time_constant_s)
+        self.args = SimpleNamespace(settle_s=slowest * acquisition.settle_time_constants,
+                                    sample_interval_s=slowest * acquisition.sample_interval_time_constants)
+        self.settings = {"config": config, "config_path": Path(config_path).resolve(),
+                         "xx_address": config.lockin_xx.address, "xy_address": config.lockin_xy.address,
+                         "timeout_ms": config.visa.timeout_ms, "authorize_writes": authorize_writes is True}
+        daily._validate_distinct_addresses(config.lockin_xx.address, config.lockin_xy.address)
+        for address in (config.lockin_xx.address, config.lockin_xy.address):
+            if not address.strip() or "CHANGE_ME" in address:
+                raise ValueError("External detectors require explicit station-local addresses")
+        self.harmonics_by_role = {"xx": acquisition.xx_harmonics, "xy": acquisition.xy_harmonics}
+        self.harmonics = tuple(sorted(set(acquisition.xx_harmonics + acquisition.xy_harmonics)))
+        self.skip_unsupported = acquisition.skip_unsupported_harmonics
+        self.skipped_by_frequency = {}
+        for frequency in config.excitation_6221.frequency_points_hz:
+            _, skipped = daily._harmonics_for_frequency(frequency, self.harmonics,
+                skip_unsupported=self.skip_unsupported, config=config, harmonics_by_role=self.harmonics_by_role)
+            self.skipped_by_frequency[str(frequency)] = skipped
+        self.grid = ()
+        self.base_sleep = sleep or daily.time.sleep
+        self.monitor_wait_context = None
+        self.clock = {"monotonic": monotonic, "sleep": self._wait}
+        self.manager_factory = manager_factory
+        self.context = self.pair = self.preflight = self.harmonic_control = None
+        self.fixed_setup = self.frequency_setup = self.sensitivity_setup = self.reserve_setup = None
+        self.point_record = self.range_profile = self.range_profile_record = None
+        self.range_profile_failed = self.writes_started = False
+        self.sample_count = 0
+        self.target_frequency_hz = config.excitation_6221.frequency_points_hz[0]
+        self.point_harmonics = self.harmonics
+        self.source_active = False
+        self.source_off_proof = None
+        self.detectors = ()
+        self.source_baseline = {}
+
+    def _status(self, *, allow_unlock=False, transition=False, acquisition=False):
+        result, problems = {}, []
+        for role, instrument in zip(("lockin_xx", "lockin_xy"), self.pair):
+            status, error = instrument.read_status_latches()
+            result[role] = {"lia_status": asdict(status), "error_status": error}
+            if error != 0:
+                problems.append(role + " instrument error or unknown status")
+            if daily.model_name(status) == "SR865A":
+                problems.extend(role + " " + p for p in native_status_problems(status))
+            elif status.raw < 0 or status.raw & ~0x7f:
+                problems.append(role + " unknown native status")
+            if status.reference_unlocked and not allow_unlock:
+                problems.append(role + " reference unlocked")
+            if not transition and status.any_overload:
+                overloads = []
+                if status.input_or_reserve_overload:
+                    overloads.append(role + " input/reserve overload")
+                if status.filter_overload:
+                    overloads.append(role + " filter overload")
+                if acquisition:
+                    blocking, _ = self.harmonic_control.overload.partition(overloads)
+                    problems.extend(blocking)
+                else:
+                    problems.extend(overloads)
+                if status.output_overload and (role == "lockin_xy" or not acquisition):
+                    problems.append(role + " output overload")
+            if not transition and (status.time_constant_changed or status.frequency_range_changed):
+                problems.append(role + " unexpected detector setting change")
+        evidence = {"captured_at_utc": utc_now(), "source_inactive_or_transition": allow_unlock,
+                    "formal_sample": False, "roles": result, "problems": problems}
+        self.event("external_lockin_status", evidence)
+        if problems:
+            raise Sr830Error("External detector status rejected: " + "; ".join(problems))
+        return evidence
+
+    def _settings(self, instrument, role):
+        record = {}
+        try:
+            record["identity"] = instrument.query_identity()
+            identity_fields = tuple(part.strip() for part in record["identity"].split(","))
+            expected_model = "SR830" if role == "lockin_xx" else "SR865A"
+            if (len(identity_fields) != 4 or identity_fields[:2] != ("Stanford_Research_Systems", expected_model)
+                    or not identity_fields[2] or not identity_fields[3]):
+                raise Sr830Error(role + " unexpected physical identity")
+            for field, method in (("harmonic", "read_harmonic"), ("sensitivity", "read_sensitivity"),
+                                  ("reserve_mode", "read_reserve_mode"), ("sine_output_v", "read_sine_output"),
+                                  ("phase_shift_deg", "read_phase_shift")):
+                record[field] = getattr(instrument, method)()
+            for field in ("reference_mode", "reference_slope", *daily._SWEEP_FIXED_SETTING_FIELDS):
+                record[field] = instrument.read_fixed_setting(field)
+            if role == "lockin_xy":
+                record["native_settings"] = asdict(instrument._driver.read_settings())
+        except BaseException as exc:
+            record["error"] = str(exc) or type(exc).__name__
+            raise
+        finally:
+            self.event("external_lockin_settings", {"role": role, "captured_at_utc": utc_now(), "settings": record})
+        return record
+
+    def open(self, *, recovery=False):
+        if self.settings["authorize_writes"] is not True:
+            raise AuthorizationRequired("External detector access requires explicit acquisition authorization")
+        stack = ExitStack()
+        self.context = stack
+        manager = (self.manager_factory or daily._load_resource_manager_factory())()
+        stack.callback(manager.close)
+        resources = []
+        for address in (self.settings["xx_address"], self.settings["xy_address"]):
+            resource = daily._open_resource(manager, address, self.settings["timeout_ms"])
+            stack.callback(resource.close)
+            resources.append(resource)
+        self.detectors = (_ExternalSr830(resources[0], LockinRole.XX),
+                          _ExternalSr865a(resources[1], config=self.config.lockin_xy, authorize_writes=True))
+        self.pair = tuple(_AuditedInstrument(i, self.event) for i in self.detectors)
+        self.preflight = {role: self._settings(i, role) for role, i in
+                          zip(("lockin_xx", "lockin_xy"), self.pair)}
+        if self.preflight["lockin_xx"]["identity"] == self.preflight["lockin_xy"]["identity"]:
+            raise Sr830Error("Duplicate detector identity")
+        self.source_baseline = {role: {k: v for k, v in record.items() if k in {"sine_output_v", "phase_shift_deg"}}
+                                for role, record in self.preflight.items()}
+        self._status(allow_unlock=True)
+        return {"roles": deepcopy(self.preflight), "reference_policy": "external_6221_ttl",
+                "source_inactive": True, "recovery": recovery}
+
+    def configure(self, *, recovery=False, cleanup_only=False):
+        self.writes_started = True
+        self.fixed_setup = {"verified": False, "roles": {}}
+        self.reserve_setup = daily._new_sweep_reserve_setup(self.config.lockin_xx, self.config.lockin_xy,
+            original_xx_reserve_mode=self.preflight["lockin_xx"]["reserve_mode"],
+            original_xy_reserve_mode=self.preflight["lockin_xy"]["reserve_mode"])
+        self.sensitivity_setup = daily._new_sweep_sensitivity_setup(
+            lockin_xx_config=self.config.lockin_xx, lockin_xy_config=self.config.lockin_xy,
+            original_xx_sensitivity=self.preflight["lockin_xx"]["sensitivity"],
+            original_xy_sensitivity=self.preflight["lockin_xy"]["sensitivity"])
+        for role, instrument in zip(("lockin_xx", "lockin_xy"), self.pair):
+            target = getattr(self.config, role)
+            edge = 1 if target.external_reference_edge.value == "rising" else 2
+            if role == "lockin_xy":
+                self.fixed_setup["receiver_setup"] = instrument.configure_receiver()
+            else:
+                for field, code in (("reference_slope", edge), ("reference_mode", 0)):
+                    self._set_verified(instrument, field, code)
+            expected = daily._setting_codes(target)
+            for field in daily._SWEEP_FIXED_SETTING_FIELDS:
+                self._set_verified(instrument, field, getattr(expected, field))
+            sensitivity = daily.sensitivity_code_for(target, target.sensitivity_full_scale_v)
+            if instrument.read_sensitivity() != sensitivity:
+                self.sensitivity_setup["ranges"][role]["write_attempted"] = True
+                instrument.set_sensitivity(sensitivity)
+            if instrument.read_sensitivity() != sensitivity:
+                raise Sr830Error(role + " sensitivity was not confirmed")
+            self.sensitivity_setup["ranges"][role]["current_sensitivity_code"] = sensitivity
+            reserve = daily.reserve_code_for(target)
+            if reserve is not None and instrument.read_reserve_mode() != reserve:
+                self.reserve_setup["roles"][role]["write_attempted"] = True
+                instrument.set_reserve_mode(reserve)
+            if instrument.read_reserve_mode() != reserve:
+                raise Sr830Error(role + " reserve was not confirmed")
+            if instrument.read_harmonic() != 1:
+                instrument.set_harmonic(1)
+            if instrument.read_harmonic() != 1:
+                raise Sr830Error(role + " first harmonic was not confirmed")
+        self._status(allow_unlock=True, transition=True)
+        self.fixed_setup["verified"] = True
+        self.frequency_setup = {"source_owned_by": "excitation", "source_write_attempted": False}
+        self.harmonic_control = _ExternalHarmonicSession.create(self.config.lockin_xx, self.config.lockin_xy,
+            self.sensitivity_setup, self.reserve_setup, self.harmonics_by_role,
+            overload_policy=self.config.lockin_acquisition.overload_policy, **self.clock)
+        self.harmonic_control.source_transition_status = lambda: self._status(allow_unlock=True, transition=True)
+        self.pair = self.harmonic_control.track_pair(*self.pair)
+        # These source-inactive latches are already preserved above. A fresh
+        # controlled transition and deadline begin when the source actually runs.
+        self.harmonic_control.settling.window_generation = len(self.harmonic_control.settling.changes)
+        self.event("lockin_configured", {"fixed": self.fixed_setup, "sensitivity": self.sensitivity_setup,
+                                         "reserve": self.reserve_setup, "frequency": self.frequency_setup})
+
+    @staticmethod
+    def _set_verified(instrument, field, code):
+        if instrument.read_fixed_setting(field) != code:
+            instrument.set_fixed_setting(field, code)
+        if instrument.read_fixed_setting(field) != code:
+            raise Sr830Error(f"External detector {field} readback mismatch")
+
+    def prepare_source_change(self, frequency_hz):
+        daily._harmonics_for_frequency(frequency_hz, self.harmonics,
+            skip_unsupported=self.skip_unsupported, config=self.config, harmonics_by_role=self.harmonics_by_role)
+        if self.source_active and frequency_hz != self.target_frequency_hz:
+            self.harmonic_control.enter(*self.pair, harmonic=1, settle_s=self.args.settle_s,
+                                         record=self.point_record)
+
+    def source_changed(self, current_rms_a, frequency_hz, index=0, source_record=None):
+        self._require_range_profile_ready()
+        if isinstance(current_rms_a, bool) or not math.isfinite(current_rms_a) or current_rms_a <= 0:
+            raise ValueError("External current RMS must be positive and finite")
+        changed = (not self.source_active or self.point_record is None
+                   or current_rms_a != self.point_record["excitation_current_rms_a"]
+                   or frequency_hz != self.target_frequency_hz)
+        self.target_frequency_hz = frequency_hz
+        self.point_harmonics, skipped = daily._harmonics_for_frequency(frequency_hz, self.harmonics,
+            skip_unsupported=self.skip_unsupported, config=self.config, harmonics_by_role=self.harmonics_by_role)
+        self.point_record = {"point_index": index, "target_frequency_hz": frequency_hz,
+            "excitation_current_rms_a": current_rms_a, "excitation_frequency_hz": frequency_hz,
+            "excitation_source": deepcopy(source_record), "skipped_harmonics": skipped,
+            "samples": [], "harmonic_transition_status": []}
+        self.source_active = True
+        self.source_off_proof = None
+        self.detectors[1].source_active = True
+        if changed:
+            self.harmonic_control.settling.changed("excitation.source_setting")
+            self.harmonic_control.source_transition_pending = True
+            self.point_record["source_transition_status"] = self._status(allow_unlock=True, transition=True)
+            self.harmonic_control.settling.window_generation = len(self.harmonic_control.settling.changes)
+        self.sample_count = 0
+        self.event("external_excitation_applied_to_detectors", deepcopy(self.point_record))
+
+    def qualify(self):
+        if not self.source_active or self.point_record is None:
+            raise Sr830Error("External source has not been established")
+        # Choose final detector settings before the shared deadline. Controlled
+        # source-change unlock is permitted only in this nonformal window.
+        self.harmonic_control.enter(*self.pair,
+            harmonic=self.harmonic_control.initial_harmonics(self.target_frequency_hz),
+            settle_s=self.args.settle_s, record=self.point_record)
+        self.harmonic_control.ensure_settled(*self.pair, self.args.settle_s, self.point_record)
+        self.harmonic_control.source_transition_pending = False
+        self._read_coordinates()
+        self._status(acquisition=True)
+        self.event("lockin_point_qualification", deepcopy(self.point_record))
+
+    def _read_coordinates(self, *, verify_companion=True):
+        if not self.source_active:
+            raise Sr830Error("Cannot acquire without established external source")
+        frequencies = {}
+        for role, instrument in zip(("lockin_xx", "lockin_xy"), self.pair):
+            target = getattr(self.config, role)
+            expected_mode = 0 if role == "lockin_xx" else 1
+            edge = 1 if target.external_reference_edge.value == "rising" else 2
+            if instrument.read_fixed_setting("reference_mode") != expected_mode or instrument.read_fixed_setting("reference_slope") != edge:
+                raise Sr830Error(role + " external reference setting changed")
+            frequencies[role] = instrument.read_reference_frequency()
+        daily._verify_frequency_readbacks(self.target_frequency_hz, *frequencies.values(),
+            rel_tolerance=daily.SWEEP_FREQUENCY_REL_TOLERANCE,
+            absolute_tolerance_hz=daily.SWEEP_FREQUENCY_ABS_TOLERANCE_HZ)
+        self.point_harmonics, skipped = daily._harmonics_for_frequency(
+            max(self.target_frequency_hz, *frequencies.values()), self.harmonics,
+            skip_unsupported=self.skip_unsupported, config=self.config,
+            harmonics_by_role=self.harmonics_by_role)
+        self.point_record["skipped_harmonics"] = skipped
+        self.point_record["frequency_readback_hz"] = frequencies
+        self.point_record["actual_frequency_hz"] = frequencies["lockin_xx"]
+        return {}  # Source module owns the two excitation coordinates.
+
+    def _capture_frequency(self, actual):
+        return self.target_frequency_hz
+
+    def _formal_pair_recorded(self, payload):
+        payload["excitation_source"] = deepcopy(self.point_record["excitation_source"])
+        payload["sweep_point"].update({k: self.point_record[k] for k in
+            ("excitation_current_rms_a", "excitation_frequency_hz")})
+        super()._formal_pair_recorded(payload)
+
+    def disturbed(self, module):
+        if self.harmonic_control is not None:
+            self.harmonic_control.settling.changed(module + ".axis_setting")
+            if self.source_active:
+                self.harmonic_control.open_transition_window(*self.pair, self.point_record)
+            else:
+                self.harmonic_control.settling.window_generation = len(self.harmonic_control.settling.changes)
+
+    def source_stopped(self, proof):
+        if not isinstance(proof, dict) or proof.get("verified") is not True or proof.get("output_off_confirmed") is not True:
+            raise Sr830Error("Detector cleanup requires verified external source OFF evidence")
+        self.source_off_proof = deepcopy(proof)
+        self.source_active = False
+        if len(self.detectors) > 1:
+            self.detectors[1].source_active = False
+
+    def cleanup(self):
+        record = {"attempted": self.writes_started, "verified": False, "errors": [],
+                  "source_output_owned": False, "source_off_proof": deepcopy(self.source_off_proof), "final": {}}
+        if not self.writes_started:
+            record["verified"] = True
+            return record
+        if self.source_active or self.source_off_proof is None:
+            record["errors"].append("External source OFF was not verified; detector cleanup not certified")
+            return record
+        for role, instrument in zip(("lockin_xx", "lockin_xy"), self.pair):
+            try:
+                target = getattr(self.config, role)
+                if instrument.read_harmonic() != 1:
+                    instrument.set_harmonic(1)
+                if instrument.read_harmonic() != 1:
+                    raise Sr830Error("h1 cleanup readback mismatch")
+                code = daily.sensitivity_code_for(target, target.sensitivity_full_scale_v)
+                if instrument.read_sensitivity() != code:
+                    instrument.set_sensitivity(code)
+                reserve = daily.reserve_code_for(target)
+                if reserve is not None and instrument.read_reserve_mode() != reserve:
+                    instrument.set_reserve_mode(reserve)
+                final = record["final"][role] = self._settings(instrument, role)
+                expected = daily._setting_codes(target)
+                for field in (*daily._SWEEP_FIXED_SETTING_FIELDS, "sensitivity"):
+                    if final[field] != getattr(expected, field):
+                        raise Sr830Error(role + " final " + field + " mismatch")
+                edge = 1 if target.external_reference_edge.value == "rising" else 2
+                if (final["reserve_mode"] != reserve
+                        or final["reference_mode"] != (0 if role == "lockin_xx" else 1)
+                        or final["reference_slope"] != edge):
+                    raise Sr830Error(role + " final reference/reserve mismatch")
+                for key, value in self.source_baseline[role].items():
+                    if final[key] != value:
+                        raise Sr830Error(role + " disconnected output/phase changed")
+                if role == "lockin_xy":
+                    instrument.read_receiver_invariants()
+            except BaseException as exc:
+                record["errors"].append(role + ": " + str(exc))
+        try:
+            record["transition_status"] = self._status(allow_unlock=True, transition=True)
+            self._wait(self.args.settle_s)
+            record["status"] = self._status(allow_unlock=True)
+        except BaseException as exc:
+            record["errors"].append(str(exc))
+        record["verified"] = not record["errors"]
+        self.event("external_lockin_cleanup", deepcopy(record))
+        return record

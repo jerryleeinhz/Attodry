@@ -1,8 +1,40 @@
 # Project handoff
 
-Last updated: 2026-10-25
+Last updated: 2026-11-13
 
 ## Current stage
+
+### 6221 external AC source and mixed Lock-in detectors (2026-11-13)
+
+- New explicit `excitation_source="keithley6221"` separates source current/frequency
+  from a singleton Lock-in detector stage; SR830 XX and native SR865A XY both use
+  external TTL. The default SR830 voltage-source topology is unchanged.
+- Strict RMS-to-peak/offset/compliance/grid validation, source OFF preflight,
+  explicit phase-marker setup, verified waveform start, source before/after
+  formal brackets and OFF-before-detector-cleanup are implemented. Native raw
+  errors/status and invalid/rejected attempts remain archived. No process guards,
+  background readers, real device imports or live source-state assumptions added.
+- Existing axis-entry temperature qualification, shared detector settling,
+  compiled outer-coordinate ranges, full-condition resume and immutable analysis
+  snapshots are reused. Source topology/settings are archived and frozen across
+  resume. Current plots explicitly label source setting readbacks, never measured
+  current or the old voltage-derived current estimate. Source contracts also
+  separate direct repeat statistics and heatmap/curve grouping.
+- Implementation is in the dedicated electrical worktree/branch
+  `codex/6221-ac-excitation`; unrelated dirty photovoltage work remains untouched.
+  This delivery is source code/offline tests only, with no SSH, LK_setup deployment,
+  real acquisition or automatic task. 2182/SMU detector modes and optical timing/
+  backgrounds are future integration work. See [EXTERNAL_AC_EXCITATION.md](EXTERNAL_AC_EXCITATION.md)
+  and the explicit [template](../config/hardware.6221.example.toml).
+- Verification: 161 related guarded regressions passed in 77.253 s. After review
+  fixes, the final 84-case source/detector/combination/archive/analysis suite passed
+  in 48.017 s (these suites overlap). Review regressions cover consistent live/
+  archived low-frequency tolerances, native sample timestamps inside source
+  brackets, pair source provenance, simultaneous source/environment failures,
+  partial detector-open cleanup and both TTL edges. A stale historical source-
+  inventory test fixture was pinned to its original file set; production recovery
+  validation was not relaxed. Real VISA/serial imports and instrument DLL loads
+  were blocked throughout. Query/write and settling costs are documented.
 
 ### Electrical progress, phase timing and channel labels (2026-10-25)
 
