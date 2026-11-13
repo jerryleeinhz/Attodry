@@ -120,13 +120,14 @@ def _setting_matches(key, value, expected):
 
 class Keithley6221Ac:
     def __init__(self, resource, config: Excitation6221Config, event=None, *,
-                 authorize_writes=False, monotonic=None):
+                 authorize_writes=False, monotonic=None, sleep=None):
         if not isinstance(config, Excitation6221Config):
             raise TypeError("6221 requires a validated Excitation6221Config")
         config.require_output_contract()
         self.resource, self.config = resource, config
         self.event = event or (lambda kind, payload: None)
         self.monotonic = monotonic or time.monotonic
+        self.sleep = sleep or time.sleep
         self.authorize_writes = authorize_writes is True
         self.preflight_passed = self.owned = self.ready = self.faulted = False
         self.current_point = None
@@ -220,7 +221,7 @@ class Keithley6221Ac:
         return state
 
     @staticmethod
-    def _healthy(state, *, active=False):
+    def _healthy(state, *, active=False, stopping=False):
         # Only known idle/wave status is relevant to this waveform owner. Other
         # sweep/delta/calibration/RS232/unknown modes cannot be taken over.
         if state["operation_condition"] & ~(1024 | 128 | 16):
@@ -241,8 +242,27 @@ class Keithley6221Ac:
                     or not state["output_enabled"] or not state["wave_started"]
                     or state["operation_condition"] & 128):
                 raise Keithley6221Error("6221 waveform start/output was not confirmed")
-        elif state["output_enabled"] or state["wave_started"]:
+        elif not stopping and (state["output_enabled"] or state["wave_started"]):
             raise Keithley6221Error("6221 output OFF, inactive waveform and exact DC zero are required")
+
+    def _confirm_stopped(self, audit):
+        """Read-only bounded ACK after our ABOR; never repeat a stop command.
+
+        Only output/wave transition flags may lag. Compliance (including its
+        event latch), interlock, DC zero, unknown bits and I/O errors fail now.
+        Preflight still requires an immediately known inactive source.
+        """
+        deadline = self.monotonic() + 2.0
+        for poll in range(21):
+            state = self._core()
+            audit.append(state)
+            self._healthy(state, stopping=True)
+            if not state['output_enabled'] and not state['wave_started']:
+                return state
+            remaining = deadline - self.monotonic()
+            if remaining <= 0 or poll == 20:
+                raise Keithley6221Error('6221 stop acknowledgement timeout; OFF not certified')
+            self.sleep(min(0.1, remaining))
 
     @_operation
     def preflight(self):
@@ -360,7 +380,7 @@ class Keithley6221Ac:
         # or settled state. A later commissioning may optimize this explicit path.
         self._read_settings(active=self.current_point is not None)
         self._write("SOUR:WAVE:ABOR")
-        self._healthy(self._core())
+        self._confirm_stopped([])
         self._setting("SOUR:WAVE:AMPL", peak)
         self._setting("SOUR:WAVE:FREQ", frequency)
         self._write("SOUR:WAVE:ARM")
@@ -368,6 +388,11 @@ class Keithley6221Ac:
         self.current_point = (current, frequency)
         self._write("SOUR:WAVE:INIT")
         return self._read_settings(active=True)
+
+    @_operation
+    def verify_stopped(self):
+        """Fresh strict OFF proof; no transitional exception and no writes."""
+        return self._read_settings(active=False)
 
     @_operation
     def readback(self):
@@ -392,7 +417,7 @@ class Keithley6221Ac:
             except BaseException as exc:
                 result["errors"].append(command + ": " + str(exc))
         try:
-            state = self._core()
+            state = self._confirm_stopped(result.setdefault('stop_confirmation', []))
             result["final"] = state
             self._healthy(state)
             result["output_off_confirmed"] = True

@@ -143,3 +143,20 @@ verify query/write counts, no writes for unchanged profiles, serial role order,
 partial failures and immutable cleanup baselines. Real latency, saturation
 recovery and signal quality need separately authorized bounded station testing.
 No extra measurement-speed tuning is included with the range-rule feature.
+
+## External-source relock and stop acknowledgement budgets
+
+Only a changed 6221 coordinate opens relock qualification. Each serialized poll
+uses two SR830 and four SR865A status queries; successful lock adds mode, slope
+and frequency checks for both roles (six queries). No writes are added. Without
+observed unlock, elapsed settling time counts. With unlock, the shared deadline
+resets once at lock confirmation: one full settle after lock, not two unconditional
+settles. Repeated coordinates do not reopen latch history.
+
+Relock has a 30 s / 301-poll cap with at most 100 ms between polls. A settled/formal
+unlock stops rather than requalifying repeatedly. Stop ACK adds eleven core/error
+queries per poll, limited to 2 s / 21 reads; immediate ACK keeps the existing eleven
+queries. An in-flight VISA timeout is additional. Neither loop repeats source
+commands. Raw polls/timestamps/deadlines and partial failures remain auditable.
+The narrowly reviewed deferred-cleanup recovery adds one inactive-source settings
+verification after detector setup; ordinary scans pay no recovery overhead.

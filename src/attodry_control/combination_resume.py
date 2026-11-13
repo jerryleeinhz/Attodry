@@ -21,6 +21,27 @@ LEGACY_SOURCE_SETS = {
     "8c29bd00d7b0549dc280143787e6f95b251860069f00d5efcf46ab74374efbd6",
 }
 RECOVERY_CONTRACT = "combination-condition-recovery-v1"
+RELOCK_PREDECESSOR_SETS = {
+    # Reviewed e925e29, Git LF and station CRLF. Only the relock/stop/recovery
+    # implementation files below may differ; all other source stays bound.
+    "ee66a95fb0653177a5e1ea2dd555830bc64c092e459f5acfefca57e83746c60d",
+    "5d91f90788ad64f538bc845a445dc3c09d3eae5f176718b5d171c8458733ba4c",
+}
+
+
+def source_compatibility(before, after):
+    if not before or not after:
+        return None
+    if before == after:
+        return 'unchanged'
+    if digest(before) in LEGACY_SOURCE_SETS:
+        return 'reviewed-79ed5b4'
+    changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+    if (digest(before) in RELOCK_PREDECESSOR_SETS and set(before) == set(after)
+            and changed <= {'external_lockin_points.py', 'keithley6221_ac.py',
+                            'combination_hardware.py', 'combination_resume.py', 'combination_store.py'}):
+        return 'reviewed-e925e29-external-relock'
+    return None
 
 
 def digest(value):
@@ -188,6 +209,90 @@ def _cleanup_review(cleanup, modules=None):
             "manual_verification_required": uncertain or bool(unresolved)}
 
 
+def external_relock_cleanup_resolution(state, parent, connection):
+    """Recognize only the reviewed latch/stop-bit lag; do not certify old cleanup.
+
+    The new execution must still read source OFF/DC zero and restore/verify both
+    detectors before any INIT. Unknown cleanup, compliance or present unlock is
+    ineligible. Recomputed under the atomic DB claim, never accepted from a flag.
+    """
+    if (digest(parent.get('source_sha256')) not in RELOCK_PREDECESSOR_SETS
+            or [a['module'] for a in parent['axes']] != ['excitation', 'lockin']
+            or state['run']['status'] != 'failed'
+            or state['run']['error'] != 'Sr830Error: External detector status rejected: lockin_xy reference unlocked'):
+        return None
+    cleanup = json.loads(state['run']['cleanup_json'] or '{}')
+    try:
+        actions = cleanup['actions']
+        if (cleanup['communication_uncertain'] is not False or len(actions) != 2
+                or cleanup['errors'] != ['excitation: cleanup not certified; review recorded actions',
+                                          'lockin: cleanup not certified; review recorded actions']
+                or [a['module'] for a in actions] != ['excitation', 'lockin']
+                or any(a['audit_errors'] or a['startup_completed'] is not True for a in actions)):
+            return None
+        source, detector = (a['result'] for a in actions)
+        if (source['errors'] != ['zero/OFF verification: 6221 output OFF, inactive waveform and exact DC zero are required']
+                or source['attempted'] is not True or source['verified'] is not False
+                or source['output_off_confirmed'] is not False
+                or detector['errors'] != ['External source OFF was not verified; detector cleanup not certified']
+                or detector['attempted'] is not True or detector['verified'] is not False
+                or detector['final'] != {} or detector['source_off_proof'] is not None):
+            return None
+        final = source['final']
+        expected = {'output_enabled': False, 'dc_current_setpoint_a': 0.0,
+                    'operation_condition': 16, 'wave_started': True,
+                    'measurement_condition': 0, 'measurement_event': 0,
+                    'questionable_condition': 0, 'compliance_tripped': False,
+                    'interlock_asserted': True, 'interlock_raw': '1',
+                    'status_contract': '6221-direct-interlock-v1'}
+        if any(type(final[k]) is not type(v) or final[k] != v for k, v in expected.items()):
+            return None
+        if final['error_queue']['code'] != 0:
+            return None
+        from dataclasses import fields
+        from .excitation_6221_config import Excitation6221Config, parse_excitation_6221
+        from .keithley6221_ac import validate_active_state
+        config = parse_excitation_6221({f.name: parent['hardware']['excitation'][f.name]
+                                        for f in fields(Excitation6221Config)})
+        last = source['last_confirmed']
+        validate_active_state(last, config, last['actual']['excitation_current_rms_a'],
+                              last['actual']['excitation_frequency_hz'], require_direct_interlock=True)
+        if (final['compliance_voltage_v'] != config.compliance_voltage_v
+                or any(final[k] != last[k] for k in ('inner_shield', 'inner_shield_raw',
+                     'output_low_grounding', 'output_low_earth_connected'))):
+            return None
+        row = connection.execute("SELECT event_id,payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type='external_lockin_status' ORDER BY event_id DESC LIMIT 1",
+            (state['run']['run_id'],)).fetchone()
+        event = json.loads(row['payload_json'])
+        if (event['formal_sample'] is not False or event['source_inactive_or_transition'] is not False
+                or event['problems'] != ['lockin_xy reference unlocked']
+                or event['execution_id'] != state['executions'][-1]['execution_id']):
+            return None
+        xx, xy = (event['roles'][r] for r in ('lockin_xx', 'lockin_xy'))
+        native = xy['lia_status']['native_status']
+        if (xx['error_status'] != 0 or xx['lia_status']['raw'] != 0 or xy['error_status'] != 0
+                or native['locked'] is not True or native['current_status_raw'] != 0
+                or native['lia_status_raw'] != 8 or native['error_status_raw'] != 0
+                or native['standard_event_status_raw'] != 0 or native['unknown_status_bits'] != 0):
+            return None
+        raw = native['raw']
+        if ([(r['command'], r['response'].strip(), r['error']) for r in raw]
+                != [('CUROVLDSTAT?', '0', None), ('LIAS?', '8', None),
+                    ('ERRS?', '0', None), ('*ESR?', '0', None)]):
+            return None
+        if connection.execute("SELECT 1 FROM combination_events WHERE run_id=? AND event_type='lockin_formal_pair' "
+                "AND json_extract(payload_json,'$.execution_id')=? AND json_extract(payload_json,'$.condition_id')=? "
+                "AND json_extract(payload_json,'$.attempt_index')=? LIMIT 1",
+                (state['run']['run_id'], event['execution_id'], event['condition_id'], event['attempt_index'])).fetchone():
+            return None
+        return {'contract': 'external-relock-stop-lag-v1', 'status_event_id': row['event_id'],
+                'status_sha256': digest(event), 'original_cleanup_sha256': digest(cleanup),
+                'original_cleanup_certified': False, 'fresh_source_off_and_detector_setup_required': True}
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
 def build_recovery(config, database, run_id, *, acknowledge_failure=False,
                    manual_verification=False, approve_protection_changes=False,
                    live_owner_resolution=None):
@@ -228,8 +333,8 @@ def build_recovery(config, database, run_id, *, acknowledge_failure=False,
             if type(live_owner_resolution) not in (LiveOwnerResolution, LiveInitialisationResolution, LiveGuardIdentityResolution, LiveProcessGuardRemovalResolution) or manual_verification:
                 raise ValueError("Live owner resolution requires an ephemeral capability, not a manual flag or file")
             live_resolution_review, _ = live_owner_resolution.verify(state, config.snapshot, connection)
-        if not old_sources or (old_sources != new_sources and digest(old_sources) not in LEGACY_SOURCE_SETS
-                               and live_resolution_review is None):
+        compatibility = source_compatibility(old_sources, new_sources)
+        if compatibility is None and live_resolution_review is None:
             raise ValueError("Archived source version has no reviewed recovery compatibility")
         changes = configuration_changes(parent, config.snapshot)
         accepted = set(state["accepted_condition_ids"])
@@ -241,10 +346,12 @@ def build_recovery(config, database, run_id, *, acknowledge_failure=False,
         validate_accepted_records(connection, run_id, original)
         cleanup = json.loads(state["run"]["cleanup_json"] or "{}")
         cleanup_review = _cleanup_review(cleanup, [a["module"] for a in original["axes"]])
+        deferred = external_relock_cleanup_resolution(state, parent, connection)
         blockers = []
         if not acknowledge_failure:
             blockers.append("Review original failure/cleanup and supply --acknowledge-failure")
-        if cleanup_review["manual_verification_required"] and not manual_verification and live_resolution_review is None:
+        if (cleanup_review["manual_verification_required"] and not manual_verification
+                and live_resolution_review is None and deferred is None):
             blockers.append("Resolve unknown cleanup physically, then supply --confirm-manual-verification")
         if any(c["category"] == "protection_increase" for c in changes) and not approve_protection_changes:
             blockers.append("Approve the displayed SMU protection increase with --approve-protection-changes")
@@ -256,7 +363,8 @@ def build_recovery(config, database, run_id, *, acknowledge_failure=False,
             "blockers": blockers, "config_sha256": config.snapshot["config_sha256"],
             "scan_contract_sha256": digest(scan_contract(original)),
             "source_compatibility": (live_resolution_review["contract"] if live_resolution_review is not None
-                                     else "reviewed-79ed5b4" if old_sources != new_sources else "unchanged")}
+                                     else compatibility),
+            "deferred_cleanup_resolution": deferred}
         if live_resolution_review is not None:
             review["live_owner_resolution"] = live_resolution_review
         result = {"expected_parent_state_sha256": state["state_sha256"],
@@ -281,5 +389,8 @@ def recovery_text(recovery, database, run_id):
     for change in review["configuration_changes"]:
         lines.append(f"{change['category']}: {change['path']}: {change['before']} -> {change['after']}")
     lines.extend("Required: " + reason for reason in review["blockers"])
+    if review.get('deferred_cleanup_resolution'):
+        lines.append('Known historical stop-bit lag: fresh source OFF/DC zero and verified detector setup '
+                     'required before output; original failed cleanup remains archived')
     lines.append("File review ready: " + str(review["ready"]) + "; fresh hardware preflight required")
     return "\n".join(lines)

@@ -4,6 +4,23 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### External-reference relock and stop acknowledgement (2026-11-13)
+
+- Separate SR865A current lock from historical LIAS unlock after a deliberate
+  6221 change. Require current SR865A lock, a fresh clear SR830 latch and correct
+  mode/slope/frequency. Observed relock starts one full shared settle. New unlock
+  during that window or formal acquisition still aborts; no formal latch is hidden.
+- Bound read-only ABOR/OFF acknowledgement to 2 s / 21 polls. Only known wave/
+  output flags may lag. Compliance, interlock, DC zero, unknown/error/transport
+  protections remain immediate. Stop commands are never repeated by polling.
+- Review only the exact e925e29 latch/stop-lag failure for whole-condition recovery.
+  Preserve original failed cleanup; require fresh OFF and verified detector setup
+  before new output. Other uncertain cleanup and unrelated source changes block.
+- Keep the approved five-point RMS grid, 25 Hz and 5 V compliance unchanged.
+- Verification: 342 hardware-blocked checks passed (196 targeted in 42.916 s;
+  146 legacy/atomic recovery/analysis/timing in 168.126 s), including full-grid
+  relock, whole-condition recovery, forged evidence and live-fault rejection.
+
 ### D04 amplitude serialization (2026-11-13)
 
 - Output-OFF verification of all six approved amplitudes confirmed AMPL? uses

@@ -152,3 +152,24 @@ The operator's actual six accepted samples also passed local validation of
 their archived raw status, harmonic/settings readbacks, timing and original
 hard bounds. Only a sanitized fixture was copied; private configuration,
 addresses and paths were omitted and the remote database was not changed.
+
+## Reviewed external-reference / stop-bit-lag recovery
+
+The exact e925e29 LF/CRLF source sets have reviewed compatibility only for the
+external detector, 6221, coordinator, recovery and atomic-store fixes. Changes to
+other source files are refused. The original grid and accepted raw data are
+independently validated as usual.
+
+An eligible original failure must be solely SR865A historical unlock, with raw
+current status0 / LIAS8 / ERRS0 / ESR0, before any formal pair in the rejected
+attempt. Cleanup must show output OFF, exact DC zero and only wave-start status
+lagging, with clear compliance/event/interlock/error evidence. Detector cleanup
+must have been skipped solely because source stop confirmation was pending.
+Missing, uncertain, conflicting or secondary-fault evidence is ineligible.
+
+resume --check --acknowledge-failure reports deferred cleanup resolution. It does
+not certify historical cleanup or declare manual verification. The atomic claim
+rechecks the raw evidence. Fresh source preflight, detector restore/readback and
+another inactive-source settings read must pass before INIT. All old cleanup
+flags and rejected attempts remain archived. Other unresolved cleanup retains
+the physical/manual verification requirement; no manual flag is invented.

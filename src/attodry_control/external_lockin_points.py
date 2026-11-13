@@ -366,11 +366,59 @@ class ExternalLockinPointSession(LockinPointSession):
         self.harmonic_control.enter(*self.pair,
             harmonic=self.harmonic_control.initial_harmonics(self.target_frequency_hz),
             settle_s=self.args.settle_s, record=self.point_record)
+        if self.harmonic_control.source_transition_pending:
+            self._requalify_reference()
         self.harmonic_control.ensure_settled(*self.pair, self.args.settle_s, self.point_record)
         self.harmonic_control.source_transition_pending = False
         self._read_coordinates()
         self._status(acquisition=True)
         self.event("lockin_point_qualification", deepcopy(self.point_record))
+
+    def _requalify_reference(self):
+        """Bound the deliberate source transition, then begin a clean window.
+
+        SR865A CUROVLDSTAT is current; LIAS is read-to-clear history. SR830
+        exposes only the latch here, so it must produce a fresh clear read.
+        Neither distinction changes strict settled/formal status validation.
+        """
+        settling = self.harmonic_control.settling
+        started = settling.monotonic()
+        history = [self.point_record['source_transition_status']['roles']]
+        history += [w['status'] for w in self.point_record.get('settling_transition_windows', [])]
+        observed = any(r['lia_status']['reference_unlocked'] for h in history for r in h.values())
+        proof = {'policy': 'external-reference-relock-v1', 'formal_sample': False,
+                 'started_monotonic_s': started, 'timeout_s': 30.0, 'polls': [],
+                 'transition_unlock_observed': observed, 'completed': False}
+        self.point_record['reference_requalification'] = proof
+        try:
+            for poll in range(301):
+                evidence = self._status(allow_unlock=True, transition=True)
+                proof['polls'].append(evidence)
+                roles = evidence['roles']
+                proof['transition_unlock_observed'] |= any(
+                    r['lia_status']['reference_unlocked'] for r in roles.values())
+                # Unknown native current/error bits have already failed in _status.
+                locked = (not roles['lockin_xx']['lia_status']['reference_unlocked']
+                          and roles['lockin_xy']['lia_status']['native_status']['locked'] is True)
+                if locked and settling.monotonic() <= started + proof['timeout_s']:
+                    self._read_coordinates()  # Mode, slope and actual frequency must agree.
+                    if proof['transition_unlock_observed']:
+                        settling.changed('external_reference.relocked')
+                    # The latches above are the final transitional baseline. Do
+                    # not clear them again after the fresh settling window starts.
+                    settling.window_generation = len(settling.changes)
+                    self.harmonic_control.source_transition_pending = False
+                    proof.update(completed=True, confirmed_monotonic_s=settling.monotonic())
+                    return
+                remaining = started + proof['timeout_s'] - settling.monotonic()
+                if remaining <= 0 or poll == 300:
+                    raise Sr830Error('External reference relock timeout; no formal acquisition')
+                self._wait(min(0.1, remaining))
+        except BaseException as exc:
+            proof['error'] = str(exc) or type(exc).__name__
+            raise
+        finally:
+            self.event('external_reference_requalification', deepcopy(proof))
 
     def _read_coordinates(self, *, verify_companion=True):
         if not self.source_active:

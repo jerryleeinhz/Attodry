@@ -230,6 +230,128 @@ class Combination6221Tests(unittest.TestCase):
         with closing(open_readonly(self.database)) as db:
             self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 4)
 
+    def failed_historical_relock(self):
+        """Replay the old second-point LIAS8/current0 plus delayed stop ACK."""
+        from attodry_control.external_lockin_points import ExternalLockinPointSession
+        from attodry_control.keithley6221_ac import Keithley6221Ac
+        self.source.state['STAT:MEAS:COND'] = '0'
+        xy_query, source_query = self.xy.query, self.source.query
+        fault = [False]
+        def query(command):
+            if command == 'LIAS?' and self.source.commands.count('SOUR:WAVE:INIT') == 2:
+                # Return the history only at the post-settle qualification read.
+                if self.clock.now >= 4.5 * 3:
+                    fault[0] = True
+                    return '8'
+            return xy_query(command)
+        def source(command):
+            if command == 'STAT:OPER:COND?' and fault[0] and self.source.state['OUTP:STAT'] in ('0', 'OFF'):
+                return '16'
+            return source_query(command)
+        self.xy.query, self.source.query = query, source
+        def old_stop(driver, audit):
+            state = driver._core()
+            return state
+        with patch.object(ExternalLockinPointSession, '_requalify_reference', lambda _: None), \
+                patch.object(Keithley6221Ac, '_confirm_stopped', old_stop):
+            result = self.execute()
+        self.assertEqual(result['status'], 'failed', result)
+        self.assertIn('lockin_xy reference unlocked', result['error'])
+        return result
+
+    def test_reviewed_relock_cleanup_is_resolved_fresh_without_manual_claim(self):
+        from attodry_control.combination_resume import digest
+        self.failed_historical_relock()
+        config = self.config()
+        with patch('attodry_control.combination_resume.RELOCK_PREDECESSOR_SETS',
+                   {digest(config.snapshot['source_sha256'])}):
+            review = build_recovery(config, self.database, 'current-run', acknowledge_failure=True)
+            self.assertIsNotNone(review['review']['deferred_cleanup_resolution'], review)
+            self.assertTrue(review['review']['ready'])
+            self.assertFalse(review['review']['manual_verification'])
+            self.assertTrue(review['review']['cleanup_review']['manual_verification_required'])
+            self.devices()
+            result = self.execute(config, recovery=review)
+        self.assertEqual(result['status'], 'completed', result)
+        self.assertEqual(self.source.commands.count('SOUR:WAVE:INIT'), 3)
+        events = self.events()
+        resolved = [v for k, v in events if k == 'recovery_cleanup_resolution_verified']
+        self.assertEqual(len(resolved), 1)
+        self.assertFalse(resolved[0]['source']['output_enabled'])
+        self.assertFalse(resolved[0]['original_cleanup_rewritten'])
+
+    def test_unresolved_source_state_still_prevents_resume_output(self):
+        from attodry_control.combination_resume import digest
+        self.failed_historical_relock()
+        config = self.config()
+        with patch('attodry_control.combination_resume.RELOCK_PREDECESSOR_SETS',
+                   {digest(config.snapshot['source_sha256'])}):
+            review = build_recovery(config, self.database, 'current-run', acknowledge_failure=True)
+            self.assertTrue(review['review']['ready'], review)
+            self.devices()
+            self.source.state['OUTP:STAT'] = '1'
+            result = self.execute(config, recovery=review)
+        self.assertEqual(result['status'], 'failed')
+        self.assertNotIn('SOUR:WAVE:INIT', self.source.commands)
+
+    def test_relock_cleanup_resolution_rejects_unknown_and_secondary_faults(self):
+        from attodry_control.combination_resume import digest, external_relock_cleanup_resolution
+        from attodry_control.combination_store import recovery_parent_state
+        self.failed_historical_relock()
+        config = self.config()
+        with closing(open_readonly(self.database)) as db, patch(
+                'attodry_control.combination_resume.RELOCK_PREDECESSOR_SETS',
+                {digest(config.snapshot['source_sha256'])}):
+            state = recovery_parent_state(db, 'current-run')
+            parent = json.loads(state['executions'][-1]['plan_json'])
+            self.assertIsNotNone(external_relock_cleanup_resolution(state, parent, db))
+            for key, value in [('output_enabled', True), ('measurement_event', 8),
+                               ('measurement_condition', 8), ('interlock_raw', '0'),
+                               ('dc_current_setpoint_a', 1e-9), ('operation_condition', 256),
+                               ('output_enabled', 0), ('compliance_voltage_v', 99)]:
+                with self.subTest(key=key, value=value):
+                    altered = deepcopy(state)
+                    cleanup = json.loads(altered['run']['cleanup_json'])
+                    cleanup['actions'][0]['result']['final'][key] = value
+                    altered['run']['cleanup_json'] = json.dumps(cleanup)
+                    self.assertIsNone(external_relock_cleanup_resolution(altered, parent, db))
+            altered = deepcopy(state)
+            altered['run']['error'] = 'OSError: communication failed'
+            self.assertIsNone(external_relock_cleanup_resolution(altered, parent, db))
+            review = build_recovery(config, self.database, 'current-run', acknowledge_failure=True)
+            review['review']['deferred_cleanup_resolution']['status_sha256'] = '0' * 64
+            self.devices()
+            with self.assertRaisesRegex(ValueError, 'Deferred cleanup'):
+                self.execute(config, recovery=review)
+            self.assertFalse(self.source.commands)
+
+    def test_five_nanoamp_points_relock_with_latched_history_every_point(self):
+        text = self.text.replace('current_rms_points_a = [0.000001, 0.000002]',
+            'current_rms_ranges_a = [{ min = 1e-9, max = 51e-9, scale = "linear", points = 5 }]')
+        text = text.replace('frequency_points_hz = [17.777, 200.0]', 'frequency_points_hz = [25.0]')
+        self.path.write_text(text, encoding='utf-8')
+        write, query = self.source.write, self.xy.query
+        pending = [False]
+        def source_write(command):
+            write(command)
+            if command == 'SOUR:WAVE:INIT':
+                pending[0] = True
+        def xy_query(command):
+            if command == 'LIAS?' and pending[0]:
+                pending[0] = False
+                return '8'
+            return query(command)
+        self.source.write, self.xy.query = source_write, xy_query
+        result = self.execute()
+        self.assertEqual(result['status'], 'completed', result)
+        self.assertTrue(result['cleanup']['clean'])
+        self.assertEqual(self.source.commands.count('SOUR:WAVE:INIT'), 5)
+        proofs = [v for k, v in self.events() if k == 'external_reference_requalification']
+        self.assertEqual(len(proofs), 5)
+        self.assertTrue(all(p['completed'] and p['transition_unlock_observed'] for p in proofs))
+        with closing(open_readonly(self.database)) as db:
+            self.assertEqual(validate_accepted_records(db, 'current-run')['accepted_conditions'], 5)
+
     def test_raw_source_tamper_blocks_recovery_validation(self):
         config = self.config()
         result = self.execute(config)

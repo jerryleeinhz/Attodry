@@ -167,3 +167,20 @@ an unknown numeric encoding is rejected before waveform startup rather than
 interpreted as a valid infinite duration. Firmware-specific responses must be
 confirmed during a separately authorized commissioning stage.
 Command/wait budgets are recorded in [measurement performance](MEASUREMENT_PERFORMANCE.md).
+
+## Requalification after an external-source change
+
+SR865A CUROVLDSTAT is current state; LIAS retains events until read. After a
+controlled source change, archive transition latches, require current SR865A
+lock and a fresh clear SR830 reference latch, and check reference mode/slope/
+frequency. If an unlock was observed, restart one complete shared settle at lock
+confirmation. Otherwise elapsed time still counts. Repeated qualification does
+not reopen the window. New settled/formal unlock remains fatal regardless of
+record_continue. All polls are nonformal external_reference_requalification
+records; the aggregate formal status interpretation remains unchanged.
+
+Relock is limited to 30 s / 301 polls. ABOR acknowledgement is limited to 2 s /
+21 reads with no repeated stop commands. Compliance including its event latch,
+interlock, DC zero, unknown/error status and transport failures remain blocking.
+Preflight still requires an immediately known inactive source. Neither timeout
+certifies lock or OFF. Historical rejected data remains excluded by default.

@@ -361,6 +361,7 @@ class HardwareCombinationStation:
                 self.config.excitation.resource, self.config.lockin.visa.timeout_ms)
             self.excitation = Keithley6221Ac(self.excitation_resource, self.config.excitation,
                 self.events.event, authorize_writes=self.authorize_hardware,
+                sleep=self.sleep,
                 **({"monotonic": self.monotonic} if self.monotonic is not None else {}))
             preflight["excitation"] = self.excitation.preflight()
         if self.config.cryostat is not None:
@@ -414,6 +415,18 @@ class HardwareCombinationStation:
                 self.smu.begin_points(self.events)
         self.open_completed = True
         if self.recovery is not None:
+            deferred = self.recovery['review'].get('deferred_cleanup_resolution')
+            if deferred is not None:
+                # Source configure already requires verified inactive output;
+                # detector configure has restored and verified every base setting.
+                # Recheck OFF after detector setup, immediately before acquisition.
+                stopped = self.excitation.verify_stopped()
+                if self.lockin.fixed_setup['verified'] is not True:
+                    raise ValueError('External detector recovery setup was not verified')
+                self.events.event('recovery_cleanup_resolution_verified', {
+                    'contract': deferred['contract'], 'source': stopped,
+                    'detector_setup': self.lockin.fixed_setup,
+                    'original_cleanup_rewritten': False})
             self.events.event("recovery_preflight_verified", {
                 "identities_and_initial_state": preflight,
                 "cleanup_only": bool(self.recovery.get("cleanup_only")),

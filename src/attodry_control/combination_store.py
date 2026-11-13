@@ -657,8 +657,9 @@ class CombinationStore:
                 if not isinstance(review, dict) or not review:
                     raise ValueError("Recovery requires an explicit archived review")
                 from .combination_resume import (
-                    LEGACY_SOURCE_SETS, RECOVERY_CONTRACT, _cleanup_review,
+                    RECOVERY_CONTRACT, _cleanup_review,
                     configuration_changes, digest, scan_contract,
+                    source_compatibility, external_relock_cleanup_resolution,
                 )
                 original_plan = json.loads(prior["plan_json"])
                 parent_plan = (json.loads(state["executions"][-1]["plan_json"])
@@ -687,17 +688,20 @@ class CombinationStore:
                     live_resolution_review, _ = live_resolution.verify(state, plan, self.connection)
                     if review.get("live_owner_resolution") != live_resolution_review:
                         raise ValueError("Live owner resolution review differs from current capability")
-                if (not old_sources or not new_sources
-                        or old_sources != new_sources and digest(old_sources) not in LEGACY_SOURCE_SETS
+                if (source_compatibility(old_sources, new_sources) is None
                         and live_resolution_review is None):
                     raise ValueError("Archived source version has no reviewed recovery compatibility")
                 cleanup_review = _cleanup_review(
                     json.loads(prior["cleanup_json"] or "{}"),
                     [axis["module"] for axis in original_plan["axes"]],
                 )
+                deferred = external_relock_cleanup_resolution(state, parent_plan, self.connection)
+                if review.get('deferred_cleanup_resolution') != deferred:
+                    raise ValueError('Deferred cleanup resolution differs from raw evidence')
                 if (review.get("cleanup_review") != cleanup_review
                         or cleanup_review["manual_verification_required"]
-                        and review.get("manual_verification") is not True and live_resolution_review is None):
+                        and review.get("manual_verification") is not True and live_resolution_review is None
+                        and deferred is None):
                     raise ValueError("Unresolved cleanup requires explicit manual verification")
                 if (any(c["category"] == "protection_increase" for c in changes)
                         and review.get("protection_changes_approved") is not True):

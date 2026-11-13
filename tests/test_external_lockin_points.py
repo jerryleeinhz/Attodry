@@ -123,6 +123,48 @@ class ExternalLockinTests(unittest.TestCase):
         s.sample_point()
         self.assertEqual(clock.waits, [2.5])
 
+    def test_next_point_archives_historical_unlock_before_fresh_settle_window(self):
+        f, c, s, clock, events, table = self.fixture(harmonics=(1,))
+        self.start(f, s)
+        s.qualify()
+        s.source_changed(2e-6, 17.777, index=1)
+        original = f.xy.query
+        pending = [True]
+        def query(command):
+            if command == 'LIAS?' and pending[0]:
+                pending[0] = False
+                return '8'  # Historical loss; CUROVLDSTAT is already zero.
+            return original(command)
+        f.xy.query = query
+        s.qualify()
+        self.assertTrue(s.sample_point()['clean'])
+        proof = s.point_record['reference_requalification']
+        self.assertTrue(proof['completed'])
+        self.assertTrue(proof['transition_unlock_observed'])
+        self.assertEqual(proof['polls'][0]['roles']['lockin_xy']['lia_status']['raw'], 8)
+        self.assertEqual(clock.waits, [4.5, 4.5])
+
+    def test_new_unlock_during_requalified_settle_is_not_cleared_or_retried(self):
+        f, c, s, clock, events, table = self.fixture(harmonics=(1,))
+        self.start(f, s)
+        original = clock.sleep
+        def sleep(seconds):
+            original(seconds)
+            f.xy.responses['LIAS?'] = '8'
+        s.base_sleep = sleep
+        with self.assertRaisesRegex(Sr830Error, 'reference unlocked'):
+            s.qualify()
+        self.assertFalse(any(k == 'lockin_formal_pair' for k, _ in events))
+
+    def test_continuing_current_unlock_has_bounded_timeout_and_no_formal_data(self):
+        f, c, s, clock, events, table = self.fixture(harmonics=(1,))
+        self.start(f, s)
+        f.xy.responses['CUROVLDSTAT?'] = '8'
+        with self.assertRaisesRegex(Sr830Error, 'relock timeout'):
+            s.qualify()
+        self.assertLessEqual(clock.now, 30.000001)
+        self.assertFalse(any(k == 'lockin_formal_pair' for k, _ in events))
+
     def test_initial_latched_overload_is_history_then_requires_fresh_settled_status(self):
         f, c, s, clock, events, table = self.fixture(harmonics=(1,))
         f.xx.responses['LIAS?'] = '13'

@@ -495,6 +495,49 @@ class DriverTests(unittest.TestCase):
         self.assertIsNone(result["final"])
         self.assertTrue(result["last_confirmed"]["output_enabled"])
 
+    def test_cleanup_waits_for_stop_bit_without_repeating_writes(self):
+        r, d, events = self.active()
+        now = [0.0]
+        d.monotonic = lambda: now[0]
+        d.sleep = lambda seconds: now.__setitem__(0, now[0] + seconds)
+        query = r.query
+        replies = iter(['16', '128'])
+        def delayed(command):
+            return next(replies) if command == 'STAT:OPER:COND?' else query(command)
+        r.query = delayed
+        commands = len(r.commands)
+        result = d.cleanup()
+        self.assertTrue(result['verified'], result)
+        self.assertEqual(len(result['stop_confirmation']), 2)
+        self.assertEqual(r.commands[commands:], ['SOUR:WAVE:ABOR', 'OUTP:STAT OFF'])
+        self.assertEqual(d.cleanup(), result)
+        self.assertEqual(now[0], .1)
+
+    def test_stop_poll_never_hides_compliance_or_interlock_faults(self):
+        for fault, value in [('STAT:MEAS:COND?', '8'), ('STAT:MEAS:EVEN?', '8'),
+                             ('OUTP:INT:TRIP?', '0'), ('STAT:OPER:COND?', '256')]:
+            with self.subTest(fault=fault):
+                r, d, events = self.active()
+                query = r.query
+                r.query = lambda command: value if command == fault else query(command)
+                d.sleep = lambda _: self.fail('Unsafe stop must fail immediately')
+                result = d.cleanup()
+                self.assertFalse(result['verified'])
+                self.assertFalse(result['output_off_confirmed'])
+
+    def test_stop_timeout_is_bounded_with_raw_last_state_retained(self):
+        r, d, events = self.active()
+        query = r.query
+        r.query = lambda command: '16' if command == 'STAT:OPER:COND?' else query(command)
+        now = [0.0]
+        d.monotonic = lambda: now[0]
+        d.sleep = lambda seconds: now.__setitem__(0, now[0] + seconds)
+        result = d.cleanup()
+        self.assertFalse(result['verified'])
+        self.assertIn('timeout', result['errors'][0])
+        self.assertEqual(result['stop_confirmation'][-1]['operation_condition'], 16)
+        self.assertLessEqual(now[0], 2.0)
+
     def test_cleanup_still_commands_when_audit_sink_fails(self):
         r, d, _ = self.active()
         d.event = lambda *a: (_ for _ in ()).throw(OSError("audit failed"))

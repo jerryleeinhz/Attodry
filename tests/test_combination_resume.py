@@ -63,6 +63,16 @@ class RecoveryReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "compatibility"):
             self.review(replace(self.config, snapshot=snapshot), acknowledge_failure=True)
 
+    def test_reviewed_relock_source_change_cannot_cover_unrelated_modules(self):
+        from attodry_control.combination_resume import source_compatibility, digest
+        before = {'external_lockin_points.py': 'old', 'attodry.py': 'unchanged'}
+        after = dict(before, **{'external_lockin_points.py': 'new'})
+        with patch('attodry_control.combination_resume.RELOCK_PREDECESSOR_SETS', {digest(before)}):
+            self.assertEqual(source_compatibility(before, after), 'reviewed-e925e29-external-relock')
+            self.assertIsNone(source_compatibility(before, dict(after, **{'attodry.py': 'changed'})))
+            self.assertIsNone(source_compatibility(before, dict(after, **{'extra.py': 'new'})))
+        self.assertIsNone(source_compatibility(before, after))
+
     def test_coordinates_harmonics_and_hard_bound_changes_refused(self):
         for mutate in (
             lambda s: s["axes"][0]["points"][0]["values"].update(temperature_k=2.1),
