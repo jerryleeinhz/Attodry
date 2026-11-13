@@ -1,7 +1,14 @@
 # 6221 AC excitation with SR830 XX / SR865A XY
 
-Status: implemented and tested with injected fake instruments only. No station
-deployment, real waveform, reference wiring or sample limits have been commissioned.
+Status: implemented and tested with injected fake instruments only. Source-code
+deployment does not commission a real waveform, reference wiring or sample limits.
+
+Output connections are now explicit: `inner_shield = "output_low" | "guard"`,
+`output_low_grounding = "floating" | "earth"`, and `phase_marker_enabled = true`.
+See the [complete parameter choices](KEITHLEY6221_PARAMETERS.md) and
+[25 Hz six-point review template](../config/hardware.6221_25Hz.example.toml).
+Set/read-verify connections only while OFF; capture actual connections in formal
+brackets. Cleanup never switches grounding. Source deployment is not commissioning.
 
 ## Two explicit topologies
 
@@ -108,7 +115,7 @@ axis visit, with subsequent temperature telemetry and hard protections retained.
 ## Records, analysis and recovery
 
 SQLite tables/schema stay compatible; the new snapshot declares
-`measurement_contract = "electrical-excitation-detectors-v1"` and
+`measurement_contract = "electrical-excitation-detectors-v2"` and
 `excitation_source = "keithley6221"`. Source `actual` coordinates are
 `excitation_current_rms_a` and `excitation_frequency_hz`. They are **source setting
 readbacks, not measured current**. Peak amplitude, offset, phase-marker settings,
@@ -131,6 +138,8 @@ preflight and configures the pending source; it never inherits in-memory output
 state. Switching source topology, grid, wiring/reference contract, current limit,
 compliance or source setup requires a new run. Existing reviewed detector range,
 Reserve, timing and environment changes retain their normal review requirements.
+Legacy v1 evidence remains readable without invented connection readbacks;
+v1-to-v2 source contracts require a new run, not a silent recovery migration.
 
 Offline preview uses `combination_cli describe-hardware --config <local-copy>`;
 it does not open resources. No real run or deployment is part of this delivery.

@@ -28,8 +28,14 @@ class Excitation6221Config:
     phase_marker_phase_deg: float
     current_rms_points_a: tuple[float, ...]
     frequency_points_hz: tuple[float, ...]
+    # None is only for reading pre-v2 archives, never for new hardware sessions.
+    inner_shield: str | None = None
+    output_low_grounding: str | None = None
+    phase_marker_enabled: bool | None = None
 
     def __post_init__(self):
+        if any(v is not None for v in (self.inner_shield, self.output_low_grounding, self.phase_marker_enabled)):
+            self.require_output_contract()
         for name in ("resource", "expected_idn"):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip() or any(c in value for c in "\r\n"):
@@ -60,6 +66,14 @@ class Excitation6221Config:
         for frequency in self.frequency_points_hz:
             finite_number(frequency, "excitation_frequency_hz", .001, 100000)
 
+    def require_output_contract(self):
+        if self.inner_shield not in ("output_low", "guard"):
+            raise ValueError("inner_shield must be output_low or guard")
+        if self.output_low_grounding not in ("floating", "earth"):
+            raise ValueError("output_low_grounding must be floating or earth")
+        if self.phase_marker_enabled is not True:
+            raise ValueError("phase_marker_enabled must be true for external TTL detectors")
+
     def validate_point(self, current_rms_a, frequency_hz):
         current = finite_number(current_rms_a, "excitation_current_rms_a",
                                 2e-12 / math.sqrt(2), .105 / math.sqrt(2))
@@ -83,4 +97,6 @@ def parse_excitation_6221(table):
         present = set(table) if isinstance(table, Mapping) else set()
         raise ValueError(f"excitation_6221 fields: missing={sorted(names - present)}, "
                          f"unknown={sorted(present - names)}")
-    return Excitation6221Config(**table)
+    config = Excitation6221Config(**table)
+    config.require_output_contract()
+    return config

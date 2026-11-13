@@ -1,0 +1,93 @@
+# User confirmed RMS, not peak. Peak at last point = 14.8492424049 uA; ceiling 15 uA.
+# Both 0.5 V sensitivities must be allowed by the local safety file.
+# OFFLINE TEMPLATE: replace addresses and review DUT limits locally before use.
+# This example is not authorization or evidence of hardware commissioning.
+# Keep lockin_safety.toml alongside the local copy. Do not combine this with
+# [lockin_sweep]; the external source owns the entire current/frequency grid.
+[project]
+mode = "hardware"
+database_path = "../run_data/combination_6221_25Hz/scan.sqlite"
+
+[visa]
+backend = "default"
+timeout_ms = 5000
+
+[combination_scan]
+backend = "hardware"
+order = ["excitation", "lockin"]
+excitation_source = "keithley6221"
+lockin_mode = "detector"
+samples_per_condition = 1
+repeats = 1
+run_name = "6221_25Hz_0p5-10p5uArms_6pts"
+note = "Review: 25 Hz, six RMS current points; XX h1 / XY h2; Output Low, Floating, phase marker ON Link 3 at 0 deg"
+
+[excitation_6221]
+resource = "CHANGE_ME_6221_VISA_ADDRESS"
+expected_idn = "MODEL 6221"
+inner_shield = "output_low" # output_low | guard
+output_low_grounding = "floating" # floating | earth
+phase_marker_enabled = true # required for the external TTL detector topology
+# Explicit example DUT ceiling on abs(DC offset) + AC peak, not a measured limit.
+max_current_peak_a = 0.000015
+compliance_voltage_v = 1.00
+offset_a = 0.0
+# Physical phase marker connector line; must differ from trigger output line.
+phase_marker_line = 3
+phase_marker_phase_deg = 0.0
+# Frequency outer/current inner. Values are RMS; SCPI AMPL receives sqrt(2)*RMS.
+current_rms_points_a = [0.0000005, 0.0000025, 0.0000045, 0.0000065, 0.0000085, 0.0000105]
+frequency_points_hz = [25.0]
+
+[lockin_acquisition]
+xx_harmonics = [1]
+xy_harmonics = [2]
+settle_time_constants = 15.0
+sample_interval_time_constants = 1.0
+overload_policy = "record_continue"
+skip_unsupported_harmonics = false
+
+[lockin_xx]
+channel_label = "Vxx/b axis 04/06"
+model = "SR830"
+address = "CHANGE_ME_SR830_XX_VISA_ADDRESS"
+reference_source = "external_ttl"
+external_reference_edge = "rising"
+sine_output_connected = false
+# Legacy role fields remain for schema compatibility; neither is written by
+# the external detector session or used as the current excitation coordinate.
+source_voltage_v = 0.004
+frequency_hz = 25.0
+input_mode = "a_minus_b"
+shield_grounding = "float"
+input_coupling = "ac"
+time_constant_s = 1.0
+filter_slope_db_oct = 24
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.5
+reserve_mode = "normal"
+
+[lockin_xy]
+channel_label = "Vxy/a axis 05/09"
+model = "SR865A"
+address = "CHANGE_ME_SR865A_XY_VISA_ADDRESS"
+reference_source = "external_ttl"
+external_reference_edge = "rising"
+sine_output_connected = false
+source_voltage_v = 0.004
+frequency_hz = 25.0
+input_mode = "a_minus_b"
+shield_grounding = "float"
+input_coupling = "ac"
+time_constant_s = 1.0
+filter_slope_db_oct = 24
+sensitivity_mode = "fixed"
+sensitivity_full_scale_v = 0.5
+
+[lockin_xy.sr865a]
+input_range_v_peak = 1.0
+reference_input_impedance_ohm = 1000000.0
+# Set true only after the installed firmware's current-status capability is
+# independently confirmed. False fails before connecting this new topology.
+current_status_supported = false
+sync_output_mode = "preserve"

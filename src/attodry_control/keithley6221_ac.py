@@ -91,6 +91,7 @@ class Keithley6221Ac:
                  authorize_writes=False, monotonic=None):
         if not isinstance(config, Excitation6221Config):
             raise TypeError("6221 requires a validated Excitation6221Config")
+        config.require_output_contract()
         self.resource, self.config = resource, config
         self.event = event or (lambda kind, payload: None)
         self.monotonic = monotonic or time.monotonic
@@ -146,6 +147,20 @@ class Keithley6221Ac:
             raise Keithley6221Error("6221 instrument error: " + raw)
         return {"code": code, "raw": raw}
 
+    def _read_connections(self):
+        shield = self._query("OUTP:ISH?").strip().upper()
+        if shield not in {"OLOW", "GUAR", "GUARD"}:
+            raise Keithley6221Error("Unknown 6221 inner shield response: " + shield)
+        earth = _flag(self._query("OUTP:LTE?"))
+        return {"inner_shield_raw": shield, "inner_shield": "output_low" if shield == "OLOW" else "guard",
+                "output_low_earth_connected": earth,
+                "output_low_grounding": "earth" if earth else "floating"}
+
+    def _verify_connections(self, state):
+        if (state["inner_shield"] != self.config.inner_shield
+                or state["output_low_grounding"] != self.config.output_low_grounding):
+            raise Keithley6221Error("6221 output connection differs from configuration")
+
     def _core(self):
         state = {"source_kind": "keithley6221_ac", "current_basis": "source_setting_readback",
                  "captured_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -162,6 +177,7 @@ class Keithley6221Ac:
                  "measurement_event": (_word(self._query("STAT:MEAS:EVEN?"))
                                        if self.authorize_writes else None),
                  "questionable_condition": _word(self._query("STAT:QUES:COND?"))}
+        state.update(self._read_connections())
         state["wave_started"] = bool(state["operation_condition"] & 16)
         state["compliance_tripped"] = bool(state["measurement_condition"] & 8)
         state["interlock_asserted"] = bool(state["measurement_condition"] & 2)
@@ -234,6 +250,9 @@ class Keithley6221Ac:
         self.owned = True  # Cleanup applies even if the first write is uncertain.
         self._write("SOUR:WAVE:ABOR")
         self._healthy(self._core())
+        self._setting("OUTP:ISH", "OLOW" if self.config.inner_shield == "output_low" else "GUAR")
+        self._setting("OUTP:LTE", "OFF" if self.config.output_low_grounding == "floating" else "ON")
+        self._verify_connections(self._read_connections())
         for command, value in (
             ("SOUR:CURR:COMP", self.config.compliance_voltage_v),
             ("SOUR:WAVE:FUNC", "SIN"), ("SOUR:WAVE:RANG", "BEST"),
@@ -241,7 +260,8 @@ class Keithley6221Ac:
             ("SOUR:WAVE:EXTR", "OFF"), ("SOUR:WAVE:EXTR:ILIN", 0),
             ("SOUR:WAVE:PMAR:OLIN", self.config.phase_marker_line),
             ("SOUR:WAVE:PMAR", self.config.phase_marker_phase_deg),
-            ("SOUR:WAVE:PMAR:STAT", "ON"), ("SOUR:WAVE:DUR:TIME", "INF"),
+            ("SOUR:WAVE:PMAR:STAT", "ON" if self.config.phase_marker_enabled else "OFF"),
+            ("SOUR:WAVE:DUR:TIME", "INF"),
         ):
             self._setting(command, value)
         state = self._read_settings(active=False)
@@ -266,6 +286,7 @@ class Keithley6221Ac:
         self._emit("excitation_raw_settings", deepcopy(state))
         state["error_queue"] = self._error()
         self._healthy(state, active=active)
+        self._verify_connections(state)
         if (state["waveform"] not in {"SIN", "SINUSOID"} or state["range_mode"] != "BEST"
                 or state["external_trigger_enabled"] or state["external_trigger_line"] != 0
                 or not state["phase_marker_enabled"]
@@ -357,6 +378,16 @@ def validate_active_state(state, config, current_rms_a, frequency_hz):
     if not isinstance(config, Excitation6221Config) or not isinstance(state, dict):
         raise ValueError("6221 source evidence/config is missing")
     current, frequency, peak = config.validate_point(current_rms_a, frequency_hz)
+    if config.inner_shield is not None:
+        config.require_output_contract()
+        raw = state.get("inner_shield_raw")
+        earth = state.get("output_low_earth_connected")
+        if (raw not in {"OLOW", "GUAR", "GUARD"} or type(earth) is not bool
+                or state.get("inner_shield") != ("output_low" if raw == "OLOW" else "guard")
+                or state.get("output_low_grounding") != ("earth" if earth else "floating")
+                or state.get("inner_shield") != config.inner_shield
+                or state.get("output_low_grounding") != config.output_low_grounding):
+            raise ValueError("6221 archived output connection is missing or differs")
     if state.get("source_kind") != "keithley6221_ac" or state.get("current_basis") != "source_setting_readback":
         raise ValueError("6221 source evidence has an unknown contract")
     for name in ("operation_condition", "measurement_condition", "measurement_event", "questionable_condition"):

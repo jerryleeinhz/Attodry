@@ -1,5 +1,23 @@
 # Development stages
 
+## Current: 6221 output connections and documented preset (2026-11-13)
+
+- Explicit Output Low/Guard and Floating/Earth set/readback while output is OFF;
+  Phase Marker ON required for external TTL detection. All connection states are
+  archived and verified for v2, with no retroactive proof added to v1 records.
+- Preserve original waveform behavior and serial/shared wait ownership. Cleanup
+  stops the source without changing output grounding. No new process supervision.
+- Document accepted values, fixed waveform modes and unsupported features in
+  [KEITHLEY6221_PARAMETERS.md](KEITHLEY6221_PARAMETERS.md); publish the requested
+  25 Hz, six RMS points, split harmonic 0.5 V/1 s review template.
+- Scope: code, guarded fake tests, origin delivery and workstation source deployment;
+  no real instrument connection, settings changes or scan.
+- Verification: the 91-case guarded release suite passed (49.161 s), followed by
+  the actual preset/protected-resume checks (2 cases, 2.902 s) and final source
+  checks (33 cases; overlapping suites). The broader regression's unsorted
+  test-only safety fixture was corrected; production safety rules were unchanged.
+  Station deployment repeats the guarded release suite in an isolated archive.
+
 ## Current: external 6221 AC source / mixed detectors (2026-11-13)
 
 - Add an explicitly selected 6221 sine-current source axis with frequency/current

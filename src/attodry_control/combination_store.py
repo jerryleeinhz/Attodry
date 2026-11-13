@@ -311,7 +311,11 @@ def _validate_excitation_context(state, snapshot, condition):
     from .keithley6221_ac import Keithley6221Error, validate_active_state
     from dataclasses import fields
     archived = snapshot["hardware"]["excitation"]
-    config = Excitation6221Config(**{f.name: archived[f.name] for f in fields(Excitation6221Config)})
+    legacy = snapshot.get("measurement_contract") == "electrical-excitation-detectors-v1"
+    config = Excitation6221Config(**{f.name: archived[f.name] for f in fields(Excitation6221Config)
+                                    if not legacy or f.name in archived})
+    if not legacy:
+        config.require_output_contract()
     current = condition["requested"]["excitation_current_rms_a"]
     frequency = condition["requested"]["excitation_frequency_hz"]
     try:
@@ -323,7 +327,7 @@ def _validate_excitation_context(state, snapshot, condition):
 def _validate_excitation_record(reading, snapshot, condition, start, finish):
     """Rebuild current-source evidence from raw before/after states on resume."""
     if (snapshot.get("excitation_source") != "keithley6221"
-            or snapshot.get("measurement_contract") != "electrical-excitation-detectors-v1"
+            or snapshot.get("measurement_contract") not in {"electrical-excitation-detectors-v1", "electrical-excitation-detectors-v2"}
             or reading["measurements"]):
         raise ValueError("Unknown excitation contract or fabricated measured current")
     before = reading["status"]

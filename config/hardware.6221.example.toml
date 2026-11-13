@@ -23,6 +23,9 @@ note = "Review wiring and DUT limits before commissioning"
 [excitation_6221]
 resource = "CHANGE_ME_6221_VISA_ADDRESS"
 expected_idn = "MODEL 6221"
+inner_shield = "output_low" # output_low | guard
+output_low_grounding = "floating" # floating | earth
+phase_marker_enabled = true # required for the external TTL detector topology
 # Explicit example DUT ceiling on abs(DC offset) + AC peak, not a measured limit.
 max_current_peak_a = 0.000010
 compliance_voltage_v = 1.00

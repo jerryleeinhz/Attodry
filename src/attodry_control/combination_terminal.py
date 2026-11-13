@@ -94,6 +94,11 @@ def launch_text(summary, width=None):
             "; compliance " + _number(source["compliance_voltage_v"], "V")))
         lines.append("Excitation: 6221 current setting/readback (not measured current); "
                      "both lock-ins use the external phase marker.")
+        lines.append(f"6221 connections: inner shield={source.get('inner_shield', 'unknown')}; "
+                     f"output low={source.get('output_low_grounding', 'unknown')}; "
+                     f"phase marker={source.get('phase_marker_enabled', 'unknown')}, "
+                     f"Link #{source['phase_marker_line']}, {source['phase_marker_phase_deg']:g} deg.")
+        lines.append("Wave: sine; ranging=BEST; duration=infinite; software start; external trigger OFF.")
     for role, settings in summary.get("smu", {}).items():
         hardware.append((role, settings["source_mode"], "AUTO", "-",
             _number(settings["max_abs_current_a"], "A") + " / " +

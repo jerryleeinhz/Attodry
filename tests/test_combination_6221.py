@@ -126,6 +126,28 @@ class Combination6221Tests(unittest.TestCase):
                 self.config()
         self.assertEqual(self.manager.opened, [])
 
+    def test_requested_25hz_six_rms_points_with_split_harmonics(self):
+        text = (ROOT / "config/hardware.6221_25Hz.example.toml").read_text(encoding="utf-8")
+        text = (text.replace("CHANGE_ME_6221_VISA_ADDRESS", "FAKE::SOURCE")
+            .replace("CHANGE_ME_SR830_XX_VISA_ADDRESS", "FAKE::XX")
+            .replace("CHANGE_ME_SR865A_XY_VISA_ADDRESS", "FAKE::XY")
+            .replace("current_status_supported = false", "current_status_supported = true"))
+        self.path.write_text(text, encoding="utf-8")
+        self.assertIn('channel_label = "Vxx/b axis 04/06"', text)
+        self.assertIn('channel_label = "Vxy/a axis 05/09"', text)
+        safety = self.directory / "lockin_safety.toml"
+        safety.write_text(re.sub(r"allowed_fixed_full_scales_v = (\[[^\]]+\])",
+            lambda m: "allowed_fixed_full_scales_v = " + json.dumps(sorted(set(json.loads(m[1])) | {0.5})),
+            safety.read_text()), encoding="utf-8")
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        with closing(open_readonly(self.database)) as db:
+            self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 6)
+        pairs = [v for k, v in self.events() if k == "lockin_formal_pair"]
+        self.assertEqual(len(pairs), 12)
+        self.assertEqual({(p["harmonic"], tuple(p["selected_roles"])) for p in pairs},
+                         {(1, ("xx",)), (2, ("xy",))})
+
     def test_source_preflight_failure_never_writes_or_opens_detectors(self):
         self.source.state["OUTP:STAT"] = "1"
         result = self.execute()
@@ -139,6 +161,11 @@ class Combination6221Tests(unittest.TestCase):
         changed["excitation_source"] = "sr830"
         with self.assertRaisesRegex(ValueError, "new run"):
             configuration_changes(snapshot, changed)
+        for key, value in (("inner_shield", "guard"), ("output_low_grounding", "earth")):
+            changed = deepcopy(snapshot)
+            changed["hardware"]["excitation"][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                configuration_changes(snapshot, changed)
 
     def test_failed_second_condition_resume_repeats_whole_condition(self):
         config = self.config()

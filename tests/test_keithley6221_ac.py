@@ -2,6 +2,7 @@
 from copy import deepcopy
 import math
 import unittest
+from dataclasses import asdict
 
 from attodry_control.excitation_6221_config import parse_excitation_6221
 from attodry_control.keithley6221_ac import Keithley6221Ac, Keithley6221Error, validate_active_state
@@ -10,6 +11,7 @@ from attodry_control.keithley6221_ac import Keithley6221Ac, Keithley6221Error, v
 def source_config(**overrides):
     return parse_excitation_6221({
         "resource": "GPIB0::12::INSTR", "expected_idn": "MODEL 6221",
+        "inner_shield": "output_low", "output_low_grounding": "floating", "phase_marker_enabled": True,
         "max_current_peak_a": .001, "compliance_voltage_v": 1.0, "offset_a": 0.0,
         "phase_marker_line": 3, "phase_marker_phase_deg": 0.0,
         "current_rms_points_a": [1e-6, 2e-6], "frequency_points_hz": [200., 300.], **overrides})
@@ -25,6 +27,7 @@ class Fake6221:
         self.state = {
             "*IDN": "KEITHLEY INSTRUMENTS INC.,MODEL 6221,123456,A03",
             "OUTP:STAT": "0", "SOUR:CURR": "0", "SOUR:CURR:COMP": "1",
+            "OUTP:ISH": "OLOW", "OUTP:LTE": "0",
             "STAT:OPER:COND": "1024", "STAT:MEAS:COND": "2", "STAT:MEAS:EVEN": "0",
             "STAT:QUES:COND": "0", "SYST:ERR": '0,"No error"', "TRIG:OLIN": "2",
             "SOUR:WAVE:FUNC": "SIN", "SOUR:WAVE:RANG": "BEST",
@@ -58,6 +61,16 @@ class Fake6221:
 
 
 class ConfigTests(unittest.TestCase):
+    def test_output_contract_is_explicit_and_rejects_unsupported_values(self):
+        for key, value in (("inner_shield", "unknown"), ("output_low_grounding", "ground"),
+                           ("phase_marker_enabled", False), ("phase_marker_enabled", 1)):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                source_config(**{key: value})
+        for key in ("inner_shield", "output_low_grounding", "phase_marker_enabled"):
+            table = asdict(source_config()); del table[key]
+            with self.assertRaises(ValueError):
+                parse_excitation_6221(table)
+
     def test_grid_preserves_order_duplicates_and_units(self):
         c = source_config(current_rms_points_a=[2e-6, 1e-6, 2e-6], frequency_points_hz=[300, 200])
         self.assertEqual(len(c.grid()), 6)
@@ -100,6 +113,70 @@ class ConfigTests(unittest.TestCase):
 
 
 class DriverTests(unittest.TestCase):
+    def test_connection_options_and_cleanup_never_change_grounding(self):
+        for shield, command in (("output_low", "OLOW"), ("guard", "GUAR")):
+            for ground, value in (("floating", "OFF"), ("earth", "ON")):
+                r = Fake6221()
+                d = Keithley6221Ac(r, source_config(inner_shield=shield, output_low_grounding=ground), authorize_writes=True)
+                d.preflight(); d.configure(); state = d.set_point(1e-6, 200)
+                self.assertIn("OUTP:ISH " + command, r.commands)
+                self.assertIn("OUTP:LTE " + value, r.commands)
+                self.assertTrue(validate_active_state(state, d.config, 1e-6, 200))
+                count = len(r.commands)
+                self.assertTrue(d.cleanup()["verified"])
+                self.assertEqual(r.commands[count:], ["SOUR:WAVE:ABOR", "OUTP:STAT OFF"])
+
+    def test_connection_write_requires_off_and_readback_before_wave_settings(self):
+        r, d, _ = self.make(); d.preflight()
+        r.state["OUTP:STAT"] = "1"
+        with self.assertRaises(Keithley6221Error): d.configure()
+        self.assertEqual(r.commands, [])
+        r, d, _ = self.make(); d.preflight()
+        original = r.write
+        def ignore(command):
+            original(command)
+            if command == "OUTP:LTE OFF": r.state["OUTP:LTE"] = "ON"
+        r.write = ignore
+        with self.assertRaisesRegex(Keithley6221Error, "connection"): d.configure()
+        self.assertNotIn("SOUR:WAVE:FUNC SIN", r.commands)
+        self.assertTrue(d.cleanup()["output_off_confirmed"])
+
+    def test_connection_faults_fail_live_and_archived_without_repair(self):
+        for key, value in (("OUTP:ISH", "GUAR"), ("OUTP:LTE", "ON"), ("OUTP:ISH", "?")):
+            r, d, _ = self.active(); count = len(r.commands)
+            r.state[key] = value
+            with self.subTest(key=key), self.assertRaises(Keithley6221Error): d.readback()
+            self.assertEqual(len(r.commands), count)
+        r, d, _ = self.active(); state = d.readback()
+        for key in ("inner_shield_raw", "inner_shield", "output_low_earth_connected", "output_low_grounding"):
+            bad = deepcopy(state); del bad[key]
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                validate_active_state(bad, d.config, 1e-6, 200)
+
+    def test_partial_connection_write_failure_still_aborts_off(self):
+        r, d, _ = self.make(); d.preflight(); r.fail_write = "OUTP:LTE OFF"
+        with self.assertRaises(OSError): d.configure()
+        self.assertNotIn("SOUR:WAVE:FUNC SIN", r.commands)
+        self.assertTrue(d.cleanup()["output_off_confirmed"])
+
+    def test_legacy_archive_has_no_invented_connection_proof_and_cannot_drive(self):
+        from attodry_control.excitation_6221_config import Excitation6221Config
+        r, d, _ = self.active(); state = d.readback(); old = asdict(d.config)
+        for key in ("inner_shield", "output_low_grounding", "phase_marker_enabled"): del old[key]
+        for key in ("inner_shield_raw", "inner_shield", "output_low_earth_connected", "output_low_grounding"): del state[key]
+        legacy = Excitation6221Config(**old)
+        self.assertTrue(validate_active_state(state, legacy, 1e-6, 200))
+        self.assertNotIn("inner_shield", state)
+        with self.assertRaises(ValueError): Keithley6221Ac(r, legacy)
+        from attodry_control.combination_store import _validate_excitation_context
+        snapshot = {"measurement_contract": "electrical-excitation-detectors-v1",
+                    "hardware": {"excitation": old}}
+        condition = {"requested": {"excitation_current_rms_a": 1e-6, "excitation_frequency_hz": 200}}
+        _validate_excitation_context(state, snapshot, condition)
+        snapshot["measurement_contract"] = "electrical-excitation-detectors-v2"
+        with self.assertRaises((KeyError, ValueError)):
+            _validate_excitation_context(state, snapshot, condition)
+
     def make(self, *, authorize=True, event=None):
         resource = Fake6221()
         events = []
@@ -315,17 +392,17 @@ class DriverTests(unittest.TestCase):
     def test_serial_query_write_budget_and_no_driver_sleep(self):
         r, d, _ = self.make()
         d.preflight()
-        self.assertEqual((len(r.queries), len(r.commands)), (10, 0))
+        self.assertEqual((len(r.queries), len(r.commands)), (12, 0))
         d.configure()
-        self.assertEqual((len(r.queries), len(r.commands)), (57, 11))
+        self.assertEqual((len(r.queries), len(r.commands)), (69, 13))
         d.set_point(1e-6, 200)
-        self.assertEqual((len(r.queries), len(r.commands)), (110, 16))
+        self.assertEqual((len(r.queries), len(r.commands)), (128, 18))
         before = len(r.queries), len(r.commands)
         d.readback()
-        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (21, 0))
+        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (23, 0))
         before = len(r.queries), len(r.commands)
         d.cleanup()
-        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (8, 2))
+        self.assertEqual((len(r.queries) - before[0], len(r.commands) - before[1]), (10, 2))
 
     def test_failed_query_retains_primary_when_audit_also_fails(self):
         r, d, _ = self.active()

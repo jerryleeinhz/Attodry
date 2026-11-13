@@ -113,6 +113,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                 "excitation_index": i % len(excitation.current_rms_points_a)})
             for i, point in enumerate(excitation.grid())))
         hardware["excitation"] = {**asdict(excitation), "source_kind": "ac_current_sine",
+            "waveform_settings": {"function": "sine", "ranging": "best", "duration": "infinite",
+                                  "trigger_mode": "software", "external_trigger_line": 0},
             "amplitude_unit": "A_RMS", "instrument_amplitude_unit": "A_peak",
             "current_basis": "source_setting_readback", "measured_current": False}
     temperature = magnetic = cryostat = None
@@ -256,7 +258,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                     hardware_resume_contract="whole-condition-reviewed-executions-v1")
     if external:
         snapshot.update(excitation_source="keithley6221",
-                        measurement_contract="electrical-excitation-detectors-v1",
+                        measurement_contract="electrical-excitation-detectors-v2",
                         hardware_scope="external-current-lockin-detectors-v1")
         snapshot["cleanup_policy"].update(excitation="wave_abort_verified_dc_zero_output_off",
                                          lockin="detector_h1_restore_ranges_reserve_no_source_writes")

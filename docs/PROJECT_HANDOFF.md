@@ -4,6 +4,31 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 explicit output connections and 25 Hz review preset (2026-11-13)
+
+- Add required `inner_shield`, `output_low_grounding`, `phase_marker_enabled` to new
+  6221 configurations. Verify OFF before connection writes and read back before
+  WAVE configuration; archive raw connections before/after formal capture.
+  Connection drift fails acquisition; cleanup never switches grounding.
+- Publish complete parameter choices in [KEITHLEY6221_PARAMETERS.md](KEITHLEY6221_PARAMETERS.md).
+  The supported WAVE contract remains sine/BEST/infinite/software-start; marker
+  ON, line and phase are explicit. Unsupported vendor modes reject configuration.
+- New measurement contract v2 requires connection evidence. V1 archives retain
+  their original unknown connection state and cannot silently migrate on resume.
+  Original SR830-source topology and native detector timing remain unchanged.
+- The public 25 Hz preset matches the user's six RMS current points 0.5..10.5 uA,
+  XX h1 / XY h2, both 0.5 V / 1 s, specified labels, Output Low / Floating and
+  marker ON / Link 3 / 0 degrees. Private addresses and firmware capability remain
+  unconfirmed. Existing private safety and notebooks must remain unchanged during
+  deployment. No real scan or instrument configuration is authorized in this stage.
+- Verification: 91 guarded source/detector/combination/archive/analysis/resume
+  tests passed in 49.161 s. Final focused checks passed for the actual six-point
+  preset and protected recovery settings (2 tests, 2.902 s), and the final source
+  suite passed 33 tests. These suites overlap. The broader 138-case run exposed
+  an unsorted test-only safety fixture; sorting its allowed ranges fixed it.
+  Hardware imports and DLL access remained blocked. Target delivery must repeat
+  the 91-case suite from an isolated source archive and preserve local settings.
+
 ### 6221 external AC source and mixed Lock-in detectors (2026-11-13)
 
 - New explicit `excitation_source="keithley6221"` separates source current/frequency

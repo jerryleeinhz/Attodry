@@ -2,6 +2,14 @@
 
 ## Explicit external AC topology (offline implementation, 2026-11-13)
 
+New 6221 configurations explicitly declare inner shield (Output Low/Guard),
+output low grounding (Floating/Earth) and Phase Marker enabled. The driver
+changes connections only after verified output OFF and reads them back before
+WAVE setup. Formal brackets preserve raw connection evidence; a mismatch fails
+the condition. Cleanup does not switch grounding. See
+[accepted parameter values](KEITHLEY6221_PARAMETERS.md). Neither an OFF command
+nor missing legacy metadata proves a connection setting.
+
 `combination_scan.excitation_source="keithley6221"` is a separate authorized
 topology: 6221 owns sine-current amplitude/frequency/output and provides an external
 TTL phase marker to SR830 XX and SR865A XY. Both detector SINE OUT connections
