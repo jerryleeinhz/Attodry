@@ -7,9 +7,19 @@ from __future__ import annotations
 
 from .nkt_config import NktError, number
 from .photoresponse_cld import CldController
+from .cld_output import protected_ld_off
 
 
 class CldOpticalController(CldController):
+    def protect_startup_off(self, *, authorize_writes=False, confirm_manual_route=False):
+        if self.backend.is_hardware and (authorize_writes is not True or confirm_manual_route is not True):
+            raise NktError("CLD writes and optical route require explicit authorization")
+        if "startup_off" in self.record:
+            raise NktError("CLD startup shutdown cannot be replayed")
+        self.record["startup_off"] = {}
+        return protected_ld_off(self.config, self.backend, record=self.record["startup_off"],
+                                phase="cld_startup_off", on_event=self.on_event)
+
     @property
     def session_closed(self):
         return self.closed
@@ -22,10 +32,15 @@ class CldOpticalController(CldController):
         if self.backend.is_hardware and (not authorize_writes or not confirm_manual_route):
             raise NktError("CLD writes and optical route require explicit authorization")
         self._authorization = (authorize_writes, confirm_manual_route)
+        if "startup_off" not in self.record:
+            self.protect_startup_off(authorize_writes=authorize_writes,
+                                     confirm_manual_route=confirm_manual_route)
+        if not self.record["startup_off"].get("off_confirmed") or self.record["startup_off"].get("errors"):
+            raise NktError("CLD startup shutdown was not verified")
         state = self.capture("cld_combination_preflight")
         self.healthy(state)
         if state["getLdOutputState"]:
-            raise NktError("CLD preflight requires laser OFF; no automatic takeover")
+            raise NktError("CLD re-enabled after startup shutdown; preflight blocked")
         self._freeze_temperature_protection(state)
         return state, None
 
@@ -71,4 +86,25 @@ class CldOpticalController(CldController):
     def finish_session(self):
         # Optical cleanup precedes electrical protection. Closing a default
         # VISA manager here could invalidate the lock-ins still needing cleanup.
-        return self.finish(close_backend=False)
+        if self.owned:
+            return self.finish(close_backend=False)
+        cleanup = self.record["cleanup"]
+        if "ownership_not_acquired" not in cleanup:
+            cleanup["ownership_not_acquired"] = True
+            cleanup["ld_only_cleanup"] = True
+            # Normal current/TEC ownership was never acquired. Protect only LD,
+            # using fresh readback, and retain the independent startup evidence.
+            if self.record.get("startup_off", {}).get("identity_verified"):
+                evidence = cleanup["shutdown"] = {}
+                try:
+                    protected_ld_off(self.config, self.backend, record=evidence,
+                                     phase="cld_partial_open_cleanup", on_event=self.on_event,
+                                     verified_identity=self.record["startup_off"])
+                except BaseException as exc:
+                    cleanup["errors"].append(f"{type(exc).__name__}: {exc}")
+                cleanup["off_confirmed"] = evidence.get("off_confirmed") is True
+            else:
+                cleanup["off_confirmed"] = False
+            cleanup["manual_verification_required"] = not cleanup["off_confirmed"] or bool(cleanup["errors"])
+        self.closed = True
+        return cleanup

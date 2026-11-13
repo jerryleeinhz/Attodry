@@ -63,18 +63,27 @@ class CldTemperatureModeTests(unittest.TestCase):
                 with self.assertRaises(NktError):
                     session.configure_session()
                 self.assertEqual(session.temperature_protection_mode, mode)
-                self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
+                self.assertEqual([command for kind, command in resource.calls if kind == "write"],
+                                 ["OUTP1:STAT 0"])
+                session.finish()
 
-    def test_unhealthy_or_already_on_preflight_does_not_freeze_or_take_ownership(self):
-        for command, value in (("SENS2:TEMP:DATA?", "31"), ("OUTP1:STAT?", "1")):
-            with self.subTest(command=command):
-                session, resource, _, _ = self.make(cls=CldOpticalController)
-                resource.values[command] = value
-                with self.assertRaises(NktError):
-                    session.begin_session(authorize_writes=True, confirm_manual_route=True)
-                self.assertIsNone(session.temperature_protection_mode)
-                self.assertFalse(session.owned)
-                self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
+    def test_unhealthy_preflight_still_blocks_after_protective_off(self):
+        session, resource, _, _ = self.make(cls=CldOpticalController)
+        resource.values["SENS2:TEMP:DATA?"] = "31"
+        with self.assertRaises(NktError):
+            session.begin_session(authorize_writes=True, confirm_manual_route=True)
+        self.assertIsNone(session.temperature_protection_mode)
+        self.assertFalse(session.owned)
+        self.assertEqual([command for kind, command in resource.calls if kind == "write"], ["OUTP1:STAT 0"])
+
+    def test_already_on_preflight_confirms_off_without_acquisition_ownership(self):
+        session, resource, _, _ = self.make(cls=CldOpticalController)
+        resource.values["OUTP1:STAT?"] = "1"
+        session.begin_session(authorize_writes=True, confirm_manual_route=True)
+        self.assertEqual(session.temperature_protection_mode, 1)
+        self.assertFalse(session.owned)
+        self.assertTrue(session.record["startup_off"]["off_confirmed"])
+        self.assertEqual([command for kind, command in resource.calls if kind == "write"], ["OUTP1:STAT 0"])
 
     def test_mode_drift_during_tec_wait_aborts_and_independent_cleanup_still_runs(self):
         for mode, _ in MODES:
@@ -208,6 +217,7 @@ class CldTemperatureModeTests(unittest.TestCase):
                 self.assertFalse(session.owned)
                 self.assertIsNone(session.temperature_protection_mode)
                 self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
+                session.finish()
         for value in (0, 3, True, 1.0, "ENAB", None):
             with self.subTest(value=value):
                 config = configuration(backend="simulation")

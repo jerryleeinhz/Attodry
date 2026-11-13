@@ -14,6 +14,7 @@ import time
 
 from .nkt_config import NktError, keys, number, text
 from .nkt_control import utc_now
+from .hardware_lease import cld_hardware_lease
 
 
 @dataclass(frozen=True)
@@ -209,6 +210,8 @@ class TL4000:
             try: fn.argtypes, fn.restype = args, ct.c_int32
             except AttributeError: pass  # injected Python fake API
         # idQuery=true, reset=false. Manufacturer example's reset=true is not copied.
+        self._lease = cld_hardware_lease(config.expected_serial)
+        self._lease.__enter__()
         try:
             self._call("init", config.address.encode("ascii"), ct.c_uint16(1), ct.c_uint16(0), ct.byref(self.session))
         except (Exception, KeyboardInterrupt):
@@ -217,6 +220,7 @@ class TL4000:
                     self._call("close", self.session)
                 except (Exception, KeyboardInterrupt):
                     pass  # preserve init failure; close attempt remains in transcript
+            self._lease.__exit__(None, None, None)
             raise
         self.opened = True
 
@@ -271,7 +275,9 @@ class TL4000:
         else: typed = ct.c_double(value)
         self._call(name, self.session, typed, _requested=value)
 
-    def snapshot(self):
+    def identify(self):
+        if not self.opened:
+            raise NktError("CLD session closed")
         strings = [ct.create_string_buffer(256) for _ in range(4)]
         def validate_identity():
             manufacturer, model, serial, firmware = [s.value.decode("ascii") for s in strings]
@@ -282,7 +288,10 @@ class TL4000:
             _outputs=lambda: {"raw_identity": [s.value.decode("ascii", errors="backslashreplace") for s in strings],
                               "raw_identity_hex": [s.value.hex() for s in strings]})
         manufacturer, model, serial, firmware = [s.value.decode("ascii") for s in strings]
-        result = {"identity": [manufacturer, model, serial, firmware]}
+        return [manufacturer, model, serial, firmware]
+
+    def snapshot(self):
+        result = {"identity": self.identify()}
         for name in sorted(self.SHORT_GETTERS | self.BOOL_GETTERS | self.DOUBLE_GETTERS | self.SETTING_GETTERS):
             result[name] = self.get(name)
         result["diagnostics"] = {"qualification": "unavailable",
@@ -291,8 +300,11 @@ class TL4000:
 
     def close(self):
         if self.opened:
-            self._call("close", self.session)
             self.opened = False
+            try:
+                self._call("close", self.session)
+            finally:
+                self._lease.__exit__(None, None, None)
 
 
 class VisaCld:
@@ -348,6 +360,8 @@ class VisaCld:
             raise NktError("Expected CLD VISA backend")
         if not config.address.upper().startswith("USB") or not config.address.upper().endswith("::INSTR"):
             raise NktError("CLD VISA backend requires an explicit USB INSTR resource")
+        if authorize_connection is not True:
+            raise NktError("CLD connection requires authorization")
         from .photoresponse_transport import visa_resources
         self.config, self.writes = config, authorize_writes is True
         self.opened = False
@@ -356,7 +370,13 @@ class VisaCld:
         self._resources = visa_resources({"cld": config.address}, timeout_ms=min(10000, max(1, int(config.timeout_s*1000))),
             authorize_connection=authorize_connection, authorize_writes=authorize_writes,
             on_event=on_event, manager_factory=manager_factory)
-        self.transport = self._resources.__enter__()["cld"]
+        self._lease = cld_hardware_lease(config.expected_serial)
+        self._lease.__enter__()
+        try:
+            self.transport = self._resources.__enter__()["cld"]
+        except BaseException:
+            self._lease.__exit__(None, None, None)
+            raise
         self.transcript = self.transport.transcript
         self.opened = True
 
@@ -368,6 +388,9 @@ class VisaCld:
                 or identity[2] != self.config.expected_serial or not identity[3]):
             raise NktError("Unexpected CLD manufacturer/model/serial")
         return identity
+
+    def identify(self):
+        return self._identity()
 
     def get(self, name):
         if not self.opened or name not in self.QUERIES:
@@ -482,7 +505,10 @@ class VisaCld:
     def close(self):
         if self.opened:
             self.opened = False
-            self._resources.__exit__(None, None, None)
+            try:
+                self._resources.__exit__(None, None, None)
+            finally:
+                self._lease.__exit__(None, None, None)
 
 
 class SimulatedCld:
@@ -501,6 +527,8 @@ class SimulatedCld:
             "measLdCurr": 0., "measLdVolt": 0., "measTecCurr": 0.,
             "diagnostics": {"qualification": "simulated", "reason": "No physical connection diagnostic"}}
     def snapshot(self): return deepcopy(self.state)
+    def identify(self): return deepcopy(self.state["identity"])
+    def get(self, name): return self.state[name]
     def set(self, name, value):
         keys = {"setLdCurrLimit":"getLdCurrLimit", "setLdCurrSetpoint":"getLdCurrSetpoint",
                 "setLdOperatingMode":"getLdOperatingMode", "setTempSetpoint":"getTempSetpoint",

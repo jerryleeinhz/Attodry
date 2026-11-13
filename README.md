@@ -1,5 +1,28 @@
 # attoDRY Transport Control
 
+## CLD 单行开关与扫描启动关光
+
+在项目根目录、已激活实验 Python 环境的 PowerShell 中使用。每段均为一行：
+
+```powershell
+python -m attodry_control.cld_control off --config "config\three-lockin.local\photonics-cld.local.toml"
+```
+
+```powershell
+python -m attodry_control.cld_control on --config "config\three-lockin.local\photonics-cld.local.toml"
+```
+
+`off` 只关 LD 并核验读回，保留电流与 TEC 设置。`on` 使用仪器现有电流设置，
+按 TOML 检查上限、温度稳定和原有保护，通过后开 LD；成功退出会保持开光。
+命令在 CLD 的 `output_directory` 保存唯一命名的 JSON 审计，并打印记录路径；
+失败与未知读回会明确报告。操作受同一 CLD 序列号租约
+约束，不能与正在使用该设备的项目扫描并行执行。
+
+新的 CLD 组合扫描会先核身份、强制关 LD 并确认 OFF，再连接其余仪器和执行
+原有初始化／扫描；关光失败则不继续。无需增加 TOML 字段。该变化保留全部
+健康与限值检查；NKT 流程不变。实现和离线验证状态见
+[项目交接](docs/PROJECT_HANDOFF.md)。
+
 ## Positioner：XYZ 与焦面跟随（离线实现）
 
 ANC350 RES 位移台支持绝对/相对 XYZ、XY 网格/蛇形、多点焦面标定与 Z 跟随，

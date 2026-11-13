@@ -141,6 +141,8 @@ class OpticalPointSession:
         self.retry_deadline = None
         self._qualified_power_window = None
         self.backend = self.pem = self.meter = self.engine = None
+        self._cld_controller = None
+        self._cld_startup_attempted = False
         self.opened = self.configured = self.qualified = self.sample_active = False
         self._opening_attempted = False
         self.index = self.point = self.row = self.wavelength = self.feedback = None
@@ -211,9 +213,7 @@ class OpticalPointSession:
 
         return Pm100d(self.config.pm, SimulatedPmResource(power), clock=self.clock)
 
-    def open(self, *, authorize_writes=False, confirm_manual_route=False):
-        if self._opening_attempted:
-            raise NktError("Optical session cannot be opened twice")
+    def _authorize_open(self, authorize_writes, confirm_manual_route):
         hardware = self.config.nkt.backend != "simulation"
         if hardware:
             if authorize_writes is not True or confirm_manual_route is not True:
@@ -222,9 +222,40 @@ class OpticalPointSession:
             for cfg in (self.config.pem, self.config.pm):
                 if cfg:
                     cfg.require_hardware(writes=True)
+        return hardware
+
+    def prepare_cld_startup(self, *, authorize_writes=False, confirm_manual_route=False):
+        """Identify and confirm LD OFF before connecting any other module."""
+        if self.config.scan.laser_source != "cld":
+            raise NktError("CLD startup shutdown requires a CLD configuration")
+        hardware = self._authorize_open(authorize_writes, confirm_manual_route)
+        if self._cld_startup_attempted:
+            raise NktError("CLD startup shutdown cannot be replayed")
+        self._cld_startup_attempted = True
+        self.backend = self._backend()
+        if bool(self.backend.is_hardware) != hardware:
+            raise NktError("Injected CLD backend does not match configured mode")
+        from .cld_optical import CldOpticalController
+        self._cld_controller = CldOpticalController(self.config.nkt, self.backend, clock=self.clock,
+            sleep=self.sleep, on_event=self._engine_event)
+        return self._cld_controller.protect_startup_off(authorize_writes=authorize_writes,
+            confirm_manual_route=confirm_manual_route)
+
+    def open(self, *, authorize_writes=False, confirm_manual_route=False):
+        if self._opening_attempted:
+            raise NktError("Optical session cannot be opened twice")
+        hardware = self._authorize_open(authorize_writes, confirm_manual_route)
         self._opening_attempted = True
         try:
-            self.backend = self._backend()
+            if self.config.scan.laser_source == "cld":
+                if not self._cld_startup_attempted:
+                    self.prepare_cld_startup(authorize_writes=authorize_writes,
+                        confirm_manual_route=confirm_manual_route)
+                startup = self._cld_controller.record.get("startup_off", {}) if self._cld_controller else {}
+                if not startup.get("off_confirmed") or startup.get("errors"):
+                    raise NktError("CLD startup shutdown was not verified")
+            else:
+                self.backend = self._backend()
             if bool(self.backend.is_hardware) != hardware:
                 raise NktError("Injected NKT backend does not match configured mode")
             if self.config.pem:
@@ -247,11 +278,7 @@ class OpticalPointSession:
                     raise NktError("Injected PEM lacks setting authorization")
                 if self.meter and (self.meter.authorize_settings is not True or self.meter.authorize_measurement is not True):
                     raise NktError("Injected PM100D lacks settings/measurement authorization")
-            controller = None
-            if self.config.scan.laser_source == "cld":
-                from .cld_optical import CldOpticalController
-                controller = CldOpticalController(self.config.nkt, self.backend, clock=self.clock,
-                                                  sleep=self.sleep, on_event=self._engine_event)
+            controller = self._cld_controller
             self.engine = OpticalScan(self.config.nkt, self.config.scan, self.backend,
                 pem=self.pem, meter=self.meter, clock=self.clock, sleep=self.sleep,
                 on_event=self._engine_event, controller=controller, state_guard=self.state_guard)
@@ -704,10 +731,13 @@ class OpticalPointSession:
             self.engine.reset_feedback_history()
         result = self.cleanup_result
         actions, errors = result["actions"], result["errors"]
+        controller = self.engine.nkt if self.engine else self._cld_controller
+        if self._cld_controller:
+            result["startup_off"] = deepcopy(self._cld_controller.record.get("startup_off", {}))
         if "nkt" not in actions:
             try:
-                if self.engine:
-                    actions["nkt"] = self.engine.nkt.finish_session()
+                if controller:
+                    actions["nkt"] = controller.finish_session()
                 elif self.backend:
                     if self.config.scan.laser_source != "cld":
                         self.backend.close()
@@ -735,8 +765,8 @@ class OpticalPointSession:
             # after electrical protection has been attempted (also on failure).
             self._laser_transport_closed = True
             try:
-                if self.engine:
-                    self.engine.nkt.close()
+                if controller:
+                    controller.close()
                 else:
                     # Partial opening never established source ownership. Close
                     # transport only; do not invent an OFF/zero command or proof.
@@ -773,8 +803,9 @@ class OpticalPointSession:
             name: deepcopy(device.last_confirmed_state) for name, device in
             (("pem", self.pem), ("pm100d", self.meter)) if device is not None}
         result["state_current"] = False
+        if controller:
+            result["last_confirmed_state"]["nkt"] = deepcopy(controller.record["last_confirmed_state"])
         if self.engine:
-            result["last_confirmed_state"]["nkt"] = deepcopy(self.engine.nkt.record["last_confirmed_state"])
             result["point_evidence"] = {"audit_ref": "optical_audit.points", "count": len(self.engine.record["points"])}
             result["optical_events"] = {"audit_ref": "optical_audit.events", "count": len(self.engine.record["events"])}
         result["nkt_write_attempts"] = {"audit_ref": "optical_audit.laser_write_attempts",
@@ -791,6 +822,7 @@ class OpticalPointSession:
             if (not result["reference_cleanup_pending"] and not result["meter_cleanup_pending"]
                     and not result["laser_cleanup_pending"] and not self._audit_exported):
                 self.audit_snapshot = {"schema_version": "optical-audit-v2",
+                    "cld_startup_off": deepcopy(result.get("startup_off")),
                     "points": deepcopy(self.engine.record["points"]) if self.engine else [],
                     "events": deepcopy(self.engine.record["events"]) if self.engine else [],
                     "device_transcripts": {name: deepcopy(device.transcript) for name, device in

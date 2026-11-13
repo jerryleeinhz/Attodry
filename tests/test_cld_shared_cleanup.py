@@ -61,6 +61,7 @@ class CldSharedCleanupTests(unittest.TestCase):
     def backend_factory(self, config):
         backend = SimulatedCld(config)
         backend.is_hardware = True
+        backend.state["identity"] = ["Thorlabs", config.expected_model, config.expected_serial, "fake-1"]
         backend.state["diagnostics"] = {"qualification": "unqualified",
             "ld_connection_raw": 0, "tec_connection_raw": 0, "measurement_condition_raw": 0}
         backend.closed = False
@@ -159,7 +160,7 @@ class CldSharedCleanupTests(unittest.TestCase):
         self.assertFalse(partial[-1]["laser_cleanup_pending"])
         self.assertTrue(partial[-1]["actions"]["nkt"]["transport_closed"])
 
-    def test_partial_open_defers_backend_close_and_never_writes_to_unknown_source(self):
+    def test_partial_open_defers_close_and_only_protects_identified_ld(self):
         config = load_hardware_combination(self.path).optical
         events = []
         def fail_meter(_config):
@@ -185,11 +186,79 @@ class CldSharedCleanupTests(unittest.TestCase):
         self.assertFalse(final["laser_cleanup_pending"])
         self.assertFalse(final["off_confirmed"] or final["verified"])
         self.assertTrue(final["actions"]["nkt"]["ownership_not_acquired"])
-        self.assertEqual(writes, [])
+        self.assertEqual(writes, [("switchLdOutput", False)])
         self.assertTrue(self.backend.state["getLdOutputState"])
         self.assertEqual(self.backend.state["getLdCurrSetpoint"], 0.007)
         self.assertEqual(sum(event[0] == "cld_backend_close" for event in self.shared_log), 1)
         self.assertEqual(sum(kind == "optical_audit" for kind, _ in events), 1)
+        self.assertTrue(final["startup_off"]["off_confirmed"])
+        self.assertTrue(final["actions"]["nkt"]["ld_only_cleanup"])
+
+    def test_initially_on_is_off_before_lockin_connection_failure(self):
+        original_factory = self.backend_factory
+        def initially_on(config):
+            backend = original_factory(config)
+            backend.state.update(getLdOutputState=True, getLdCurrSetpoint=0.007)
+            original_set = backend.set
+            def record_set(*args):
+                self.shared_log.append(("cld_write", *args))
+                return original_set(*args)
+            backend.set = record_set
+            return backend
+        self.backend_factory = initially_on
+        def fail_lockin(_):
+            self.assertFalse(self.backend.state["getLdOutputState"])
+            self.assertEqual(self.shared_log[0], ("cld_write", "switchLdOutput", False))
+            raise OSError("injected lockin connection failure")
+        with patch.object(LockinPointSession, "open", fail_lockin):
+            result = self.execute("startup-lockin-failure")
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("injected lockin", result["error"])
+        self.assertEqual(self.backend.state["getLdCurrSetpoint"], 0.007)
+        self.assertTrue(all(event[1:] == ("switchLdOutput", False)
+                            for event in self.shared_log if event[0] == "cld_write"))
+        audit = [payload for kind, payload in self.events() if kind == "optical_audit"]
+        self.assertEqual(len(audit), 1)
+        self.assertTrue(audit[0]["cld_startup_off"]["off_confirmed"])
+        self.assertTrue(self.backend.closed)
+
+    def test_unconfirmed_startup_off_blocks_all_other_connections_and_is_not_replayed(self):
+        config = load_hardware_combination(self.path).optical
+        backend = self.backend_factory(config.nkt)
+        backend.state["getLdOutputState"] = True
+        calls = []
+        backend.set = lambda *args: calls.append(args)  # ACK without changing state.
+        session = OpticalPointSession(config, backend_factory=lambda _: backend,
+            meter_factory=lambda _: self.fail("PM must not open"), clock=self.clock, sleep=self.clock.sleep)
+        with self.assertRaises(Exception):
+            session.open(authorize_writes=True, confirm_manual_route=True)
+        self.assertEqual(calls, [("switchLdOutput", False)])
+        with self.assertRaises(Exception):
+            session.open(authorize_writes=True, confirm_manual_route=True)
+        with self.assertRaises(Exception):
+            session.prepare_cld_startup(authorize_writes=True, confirm_manual_route=True)
+        self.assertEqual(len(calls), 1)
+        final = session.close()
+        self.assertFalse(final["startup_off"]["off_confirmed"])
+        self.assertTrue(final["startup_off"]["errors"])
+        self.assertFalse(final["verified"])
+        self.assertTrue(backend.closed)
+
+    def test_startup_audit_failure_preserves_off_evidence_without_opening_pm(self):
+        config = load_hardware_combination(self.path).optical
+        def fail_event(*args):
+            raise OSError("audit unavailable")
+        session = OpticalPointSession(config, fail_event, backend_factory=self.backend_factory,
+            meter_factory=lambda _: self.fail("PM must not open"), clock=self.clock, sleep=self.clock.sleep)
+        with self.assertRaisesRegex(Exception, "audit unavailable"):
+            session.open(authorize_writes=True, confirm_manual_route=True)
+        self.assertIsNone(session.engine)
+        final = session.close()
+        self.assertTrue(final["startup_off"]["off_confirmed"])
+        self.assertTrue(final["startup_off"]["errors"])
+        self.assertFalse(final["verified"])
+        self.assertTrue(self.backend.closed)
+        self.assertEqual(session.audit_snapshot["cld_startup_off"], final["startup_off"])
 
 
 if __name__ == "__main__":

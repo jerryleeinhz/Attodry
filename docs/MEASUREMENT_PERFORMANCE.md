@@ -1,5 +1,24 @@
 # 测量速度：本分支的优化边界与验收
 
+## 2026-11-13 CLD 单行开关与启动关光（离线验证通过）
+
+新增组合扫描启动保护仅在每次运行入口执行：先身份核验，再关 LD 并读回，
+随后才连接其他仪器。VISA 正常路径为 1 次身份、1 次初始输出、OFF setter 内
+1 次错误查询与 1 次输出核验、最后 1 次输出读回，共 5 查询及 1 次 OFF 写入；
+TL4000 使用对应原生调用，不能混称 SCPI 查询数。没有新增每条件／每组查询、
+轴入口等待、暗背景复用或采样重试。原完整健康预检和后续温稳等待保持。
+
+独立 ON 对既有设置执行完整新鲜快照与原 `stable_dwell_s`，复用既有首次 ON
+读回及有界微小负电压观察；不增加 ON 重试，不通过缩短等待提高速度。
+独立 OFF 不执行完整温稳窗口；身份确认后不让温度／连接诊断阻断保护关光，
+但任何错误和不确定性仍保留。部分打开失败的清理另做新鲜 OFF 核验，不把
+启动时的历史 OFF 当成最终状态。所有 I/O 沿同一独占后端串行执行，配置路径
+不同也共享物理序列号租约；租约与 JSON 审计只增加本地文件操作。
+
+163 项硬件入口阻断的离线测试通过，包含命令轨迹、故障和清理路径；
+独立 OFF 正常轨迹确认 5 查询／1 写。尚无实机点周期或保护响应时延
+测量，不能以函数运行时间代表物理关光完成时间。
+
 ## 2026-11-08 Per-card figure and data export
 
 Unified Plotting now provides an independent Export name, Export this figure + data button and result message on each card. The shared destination remains global. Only the clicked card and its selected samples/statistics/pixels/audit/manifest are exported; other cards may be unrendered. Multi-channel panels stay one figure. Setup preserves card names and migrates legacy global prefixes. Naming alone does not invalidate rendering; changed plot options or stale file sources still require rendering.

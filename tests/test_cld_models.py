@@ -85,6 +85,7 @@ class CldModelTests(unittest.TestCase):
                     driver.set("setLdCurrSetpoint", .01)
                 self.assertEqual(driver.transcript[-1]["response"], resource.values["*IDN?"] + "\n")
                 self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
+                driver.close()
 
     def test_cld1015_rejects_wrong_manufacturer_serial_or_missing_firmware(self):
         for identity in ("Other,CLD1015,TEST_SERIAL,2.3.0",
@@ -96,6 +97,7 @@ class CldModelTests(unittest.TestCase):
                 with self.assertRaises(NktError):
                     driver.set("setLdCurrSetpoint", .01)
                 self.assertFalse(any(kind == "write" for kind, _ in resource.calls))
+                driver.close()
 
     def test_both_models_use_same_980nm_lifecycle_commands_waits_and_cleanup(self):
         traces = []
@@ -153,6 +155,7 @@ class CldModelTests(unittest.TestCase):
                             driver.snapshot()
                         self.assertEqual(driver.transcript[-1]["raw_identity"][1], observed)
                         self.assertFalse(any(name.startswith(("set", "switch")) for name, _ in dll.calls))
+                    driver.close()
         for index, value in ((0, b"Other"), (2, b"WRONG"), (3, b"")):
             with self.subTest(index=index):
                 config = configuration(backend="tl4000", dll_path="fake.dll", expected_model="CLD1015")
@@ -164,6 +167,7 @@ class CldModelTests(unittest.TestCase):
                 with self.assertRaises(NktError):
                     driver.snapshot()
                 self.assertEqual(driver.transcript[-1]["raw_identity_hex"][index], value.hex())
+                driver.close()
 
     def test_simulation_preserves_selected_model(self):
         config = configuration(expected_model="CLD1015", backend="simulation")

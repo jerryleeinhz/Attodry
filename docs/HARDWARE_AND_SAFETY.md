@@ -1,5 +1,34 @@
 # Hardware and safety guide
 
+## 2026-11-13 Authorized CLD output control and startup OFF
+
+For new CLD combination runs, the operator-approved `run` stage includes a
+protective LD shutdown immediately after exact controller identity verification,
+before connecting the remaining instruments. An initially enabled LD is switched
+OFF and read back; unknown identity prevents writes, and unknown/failed OFF prevents
+scan continuation. This replaces only the older CLD initial-ON rejection for this
+startup path. It does not change NKT takeover rules or reinterpret old failures.
+
+The independent `cld_control off` command changes LD output only; it does not zero
+current, switch TEC, clear a fault or relax a limit. Health/thermal faults do not
+prevent protective OFF after identity is verified. Any failed query/write or
+unconfirmed readback remains in the audit even if a later OFF readback is obtained.
+The `on` command checks existing current/limits, temperature and full stable dwell,
+mode, interlock and exact connection-diagnostic policy before enabling once. It
+never silently changes those settings. Successful ON intentionally leaves LD ON;
+Operational failure before closure attempts protective OFF. A close or final-audit
+failure after verified ON may leave LD ON; retain the last confirmed output,
+require manual verification, and never reconnect or retry to mask the failure.
+
+Both real backends hold an OS-owned lease based on the configured serial before
+opening a connection. This coordinates project tools across TOMLs; it cannot
+prevent independent front-panel or third-party software operations. Startup OFF
+evidence is distinct from acquisition ownership and final cleanup; historical OFF
+is not current-state proof. Shared VISA closure stays after electrical protection.
+The TL4000 SDK initialization behavior and original first-ON voltage observation,
+diagnostic, current and temperature guards remain unchanged. Publication/deployment
+and offline tests do not authorize or establish a real illumination trial.
+
 ## 2026-10-28 CLD1015 first-ON bounded near-zero observation (file-only deployment completed)
 
 For newly authorized runs, the pre-existing CLD1010LP first-ON rule applies

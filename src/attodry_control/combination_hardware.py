@@ -527,10 +527,30 @@ class HardwareCombinationStation:
             self.set_monitor_phase(previous["phase"],
                 **{key: value for key, value in previous.items() if key != "phase"})
 
+    def _make_optical_session(self):
+        from .optical_points import OpticalPointSession
+        kwargs = {key: value for key, value in {
+            "backend_factory": self.optical_backend_factory, "pem_factory": self.pem_factory,
+            "meter_factory": self.meter_factory, "chopper_factory": self.chopper_factory,
+            "clock": self.monotonic,
+            "sleep": self.sleep}.items() if value is not None}
+        return OpticalPointSession(self.config.optical, self.events.event,
+            on_settings_applied=self._signal_change_callback("optical.tuning_completed"),
+            state_guard=self._rotator_state_guard if (getattr(self.config, "rotator", None)
+                or getattr(self.config, "positioner", None)) else None,
+            **kwargs)
+
     def open(self, modules):
         if modules != tuple(a.module for a in self.config.plan.axes):
             raise ValueError("Station modules differ from validated plan")
+        if (self.optical is not None and self.config.optical is not None
+                and self.config.optical.scan.laser_source == "cld"):
+            raise ValueError("CLD combination startup cannot be replayed")
         preflight = {}
+        if self.config.optical is not None and self.config.optical.scan.laser_source == "cld":
+            self.optical = self._make_optical_session()
+            preflight["cld_startup_off"] = self.optical.prepare_cld_startup(
+                authorize_writes=True, confirm_manual_route=True)
         if self.config.cryostat is not None:
             self.cryo = CryostatPointSession(self.config.cryostat, self.config.temperature,
                 self.config.magnetic, self.events.event, dll=self.dll,
@@ -582,17 +602,8 @@ class HardwareCombinationStation:
             self.lockin.monitor_wait_context = self._monitor_lockin_wait
             preflight["lockin"] = self.lockin.open()
         if self.config.optical is not None:
-            from .optical_points import OpticalPointSession
-            kwargs = {key: value for key, value in {
-                "backend_factory": self.optical_backend_factory, "pem_factory": self.pem_factory,
-                "meter_factory": self.meter_factory, "chopper_factory": self.chopper_factory,
-                "clock": self.monotonic,
-                "sleep": self.sleep}.items() if value is not None}
-            self.optical = OpticalPointSession(self.config.optical, self.events.event,
-                on_settings_applied=self._signal_change_callback("optical.tuning_completed"),
-                state_guard=self._rotator_state_guard if (getattr(self.config, "rotator", None)
-                    or getattr(self.config, "positioner", None)) else None,
-                **kwargs)
+            if self.optical is None:
+                self.optical = self._make_optical_session()
             preflight["optical"] = self.optical.open(authorize_writes=True, confirm_manual_route=True)
             if self.config.optical.background.enabled:
                 from .optical_background import MatchedLockinBackground
@@ -615,7 +626,7 @@ class HardwareCombinationStation:
                 "sleep": self.sleep}.items() if value is not None}
             self.positioner = PositionerPointSession(self.config.positioner, event_sink=self.events.event, **kwargs)
             preflight["positioner"] = self.positioner.open()
-        # All active preflights must succeed before any configuration writes.
+        # Except protective CLD startup OFF, configuration waits for all preflights.
         if self.optical is not None:
             if self.lockin is not None:
                 self.lockin.protect_source()

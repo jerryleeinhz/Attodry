@@ -9,6 +9,22 @@ import tempfile
 
 
 @contextmanager
+def cld_hardware_lease(serial_number, *, directory=None):
+    """Serialize cooperating CLD connections across configurations and backends.
+
+    The device serial, not a TOML filename or VISA alias, owns this lease. The
+    OS releases it when the process exits; a remaining lock file is harmless.
+    """
+    if not isinstance(serial_number, str) or not serial_number.strip():
+        raise ValueError("CLD lease requires an explicit serial number")
+    identity = serial_number.replace(" ", "").upper()
+    root = Path(directory) if directory is not None else Path(tempfile.gettempdir()) / "attodry-controller-leases"
+    key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    with station_hardware_lease(root / ("cld-" + key + ".toml")) as path:
+        yield path
+
+
+@contextmanager
 def controller_hardware_lease(serial_number, *, directory=None):
     """Cross-config ANC350 ownership; vendor connection ownership is also required.
 

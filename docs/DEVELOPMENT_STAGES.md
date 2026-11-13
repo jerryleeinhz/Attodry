@@ -1,5 +1,28 @@
 # Development stages
 
+## 2026-11-13 CLD output command and startup shutdown (offline verified)
+
+Add a dedicated single-line `cld_control on|off --config ...` entry point using
+the existing CLD adapter and TOML. LD-only OFF preserves TEC/current; ON preserves
+existing settings, requires full health and thermal qualification, and remains ON
+after verified success. Operational failure records the original error and protective
+OFF outcome, without automatic ON retries. Post-close audit/close failures retain
+the last confirmed ON state and require manual verification. A shared serial-based lease applies to real
+CLD backends independently of the configuration filename; JSON audit survives
+failure and records acquisition timestamps and uncertain readbacks.
+
+Combination startup now performs identified, verified CLD OFF before connecting
+lock-ins, PM/chopper or other axes. Separate startup evidence survives partial open;
+normal acquisition ownership and current/TEC cleanup are not fabricated. Final
+resource closure preserves the existing electrical-protection-before-shared-VISA
+close ordering. Existing NKT behavior and all hardware protections remain.
+
+Validation: 163 hardware-blocked tests passed, including 98 CLD tests and the new
+22 command tests. Additional gate/reference/rotator/positioner regressions passed
+(63 tests). Origin publication and LK_setup file deployment are authorized; local
+receipts track deployment separately. No real instrument connection, illumination
+or scan is part of delivery.
+
 ## 2026-11-08 Per-card figure and data export
 
 Unified Plotting now provides an independent Export name, Export this figure + data button and result message on each card. The shared destination remains global. Only the clicked card and its selected samples/statistics/pixels/audit/manifest are exported; other cards may be unrendered. Multi-channel panels stay one figure. Setup preserves card names and migrates legacy global prefixes. Naming alone does not invalidate rendering; changed plot options or stale file sources still require rendering.

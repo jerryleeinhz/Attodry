@@ -1,5 +1,28 @@
 # Project handoff
 
+## 2026-11-13 Current: CLD output command and verified startup shutdown
+
+The approved implementation adds `python -m attodry_control.cld_control on|off --config ...`.
+OFF identifies the configured controller, attempts LD OFF and records actual OFF
+readback without changing current or TEC settings. ON qualifies the existing
+settings and thermal dwell under the original protections, then enables LD once;
+successful ON intentionally remains enabled after the command exits. Each command
+retains a JSON audit, and the serial-based CLD lease prevents two cooperating
+controllers from owning the same device through different TOMLs.
+
+New CLD combination runs identify and verify LD OFF before connecting other
+instruments, including when LD was initially ON. This startup shutdown has its own
+audit and does not claim normal acquisition ownership or successful final cleanup.
+Unknown OFF blocks continuation. Partial opening retains fresh protective cleanup
+and closes the shared VISA manager only after electrical protection is attempted.
+NKT behavior, current/temperature/interlock/diagnostic guards and historical failed
+records remain unchanged.
+
+Validation passed: 163 hardware-blocked CLD/optical/combination tests, including
+98 CLD tests. A further 63 gate/reference/rotator/positioner regressions passed.
+The user authorized origin publication and LK_setup file deployment; deployment
+receipts are kept locally. No real ON/OFF trial or scan is part of delivery.
+
 ## 2026-11-08 Per-card figure and data export
 
 Unified Plotting now provides an independent Export name, Export this figure + data button and result message on each card. The shared destination remains global. Only the clicked card and its selected samples/statistics/pixels/audit/manifest are exported; other cards may be unrendered. Multi-channel panels stay one figure. Setup preserves card names and migrates legacy global prefixes. Naming alone does not invalidate rendering; changed plot options or stale file sources still require rendering.
@@ -54,6 +77,9 @@ LK_setup 当前采集19356与monitor18444于16:59:33/17:00:09UTC创建；本次�
 Last updated: 2026-10-22
 
 ## Current stage
+
+The current implementation is the 2026-11-13 CLD output command and startup
+shutdown described above; earlier dated stages below retain their historical status.
 
 ### 2026-10-28 CLD1015 bounded first-ON voltage observation (file-only deployment completed)
 

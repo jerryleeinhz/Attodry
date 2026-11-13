@@ -404,8 +404,11 @@ class NativeCldDriverTests(unittest.TestCase):
                     and row.get("raw_value") == 2 and "error" in row for row in raw))
                 self.assertTrue(any(row.get("requested") == .0123 and row.get("status") == -3 for row in raw))
                 self.assertTrue(any(row.get("raw_value") == 2 for row in api_events))
-                self.assertFalse(cleanup["off_confirmed"])
-                self.assertFalse(any(name == "switchLdOutput" for name, _ in dll.calls))
+                self.assertTrue(cleanup["off_confirmed"])
+                self.assertTrue(cleanup["startup_off"]["errors"])
+                self.assertTrue(cleanup["startup_off"]["manual_verification_required"])
+                self.assertTrue(cleanup["actions"]["nkt"]["ownership_not_acquired"])
+                self.assertTrue(any(name == "switchLdOutput" for name, _ in dll.calls))
                 self.assertIn("close", [name for name, _ in dll.calls])
                 json.dumps(audit, allow_nan=False)
 
