@@ -39,8 +39,10 @@ phase_marker_phase_deg = 0.0
 current_rms_ranges_a = [
   { min = 0.5e-6, max = 10.5e-6, scale = "linear", points = 6 },
 ]
-# Alternative explicit list; use exactly one current coordinate form:
+# Alternative explicit list or equivalent step range; select one current form:
 # current_rms_points_a = [0.5e-6, 2.5e-6, 4.5e-6, 6.5e-6, 8.5e-6, 10.5e-6]
+# current_rms_ranges_a = [{ min = 0.5e-6, max = 10.5e-6, scale = "linear", step = 2e-6 }]
+# Linear segments use points or step, never both. Log segments use points only.
 frequency_points_hz = [25.0]
 
 [lockin_acquisition]

@@ -19,15 +19,15 @@
 | `phase_marker_line` | 整数1～6；不得与相关触发输出／输入线路冲突 | `3`，即Phase Marker Link #3 |
 | `phase_marker_phase_deg` | 0～360° | `0.0`；这是软件模板值，非厂家180°默认值 |
 | `current_rms_points_a` | 非空有序列表，每点在 `2e-12/sqrt(2)`～`0.105/sqrt(2)` A RMS；另受配置峰值上限限制 | `[0.5, 2.5, 4.5, 6.5, 8.5, 10.5]` μA RMS，实际TOML使用A |
-| `current_rms_ranges_a` | 与上行二选一；非空范围表数组，`min`／`max` 使用同样的A RMS边界，另填 `scale`、`points` | 0.5～10.5 μA RMS，等距6点 |
+| `current_rms_ranges_a` | 与上行二选一；非空范围表数组，`min`／`max` 使用同样的A RMS边界；linear 段用 `points` 或 `step`，log 段用 `points` | 0.5～10.5 μA RMS，等距6点 |
 | `frequency_points_hz` | 非空有序列表，每点0.001～100000 Hz；另校验各检测谐波的型号频率能力 | `[25.0]` |
-| `frequency_ranges_hz` | 与上行二选一；非空范围表数组，`min`／`max` 使用同样的Hz边界，另填 `scale`、`points` | 此次单点频率继续用列表 |
+| `frequency_ranges_hz` | 与上行二选一；非空范围表数组，`min`／`max` 使用同样的Hz边界；linear 段用 `points` 或 `step`，log 段用 `points` | 此次单点频率继续用列表 |
 
 频率外循环、电流内循环；保留重复访问，不补点。源网格和整个组合计划均受已有数量上限约束。
 10.5 μA RMS 对应约14.8492424 μA峰值。设置读回不等于通过样品的实测电流。
 `inner_shield` 与 `output_low_grounding` 是两个独立的输出连接选项；与 Lock-in 的 `shield_grounding` 无关。
 
-### 列表与 `ranges + points`
+### 列表与范围
 
 ```toml
 current_rms_ranges_a = [
@@ -37,13 +37,27 @@ frequency_points_hz = [25.0]
 ```
 
 每个坐标必须恰好提供对应的列表或范围之一；同时提供、两者都缺少、未知字段均在连接前报错。
-每段只接受 `min`、`max`、`scale`、`points`：`min`／`max` 必须有限、在仪器范围内且 `max > min`；
-`scale` 可选 `"linear"` 或 `"log"`；`points` 是至少2的整数（含两端点），不接受布尔、浮点计数或 `point` 拼写。
+`current_rms_points_a`／`frequency_points_hz` 只接受具体数值列表，范围表放在对应的 `*_ranges_*` 中。
+每段的 `min`／`max` 必须有限、在仪器范围内且 `max > min`。
+`scale="linear"` 必须且只能选择 `points` 或 `step`：`points` 是至少2的整数（含两端点），
+`step` 是同一坐标单位的有限正数，按十进制精确整除 `max-min`；不静默截断或补端点。
+`scale="log"` 只接受 `points`。布尔、浮点计数和 `point` 拼写均拒绝。
 单点或任意往返顺序继续使用显式列表。多个范围按声明顺序拼接，共用端点保留重复访问，不排序、不去重。
 电流与频率可以分别选择不同形式；每个坐标累计点数及源网格乘积最多100000，展开前先检查数量。
 
 上述例子精确展开为 `[0.5e-6, 2.5e-6, 4.5e-6, 6.5e-6, 8.5e-6, 10.5e-6]`，
 在启动离线解析阶段归一化，运行、归档及分析继续使用原有点列表，采集中不临时生成点。
+以下 step 写法得到11个电流点和9个频率点，共99个激励条件；相同网格也可分别写 `points=11`／`points=9`：
+
+```toml
+current_rms_ranges_a = [
+  { min = 1e-7, max = 11e-7, scale = "linear", step = 1e-7 },
+]
+frequency_ranges_hz = [
+  { min = 100, max = 500, scale = "linear", step = 50 },
+]
+```
+
 恢复按展开后的精确点列比较；等价列表与范围可以恢复同run，其他原有源码、设置、故障及cleanup审查仍须通过。
 实际点数、点值或顺序变化仍须新运行。原TOML保留配置形式及文件哈希供审计。
 此功能不增加仪器命令、串行查询、等待或自动重试。

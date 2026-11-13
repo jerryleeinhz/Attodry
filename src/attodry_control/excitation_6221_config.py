@@ -139,17 +139,37 @@ def _parse_ranges(value, name, low, high):
     total = 0
     for index, raw in enumerate(value):
         segment_name = f"{name}[{index}]"
-        if not isinstance(raw, Mapping) or set(raw) != {"min", "max", "scale", "points"}:
-            raise ValueError(f"{segment_name} requires exactly min, max, scale and points")
+        required = {"min", "max", "scale"}
+        if (not isinstance(raw, Mapping) or not required <= set(raw)
+                or set(raw) - required not in ({"points"}, {"step"})):
+            raise ValueError(f"{segment_name} requires min, max, scale and exactly one of points or step")
         minimum = finite_number(raw["min"], segment_name + ".min", low, high)
         maximum = finite_number(raw["max"], segment_name + ".max", low, high)
         if maximum <= minimum:
             raise ValueError(f"{segment_name}.max must be greater than min")
-        scale, count = raw["scale"], raw["points"]
+        scale = raw["scale"]
         if scale not in ("linear", "log"):
             raise ValueError(f"{segment_name}.scale must be linear or log")
-        if type(count) is not int or count < 2:
-            raise ValueError(f"{segment_name}.points must be an integer at least 2")
+        if "step" in raw:
+            if scale != "linear":
+                raise ValueError(f"{segment_name}: logarithmic ranges require points, not step")
+            step = finite_number(raw["step"], segment_name + ".step", 0, high)
+            if step <= 0:
+                raise ValueError(f"{segment_name}.step must be positive")
+            span = Decimal(str(maximum)) - Decimal(str(minimum))
+            increment = Decimal(str(step))
+            # Bound the quotient before division or materializing any points,
+            # including very small positive floating-point steps.
+            if span > increment * 99999:
+                raise ValueError("6221 grid exceeds 100000 conditions")
+            intervals, remainder = divmod(span, increment)
+            if intervals < 1 or remainder:
+                raise ValueError(f"{segment_name}.step must exactly divide max - min")
+            count = int(intervals) + 1
+        else:
+            count = raw["points"]
+            if type(count) is not int or count < 2:
+                raise ValueError(f"{segment_name}.points must be an integer at least 2")
         total += count
         if total > 100000:
             raise ValueError("6221 grid exceeds 100000 conditions")

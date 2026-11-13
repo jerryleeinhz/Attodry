@@ -4,6 +4,21 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 range point counts and steps (2026-11-13)
+
+- Linear current/frequency ranges accept exactly one of `points` or a positive
+  finite `step` that divides the decimal span exactly; log ranges use points only.
+  Explicit numeric lists keep their separate keys. Invalid syntax rejects offline.
+- Keep inclusive endpoints, declared segment order and repeated boundaries;
+  verify per-axis counts and the 100000-condition product before allocation.
+  Equivalent lists, point counts and steps compile to the same archived grid.
+- Parsing adds no instrument I/O, acquisition wait, retry or runtime setting
+  change. Existing source limits, quantization and recovery checks stay in force.
+- Verification: 130 hardware-blocked tests passed, including 11 new range cases,
+  fake source I/O parity, mixed-detector scan/recovery, analysis and legacy sweeps.
+  LK_setup synchronization is deferred because a combination acquisition is active;
+  no target source/configuration or ongoing experiment was changed.
+
 ### 6221 D04 frequency readback precision (2026-11-13)
 
 - The 10 nA / 17–7000 Hz log scan accepted its first point, then rejected the

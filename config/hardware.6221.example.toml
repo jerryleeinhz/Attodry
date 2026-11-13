@@ -24,6 +24,9 @@ note = "Review wiring and DUT limits before commissioning"
 # Each coordinate uses either *_points_* or *_ranges_*, never both.
 # Example alternative to current_rms_points_a below:
 # current_rms_ranges_a = [{ min = 0.5e-6, max = 10.5e-6, scale = "linear", points = 6 }]
+# Same grid using a positive step that exactly divides max-min:
+# current_rms_ranges_a = [{ min = 0.5e-6, max = 10.5e-6, scale = "linear", step = 2e-6 }]
+# Linear ranges use exactly one of points/step; log ranges use points only.
 # frequency_ranges_hz = [{ min = 10.0, max = 100.0, scale = "log", points = 3 }]
 resource = "CHANGE_ME_6221_VISA_ADDRESS"
 expected_idn = "MODEL 6221"

@@ -49,13 +49,16 @@ invalid orders reject offline, without silently reordering the plan.
 
 `[excitation_6221]` accepts ordered `frequency_points_hz` / `current_rms_points_a`
 or corresponding `frequency_ranges_hz` / `current_rms_ranges_a`. Each coordinate
-uses exactly one form. Ranges contain exactly `min`, `max`, `scale` (`linear` or
-`log`) and integer `points >= 2`, including endpoints. A fixed frequency uses a
-one-element explicit list. Ranges expand offline before connection into the same
-point contract: frequency outer, current inner, declared order and repeated
+uses exactly one form; `*_points_*` accepts numeric lists, not range tables.
+A linear range contains `min`, `max`, `scale="linear"` and exactly one of integer
+`points >= 2` or positive finite `step`. The step must divide `max-min` exactly
+in decimal arithmetic; neither truncation nor an extra endpoint is added. A log
+range uses `scale="log"` and `points` only. Both forms include endpoints. A fixed
+frequency uses a one-element explicit list. Ranges expand offline before connection
+into the same point contract: frequency outer, current inner, declared order and repeated
 endpoints retained. Counts and the 100000-condition source grid are checked before
 allocation. Equivalent list/range forms retain same-run recovery compatibility;
-changing the actual grid requires a new run. See [range choices](KEITHLEY6221_PARAMETERS.md#列表与-ranges--points).
+changing the actual grid requires a new run. See [range choices](KEITHLEY6221_PARAMETERS.md#列表与范围).
 `lockin` is a single detector stage with no source coordinate/grid of its own.
 For example, 18 temperatures × 2 frequencies × 3 currents produce 108 conditions,
 not another Cartesian product with the old Lock-in sweep. `[lockin_acquisition]`

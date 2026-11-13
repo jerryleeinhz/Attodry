@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: 6221 range point counts and steps (2026-11-13)
+
+- Add linear `step` alongside `points` for current/frequency range tables, with
+  exactly one selector. Require a finite positive decimal-exact step; log ranges
+  retain point counts only. Reject invalid syntax and excessive counts offline.
+- Preserve point order, repeated endpoints, existing source limits and the
+  expanded-grid recording/recovery contract. No new driver command or wait.
+- Document both forms and the 11-current by 9-frequency (99-condition) example.
+- Verification: 130 hardware-blocked tests passed, including 11 new step cases
+  and list/points/step source I/O parity, combination/recovery and analysis.
+- Target synchronization is deferred while an existing acquisition is active.
+  Real instrument operation is outside this delivery.
+
 ## Current: 6221 D04 frequency readback precision (2026-11-13)
 
 - Accept only the exact seven-significant-digit rounded frequency in addition to

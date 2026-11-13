@@ -27,12 +27,16 @@ This classification reuses the existing reads: no extra queries, writes or waits
 Instantaneous SR865A faults still reject, and post-settle qualification/cleanup
 retain their normal checks. Historical latches cannot be relabeled during capture.
 
-Optional current/frequency `ranges + points` compile only during file parsing,
-before any resource connection. Generated points use the existing immutable
-coordinate fields. No per-point runtime matcher, query, write, thread or wait is
+Optional current/frequency ranges use linear `points` or exact-dividing positive
+`step`, and logarithmic `points`. Both compile only during file parsing, before
+any resource connection. Decimal step validation and count checks precede allocation;
+no per-point step calculation or extra source action is added. Generated points use
+the existing immutable coordinate fields. No per-point runtime matcher, query, write, thread or wait is
 added. Equivalent list/range configurations have identical fake driver traces;
 recovery compares the expanded grid rather than the TOML syntax. Counts are
 bounded before point allocation, including the Cartesian source-grid product.
+Verification: 130 hardware-blocked tests passed; explicit lists, point counts and
+steps have identical fake source write/query traces. No real timing claim is added.
 
 The new source driver uses one serial owner with injected transport. Its command
 budget is asserted by fake-transport tests: preflight 13 queries / 0 writes,
