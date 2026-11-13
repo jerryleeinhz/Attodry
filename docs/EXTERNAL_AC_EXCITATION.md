@@ -121,8 +121,8 @@ axis visit, with subsequent temperature telemetry and hard protections retained.
 
 ## Records, analysis and recovery
 
-SQLite tables/schema stay compatible; the new snapshot declares
-`measurement_contract = "electrical-excitation-detectors-v2"` and
+SQLite tables/schema stay compatible; new quantized scans declare
+`measurement_contract = "electrical-excitation-detectors-v4"` and
 `excitation_source = "keithley6221"`. Source `actual` coordinates are
 `excitation_current_rms_a` and `excitation_frequency_hz`. They are **source setting
 readbacks, not measured current**. Peak amplitude, offset, phase-marker settings,
@@ -145,11 +145,12 @@ preflight and configures the pending source; it never inherits in-memory output
 state. Switching source topology, grid, wiring/reference contract, current limit,
 compliance or source setup requires a new run. Existing reviewed detector range,
 Reserve, timing and environment changes retain their normal review requirements.
-Legacy v1 evidence remains readable without invented connection readbacks;
-v1-to-v2 source contracts require a new run, not a silent recovery migration.
+Legacy v1–v3 evidence remains readable under its original validation contract,
+without invented connection or quantization evidence. Contract migration requires
+a new run, not a silent recovery migration.
 
 Offline preview uses `combination_cli describe-hardware --config <local-copy>`;
-it does not open resources. No real run or deployment is part of this delivery.
+it does not open resources. The separate `run` command performs real acquisition.
 2182 acquisition, passive SMU detection, optical gates/backgrounds, multiple sources
 and arbitrary source/detector routing remain future work; they are not silently
 enabled by adding the 6221 source module.
