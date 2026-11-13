@@ -4,6 +4,19 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### D04 waveform duration encoding (2026-11-13)
+
+- Station D04 /700x accepts `SOUR:WAVE:DUR:TIME INF` with error0 and reads it
+  back as `+9.9e37`. Accept exact SCPI numeric infinity only for this duration
+  setting, retaining raw evidence. Do not interpret it as valid current, voltage,
+  frequency or scientific measurement. Nearby/negative/NaN values still reject.
+- Driver and archived validation share the same decoder. No command or timing
+  change; the successful command/error/readback and verified OFF cleanup remain
+  in the station's failed commissioning record.
+- Verification: 74 source/combination/analysis guarded regressions passed in
+  24.769 s. An output-OFF station probe also confirmed the first requested peak
+  amplitude readback precision and 25 Hz; no ARM/INIT was sent by that probe.
+
 ### External detector initial latch boundary (2026-11-13)
 
 - Archive pre-existing SR830/SR865A overload latches at first connection as an

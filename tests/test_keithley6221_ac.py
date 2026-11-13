@@ -516,7 +516,7 @@ class DriverTests(unittest.TestCase):
                  {"wave_started": False}, {"output_enabled": 1},
                  {"error_queue": {"code": False, "raw": '0,"No error"'}},
                  {"phase_marker_line": 4}, {"current_peak_a": 2e-6},
-                 {"duration_time_s": "9.9E37"},
+                 {"duration_time_s": "9.91E37"},
                  {"dc_current_setpoint_a": 1e-12}, {"dc_current_setpoint_a": False},
                  {"dc_current_setpoint_a": None}, {"dc_current_setpoint_a": float("nan")},
                  {"trigger_output_line": 3}, {"trigger_output_line": True},
@@ -526,11 +526,21 @@ class DriverTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises((ValueError, Keithley6221Error)):
                 validate_active_state({**deepcopy(original), **changes}, d.config, 1e-6, 200)
 
-    def test_numeric_overflow_sentinel_does_not_prove_infinite_duration(self):
+    def test_d04_numeric_infinity_is_limited_to_duration_and_exact_value(self):
+        for raw in ('+9.9e37', '9.900E+37', 'INF'):
+            r, d, _ = self.active()
+            r.state['SOUR:WAVE:DUR:TIME'] = raw
+            state = d.readback()
+            self.assertEqual(state['duration_time_s'], raw)
+            self.assertTrue(validate_active_state(state, d.config, 1e-6, 200))
+        for raw in ('9.91E37', '-9.9E37', '9.899999999999999999E37', 'nan', '1000'):
+            r, d, _ = self.active()
+            r.state['SOUR:WAVE:DUR:TIME'] = raw
+            with self.subTest(raw=raw), self.assertRaisesRegex(Keithley6221Error, 'duration'):
+                d.readback()
         r, d, _ = self.active()
-        r.state["SOUR:WAVE:DUR:TIME"] = "9.9E37"
-        with self.assertRaisesRegex(Keithley6221Error, "duration"):
-            d.readback()
+        r.state['SOUR:WAVE:AMPL'] = '+9.9e37'
+        with self.assertRaises(Keithley6221Error): d.readback()
 
     def test_live_and_archive_share_small_current_and_frequency_tolerances(self):
         for peak_delta, frequency_delta, accepted in (

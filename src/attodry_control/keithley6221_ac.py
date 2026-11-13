@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 import math
 import re
@@ -76,6 +77,23 @@ def _interlock_closed(raw):
     if not isinstance(raw, str) or raw.strip() not in {"0", "1"}:
         raise Keithley6221Error(f"Unknown 6221 interlock response: {raw!r}")
     return raw.strip() == "1"
+
+
+def _infinite_wave_duration(raw):
+    """Decode only DUR:TIME, never a scientific measurement/overflow value."""
+    if not isinstance(raw, str):
+        return False
+    value = raw.strip().upper()
+    if value in {"INF", "INFINITY", "+INF", "+INFINITY"}:
+        return True
+    # D04 /700x returns +9.9e37 after a successful DUR:TIME INF command.
+    # SCPI numeric infinity is exact; nearby overflow/NaN/negative sentinels fail.
+    if not re.fullmatch(r"[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:E[+-]?\d+)?", value):
+        return False
+    try:
+        return Decimal(value) == Decimal("9.9e37")
+    except InvalidOperation:
+        return False
 
 
 _SETTING_ABS_TOLERANCES = {
@@ -309,10 +327,7 @@ class Keithley6221Ac:
                               ("compliance_voltage_v", self.config.compliance_voltage_v)):
             if not _setting_matches(key, state[key], expected):
                 raise Keithley6221Error("6221 setting mismatch: " + key)
-        # The manual documents INFinity here, but 9.9E37 elsewhere represents
-        # invalid/overflow readings. Do not invent a numeric infinity encoding.
-        duration = state["duration_time_s"].upper()
-        if duration not in {"INF", "INFINITY", "+INF", "+INFINITY"}:
+        if not _infinite_wave_duration(state["duration_time_s"]):
             raise Keithley6221Error("6221 waveform duration is not infinite")
         if active:
             current, frequency = self.current_point
@@ -454,7 +469,6 @@ def validate_active_state(state, config, current_rms_a, frequency_hz, *, require
                 or not math.isclose(value, expected_value, rel_tol=1e-12, abs_tol=1e-18)):
             raise ValueError("6221 coordinates contradict source settings: " + key)
     config.validate_point(actual["excitation_current_rms_a"], actual["excitation_frequency_hz"])
-    duration = str(state.get("duration_time_s", "")).upper()
-    if duration not in {"INF", "INFINITY", "+INF", "+INFINITY"}:
+    if not _infinite_wave_duration(state.get("duration_time_s")):
         raise ValueError("6221 duration evidence is not infinite")
     return True

@@ -1,5 +1,15 @@
 # Development stages
 
+## Current: D04 duration encoding (2026-11-13)
+
+- Support exact numeric SCPI infinity `+9.9e37` for WAVE duration, as actually
+  returned after the successful INF setting by D04 /700x. Keep scientific values
+  and all other numeric protections unchanged; no extra commands or waits.
+- Tests cover live/archive agreement, exact decimal boundary rejection, NaN and
+  negative sentinel rejection, and rejecting the same value as current amplitude.
+- Verification: 74 hardware-blocked source/combination/analysis tests passed in
+  24.769 s; no new command or timing cost.
+
 ## Current: initial external detector latch baseline (2026-11-13)
 
 - Separate pre-configuration historical latches from the new formal window.
