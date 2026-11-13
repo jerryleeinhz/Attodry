@@ -249,6 +249,10 @@ class ReportPlottingTests(unittest.TestCase):
         document = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
         code = next("".join(cell["source"]) for cell in document["cells"]
                     if cell["cell_type"] == "code" and "REPORT_AMPLITUDE_CHANNELS =" in "".join(cell["source"]))
+        # The shared report cell also supports the existing f x e section.
+        env.update(combined_rows=(), frequency_excitation_scaling_rows_snapshot=(),
+                   frequency_excitation_scaling_results={}, frequency_excitation_scaling_manifest={},
+                   notebook_plot_frequency_fits=lambda results, **kwargs: {})
         exec(compile(code, "report-cell", "exec"), env)
         self.assertEqual(len(env["report_figures"]), 3)
         first_figure = env["report_figures"][(first[0].source_path, "xy", 2)]
@@ -281,6 +285,10 @@ class ReportPlottingTests(unittest.TestCase):
         document = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
         code = next("".join(cell["source"]) for cell in document["cells"]
                     if cell["cell_type"] == "code" and "REPORT_AMPLITUDE_CHANNELS =" in "".join(cell["source"]))
+        # The shared report cell also supports the existing f x e section.
+        env.update(combined_rows=(), frequency_excitation_scaling_rows_snapshot=(),
+                   frequency_excitation_scaling_results={}, frequency_excitation_scaling_manifest={},
+                   notebook_plot_frequency_fits=lambda results, **kwargs: {})
         exec(compile(code, "retained-merged-report", "exec"), env)
         self.assertEqual(len(env["report_figures"]), 7)
         self.assertEqual(set(env["merged_report_figures"]), {rows[0].source_path})

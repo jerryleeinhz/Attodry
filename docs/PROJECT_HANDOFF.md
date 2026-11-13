@@ -4,6 +4,28 @@ Last updated: 2026-11-13
 
 ## Current stage
 
+### 6221 commissioning Notebook compatibility (2026-11-13)
+
+- Add an explicit SQLite/run panel to `sr830_commissioning_sweeps.ipynb`;
+  retain all legacy Notebook cells, SR830 JSON/JSONL readers and resistor-based
+  current analysis. Reuse the existing native quality, plot, fit and report code.
+- Use archived 6221 RMS setting readback directly; no target/voltage/resistance
+  fallback. Preserve requested current, source/run/execution/attempt/formal IDs,
+  selected XX/XY harmonics, archived labels and raw LIAS in analysis/export.
+- Recovered accepted prefixes remain available; rejected/flagged audit rows never
+  join fits. Separate configuration/contract/frequency/repeat/outer-visit groups.
+  Manual immutable snapshots tolerate concurrent DB appends without rereading on
+  render. Point exclusions affect plots and fits; exports are opt-in.
+- Keep original fit rules, including minimum six points by default. A five-point
+  scan remains visible with an explicit insufficient-data fitting verdict.
+- Verification: 165 hardware-blocked offline tests passed in 36.596 s, including
+  a five-point mixed-detector fake scan with a failed/recovered second condition,
+  exact channel/current mapping, quality/audit/preview, grouping, UI/export and
+  legacy plotting/report/progress/temperature/unified regressions. Correct the
+  old report test fixtures to supply their already-existing f x e globals.
+- Performance: zero hardware calls or acquisition changes; one read-only snapshot
+  per explicit Load, one set of fits reused by report overlays.
+
 ### External-reference relock and stop acknowledgement (2026-11-13)
 
 - Separate SR865A current lock from historical LIAS unlock after a deliberate

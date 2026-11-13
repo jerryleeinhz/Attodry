@@ -37,6 +37,7 @@ SWEEP_X_AXES = frozenset(
         "sine_output_v_rms",
         "nominal_current_a_rms",
         "sine_output_current_a_rms",
+        "excitation_current_rms_a",
     }
 )
 PLOT_ROLES = ("xx", "xy")
@@ -66,8 +67,8 @@ class CommissioningSample:
     sample_index: int
     target_frequency_hz: float
     actual_frequency_hz: float
-    source_v_rms: float
-    sine_output_v_rms: float
+    source_v_rms: float | None
+    sine_output_v_rms: float | None
     nominal_current_a_rms: float | None
     recorded_external_series_resistance_ohm: float | None
     recorded_sr830_output_resistance_ohm: float | None
@@ -89,6 +90,16 @@ class CommissioningSample:
     source_readback_confirmed: bool = False
     model: str | None = None
     recorded_lia_status: Mapping[str, object] | None = None
+    excitation_source: str = "sr830"
+    excitation_current_rms_a: float | None = None
+    requested_current_rms_a: float | None = None
+    run_id: str | None = None
+    execution_id: str | None = None
+    condition_id: str | None = None
+    attempt_index: int | None = None
+    configuration_revision: str | None = None
+    channel_label: str | None = None
+    combination_sample_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,6 +410,7 @@ class HarmonicScalingFit:
     scalar_models: tuple[ScalarHarmonicScalingModel, ...]
     reasons: tuple[str, ...]
     points: tuple[HarmonicScalingPoint, ...]
+    current_basis: str = "sr830_sine_output_over_archived_resistance"
 
     def as_dict(self) -> dict[str, object]:
         values = asdict(self)
@@ -1157,7 +1169,7 @@ def fit_harmonic_scaling(
     excitation_path: ExcitationPathResistance | None = None,
     rules: HarmonicScalingRules | None = None,
 ) -> HarmonicScalingFit:
-    """Fit one excitation-sweep channel against SINE OUT-derived RMS current.
+    """Fit one excitation channel against its source-specific RMS current.
 
     The primary fit is performed in log-log space.  It compares a free
     exponent ``p`` with the physically expected fixed exponent ``harmonic``.
@@ -1456,6 +1468,8 @@ def fit_harmonic_scaling(
         scalar_models=scalar_assessment.models,
         reasons=tuple(dict.fromkeys(reasons)),
         points=points,
+        current_basis=("6221_rms_setting_readback" if rows[0].excitation_source == "keithley6221"
+                       else "sr830_sine_output_over_archived_resistance"),
     )
 
 
@@ -1719,7 +1733,9 @@ def plot_harmonic_scaling_fit(
     axis.set_xscale("log")
     axis.set_yscale("log")
     residual_axis.set_xscale("log")
-    residual_axis.set_xlabel("SINE OUT current (A RMS)")
+    residual_axis.set_xlabel("6221 current readback (A RMS)"
+                            if fit.current_basis == "6221_rms_setting_readback"
+                            else "SINE OUT current (A RMS)")
     axis.set_ylabel(f"V{fit.role} h{fit.harmonic} R (V RMS)")
     residual_axis.set_ylabel("Relative residual")
     axis.set_title(f"V{fit.role} h{fit.harmonic} harmonic-scaling fits")
@@ -1972,7 +1988,7 @@ def _harmonic_scaling_points(
 ) -> tuple[HarmonicScalingPoint, ...]:
     grouped: dict[float, list[CommissioningSample]] = {}
     for row in rows:
-        current = _sweep_x_value(row, "sine_output_current_a_rms", excitation_path)
+        current = rms_current_for_row(row, excitation_path)
         grouped.setdefault(float(current), []).append(row)
     points: list[HarmonicScalingPoint] = []
     for current, grouped_rows in sorted(grouped.items()):
@@ -3347,6 +3363,7 @@ def plot_commissioning_sweep(
             "nominal_current_a_rms": "Nominal current (A RMS)",
             "sine_output_v_rms": "SINE OUT readback (V RMS)",
             "sine_output_current_a_rms": "SINE OUT current (A RMS)",
+            "excitation_current_rms_a": "6221 current readback (A RMS)",
         }[resolved_x_axis]
     )
     axis.set_ylabel(
@@ -4043,8 +4060,8 @@ def _commissioning_sample(
         sample_index=int(sample.get("sample_index", 0)),
         target_frequency_hz=float(point["target_frequency_hz"]),
         actual_frequency_hz=float(actual_frequency),
-        source_v_rms=float(point["source_v_rms"]),
-        sine_output_v_rms=float(sine_output),
+        source_v_rms=None if point["source_v_rms"] is None else float(point["source_v_rms"]),
+        sine_output_v_rms=None if sine_output is None else float(sine_output),
         nominal_current_a_rms=(
             None if nominal_current is None else float(nominal_current)
         ),
@@ -4132,9 +4149,16 @@ def _excitation_path_for_row(
 def _single_excitation_path_for_rows(
     rows: Sequence[CommissioningSample],
     override: ExcitationPathResistance | None,
-) -> ExcitationPathResistance:
-    """Resolve one path and reject a mixed-calibration curve by default."""
+) -> ExcitationPathResistance | None:
+    """Resolve one legacy path, or direct 6221 readbacks without resistance."""
 
+    sources = {row.excitation_source for row in rows}
+    if sources == {"keithley6221"}:
+        for row in rows:
+            rms_current_for_row(row)
+        return None
+    if sources != {"sr830"}:
+        raise ValueError("Analyze different excitation sources separately.")
     if override is not None:
         return override
     paths = {_excitation_path_for_row(row, None) for row in rows}
@@ -4146,15 +4170,29 @@ def _single_excitation_path_for_rows(
     return next(iter(paths))
 
 
+def rms_current_for_row(row: CommissioningSample,
+                        excitation_path: ExcitationPathResistance | None = None) -> float:
+    """Archived source setting readback, or the legacy SR830 path estimate."""
+    if row.excitation_source == "keithley6221":
+        value = row.excitation_current_rms_a
+        if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError("Missing or invalid 6221 RMS current readback; no target fallback.")
+        return float(value)
+    if row.excitation_source != "sr830":
+        raise ValueError("Unknown excitation source.")
+    return _excitation_path_for_row(row, excitation_path).current_from_sine_output(row.sine_output_v_rms)
+
+
 def _sweep_x_value(
     row: CommissioningSample,
     x_axis: str,
     excitation_path: ExcitationPathResistance | None,
 ) -> float:
+    if row.excitation_source == "keithley6221" and x_axis in {
+            "sine_output_current_a_rms", "sine_output_v_rms", "source_v_rms"}:
+        raise ValueError("6221 data requires excitation_current_rms_a, not a SINE OUT axis.")
     if x_axis == "sine_output_current_a_rms":
-        return _excitation_path_for_row(
-            row, excitation_path
-        ).current_from_sine_output(row.sine_output_v_rms)
+        return rms_current_for_row(row, excitation_path)
     raw_x = getattr(row, x_axis)
     if raw_x is None:
         raise ValueError(f"Selected x axis {x_axis} contains missing values.")
@@ -4162,12 +4200,14 @@ def _sweep_x_value(
 
 
 def _validate_excitation_x_axis(x_axis: str) -> None:
-    if x_axis not in {"sine_output_current_a_rms", "sine_output_v_rms"}:
+    if x_axis not in {"sine_output_current_a_rms", "sine_output_v_rms", "excitation_current_rms_a"}:
         raise ValueError(f"Unsupported excitation x axis: {x_axis}")
 
 
 def _excitation_x_label(x_axis: str) -> str:
     _validate_excitation_x_axis(x_axis)
+    if x_axis == "excitation_current_rms_a":
+        return "6221 current readback (A RMS)"
     return (
         "SINE OUT readback-derived current (A RMS)"
         if x_axis == "sine_output_current_a_rms"
@@ -4185,7 +4225,7 @@ def _current_summary(
         rows, excitation_path
     )
     currents = [
-        resolved_excitation_path.current_from_sine_output(row.sine_output_v_rms)
+        rms_current_for_row(row, resolved_excitation_path)
         for row in rows
     ]
     minimum = min(currents)

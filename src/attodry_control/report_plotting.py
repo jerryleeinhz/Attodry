@@ -327,7 +327,9 @@ def plot_condensed_iv_report(
 
     amplitude_axis.set_xscale("log")
     amplitude_axis.set_yscale("log")
-    amplitude_axis.set_xlabel("SINE OUT current (A RMS)")
+    amplitude_axis.set_xlabel("6221 current readback (A RMS)"
+        if all(getattr(fits[k], "current_basis", None) == "6221_rms_setting_readback" for k in selected_amplitudes)
+        else "SINE OUT current (A RMS)")
     amplitude_axis.set_ylabel("Lock-in amplitude R (V RMS)")
     amplitude_axis.set_title(title)
     style_axis(amplitude_axis)

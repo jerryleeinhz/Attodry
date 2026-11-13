@@ -160,3 +160,16 @@ queries. An in-flight VISA timeout is additional. Neither loop repeats source
 commands. Raw polls/timestamps/deadlines and partial failures remain auditable.
 The narrowly reviewed deferred-cleanup recovery adds one inactive-source settings
 verification after detector setup; ordinary scans pay no recovery overhead.
+
+## 6221 commissioning analysis snapshots (2026-11-13)
+
+This analysis-only feature adds zero hardware queries, writes, waits, watchers
+or acquisition retries. The run catalog reads only run metadata. Explicit Load
+uses the existing execution-aware SQLite snapshot reader in one short read-only
+transaction; decoding, native channel filtering, plotting and fitting occur
+after the connection closes. One loaded snapshot feeds all plots and exports;
+changing point exclusions never rereads a growing database. Grouping is indexed
+by configuration/contract/frequency/repeat/outer visit. User-selected curve groups
+are fitted once per render; report overlays reuse those fits. No database or
+scan schema is migrated. Fake acquisition fixtures verify the same-run accepted
+prefix across recovery; offline UI checks verify stale-result clearing and exports.

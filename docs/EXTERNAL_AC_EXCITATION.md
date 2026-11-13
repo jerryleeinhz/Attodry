@@ -184,3 +184,12 @@ Relock is limited to 30 s / 301 polls. ABOR acknowledgement is limited to 2 s /
 interlock, DC zero, unknown/error status and transport failures remain blocking.
 Preflight still requires an immediately known inactive source. Neither timeout
 certifies lock or OFF. Historical rejected data remains excluded by default.
+
+### Commissioning Notebook support
+
+`sr830_commissioning_sweeps.ipynb` now includes an explicit SQLite/run selector
+for 6221 RMS-current curves, all three existing harmonic fit methods and reports.
+It uses the archived source RMS readback directly and retains execution-aware
+accepted-prefix recovery and native selected-channel filtering. Old SR830
+JSON/JSONL plots and voltage-derived current remain supported. See
+[Notebook operation, exclusions and fit thresholds](DATA_ANALYSIS.md#6221-current-sweeps-in-sr830_commissioning_sweepsipynb).

@@ -14,6 +14,47 @@ python -m pip install -e ".[analysis]"
 The project pins matplotlib 3.10.9 for reproducible offline wheelhouses. Analysis
 does not import attoDRY, SR830, SMU, PPMS, MultiPyVu, ETO, or rotator control.
 
+## 6221 current sweeps in `sr830_commissioning_sweeps.ipynb`
+
+Run the setup cell, then the **6221 SQLite · RMS current sweeps** panel directly
+below it. Set `CURRENT_SCAN_DATABASE` (default
+`run_data/combination_6221_25Hz/scan.sqlite`), click **Refresh SQLite runs**, choose
+an explicit Run ID, **Load selected run**, then **Apply selection and plot**.
+Reload after new data arrives; plotting and exclusions reuse the materialized
+snapshot and do not reread a changing database. The old SR830 JSON/JSONL browser,
+progress panels and voltage-based frequency calibration remain unchanged below.
+
+The current axis and all current fits use only
+`actual.excitation_current_rms_a`, the archived 6221 RMS **setting readback**.
+This is not measured DUT current. Missing/invalid readback is an error, with no
+fallback to a target, SINE OUT voltage or resistor calculation. Requested RMS
+current is retained for point labels/exclusions. SR830 files still use their
+original archived resistance model and explicit legacy override.
+
+Only the formally selected role/harmonic is adapted (for example XX h1 and XY
+h2), using the existing native detector quality rules. Default selection requires
+a final completed/clean run and clean accepted samples. The accepted prefix of a
+recovered run remains available from its original execution; rejected attempts
+and flagged channels require explicit audit controls and are excluded from fits.
+Accepted active-run preview is separately opt-in and marked preliminary. Keep
+configuration/contract, frequency, repeat and outer-axis visits in separate curve
+groups; no current/frequency or outer-coordinate grid is invented.
+
+The panel reuses R/X/Y/phase plotting, log/scalar/complex harmonic fits,
+amplitude/phase experiment-plus-fit reports and the merged scalar report. It
+uses `SCALING_RULES` and `SCALING_PLOT_METHODS` from the setup cell. A five-point
+scan is below the existing default `minimum_points=6`; plots still show all
+eligible points and report insufficient fitting data. Changing that analysis
+threshold is explicit, never automatic. Voltage-normalized SR830 frequency
+calibration is not reinterpreted as a current-source calibration.
+
+**Export displayed result** writes a new timestamped directory under
+`analysis_output/6221_commissioning` with CSV, PNG/PDF/SVG and a JSON manifest.
+The manifest records the snapshot digest, source database/run, execution,
+condition/attempt/formal sample IDs, original LIAS and quality exclusions,
+requested/actual RMS current, group bindings, manual exclusions and fit rules.
+No scan data/schema, hardware configuration or instrument state is changed.
+
 ## Unified and combination plotting
 
 Combination XX/XY channels may carry an optional archived `channel_label` wiring
