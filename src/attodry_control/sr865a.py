@@ -22,10 +22,10 @@ from . import sr865a_settings as settings
 
 # FREQEXT? and FREQDET? are sequential observations of the tracked external
 # reference. Compare detection/harmonic with the reference using the operator's
-# approved 100 ppm / 5 mHz allowance in fundamental-frequency units. Detection
+# approved 200 ppm / 5 mHz allowance in fundamental-frequency units. Detection
 # tolerance therefore scales with harmonic. Internal checks and independent
 # frequency/status limits remain; this is not an accuracy specification.
-EXTERNAL_REFERENCE_FREQUENCY_REL_TOLERANCE = 100e-6
+EXTERNAL_REFERENCE_FREQUENCY_REL_TOLERANCE = 200e-6
 EXTERNAL_REFERENCE_FREQUENCY_ABS_TOLERANCE_HZ = 0.005
 # At most three independent frequency pairs, never an acquisition/setup retry.
 # This counter-observation delay is separate from the configured signal-filter

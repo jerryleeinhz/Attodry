@@ -25,8 +25,8 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
         self.resource.responses.update({'HARM?':'2', 'FREQEXT?':references or '71.124229431',
             'FREQDET?':detections})
 
-    def test_reported_mismatch_recovers_with_fresh_pair_and_full_audit(self):
-        self.mismatches(['142.2336731','142.24'], ['71.124229431','71.12'])
+    def test_out_of_tolerance_mismatch_recovers_with_fresh_pair_and_full_audit(self):
+        self.mismatches(['142.20','142.24'], ['71.124229431','71.12'])
         sample=self.sample()
         self.assertTrue(sample.status.valid)
         self.assertEqual(self.sleeps,[1.0])
@@ -38,13 +38,13 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
         self.assertEqual(sample.frequency_checks[0].retry_wait_s,1.0)
         self.assertEqual(self.resource.events.count(('query','SNAP? X,Y')),1)
         frequencies=[r for r in sample.raw if r.command in ('FREQEXT?','FREQDET?')]
-        self.assertEqual([r.response for r in frequencies],['71.124229431','142.2336731','71.12','142.24'])
+        self.assertEqual([r.response for r in frequencies],['71.124229431','142.20','71.12','142.24'])
         self.assertTrue(all(r.started_at_utc<=r.completed_at_utc for r in frequencies))
         self.assertEqual(self.resource.writes,[])
 
     def test_third_pair_can_recover_without_widening_h1_h2_h3_thresholds(self):
         for harmonic in (1,2,3):
-            for reference,delta in ((17.,.006),(5000.,.6)):
+            for reference,delta in ((17.,.006),(5000.,1.1)):
                 with self.subTest(harmonic=harmonic, reference=reference):
                     self.setUp()
                     self.resource.responses.update({'HARM?':str(harmonic),'FREQEXT?':str(reference),
@@ -52,12 +52,12 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
                     sample=self.sample()
                     self.assertEqual(self.sleeps,[1.,1.])
                     self.assertEqual([c.frequency_consistent for c in sample.frequency_checks],[False,False,True])
-                    self.assertEqual(sample.frequency_checks[-1].reference_tolerance_hz,max(.005,reference*100e-6))
+                    self.assertEqual(sample.frequency_checks[-1].reference_tolerance_hz,max(.005,reference*200e-6))
                     self.assertEqual(self.resource.events.count(('query','SNAP? X,Y')),1)
                     self.assertEqual(self.resource.writes,[])
 
     def test_persistent_mismatch_stops_after_three_pairs_and_revokes_identity(self):
-        self.mismatches('142.2336731')
+        self.mismatches('142.20')
         with self.assertRaisesRegex(Sr865aError,'3/3') as error:
             self.sample()
         self.assertEqual(self.sleeps,[1.,1.])
@@ -74,7 +74,7 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
                           ('CUROVLDSTAT?','4'),('ERRS?','4'),('ERRS?','1'),
                           ('*ESR?','32'),('*ESR?','64'),('*ESR?','128')]:
             with self.subTest(cmd=cmd,value=value):
-                self.setUp();self.mismatches(['142.2336731','142.248458862'])
+                self.setUp();self.mismatches(['142.20','142.248458862'])
                 self.resource.responses[cmd]=[value,'0']
                 with self.assertRaisesRegex(Sr865aError,'status') as error:self.sample()
                 self.assertFalse(error.exception.frequency_checks[-1].status.valid)
@@ -85,7 +85,7 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
     def test_status_fault_after_wait_does_not_become_valid_when_frequency_recovers(self):
         for cmd,value in [('CUROVLDSTAT?','8'),('LIAS?','8'),('ERRS?','1'),('*ESR?','64')]:
             with self.subTest(cmd=cmd):
-                self.setUp();self.mismatches(['142.2336731','142.248458862'])
+                self.setUp();self.mismatches(['142.20','142.248458862'])
                 self.resource.responses[cmd]=['0',value]
                 sample=self.sample()
                 self.assertFalse(sample.status.valid)
@@ -95,7 +95,7 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
     def test_no_recheck_without_complete_authorized_status_evidence(self):
         for consume,current in ((False,False),(False,True),(True,False)):
             with self.subTest(consume=consume,current=current):
-                self.setUp();self.mismatches('142.2336731')
+                self.setUp();self.mismatches('142.20')
                 with self.assertRaises(Sr865aError):
                     self.sample(consume_status_latches=consume,current_status_supported=current)
                 self.assertEqual(self.sleeps,[])
@@ -105,7 +105,7 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
     def test_changed_harmonic_reference_mode_or_input_aborts_recheck(self):
         for cmd,values in [('HARM?',['2','1']),('RSRC?',['1','0']),('IVMD?',['0','1'])]:
             with self.subTest(cmd=cmd):
-                self.setUp();self.mismatches('142.2336731');self.resource.responses[cmd]=values
+                self.setUp();self.mismatches('142.20');self.resource.responses[cmd]=values
                 with self.assertRaises(Sr865aError) as error:self.sample()
                 self.assertEqual(len(error.exception.frequency_checks),1)
                 self.assertEqual(self.sleeps,[1.])
@@ -121,7 +121,7 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
                 self.assertNotIn(('query','SNAP? X,Y'),self.resource.events)
 
     def test_failure_during_recheck_retains_first_pair_and_does_not_try_again(self):
-        self.mismatches(['142.2336731',OSError('fake timeout')])
+        self.mismatches(['142.20',OSError('fake timeout')])
         # FakeResource normally raises a stored exception, but list entries need
         # the same transport behavior when fault injection is sequential.
         original=self.resource.query
@@ -149,12 +149,12 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
     def test_receiver_serializes_recovered_history_and_terminal_failure(self):
         adapter=Sr865aReceiver(self.resource,config=SimpleNamespace(current_status_supported=True))
         adapter._driver._sleep=self.sleeps.append
-        self.mismatches(['142.2336731','142.248458862'])
+        self.mismatches(['142.20','142.248458862'])
         sample=adapter.read_harmonic_sample(2)
         serialized=asdict(sample)
         self.assertEqual(len(serialized['native_sample']['frequency_checks']),2)
         json.dumps(serialized,default=str)
-        self.mismatches('142.2336731')
+        self.mismatches('142.20')
         with self.assertRaises(ElectricalLockinError) as error:adapter.read_harmonic_sample(2)
         self.assertEqual(len(error.exception.evidence['frequency_checks']),3)
         self.assertFalse(error.exception.evidence['frequency_checks'][0]['frequency_consistent'])
@@ -165,7 +165,7 @@ class ExternalFrequencyRecheckTests(unittest.TestCase):
     def test_failure_after_recovery_retains_history_and_does_not_repeat_xy_read(self):
         for command in ("SNAP? X,Y",):
             self.setUp()
-            self.mismatches(['142.2336731', '142.248458862'])
+            self.mismatches(['142.20', '142.248458862'])
             self.resource.responses[command] = OSError("fake read failure")
             with self.assertRaises(Sr865aError) as error:
                 self.sample()

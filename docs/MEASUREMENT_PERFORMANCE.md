@@ -4,6 +4,24 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## SR865A External 200 ppm allowance (2026-11-14)
+
+The native External relative consistency constant changes from 100 to 200 ppm;
+the 5 mHz fundamental floor, existing serial queries/writes, three-observation
+budget and 1 s recheck intervals do not change. A formerly rejected 117–121 ppm
+pair can now proceed on its first observation and ordinary status verification,
+avoiding its former extra observations/waits. Healthy in-bound observations add
+no I/O, wait, background task or source action. Larger discrepancies retain the
+same bounded rejection path and all status checks.
+
+This is not a hardware accuracy or measured-throughput claim. Stored actual
+thresholds/raw readings remain the audit basis; old records are not recomputed.
+The user requested no deployment or restart of the currently active scan.
+
+Verification: 295 hardware-blocked offline tests passed in 103.682 s, including
+14 new cases. The first-read trace comparison confirms no extra I/O or wait for
+newly accepted pairs; beyond-bound cases retain three observations/two 1 s waits.
+
 ## Pre-capture external coordinate re-observation (2026-11-13)
 
 The shared pre-capture hook delegates to the original one-read implementation.

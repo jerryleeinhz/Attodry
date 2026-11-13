@@ -272,7 +272,7 @@ class Sr865aAdapterTests(unittest.TestCase):
         # Every harmonic uses the same error in reference-frequency units.
         for reference, difference, accepted in (
             (17.0, 0.0049999, True), (17.0, 0.0050001, False),
-            (5000.0, 0.49999, True), (5000.0, 0.50001, False),
+            (5000.0, 0.99999, True), (5000.0, 1.00001, False),
         ):
             for harmonic in (1, 2, 3):
                 for sign in (-1, 1):
@@ -319,7 +319,7 @@ class Sr865aAdapterTests(unittest.TestCase):
 
     def test_external_mismatch_reports_reference_and_detection_tolerances(self):
         for reference, difference, tolerance in ((17.0, 0.007, 0.005),
-                                                 (5000.0, 0.7, 0.5)):
+                                                 (5000.0, 1.1, 1.0)):
             self.resource.responses.update({
                 "HARM?": "3", "FREQEXT?": str(reference),
                 "FREQDET?": str(3 * (reference + difference)),
@@ -343,7 +343,7 @@ class Sr865aAdapterTests(unittest.TestCase):
 
     def test_external_frequency_jitter_limit_does_not_accept_frequency_fault(self):
         self.resource.responses.update({
-            "HARM?": "1", "FREQEXT?": "5000", "FREQDET?": "5000.6",
+            "HARM?": "1", "FREQEXT?": "5000", "FREQDET?": "5001.1",
         })
         with self.assertRaisesRegex(Sr865aError, "Detection frequency"):
             self.sample()

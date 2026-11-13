@@ -441,7 +441,7 @@ autorange_stable_samples = 2
             reply = original_query(command)
             if (command == "FREQDET?" and fixture.frequency["hz"] == 100000.
                     and fixture.xy.responses["HARM?"] == "2" and len(injected) < count):
-                reply = str(float(reply) * 1.00012)
+                reply = str(float(reply) * 1.00022)
                 injected.append(reply)
             return reply
         fixture.xy.query = query

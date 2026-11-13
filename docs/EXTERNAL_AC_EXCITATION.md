@@ -105,6 +105,16 @@ source change or cleanup. This is not a pulsed/dark-window excitation feature.
 
 ## Detector timing and range rules
 
+From 2026-11-14, the operator-approved SR865A native External consistency check
+uses `abs(FREQDET/HARM - FREQEXT) <= max(0.005 Hz, abs(FREQEXT)*200e-6)`.
+The detection-frequency allowance scales with the harmonic; actual raw values
+and the applied numeric tolerance remain archived. This change covers only that
+native counter-pair comparison. Internal checks and the separate source-target
+and XX/XY coordinate checks retain their existing tolerances. Lock/status/source
+protection and the three-observation budget remain in force. Earlier records keep
+their recorded thresholds and decisions. This delivery does not deploy into or
+restart the user's active scan.
+
 Source transitions can legitimately remove the reference. Such transition
 latches are archived separately; formal acquisition still requires fresh known
 lock, frequency and native status. The mixed detector session reuses the same

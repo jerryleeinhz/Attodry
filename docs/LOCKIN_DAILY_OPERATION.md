@@ -120,15 +120,17 @@ SLVL/SOFF/REFM/BLAZEX 保留；测量滤波 ADVFILT/SYNC 另行禁用并校验�
 与温度–激励入口使用各自已有运行授权。独立只读诊断不得与扫描并行连接。
 
 SR865A 的 `FREQEXT?` 和 `FREQDET?` 是先后查询，不是同一时刻的快照。
-2026-10-08 起，External 模式先把实际检测频率除以谐波倍数，折算回基频比较：
+External 模式先把实际检测频率除以谐波倍数，折算回基频比较。
+2026-11-14 操作者批准将相对容差从 100 ppm 调整为 200 ppm：
 
 ```python
 reference_error_hz = abs(detection_hz / harmonic - reference_hz)
-reference_tolerance_hz = max(0.005, abs(reference_hz) * 100e-6)
+reference_tolerance_hz = max(0.005, abs(reference_hz) * 200e-6)
 frequency_consistent = reference_error_hz <= reference_tolerance_hz
 ```
 
-**5 mHz 是基频绝对容差**，相对容差保持 100 ppm，取两者较大者。
+**5 mHz 是基频绝对容差**，相对容差为 200 ppm（0.02%），取两者较大者。
+这只调整 SR865A 内部两项读回的一致性比较；源目标及 XX/XY 坐标检查保持原容差。
 等价的检测频率容差为 `harmonic * reference_tolerance_hz`：
 
 | 谐波 | 检测频率绝对容差下限 |

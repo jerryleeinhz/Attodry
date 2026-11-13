@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: SR865A external 200 ppm consistency (2026-11-14)
+
+- Increase only the External native reference/detection relative allowance from
+  100 to 200 ppm, with the original fundamental 5 mHz floor and harmonic scaling.
+- Reproduce the three real 4808 Hz pairs at 117–121 ppm. Retain raw values,
+  actual applied tolerances, status rejection and the existing bounded rechecks.
+- Keep Internal and requested-source target checks, limits and cleanup intact;
+  old archived decisions are not reclassified using the new allowance.
+- Current scope is code/tests/origin only: user cancelled restart and requested
+  that the independently running LK_setup scan remain undisturbed.
+- Verification: 295 hardware-blocked offline regression tests passed, including
+  14 new boundary/raw-audit cases and the existing source/status/recheck guards.
+
 ## Current: Pre-capture external frequency coordinates (2026-11-13)
 
 - Real verification exposed a second counter gate: 818 Hz / 0.9 uA failed the

@@ -1,5 +1,20 @@
 # Hardware and safety guide
 
+## SR865A external frequency consistency allowance (2026-11-14)
+
+The operator approved a 200 ppm relative consistency allowance between External
+`FREQDET?/HARM` and `FREQEXT?`, with a fundamental absolute floor of 0.005 Hz.
+This is a software allowance for separate counter observations, not a claimed
+manufacturer accuracy. Scale the detection-frequency allowance by the harmonic.
+Retain the actual observed values, query times and numeric threshold per check.
+
+Internal consistency and requested-source/XX–XY target comparisons retain their
+own existing tolerances. Native lock, overload, unknown/error status, frequency
+and harmonic limits, mode/settings, bounded observation count and source
+compliance/interlock checks remain independent. Historical records retain their
+stored decisions and thresholds. This code change does not authorize alteration
+of source used by an active scan; the user cancelled the proposed restart.
+
 ## Pre-capture external frequency observations (2026-11-13)
 
 The external-6221 detector path may re-observe a typed finite/in-range frequency
@@ -212,7 +227,8 @@ it opens no magnetic, temperature, SMU or optical connection.
 ## Bounded SR865A frequency observation (2026-10-09)
 
 The operator authorized up to two one-second rechecks of an in-range External
-frequency inconsistency. The 100 ppm / fundamental 5 mHz threshold is unchanged.
+frequency inconsistency. At that stage the threshold was 100 ppm / fundamental
+5 mHz; the relative allowance was subsequently updated to 200 ppm on 2026-11-14.
 Every wait requires a complete clean current/latched status window, with
 explicit status capability and latch-consumption authorization. All raw pairs,
 statuses and timestamps survive success or failure. Unlock, overload, device or

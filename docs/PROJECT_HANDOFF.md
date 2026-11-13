@@ -1,8 +1,22 @@
 # Project handoff
 
-Last updated: 2026-11-13
+Last updated: 2026-11-14
 
 ## Current stage
+
+### SR865A external frequency consistency allowance (2026-11-14)
+
+- Operator-approved native External `FREQDET?/HARM` versus `FREQEXT?` relative
+  allowance is now 200 ppm (0.02%), retaining the fundamental 5 mHz floor.
+  The three real 4808 Hz pairs at roughly 117–121 ppm pass this new check.
+- Internal frequency validation, requested-source/XX–XY target checks, native
+  status, the three-observation budget and 6221 protections remain unchanged.
+  Every observation still archives its actual numeric thresholds and raw reads;
+  historical failed/accepted records retain their original 100 ppm decisions.
+- The user subsequently cancelled restart and requested code changes only.
+  Do not deploy this change into the active LK_setup acquisition or restart it.
+- Verification: 295 hardware-blocked offline regression tests passed, including
+  14 new boundary/raw-audit cases and the existing source/status/recheck guards.
 
 ### Pre-capture external frequency coordinates (2026-11-13)
 
