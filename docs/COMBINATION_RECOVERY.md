@@ -86,6 +86,15 @@ configuration, not the final condition's range. See
 
 ## Handoff and failures
 
+A narrow reviewed exception recognizes the gated version's attoDRY Connect
+resource-busy failure during preflight, before any condition or actuator write.
+It requires the complete raw event sequence, exact source version, clean OFF/DC
+zero source preflight and matching unopened/no-write module results. Both the
+file review and atomic database claim recompute the proof; missing, changed or
+additional operations fail closed. Original failed cleanup/manual flags remain
+unchanged. The next execution still performs fresh OFF/health and detector setup
+checks, rather than claiming physical manual verification from a file flag.
+
 As explicitly requested on 2026-10-15, ordinary hardware run/resume no longer
 enumerates OS processes, checks PID/Jupyter/GUI identities or idle state, or
 acquires the former Windows resource mutexes/station file lease. Independent

@@ -4,6 +4,22 @@ Last updated: 2026-11-14
 
 ## Current stage
 
+### Proven no-write cryostat connection preflight (2026-11-14)
+
+- The authorized first gated recovery stopped at attoDRY Connect with VISA
+  resource-busy, before configuration or a condition attempt. The original
+  source preflight read OFF/DC zero/clear protection; Lock-in was never opened.
+- Review this exact known-source, complete raw no-write trace without changing
+  the failed cleanup/manual flags. The file review and atomic claim rederive the
+  same proof; all other unknown cleanup remains blocked. A new execution still
+  requires fresh source OFF/health and verified detector configuration.
+- The operator disconnected the original interface; one write-disabled cryostat
+  probe confirmed the released connection and closed it. No scan data was added
+  by that probe. Keep the original 15 accepted conditions and 20 V compliance.
+- Verification: 51 hardware-blocked recovery/atomic cases passed, including 11
+  new cases. The real 48-event evidence and LF/CRLF version migrations also pass
+  independently, while malformed/contradictory raw status and missing events fail.
+
 ### Condition-gated 6221 output (2026-11-14)
 
 - Every external-6221 combination condition begins with a fresh, verified source

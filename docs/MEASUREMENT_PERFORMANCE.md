@@ -4,6 +4,17 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## No-write connection-preflight review (2026-11-14)
+
+The exceptional recovery review reads a bounded global event tail and requires
+the complete known preflight signature. It performs no instrument I/O or wait
+and is repeated inside the existing atomic claim. After a proven no-write failure,
+the existing deferred-resolution hook adds a fresh source OFF verification after
+normal detector setup; it never starts a waveform or changes protection. Missing
+events or any write/attempt/fault outside the reviewed signature block recovery.
+Verification: 51 hardware-blocked cases passed in 49.435 s. No new polling,
+instrument session, actuator write or retry loop is part of the file proof.
+
 ## Condition-gated 6221 output (2026-11-14)
 
 Each external-source condition now has an explicit OFF bracket. The serial owner

@@ -7,9 +7,11 @@ from __future__ import annotations
 
 from contextlib import closing
 from copy import deepcopy
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
+import re
 
 from .combination_store import encode, open_readonly, recovery_parent_state, validate_accepted_records
 
@@ -55,6 +57,14 @@ GATED_6221_TARGET_SHA256 = {
         "98ea2c4fe4505aaa64eed7531dc0a6e279c2f741276f72941e1eca6407104f85",
     }),
 }
+BUSY_PREFLIGHT_PREDECESSOR_SETS = {
+    # Reviewed 83abe96, Git LF and the station's CRLF checkout. Only this
+    # recovery module changes; the source/actuator implementations stay frozen.
+    "3a5356e107ed690ce5c2f3200909b31a58fb217f22c4b12544739bc2b6eafca0",
+    "7e0a09481d02841e3f7f0a694742451fdd99b23cf6b36f5c39c7b03a5ca22850",
+}
+BUSY_PREFLIGHT_ERROR = "AttoDryDllError: Connect returned DLL error code -1073807246."
+BUSY_PREFLIGHT_CONTRACT = "reviewed-83abe96-busy-connect-no-writes-v1"
 
 
 def _gated_6221_destination(after):
@@ -86,6 +96,11 @@ def source_compatibility(before, after):
             and changed <= set(GATED_6221_TARGET_SHA256) | {"combination_resume.py"}
             and _gated_6221_destination(after)):
         return GATED_6221_COMPATIBILITY
+    if (digest(before) in BUSY_PREFLIGHT_PREDECESSOR_SETS and set(before) == set(after)
+            and changed == {"combination_resume.py"}
+            and after["combination_resume.py"] == hashlib.sha256(
+                Path(__file__).read_bytes()).hexdigest()):
+        return BUSY_PREFLIGHT_CONTRACT
     return None
 
 
@@ -274,13 +289,172 @@ def _cleanup_review(cleanup, modules=None):
             "manual_verification_required": uncertain or bool(unresolved)}
 
 
+def busy_preflight_cleanup_resolution(state, parent, connection):
+    """Prove the frozen Connect-busy startup never reached actuator writes.
+
+    A not-opened detector needs no physical reset. Its old failed/manual flags
+    remain untouched; every selected preflight must pass again in the new owner.
+    """
+    if (digest(parent.get("source_sha256")) not in BUSY_PREFLIGHT_PREDECESSOR_SETS
+            or parent.get("excitation_source") != "keithley6221"
+            or parent.get("excitation_output_policy") != GATED_6221_OUTPUT_POLICY
+            or [a["module"] for a in parent.get("axes", [])] != ["temperature", "excitation", "lockin"]
+            or state["run"]["status"] != "failed"
+            or state["run"]["error"] != BUSY_PREFLIGHT_ERROR or not state["executions"]):
+        return None
+    try:
+        execution = state["executions"][-1]
+        execution_id = execution["execution_id"]
+        cleanup = json.loads(state["run"]["cleanup_json"] or "{}")
+        if (execution["kind"] != "resume" or execution["status"] != "failed"
+                or execution["error"] != BUSY_PREFLIGHT_ERROR
+                or json.loads(execution["plan_json"]) != parent
+                or json.loads(execution["cleanup_json"] or "{}") != cleanup
+                or not execution["finished_at_utc"]
+                or cleanup["communication_uncertain"] is not False
+                or cleanup["clean"] is not False or cleanup["manual_verification_required"] is not True
+                or cleanup["errors"] != [f"{m}: cleanup not certified; review recorded actions"
+                                         for m in ("excitation", "lockin", "temperature")]
+                or any(x["execution_id"] == execution_id for x in state["attempt_executions"])):
+            return None
+        start = datetime.fromisoformat(execution["created_at_utc"])
+        finish = datetime.fromisoformat(execution["finished_at_utc"])
+        if start >= finish or connection.execute(
+                "SELECT 1 FROM combination_attempts WHERE run_id=? AND started_at_utc>=? LIMIT 1",
+                (state["run"]["run_id"], execution["created_at_utc"])).fetchone():
+            return None
+        actions = cleanup["actions"]
+        if ([a["module"] for a in actions] != ["excitation", "lockin", "temperature"]
+                or any(a["startup_completed"] is not False or a["audit_errors"] != []
+                       or a["failure_requires_manual_review"] is not True or a["clean"] is not False
+                       for a in actions)):
+            return None
+        source, detector, temperature = (a["result"] for a in actions)
+        if (source["attempted"] is not False or source["verified"] is not True
+                or source["output_off_confirmed"] is not False or source["final"] is not None
+                or source["errors"] != []
+                or detector != {"attempted": False, "reason": "not opened"}
+                or temperature != {"attempted": False, "reason": "no writes attempted", "verified": True}):
+            return None
+        last = source["last_confirmed"]
+        expected = {"output_enabled": False, "dc_current_setpoint_a": 0.0,
+                    "operation_condition": 128, "wave_started": False,
+                    "measurement_condition": 0, "measurement_event": 0,
+                    "questionable_condition": 0, "compliance_tripped": False,
+                    "interlock_asserted": True, "interlock_raw": "1",
+                    "status_contract": "6221-direct-interlock-v1"}
+        if (any(type(last[k]) is not type(v) or last[k] != v for k, v in expected.items())
+                or not start <= datetime.fromisoformat(last["captured_at_utc"]) <= finish
+                or type(last["error_queue"]["code"]) is not int or last["error_queue"]["code"] != 0
+                or type(last["output_low_earth_connected"]) is not bool):
+            return None
+        selected = parent["hardware"]["excitation"]
+        if any(last[k] != selected[k] for k in (
+                "compliance_voltage_v", "inner_shield", "output_low_grounding")):
+            return None
+        # LIMIT the global window before selecting this run/execution. A
+        # missing prefix, extra event, write or partial query cannot prove idle.
+        rows = [dict(r) for r in connection.execute(
+            "SELECT * FROM (SELECT * FROM combination_events ORDER BY event_id DESC LIMIT 1024) "
+            "WHERE run_id=? AND json_extract(payload_json,'$.execution_id')=? ORDER BY event_id",
+            (state["run"]["run_id"], execution_id))]
+        events = [(r["event_type"], json.loads(r["payload_json"])) for r in rows]
+        commands = ("*IDN?", "OUTP:STAT?", "SOUR:CURR?", "SOUR:CURR:COMP?", "STAT:OPER:COND?",
+                    "STAT:MEAS:COND?", "STAT:MEAS:EVEN?", "STAT:QUES:COND?", "OUTP:INT:TRIP?",
+                    "OUTP:ISH?", "OUTP:LTE?", "SYST:ERR?", "TRIG:OLIN?")
+        kinds = ["launch_registered", "run_started", "scan_phase"]
+        for index in range(len(commands)):
+            kinds.extend(("excitation_query_attempt", "excitation_query_return"))
+            if index == 10:
+                kinds.append("excitation_raw_state")
+        kinds.append("measurement_stage_timing")
+        kinds.extend(["cleanup_started", "scan_phase", "measurement_stage_timing", "cleanup_result"] * 3)
+        kinds.extend(("scan_phase", "measurement_stage_timing", "measurement_timing_summary",
+                      "run_finished", "data_quality_summary"))
+        if ([kind for kind, _ in events] != kinds
+                or any(p.get("execution_id") != execution_id or "condition_id" in p
+                       or "attempt_index" in p for _, p in events)):
+            return None
+        started = events[1][1]
+        if (started["plan"] != parent or started["resume"] is not True
+                or started["cleanup_only"] is not False or events[2][1]["phase"] != "preflight"):
+            return None
+        query_attempts = [p["command"] for k, p in events if k == "excitation_query_attempt"]
+        query_returns = [p for k, p in events if k == "excitation_query_return"]
+        if tuple(query_attempts) != commands or tuple(p["command"] for p in query_returns) != commands:
+            return None
+        raw = {p["command"]: str(p["raw"]).strip() for p in query_returns}
+        from .keithley6221_ac import _flag, _word, _number, _interlock_closed
+        shield = raw["OUTP:ISH?"].upper()
+        if shield not in {"OLOW", "GUAR", "GUARD"}:
+            return None
+        error_response = re.fullmatch(r"([+-]?\d+),\s*(\S.*)", raw["SYST:ERR?"])
+        if error_response is None or int(error_response.group(1)) != 0:
+            return None
+        earth = _flag(raw["OUTP:LTE?"])
+        decoded = {"output_enabled": _flag(raw["OUTP:STAT?"]),
+                   "dc_current_setpoint_a": _number(raw["SOUR:CURR?"]),
+                   "compliance_voltage_v": _number(raw["SOUR:CURR:COMP?"]),
+                   "operation_condition": _word(raw["STAT:OPER:COND?"]),
+                   "measurement_condition": _word(raw["STAT:MEAS:COND?"]),
+                   "measurement_event": _word(raw["STAT:MEAS:EVEN?"]),
+                   "questionable_condition": _word(raw["STAT:QUES:COND?"]),
+                   "interlock_raw": raw["OUTP:INT:TRIP?"],
+                   "interlock_asserted": _interlock_closed(raw["OUTP:INT:TRIP?"]),
+                   "inner_shield_raw": shield,
+                   "inner_shield": "output_low" if shield == "OLOW" else "guard",
+                   "output_low_earth_connected": earth,
+                   "output_low_grounding": "earth" if earth else "floating", "identity": raw["*IDN?"]}
+        identity = [part.strip() for part in raw["*IDN?"].split(",")]
+        if (any(last[k] != v for k, v in decoded.items())
+                or raw["SYST:ERR?"] != last["error_queue"]["raw"]
+                or len(identity) != 4 or "KEITHLEY" not in identity[0].upper()
+                or identity[1].upper() not in {"6221", "MODEL 6221"} or not all(identity[2:])
+                or selected["expected_idn"] not in last["identity"]
+                or not 1 <= _word(raw["TRIG:OLIN?"]) <= 6
+                or _word(raw["TRIG:OLIN?"]) == selected["phase_marker_line"]):
+            return None
+        observed = deepcopy(next(p for k, p in events if k == "excitation_raw_state"))
+        observed.pop("execution_id")
+        expected_raw = {k: v for k, v in last.items() if k not in {"identity", "error_queue"}}
+        if observed != expected_raw:
+            return None
+        timings = [p for k, p in events if k == "measurement_stage_timing"]
+        if ([(p["stage"], p["completed"], p.get("module")) for p in timings]
+                != [("preflight", False, None), ("cleanup", True, "excitation"),
+                    ("cleanup", True, "lockin"), ("cleanup", True, "temperature"), ("close", True, None)]
+                or timings[0]["error"] != BUSY_PREFLIGHT_ERROR
+                or any("error" in p for p in timings[1:])):
+            return None
+        recorded_actions = [{k: v for k, v in p.items() if k != "execution_id"}
+                            for kind, p in events if kind == "cleanup_result"]
+        summary = next(p for k, p in events if k == "measurement_timing_summary")
+        finished = next(p for k, p in events if k == "run_finished")
+        if (recorded_actions != actions or summary["audit_errors"] != []
+                or summary["stage_count"] != 5
+                or finished["status"] != "failed" or finished["error"] != BUSY_PREFLIGHT_ERROR
+                or finished["cleanup"] != cleanup):
+            return None
+        return {"contract": BUSY_PREFLIGHT_CONTRACT, "execution_id": execution_id,
+                "original_cleanup_sha256": digest(cleanup), "original_cleanup_certified": False,
+                "evidence_sha256": digest(rows), "first_event_id": rows[0]["event_id"],
+                "last_event_id": rows[-1]["event_id"], "actuator_writes": 0,
+                "condition_attempts": 0, "formal_samples": 0,
+                "fresh_source_off_and_detector_setup_required": True}
+    except (KeyError, TypeError, ValueError, IndexError, RuntimeError):
+        return None
+
+
 def external_relock_cleanup_resolution(state, parent, connection):
-    """Recognize only the reviewed latch/stop-bit lag; do not certify old cleanup.
+    """Dispatch narrowly reviewed no-write startup or historical stop-bit lag.
 
     The new execution must still read source OFF/DC zero and restore/verify both
     detectors before any INIT. Unknown cleanup, compliance or present unlock is
     ineligible. Recomputed under the atomic DB claim, never accepted from a flag.
     """
+    busy = busy_preflight_cleanup_resolution(state, parent, connection)
+    if busy is not None:
+        return busy
     if (digest(parent.get('source_sha256')) not in RELOCK_PREDECESSOR_SETS
             or [a['module'] for a in parent['axes']] != ['excitation', 'lockin']
             or state['run']['status'] != 'failed'
@@ -456,7 +630,9 @@ def recovery_text(recovery, database, run_id):
         lines.append(f"{change['category']}: {change['path']}: {change['before']} -> {change['after']}")
     lines.extend("Required: " + reason for reason in review["blockers"])
     if review.get('deferred_cleanup_resolution'):
-        lines.append('Known historical stop-bit lag: fresh source OFF/DC zero and verified detector setup '
+        reason = ('Reviewed no-write Connect-busy startup' if review['deferred_cleanup_resolution'].get(
+            'contract') == BUSY_PREFLIGHT_CONTRACT else 'Known historical stop-bit lag')
+        lines.append(reason + ': fresh source OFF/DC zero and verified detector setup '
                      'required before output; original failed cleanup remains archived')
     lines.append("File review ready: " + str(review["ready"]) + "; fresh hardware preflight required")
     return "\n".join(lines)

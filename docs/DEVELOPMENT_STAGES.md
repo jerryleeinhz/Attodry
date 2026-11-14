@@ -1,5 +1,19 @@
 # Development stages
 
+## Current: Proven no-write connection preflight (2026-11-14)
+
+- Recognize only the reviewed gated source version's precise attoDRY
+  resource-busy preflight failure, with a complete no-write event trace and no
+  new condition attempt/formal data. An unopened detector is not a failed reset.
+- Preserve historical cleanup/manual/error payloads. Recompute the raw proof
+  under the atomic recovery claim; never replace it with a ready/manual flag.
+  Fresh source OFF/health and detector setup remain mandatory before INIT.
+- Source compatibility is an exact reviewed recovery-module-only upgrade;
+  the existing f182ba4 gating migration and all current/protection limits remain.
+- Verification: 51 hardware-blocked recovery/atomic cases passed in 49.435 s,
+  including 11 new cases. Real bounded evidence and both exact newline variants
+  pass; raw-error/unknown-shield/derived-status contradictions are rejected.
+
 ## Current: Condition-gated 6221 output (2026-11-14)
 
 - Close the gap where a previous temperature's final current remained active
