@@ -359,6 +359,8 @@ class ExternalLockinPointSession(LockinPointSession):
             "excitation_current_rms_a": current_rms_a, "excitation_frequency_hz": frequency_hz,
             "excitation_source": deepcopy(source_record), "skipped_harmonics": skipped,
             "samples": [], "harmonic_transition_status": []}
+        if self.range_profile is not None:
+            self.point_record["lockin_range_rule"] = self.range_context()
         self.source_active = True
         self.source_off_proof = None
         self.detectors[1].source_active = True

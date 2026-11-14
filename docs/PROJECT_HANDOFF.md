@@ -4,6 +4,24 @@ Last updated: 2026-11-14
 
 ## Current stage
 
+### Condition-gated 6221 output (2026-11-14)
+
+- Every external-6221 combination condition begins with a fresh, verified source
+  OFF/wave-stopped/DC-zero proof before any temperature, magnetic, SMU or detector
+  setting/qualification. Source coordinates are deferred until all axes are ready.
+- Enable the source only for detector qualification, its required settling and
+  the condition's formal sample groups; stop and verify OFF again before accepting
+  the condition. Failed OFF, compliance, unknown status and audit errors reject.
+- Keep configured compliance/current limits and raw status evidence. An approved,
+  exact-source migration preserves the f182ba4 accepted prefix and original failed
+  execution while adding the new output-lifecycle policy to the recovery review.
+- Verification: 297 distinct hardware-blocked regression cases passed, including
+  32 new cases. The final affected suites passed 78 cases and recovery/atomic
+  review passed 40. Range provenance survives deferred activation; the original
+  failed execution and accepted-prefix payloads stay unchanged on recovery.
+- The operator explicitly authorizes origin delivery, LK_setup deployment and
+  one recovery of the reviewed 2--252 K scan with its existing 20 V compliance.
+
 ### SR865A external frequency consistency allowance (2026-11-14)
 
 - Operator-approved native External `FREQDET?/HARM` versus `FREQEXT?` relative

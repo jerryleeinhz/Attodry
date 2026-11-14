@@ -404,6 +404,37 @@ class Keithley6221Ac:
         return self._read_settings(active=False)
 
     @_operation
+    def stop_output(self):
+        """Pause an owned waveform with strict OFF proof, keeping setup reusable."""
+        self._require_authorized()
+        if not self.ready or not self.owned:
+            raise Keithley6221Error("6221 is not configured for a reusable output stop")
+        # Read and archive faults before ABOR can remove a current compliance
+        # condition. This transition never turns a known fault into permission
+        # for another condition; terminal cleanup remains independent.
+        before = self._read_settings(active=self.current_point is not None)
+        proof = {"attempted": True, "verified": False,
+                 "output_off_confirmed": False, "errors": [],
+                 "before": deepcopy(before), "final": None,
+                 "stop_confirmation": []}
+        if self.current_point is not None:
+            self._write("SOUR:WAVE:ABOR")
+            self._write("OUTP:STAT OFF")
+            final = self._confirm_stopped(proof["stop_confirmation"])
+            self._healthy(final)
+            self._verify_connections(final)
+            if not _setting_matches("compliance_voltage_v", final["compliance_voltage_v"],
+                                    self.config.compliance_voltage_v):
+                raise Keithley6221Error("6221 setting mismatch: compliance_voltage_v")
+        else:
+            final = before
+        proof.update(verified=True, output_off_confirmed=True, final=deepcopy(final))
+        self.last_confirmed_state = deepcopy(final)
+        self.current_point = None
+        self._emit("excitation_output_stopped", deepcopy(proof))
+        return proof
+
+    @_operation
     def readback(self):
         if not self.ready or self.current_point is None:
             raise Keithley6221Error("6221 has no active condition")

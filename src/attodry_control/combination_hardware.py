@@ -261,7 +261,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     if external:
         snapshot.update(excitation_source="keithley6221",
                         measurement_contract="electrical-excitation-detectors-v4",
-                        hardware_scope="external-current-lockin-detectors-v1")
+                        hardware_scope="external-current-lockin-detectors-v1",
+                        excitation_output_policy="condition-gated-verified-off-v1")
         snapshot["cleanup_policy"].update(excitation="wave_abort_verified_dc_zero_output_off",
                                          lockin="detector_h1_restore_ranges_reserve_no_source_writes")
     # Include point engines and shared safety code, not just the Cartesian loop.
@@ -317,6 +318,7 @@ class HardwareCombinationStation:
         self.excitation = None
         self.excitation_manager = self.excitation_resource = None
         self.excitation_off_proof = None
+        self.excitation_point = None
         self.point = None
         self.open_completed = False
         self.cryo = None
@@ -514,15 +516,31 @@ class HardwareCombinationStation:
             "outer_indices": dict(zip(schedule.outer_modules, selection.outer_indices)),
             "requested": selection.requested, **result})
 
+    def _stop_excitation_for_condition(self, condition, stage):
+        if self.excitation is None:
+            return
+        context = {"condition_id": condition["condition_id"], "stage": stage}
+        self.events.event("excitation_condition_stop_started", context)
+        proof = self.excitation.stop_output()
+        self.lockin.source_stopped(proof)
+        self.excitation_off_proof = proof
+        self.events.event("excitation_condition_off_verified", {**context, "proof": proof})
+
+    def begin_condition(self, condition):
+        """Require source OFF before any condition setting or axis qualification."""
+        self._stop_excitation_for_condition(condition, "before_settings")
+
+    def end_condition(self, condition):
+        """Remove the source after all samples, before accepting the condition."""
+        self._stop_excitation_for_condition(condition, "after_samples")
+
     def apply(self, module, point):
         if module == "excitation":
-            frequency = point.values["excitation_frequency_hz"]
-            current = point.values["excitation_current_rms_a"]
-            self.lockin.prepare_source_change(frequency)
-            result = self.excitation.set_point(current, frequency)
-            axis = next(a for a in self.config.plan.axes if a.module == "excitation")
-            self.lockin.source_changed(current, frequency, axis.points.index(point), result)
-            return {"actual": result["actual"], "source": result}
+            # Keep the requested coordinate while every other selected axis is
+            # configured/qualified. Actual source activation belongs to qualify.
+            self.excitation_point = point
+            return {"requested": dict(point.values),
+                    "deferred_until_condition_qualification": True}
         if module in {"temperature", "magnetic"}:
             result = self.cryo.apply(module, point)
             if self.lockin is not None:
@@ -549,6 +567,17 @@ class HardwareCombinationStation:
         return {"ready": True, "axis_scope": scope}
 
     def qualify(self, modules):
+        if self.excitation is not None:
+            if self.excitation_point is None:
+                raise ValueError("External excitation condition has no requested point")
+            point = self.excitation_point
+            current = point.values["excitation_current_rms_a"]
+            frequency = point.values["excitation_frequency_hz"]
+            self.lockin.prepare_source_change(frequency)
+            result = self.excitation.set_point(current, frequency)
+            self.excitation_off_proof = None
+            axis = next(a for a in self.config.plan.axes if a.module == "excitation")
+            self.lockin.source_changed(current, frequency, axis.points.index(point), result)
         if self.lockin is not None:
             self.lockin.qualify()
         return {"ready": True, "mode": "hardware", "active_modules": modules,

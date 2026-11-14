@@ -1,5 +1,19 @@
 # Hardware and safety guide
 
+## Condition-gated external 6221 (2026-11-14)
+
+External-6221 combination scans require a fresh verified OFF, stopped waveform
+and exact DC zero before every condition's axis/range changes or environmental
+qualification. Defer the source point until all axes are ready, then enable it
+for detector relock/settling and the formal groups. Stop and verify OFF after
+the groups, before the condition is accepted or another condition starts.
+
+Read and archive the prior source state before a deliberate stop so a compliance
+event cannot disappear through ABOR. Compliance/interlock/unknown/error state,
+OFF uncertainty, transport or audit failure rejects and invokes normal cleanup;
+it never permits an environmental command or a new INIT. The reusable condition
+stop is separate from terminal cleanup. Existing limits and protections apply.
+
 ## SR865A external frequency consistency allowance (2026-11-14)
 
 The operator approved a 200 ppm relative consistency allowance between External

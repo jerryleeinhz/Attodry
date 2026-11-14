@@ -27,6 +27,47 @@ RELOCK_PREDECESSOR_SETS = {
     "ee66a95fb0653177a5e1ea2dd555830bc64c092e459f5acfefca57e83746c60d",
     "5d91f90788ad64f538bc845a445dc3c09d3eae5f176718b5d171c8458733ba4c",
 }
+GATED_6221_PREDECESSOR_SETS = {
+    # Reviewed f182ba4, Git LF and the station's CRLF checkout. Preserve the
+    # accepted prefix under its original source and output-lifecycle policy.
+    "51dc6f520a0b2f27e02228ea9fab0a9629eeb89d101609e2b349b3530b78781c",
+    "970841e56bac931460e179492498de75d8300b6028272505e26d66d9d3123837",
+}
+GATED_6221_COMPATIBILITY = "reviewed-f182ba4-condition-gated-6221"
+GATED_6221_OUTPUT_POLICY = "condition-gated-verified-off-v1"
+GATED_6221_TARGET_SHA256 = {
+    # Exact reviewed destination bytes, Git LF and station CRLF. A later edit
+    # needs its own review rather than inheriting a filename-only exemption.
+    "combination_scan.py": frozenset({
+        "061cd4bb5d7fa422fffe30a79d2d25c5209e5603f4fbd06cc9c521f909c8eef6",
+        "7c1bac572ec331699d734b1179557f920b58096adf0bf3d6858c67a0bef5c58e",
+    }),
+    "combination_hardware.py": frozenset({
+        "aca9faffa5d8dd64852c99b20d61207cf64831dec34f0f04ceb18fbc2bd81945",
+        "3f4a55cee6b65c652a0d2f63ec60049abc3c42ecb9ce97bde027d5d7ae1b9fc6",
+    }),
+    "keithley6221_ac.py": frozenset({
+        "0ef88c20b7de12751d551335a544bf12f71739f748229228a77d0fb739478f06",
+        "fe4a8e788c3a5d0c87d134491d50414da6c64d1e0800efc28558253a6c8881cb",
+    }),
+    "external_lockin_points.py": frozenset({
+        "84ea69c2c3806d4d3e8ee6d79aa2ce52c033b0bf608145897a8532798bf38b7f",
+        "98ea2c4fe4505aaa64eed7531dc0a6e279c2f741276f72941e1eca6407104f85",
+    }),
+}
+
+
+def _gated_6221_destination(after):
+    if any(after.get(name) not in hashes
+           for name, hashes in GATED_6221_TARGET_SHA256.items()):
+        return False
+    try:
+        # Binding this module to its running bytes avoids a self-referential
+        # hard-coded hash while refusing an arbitrary supplied recovery file.
+        recovery_hash = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError:
+        return False
+    return after.get("combination_resume.py") == recovery_hash
 
 
 def source_compatibility(before, after):
@@ -41,6 +82,10 @@ def source_compatibility(before, after):
             and changed <= {'external_lockin_points.py', 'keithley6221_ac.py',
                             'combination_hardware.py', 'combination_resume.py', 'combination_store.py'}):
         return 'reviewed-e925e29-external-relock'
+    if (digest(before) in GATED_6221_PREDECESSOR_SETS and set(before) == set(after)
+            and changed <= set(GATED_6221_TARGET_SHA256) | {"combination_resume.py"}
+            and _gated_6221_destination(after)):
+        return GATED_6221_COMPATIBILITY
     return None
 
 
@@ -162,12 +207,32 @@ def _allowed(path, old, new, hardware):
 
 
 def configuration_changes(original, current):
+    compatibility = source_compatibility(original.get("source_sha256"),
+                                       current.get("source_sha256"))
+    old_policy = original.get("excitation_output_policy")
+    new_policy = current.get("excitation_output_policy")
+    lifecycle_changes = []
+    if compatibility == GATED_6221_COMPATIBILITY:
+        if ("excitation_output_policy" in original
+                or new_policy != GATED_6221_OUTPUT_POLICY
+                or any(snapshot.get("excitation_source") != "keithley6221"
+                       or not {"excitation", "lockin"} <= {
+                           axis.get("module") for axis in snapshot.get("axes", [])}
+                       for snapshot in (original, current))):
+            raise ValueError("Reviewed 6221 output lifecycle migration is outside its scope")
+        lifecycle_changes.append({"path": "excitation_output_policy", "before": None,
+                                  "after": new_policy, "category": "output_lifecycle"})
+    elif old_policy != new_policy:
+        raise ValueError("Excitation output lifecycle changed without reviewed source compatibility")
+    if old_policy not in (None, GATED_6221_OUTPUT_POLICY) or new_policy not in (
+            None, GATED_6221_OUTPUT_POLICY):
+        raise ValueError("Unknown excitation output lifecycle policy")
     if json.loads(encode(original.get("lockin_range_rules"))) != json.loads(
             encode(current.get("lockin_range_rules"))):
         raise ValueError("Lock-in range rules/resolved schedule changed; start a new run")
     if scan_contract(original) != scan_contract(current):
         raise ValueError("Scan points/order/repeats/groups/harmonics changed; start a new run")
-    changes = []
+    changes = lifecycle_changes
     hardware = _settings(current)
     for path, old, new in _diff(_settings(original), hardware):
         category = _allowed(path, old, new, hardware)

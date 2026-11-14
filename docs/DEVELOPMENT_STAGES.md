@@ -1,5 +1,23 @@
 # Development stages
 
+## Current: Condition-gated 6221 output (2026-11-14)
+
+- Close the gap where a previous temperature's final current remained active
+  during the next temperature ramp. Apply the operator's broader rule to every
+  external-6221 combination condition, including magnetic/SMU/detector changes.
+- Require fresh OFF/stopped/DC-zero before settings, defer source activation until
+  all axes qualify, retain the full detector settle and all formal source checks,
+  and verify OFF after all sample groups before accepting the condition.
+- Preserve compliance/interlock/transport/audit failures and original rejected
+  data. Recover only the reviewed exact f182ba4 source set with unchanged scan and
+  protection, preserving its accepted prefix and failed-execution provenance.
+- Verification: 297 distinct hardware-blocked regression cases passed, including
+  32 new cases. Final affected suites passed 78 and recovery/atomic passed 40.
+  An existing range-audit regression exposed and now verifies preservation of
+  the confirmed range context when deferred source activation rebuilds a point.
+- User authorization includes origin delivery, station deployment and recovery
+  of the stopped scan; preserve its configured 20 V compliance and raw history.
+
 ## Current: SR865A external 200 ppm consistency (2026-11-14)
 
 - Increase only the External native reference/detection relative allowance from

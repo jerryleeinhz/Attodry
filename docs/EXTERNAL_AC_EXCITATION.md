@@ -69,6 +69,16 @@ they are not the external source coordinates and are never written in this mode.
 
 ## Source values and lifecycle
 
+External-6221 combination scans use `condition-gated-verified-off-v1`: every
+condition starts with fresh OFF/wave-stopped/DC-zero verification before any
+axis/range changes. Source coordinates are held pending until environmental
+axes have qualified. Enable only for detector qualification, the required full
+settling window and the condition's formal groups, then stop and verify OFF
+before accepting the condition. This applies with or without a temperature axis.
+All configured compliance/current limits and raw status checks remain active.
+Unknown OFF or any source/audit fault prevents further setting or activation.
+Terminal cleanup remains independent and runs on failures.
+
 - User coordinates are RMS amperes. The 6221 `SOUR:WAVE:AMPL` command accepts peak
   amperes; for sine waves the driver sends `sqrt(2) * current_rms_a`.
 - `abs(offset_a) + AC peak` must remain within the explicitly configured

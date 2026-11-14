@@ -349,6 +349,10 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
             current = condition
             attempt = store.begin_attempt(run_id, condition["condition_id"])
             emit("condition_started", condition)
+            if "excitation" in modules and hasattr(station, "begin_condition"):
+                phase("condition_output_off", module="excitation")
+                with timing.timed_stage("condition_output_off", module="excitation"):
+                    station.begin_condition(condition)
             indices = (condition["repeat_index"], *(
                 condition["axes"][module]["index"] for module in modules))
             # Index prefixes, not values: preserve duplicate points and inner resets.
@@ -476,6 +480,10 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                     emit("formal_sample", {"sample_index": sample_index, "clean": clean})
                     if not acquisition_accepted:
                         raise ValueError("Formal sample is incomplete or unclean")
+            if "excitation" in modules and hasattr(station, "end_condition"):
+                phase("condition_output_off", module="excitation")
+                with timing.timed_stage("condition_output_off", module="excitation"):
+                    station.end_condition(condition)
             store.finish_attempt(run_id, condition["condition_id"], attempt,
                                  expected_samples=plan.samples_per_condition)
             emit("condition_accepted", {})

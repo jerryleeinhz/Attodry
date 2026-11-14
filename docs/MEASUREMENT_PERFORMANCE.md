@@ -4,6 +4,33 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Condition-gated 6221 output (2026-11-14)
+
+Each external-source condition now has an explicit OFF bracket. The serial owner
+reads/archives source status before stopping, sends ABOR/OFF only when needed,
+and reuses the bounded OFF acknowledgement. This intentionally adds source I/O
+at condition boundaries; it does not create a second session or background poll.
+Source activation follows environmental qualification and starts the existing
+full shared detector settle. All sample groups within one condition share that
+active interval; no per-harmonic or per-sample stop/start is added.
+
+An unchanged requested source point must still start afresh after the condition
+OFF, so the old read-only shortcut cannot reuse a stopped waveform or stale
+settling proof. Added lifecycle/phase/timing events preserve their real I/O and
+audit cost. Protection failure ends the condition and keeps raw partial data;
+it does not add a retry loop. Regression call counts and elapsed test time are
+recorded with the verification result, not claimed as real station throughput.
+Normal active stop uses 35 source queries and two writes; an already-OFF fresh
+proof uses 24 queries and zero writes. There is no fixed extra sleep; only the
+existing 2 s / 21-poll stop acknowledgement can wait for actual stop-bit lag.
+The deferred-source range-context correction copies existing verified evidence
+in memory and adds no hardware I/O or wait.
+
+Verification: 297 distinct hardware-blocked regression cases passed, including
+32 new cases. Final affected suites passed 78 cases in 86.087 s; final recovery/
+atomic cases passed 40 in 32.188 s. Targeted source/range/fake-temperature cases
+passed 16 in 24.801 s. These are offline timings, not measured station speed.
+
 ## SR865A External 200 ppm allowance (2026-11-14)
 
 The native External relative consistency constant changes from 100 to 200 ppm;

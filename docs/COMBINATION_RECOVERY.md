@@ -41,6 +41,15 @@ sample's approved limits. These declarations never replace fresh hardware checks
 
 ## Allowed changes and fixed plan
 
+The reviewed f182ba4 external-6221 source set has a narrow migration to
+`condition-gated-verified-off-v1`. It accepts only the frozen LF/CRLF predecessor
+fingerprints and reviewed lifecycle implementation hashes, with the same source
+file set, scan, selected devices and protection settings. The new execution
+records the lifecycle change; original accepted samples and failed cleanup remain
+unchanged. File-only review and the atomic database claim both recheck it. This
+does not waive fresh source OFF/health preflight or authorize arbitrary code
+changes, altered compliance, or unknown cleanup.
+
 | Module | Recovery changes | Fixed constraints |
 |---|---|---|
 | Temperature | Target tolerance, stable range, dwell, minimum samples, poll/timeout | Acceptance mode, targets, response and hard/overshoot limits |
