@@ -63,6 +63,16 @@ class RecoveryReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "compatibility"):
             self.review(replace(self.config, snapshot=snapshot), acknowledge_failure=True)
 
+    def test_magnetic_boundary_policy_cannot_relabel_an_existing_run(self):
+        legacy = deepcopy(self.config.snapshot)
+        command = deepcopy(legacy)
+        command.update(command_scoped_field=True,
+                       field_limit_policy="command-scoped-configured-v1")
+        for before, after in ((legacy, command), (command, legacy)):
+            with self.subTest(direction=(before["field_limit_policy"], after["field_limit_policy"])), \
+                    self.assertRaisesRegex(ValueError, "boundary policy changed"):
+                configuration_changes(before, after)
+
     def test_reviewed_relock_source_change_cannot_cover_unrelated_modules(self):
         from attodry_control.combination_resume import source_compatibility, digest
         before = {'external_lockin_points.py': 'old', 'attodry.py': 'unchanged'}

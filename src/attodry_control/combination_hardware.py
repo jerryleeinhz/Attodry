@@ -121,7 +121,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             "current_basis": "source_setting_readback", "measured_current": False}
     temperature = magnetic = cryostat = None
     if "temperature" in order:
-        temperature = configuration.load_temperature_operation_config(path)
+        temperature = configuration.load_temperature_operation_config(
+            path, command_scoped="magnetic" in order)
         points = (temperature.temperature_scan.points_k if temperature.temperature_scan is not None
                   else (temperature.temperature_run.target_k,))
         # An inner axis returns from its last point to its first on each outer
@@ -138,7 +139,7 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             qualification="fresh_dwell_per_axis_entry", formal_temperature_policy="record_with_quality_flags",
             pre_measure_wait_s_used=False)
     if "magnetic" in order:
-        magnetic = configuration.load_magnetic_field_operation_config(path)
+        magnetic = configuration.load_magnetic_field_operation_config(path, command_scoped=True)
         segments = magnetic.run.segment_plan
         axes["magnetic"] = ScanAxis("magnetic", tuple(AxisPoint(
             {"field_x_t": point.bx_t, "field_z_t": point.bz_t},
@@ -157,7 +158,9 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
             magnet=replace(selected.magnet, limits=effective),
             temperature_stability=(temperature.temperature_stability if temperature is not None
                                    else selected.magnet.stability))
-        hardware["effective_cryostat"] = {name: asdict(value) for name, value in vars(cryostat).items()}
+        if magnetic is not None:
+            cryostat.command_scoped_field = True
+        hardware["effective_cryostat"] = {name: _json(value) for name, value in vars(cryostat).items()}
         if magnetic is not None:
             # Offline check exact float32 endpoints and every component corner
             # under the configured nominal limits; the parser already checked
@@ -224,7 +227,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
     plan = CombinationPlan(tuple(axes[m] for m in order), table["samples_per_condition"],
                            table["repeats"], table["run_name"], table["note"],
                            magnet_limits=cryostat.magnet.limits if cryostat else MagnetLimits(),
-                           readback_tolerance_t=cryostat.magnet.readback_tolerance_t if cryostat else None)
+                           readback_tolerance_t=cryostat.magnet.readback_tolerance_t if cryostat else None,
+                           command_scoped_field=magnetic is not None)
     range_schedule = None
     if "lockin_range_rules" in table:
         from .lockin_backend import capabilities_for
@@ -445,11 +449,18 @@ class HardwareCombinationStation:
         if state is None:
             raise ValueError("Recovery requires a complete current cryostat state")
         self.events.event("recovery_environment_initial", {"state": asdict(state)})
-        # Recovery retains the operator's universal 3 T ceiling. Ordinary runs
-        # keep their existing complete-plan single-axis policy.
-        for field in (state.field, state.field_setpoint):
-            if field.magnitude_t > 3.0:
-                raise ValueError("Recovery actual field or setpoint exceeds 3 T")
+        command_scoped = self.config.plan.command_scoped_field
+        if command_scoped:
+            policy = self.config.plan.magnetic_readback_policy()
+            policy.validate_readback(state.field,
+                command=self.cryo.driver.field_readback_context(state))
+            policy.validate_target(state.field_setpoint)
+        else:
+            # Historical and temperature-only recovery retains its universal
+            # 3 T envelope. A new policy never reclassifies an archived run.
+            for field in (state.field, state.field_setpoint):
+                if field.magnitude_t > 3.0:
+                    raise ValueError("Recovery actual field or setpoint exceeds 3 T")
         conditions = self.config.plan.conditions()
         pending = self.recovery.get("next_condition")
         if pending is None and self.recovery.get("cleanup_only") and conditions:
@@ -471,18 +482,24 @@ class HardwareCombinationStation:
             targets = tuple(VectorField(c["requested"]["field_x_t"], c["requested"]["field_z_t"])
                             for c in conditions[sequence:])
             limits = self.config.cryostat.magnet.limits
-            limits = replace(limits, hardware_x_max_t=min(limits.hardware_x_max_t, 3.0),
-                             hardware_z_max_t=min(limits.hardware_z_max_t, 3.0),
-                             experiment_vector_max_t=min(limits.experiment_vector_max_t, 3.0))
-            # Check both actual and command-register starts. The driver repeats
-            # this planning against fresh reads immediately before a field write.
-            for initial in (state.field, state.field_setpoint):
+            if not command_scoped:
+                limits = replace(limits, hardware_x_max_t=min(limits.hardware_x_max_t, 3.0),
+                                 hardware_z_max_t=min(limits.hardware_z_max_t, 3.0),
+                                 experiment_vector_max_t=min(limits.experiment_vector_max_t, 3.0))
+            # New policy checks actual readbacks above with confirmed command
+            # context, never promotes a noisy inactive residual to a command.
+            # Like ordinary field execution, plan from the confirmed register.
+            starts = ((state.field_setpoint,) if command_scoped
+                      else (state.field, state.field_setpoint))
+            for initial in starts:
                 plans = plan_ordered_field_transitions(initial, targets,
                     self.config.magnetic.run.max_step_t,
                     self.config.magnetic.run.transition_policy, limits)
                 self.events.event("recovery_magnetic_path_verified", {
                     "start": asdict(initial), "target_count": len(targets),
-                    "transition_count": len(plans), "maximum_vector_t": 3.0})
+                    "transition_count": len(plans), "maximum_vector_t": limits.experiment_vector_max_t,
+                    **({"field_readback_policy": policy.snapshot(),
+                        "axis_limits": asdict(limits)} if command_scoped else {})})
 
     def prepare_cleanup_recovery(self, last_condition):
         """Re-establish the final accepted environment without formal sampling."""

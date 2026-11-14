@@ -101,7 +101,8 @@ class CryostatCombinationTests(unittest.TestCase):
         with redirect_stdout(output):
             self.assertEqual(cli(["describe-hardware", "--config", str(self.path)]), 0)
         plan = json.loads(output.getvalue())["plan"]
-        self.assertEqual(plan["field_limit_policy"], "planned-axis-configured-v2")
+        self.assertEqual(plan["field_limit_policy"], "command-scoped-configured-v1")
+        self.assertEqual(plan["field_readback_policy"]["readback_margin_t"], 0)
         self.assertEqual(plan["hardware"]["effective_cryostat"]["magnet"]["limits"]["hardware_z_max_t"], 9)
         self.assertEqual(self.dll.events, [])
 
@@ -277,7 +278,7 @@ angle_segments = [
         self.assertEqual(self.dll.temperature_control, 0)
         self.assertTrue(result["cleanup"]["manual_verification_required"])
 
-    def test_field_envelope_trip_still_zeroes_and_disables_temperature(self):
+    def test_field_envelope_trip_does_not_expand_new_cleanup_bounds(self):
         source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
         source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
         source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
@@ -292,12 +293,14 @@ angle_segments = [
         result = self.execute()
         self.assertEqual(result["status"], "failed", result)
         self.assertIn("exceeds 0.02", result["error"])
-        self.assertIn("sweep_zero", self.dll.events)
+        self.assertNotIn("sweep_zero", self.dll.events)
         self.assertEqual(self.dll.events.count("set_field_z"), 1)
-        self.assertEqual(self.dll.temperature_control, 0)
+        # The strict profile cannot certify/command cleanup through an unsafe
+        # full-state read; retain manual review rather than a factory envelope.
+        self.assertEqual(self.dll.temperature_control, 1)
         actions = {a["module"]: a for a in result["cleanup"]["actions"]}
         for module in ("magnetic", "temperature"):
-            self.assertTrue(actions[module]["result"]["verified"], actions)
+            self.assertFalse(actions[module]["result"]["verified"], actions)
             self.assertFalse(actions[module]["clean"])
         self.assertTrue(result["cleanup"]["manual_verification_required"])
         self.assertEqual(load_combination_rows(self.database), ())
@@ -305,12 +308,16 @@ angle_segments = [
                             payload["state"]["field"]["bz_t"] > .02
                             for kind, payload in self.events()))
 
-    def recovery_session(self):
+    def recovery_session(self, *, legacy=False):
         source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
         source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
         source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
         self.write_config(("temperature", "magnetic"), source=source)
         config = load_hardware_combination(self.path)
+        if legacy:
+            # Exercise the historical direct session contract separately from
+            # the new hardware-combination entry's explicit command policy.
+            config.cryostat.command_scoped_field = False
         events = []
         session = CryostatPointSession(config.cryostat, config.temperature, config.magnetic,
             lambda kind, payload: events.append((kind, payload)), dll=self.dll,
@@ -321,8 +328,8 @@ angle_segments = [
         self.dll.field_control = self.dll.temperature_control = 1
         return session, events
 
-    def test_recovery_waits_for_actual_zero_and_restores_scan_checks(self):
-        session, events = self.recovery_session()
+    def test_legacy_recovery_waits_for_actual_zero_and_restores_scan_checks(self):
+        session, events = self.recovery_session(legacy=True)
         original_limits = session.driver.limits
         self.dll.bz_t = .03
         self.dll.setpoint_z_t = .005
@@ -351,8 +358,8 @@ angle_segments = [
         with self.assertRaisesRegex(ValueError, "exceeds 0.02"):
             session.driver.read_state()
 
-    def test_failed_zero_does_not_block_independent_temperature_disable(self):
-        session, _ = self.recovery_session()
+    def test_legacy_failed_zero_does_not_block_independent_temperature_disable(self):
+        session, _ = self.recovery_session(legacy=True)
         self.dll.bz_t = .03
         def stuck_zero():
             self.dll.setpoint_x_t = self.dll.setpoint_z_t = 0
@@ -398,7 +405,7 @@ angle_segments = [
         self.assertIsNone(session.recovery_action)
         self.assertNotIn("sweep_zero", self.dll.events)
 
-    def test_trip_during_normal_zero_rejects_run_despite_verified_recovery(self):
+    def test_trip_during_normal_zero_keeps_new_cleanup_unverified(self):
         source = self.base.replace('hardware_x_max_t = 3.0', 'hardware_x_max_t = 0.02')
         source = source.replace('hardware_z_max_t = 9.0', 'hardware_z_max_t = 0.02')
         source = source.replace('experiment_vector_max_t = 3.0', 'experiment_vector_max_t = 0.02')
@@ -420,8 +427,9 @@ angle_segments = [
         result = self.execute()
         self.assertEqual(result["status"], "failed", result)
         actions = {a["module"]: a for a in result["cleanup"]["actions"]}
-        self.assertTrue(actions["magnetic"]["result"]["verified"])
-        self.assertTrue(actions["magnetic"]["result"]["scan_limits_violated"])
+        self.assertFalse(actions["magnetic"]["result"]["verified"])
+        self.assertFalse(actions["magnetic"]["clean"])
+        self.assertTrue(result["cleanup"]["manual_verification_required"])
         self.assertEqual(self.dll.temperature_control, 0)
         self.assertEqual(load_combination_rows(self.database), ())
 

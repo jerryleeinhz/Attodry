@@ -344,7 +344,67 @@ def _validate_excitation_record(reading, snapshot, condition, start, finish):
         raise ValueError("Excitation brackets are out of order")
 
 
-def _validate_environment_record(reading, module, snapshot, start, finish):
+def _field_command_trace(connection, run_id, execution_id, policy):
+    """Replay one execution's existing raw register reads, without new I/O.
+
+    The last confirmed nonzero register supplies zero-transition context. Never
+    infer an axis from actual residuals or trust a sample's self-reported mode.
+    This cache is built once per execution during a complete accepted-prefix
+    review; it does not add acquisition queries or database writes.
+    """
+    from bisect import bisect_right
+    from .models import VectorField
+    if not isinstance(execution_id, str) or not execution_id:
+        raise ValueError("Command-scoped field history requires its execution identity")
+    times, entries, previous, context_known = [], [], None, True
+    for row in connection.execute(
+            "SELECT payload_json FROM combination_events WHERE run_id=? "
+            "AND event_type='cryostat_state' AND json_extract(payload_json,'$.execution_id')=? "
+            "ORDER BY event_id", (run_id, execution_id)):
+        payload = json.loads(row[0])
+        captured = datetime.fromisoformat(payload["captured_at_utc"])
+        if (captured.tzinfo is None or captured.utcoffset().total_seconds() != 0
+                or (times and captured < times[-1])):
+            raise ValueError("Field command history has unknown/out-of-order capture times")
+        state, problem, command = payload["state"], None, None
+        try:
+            if (any(set(state[key]) != {"bx_t", "bz_t"}
+                    or not all(_finite(v) for v in state[key].values())
+                    for key in ("field", "field_setpoint"))
+                    or any(type(state.get(key)) is not bool for key in
+                           ("temperature_control_enabled", "field_control_enabled"))):
+                raise ValueError("Field command history has incomplete/unknown raw state")
+            setpoint = VectorField(**state["field_setpoint"])
+            policy.validate_target(setpoint)
+            if type(state.get("error_code")) is not int or state["error_code"] != 0:
+                raise ValueError("Field history reports an unknown/hardware error")
+            if setpoint.magnitude_t == 0 and not context_known:
+                raise ValueError("Zero-transition command history is unresolved")
+            command = (setpoint if setpoint.magnitude_t != 0 else
+                       previous if previous is not None else setpoint)
+            policy.validate_readback(VectorField(**state["field"]), command=command)
+            if setpoint.magnitude_t != 0:
+                previous, context_known = setpoint, True
+        except (KeyError, TypeError, ValueError) as exc:
+            problem = str(exc)
+            context_known = False
+        times.append(captured)
+        entries.append((state, command, problem))
+
+    def confirmed_context(raw):
+        captured = datetime.fromisoformat(raw["captured_at_utc"])
+        index = bisect_right(times, captured) - 1
+        if index < 0:
+            raise ValueError("Formal field has no preceding execution-bound register evidence")
+        state, command, problem = entries[index]
+        if problem or state != raw["state"] or command is None:
+            raise ValueError("Formal field differs from its confirmed raw command history")
+        return command
+
+    return confirmed_context
+
+
+def _validate_environment_record(reading, module, snapshot, start, finish, field_trace=None):
     from .models import VectorField
     from .safety import FieldReadbackPolicy, MagnetLimits, validate_vector_field
     hardware = snapshot.get("hardware", {})
@@ -377,7 +437,22 @@ def _validate_environment_record(reading, module, snapshot, start, finish):
                 raise ValueError("formal environment field state is incomplete")
             field = VectorField(**state[key])
             if policy is not None:
-                (policy.validate_readback if key == "field" else policy.validate_target)(field)
+                if key == "field":
+                    context = {}
+                    if policy.command_scoped:
+                        assessment = raw["field_readback_assessment"]
+                        command = VectorField(**assessment["command_context"])
+                        setpoint = VectorField(**state["field_setpoint"])
+                        if setpoint.magnitude_t != 0 and command != setpoint:
+                            raise ValueError("Archived field command context differs from confirmed setpoint")
+                        if field_trace is None or command != field_trace(raw):
+                            raise ValueError("Archived field context lacks matching confirmed command history")
+                        context = {"command": command}
+                        if assessment != policy.assessment(field, **context):
+                            raise ValueError("Archived field assessment differs from its raw state/context")
+                    policy.validate_readback(field, **context)
+                else:
+                    policy.validate_target(field)
             elif field_limits is not None:
                 validate_vector_field(field, MagnetLimits(**field_limits))
     if module == "temperature":
@@ -385,6 +460,15 @@ def _validate_environment_record(reading, module, snapshot, start, finish):
             raise ValueError("formal temperature differs from its archived window")
     elif reading["actual"] != status["field_mean"]:
         raise ValueError("formal field differs from its archived window")
+    if policy is not None and policy.command_scoped:
+        if status["field_readback_policy"] != policy.snapshot():
+            raise ValueError("Formal field window policy differs from its execution")
+        command = field_trace(samples[-1])
+        mean = VectorField(status["field_mean"]["field_x_t"], status["field_mean"]["field_z_t"])
+        assessment = policy.assessment(mean, command=command)
+        if status["field_readback_assessment"] != assessment:
+            raise ValueError("Formal mean field context differs from its confirmed raw brackets")
+        policy.validate_readback(mean, command=command)
 
 
 def _validate_smu_record(reading, condition, start, finish):
@@ -432,7 +516,7 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
         "SELECT * FROM combination_attempt_executions WHERE run_id=?", (run_id,))}
         if _has_table(connection, "combination_attempt_executions") else {})
     accepted_count = sample_count = 0
-    range_indexes = {}
+    range_indexes, field_traces = {}, {}
     for attempt in connection.execute("SELECT a.*,c.context_json FROM combination_attempts a "
         "JOIN combination_conditions c ON c.run_id=a.run_id AND c.condition_id=a.condition_id "
         "WHERE a.run_id=? AND a.status='accepted' ORDER BY c.sequence_index", (run_id,)):
@@ -443,6 +527,12 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
         snapshot = configurations.get(execution_id, original)
         if execution_id not in range_indexes:
             range_indexes[execution_id] = _index_lockin_ranges(snapshot)
+            if snapshot.get("command_scoped_field") is True:
+                from .safety import FieldReadbackPolicy
+                policy = FieldReadbackPolicy.from_snapshot(snapshot["field_readback_policy"])
+                if not policy.command_scoped:
+                    raise ValueError("Execution field boundary flag differs from its policy")
+                field_traces[execution_id] = _field_command_trace(connection, run_id, execution_id, policy)
         modules = [a["module"] for a in snapshot["axes"]]
         rows = connection.execute("SELECT sample_index,payload_json FROM combination_samples "
             "WHERE run_id=? AND condition_id=? AND attempt_index=? ORDER BY sample_index",
@@ -486,7 +576,8 @@ def validate_accepted_records(connection: sqlite3.Connection, run_id: str, origi
                         _validate_lockin_record(reading, snapshot, condition, start, finish,
                                                 range_indexes[execution_id])
                     elif module in {"temperature", "magnetic"}:
-                        _validate_environment_record(reading, module, snapshot, start, finish)
+                        _validate_environment_record(reading, module, snapshot, start, finish,
+                                                     field_traces.get(execution_id))
                     elif module == "smu":
                         _validate_smu_record(reading, condition, start, finish)
                     elif module == "excitation":

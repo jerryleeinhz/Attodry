@@ -405,7 +405,7 @@ class FieldPolicyHardwareCombinationTests(unittest.TestCase):
         self.assertTrue(all(row["status.magnetic"]["field_readback_policy"]["mode"] == "vector"
                             for row in rows))
 
-    def test_inactive_axis_drift_rejects_and_existing_owned_cleanup_verifies_zero(self):
+    def test_inactive_axis_drift_keeps_strict_cleanup_unverified(self):
         self.points([(0.1, 0)], ("magnetic", "smu"))
         def modify(adapter):
             original = adapter.read
@@ -420,11 +420,11 @@ class FieldPolicyHardwareCombinationTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed", result)
         self.assertIn("readback Bz", result["error"])
         self.assertEqual(load_combination_rows(self.database), ())
-        self.assertIn("sweep_zero", self.dll.events)
+        self.assertNotIn("sweep_zero", self.dll.events)
         action = next(a for a in result["cleanup"]["actions"] if a["module"] == "magnetic")
-        self.assertTrue(action["result"]["verified"])
-        self.assertTrue(action["result"]["scan_limits_violated"])
-        self.assertEqual(action["result"]["state"]["field"], {"bx_t": 0.0, "bz_t": 0.0})
+        self.assertFalse(action["result"]["verified"])
+        self.assertFalse(action["clean"])
+        self.assertIn("last_confirmed_state_not_current", action["result"])
         self.assertTrue(result["cleanup"]["manual_verification_required"])
 
     def test_single_axis_communication_failure_does_not_certify_cleanup(self):

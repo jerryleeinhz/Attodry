@@ -4,6 +4,37 @@ Last updated: 2026-11-14
 
 ## Current stage
 
+### Command-scoped magnetic boundaries (offline alignment)
+
+- Align new magnetic combination scans with the verified photonics `a93b786` boundary
+  policy: strict configured axis caps, command-scoped single/dual-axis readback
+  checks, no added hard-boundary margin, and a separately limited inactive axis.
+  Retain previous nonzero command context while zeroing; missing context fails.
+- New versioned magnetic recovery uses the same configured single-axis and
+  dual-axis limits instead of the legacy universal 3 T recovery clamp. This
+  permits a configured pure-Z 3.6 T plan without increasing any configured cap.
+  Historical plans/policies and temperature-only envelopes remain separate;
+  no automatic source-version or archive migration is granted.
+- Default standalone magnetic and generic driver entry points keep their
+  historical policy; the explicit combination entry selects the new policy.
+- Retain 6221 condition OFF/zero proof, compliance, source/readback audit,
+  exact-float32 transition planning and strict formal magnetic qualification.
+  Magnetic `record_continue` is not added by this boundary-only change.
+- Bind archived formal command context to the same execution's raw register
+  trace, including the previous nonzero waypoint while zeroing. Missing or
+  altered trace/context blocks accepted-prefix certification and recovery.
+- Work is isolated locally. Do not deploy into the pinned active temperature
+  acquisition or infer instrument state from offline tests.
+- Validation covers 488 distinct hardware-blocked cases, including 36 new
+  boundary/ACK/context/recovery regressions. The 306-case primary run passed;
+  two obsolete expectations from 179 supplemental cases were updated and their
+  affected recovery/tolerance set rechecked (32 cases passed). New mixed-entry
+  and quantized-ACK cases also pass. Six core policy/planner ASTs match `a93b786`.
+- The private 630-condition candidate parses under the new local policy,
+  preserving its electrical settings and 20 V compliance. The donor 0.2 mT ACK
+  also parses; confirmed register values within ACK are retained, not rounded
+  into requested targets. Beyond-ACK and hard-boundary faults still reject.
+
 ### Proven no-write cryostat connection preflight (2026-11-14)
 
 - The authorized first gated recovery stopped at attoDRY Connect with VISA

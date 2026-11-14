@@ -78,12 +78,22 @@ class CryostatPointSession:
         self.temperature_entry = 0
         self.recovery_action = None
         self.recovery_scan_limits_violated = False
+        self.command_scoped_field = getattr(config, "command_scoped_field", False)
+        if type(self.command_scoped_field) is not bool:
+            raise ValueError("Cryostat command_scoped_field must be a boolean")
+        if self.command_scoped_field and magnetic is None:
+            raise ValueError("Command-scoped field policy requires a magnetic axis")
         self.field_policy = (FieldReadbackPolicy.from_targets(
-            magnetic.run.points, config.magnet.limits, config.magnet.readback_tolerance_t)
+            magnetic.run.points, config.magnet.limits, config.magnet.readback_tolerance_t,
+            command_scoped=self.command_scoped_field)
             if magnetic is not None else None)
 
     @property
     def active_field_policy(self):
+        if self.command_scoped_field:
+            # Match the verified magnetic profile even in zero/disable cleanup:
+            # unknown or over-limit readbacks never gain a factory envelope.
+            return self.field_policy
         if self.recovery_action is not None and self.field_policy is not None:
             # Only the already-owned zero/disable action can use factory limits.
             # Pure-Z recovery keeps X's independent residual guard at high Z.
@@ -101,7 +111,7 @@ class CryostatPointSession:
     def field_readback_limits(self):
         # A scan trip must not prevent an already-owned controller from zeroing.
         # This is only a readback envelope for zero/disable, never target permission.
-        if self.recovery_action is not None:
+        if self.recovery_action is not None and not self.command_scoped_field:
             if self.field_policy is not None and self.field_policy.mode is FieldScanMode.SINGLE_Z:
                 return MagnetLimits()
             return MagnetLimits(3.0, 3.0, 3.0)
@@ -131,7 +141,7 @@ class CryostatPointSession:
                     validate_vector_field(state.field, self.config.magnet.limits)
                     validate_vector_field(state.field_setpoint, self.config.magnet.limits)
                 else:
-                    self.field_policy.validate_readback(state.field)
+                    self.field_policy.validate_readback(state.field, **self._field_context(state))
                     self.field_policy.validate_target(state.field_setpoint)
             except SafetyViolation as exc:
                 if not self.recovery_scan_limits_violated:
@@ -143,7 +153,7 @@ class CryostatPointSession:
             validate_vector_field(state.field, self.field_readback_limits)
             validate_vector_field(state.field_setpoint, self.field_readback_limits)
         else:
-            policy.validate_readback(state.field)
+            policy.validate_readback(state.field, **self._field_context(state))
             policy.validate_target(state.field_setpoint)
         if state.error_code:
             raise AttoDryError(f"attoDRY error code {state.error_code}")
@@ -160,7 +170,8 @@ class CryostatPointSession:
 
     def open(self):
         self.driver = _AuditedDriver.from_config(
-            self.config, dll=self.dll, connection_authorized=True, writes_authorized=True)
+            self.config, dll=self.dll, connection_authorized=True, writes_authorized=True,
+            **({"field_readback_policy": self.field_policy} if self.command_scoped_field else {}))
         self.driver.owner = self
         if self.temperature is not None:
             self.telemetry = TemperatureTelemetryRecorder(self.driver, self.event)
@@ -179,6 +190,10 @@ class CryostatPointSession:
         if pending_state is not state:
             raise AttoDryError("Temperature telemetry does not match the current state read")
         return {**deepcopy(pending), **metadata}
+
+    def _field_context(self, state):
+        return ({"command": self.driver.field_readback_context(state)}
+                if self.command_scoped_field else {})
 
     def _finish_temperature_record(self, state, **metadata):
         record = self._temperature_record(state, **metadata)
@@ -273,7 +288,8 @@ class CryostatPointSession:
             state, stage=stage, harmonic=harmonic, sample_index=sample_index,
             captured_at_utc=utc_now(), captured_monotonic_s=self.monotonic())
         if self.field_policy is not None:
-            record["field_readback_assessment"] = self.field_policy.assessment(state.field)
+            record["field_readback_assessment"] = self.field_policy.assessment(
+                state.field, **self._field_context(state))
         self.event("environment_sample", record)
         if self.window is not None:
             self.window.append(record)
@@ -347,7 +363,9 @@ class CryostatPointSession:
             if self.field_policy is not None:
                 summary["field_readback_policy"] = self.field_policy.snapshot()
                 summary["field_readback_assessment"] = self.field_policy.assessment(
-                    VectorField(field_means["field_x_t"], field_means["field_z_t"]))
+                    VectorField(field_means["field_x_t"], field_means["field_z_t"]),
+                    **({"command": VectorField(**after["field_readback_assessment"]["command_context"])}
+                       if self.command_scoped_field else {}))
             self.event("environment_formal_window", summary)
             if self.magnetic is not None and not field_range_ok:
                 raise AttoDryError("Magnetic range exceeded during formal sample")

@@ -1,5 +1,24 @@
 # Development stages
 
+## Current: Command-scoped magnetic boundary alignment (offline)
+
+- Port the verified photonics command-context boundary semantics, preserving
+  configured X/Z caps and the strict dual-command resultant ceiling. No margin
+  expands the new magnetic policy's hard readback envelope.
+- Version new magnetic combination plans/records and apply their declared limits during
+  recovery. Preserve legacy and temperature-only contracts and original data;
+  do not implicitly approve recovery across source or policy versions.
+- Keep the default standalone magnetic entry and generic driver construction
+  on their existing contracts; scope configurable tolerance to the new entry.
+- Keep source OFF during all condition changes, independent source protections,
+  formal-window qualification, read ownership, waits and exact-float32 planning.
+- Independent local worktree only; real deployment and scans are not performed.
+- Validation: 488 distinct relevant offline cases covered, including 36 new
+  cases. Primary 306 passed; revised legacy expectations passed in the affected
+  32-case recovery/tolerance rerun. Configured 0.2 mT ACK, temperature+magnetic
+  scoping and real quantized-register provenance pass; six core ASTs match the
+  verified source. The private 630-condition review configuration parses.
+
 ## Current: Proven no-write connection preflight (2026-11-14)
 
 - Recognize only the reviewed gated source version's precise attoDRY

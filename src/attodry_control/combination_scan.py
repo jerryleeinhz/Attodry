@@ -16,7 +16,7 @@ from pathlib import Path
 from .combination_store import CombinationStore, utc_now
 from .measurement_timing import MeasurementTiming
 from .models import VectorField
-from .safety import FieldReadbackPolicy, MagnetLimits
+from .safety import FieldReadbackPolicy, MagnetLimits, float32_field
 
 
 MODULE_KEYS = {
@@ -29,6 +29,7 @@ MODULE_KEYS = {
 }
 SMU_ROLES = ("smu_bias", "gate_top", "gate_bottom")
 COMBINATION_FIELD_LIMIT_POLICY = "planned-axis-configured-v2"
+COMMAND_SCOPED_FIELD_LIMIT_POLICY = "command-scoped-configured-v1"
 COMBINATION_QUALIFICATION_POLICY = "axis-entry-qualification-temperature-record-v1"
 
 
@@ -67,13 +68,18 @@ class CombinationPlan:
     note: str = ""
     magnet_limits: MagnetLimits = MagnetLimits()
     readback_tolerance_t: float | None = None
+    command_scoped_field: bool = False
 
     def validate(self) -> None:
         if not isinstance(self.magnet_limits, MagnetLimits):
             raise ValueError("Combination magnet limits must be validated MagnetLimits")
+        if type(self.command_scoped_field) is not bool:
+            raise ValueError("command_scoped_field must be a boolean")
         if not isinstance(self.run_name, str) or not isinstance(self.note, str):
             raise ValueError("Run name and note must be strings")
         modules = [axis.module for axis in self.axes]
+        if self.command_scoped_field and "magnetic" not in modules:
+            raise ValueError("Command-scoped field policy requires a magnetic axis")
         if not modules or len(set(modules)) != len(modules):
             raise ValueError("Provide distinct module axes")
         external = "excitation" in modules
@@ -122,13 +128,19 @@ class CombinationPlan:
                         raise ValueError("6221 sine current is outside its RMS envelope")
                     if not 0.001 <= point.values["excitation_frequency_hz"] <= 100000:
                         raise ValueError("6221 waveform frequency is out of range")
-        # Classify the complete ordered plan, never an individual pure-axis leaf.
+        # Historical policies classify the complete plan. New magnetic scans
+        # bind actual-field checks to confirmed command/transition context.
         self.magnetic_readback_policy()
 
     def snapshot(self) -> dict:
         self.validate()
         policy = self.magnetic_readback_policy()
-        return {**asdict(self), "mode": "simulation", "field_limit_policy": COMBINATION_FIELD_LIMIT_POLICY,
+        settings = asdict(self)
+        if not self.command_scoped_field:
+            settings.pop("command_scoped_field")  # Preserve legacy snapshot shape.
+        return {**settings, "mode": "simulation", "field_limit_policy": (
+                    COMMAND_SCOPED_FIELD_LIMIT_POLICY if self.command_scoped_field
+                    else COMBINATION_FIELD_LIMIT_POLICY),
                 "qualification_policy": COMBINATION_QUALIFICATION_POLICY,
                 **({"field_readback_policy": policy.snapshot()} if policy is not None else {}),
                 "record_contract": "combination-v1",
@@ -140,7 +152,8 @@ class CombinationPlan:
             return None
         return FieldReadbackPolicy.from_targets(
             tuple(VectorField(p.values["field_x_t"], p.values["field_z_t"]) for p in axis.points),
-            self.magnet_limits, self.readback_tolerance_t)
+            self.magnet_limits, self.readback_tolerance_t,
+            command_scoped=self.command_scoped_field)
 
     def conditions(self) -> list[dict]:
         self.validate()
@@ -277,7 +290,9 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
         if planned_policy is None or field_policy.snapshot() != planned_policy.snapshot():
             raise ValueError("Field policy differs from the complete target plan")
     if plan.magnetic_readback_policy() is not None:
-        if snapshot.get("field_limit_policy") == COMBINATION_FIELD_LIMIT_POLICY:
+        expected_policy = (COMMAND_SCOPED_FIELD_LIMIT_POLICY if plan.command_scoped_field
+                           else COMBINATION_FIELD_LIMIT_POLICY)
+        if snapshot.get("field_limit_policy") == expected_policy:
             if field_policy is None:
                 raise ValueError("Configured field targets require their archived readback policy")
         else:
@@ -440,6 +455,26 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                     acquisition_accepted = (finite and set(actual) == expected_keys and all(
                         reading_allows_continuation(r) for r in reads)
                         and expected_measured <= set(measurements) and fresh)
+                    field_context = {}
+                    if field_policy is not None and field_policy.command_scoped:
+                        requested_command = float32_field(VectorField(
+                            condition["requested"]["field_x_t"], condition["requested"]["field_z_t"]))
+                        command = requested_command
+                        if snapshot["mode"] == "hardware":
+                            magnetic_read = next(r for r in reads if r["module"] == "magnetic")
+                            command = VectorField(**magnetic_read["status"]["field_readback_assessment"]["command_context"])
+                            # Keep the actual confirmed register and the same
+                            # configured ACK criterion used by the field driver.
+                            # ACK never expands a nominal axis/resultant bound.
+                            field_policy.validate_target(command)
+                            ack = snapshot["hardware"]["magnetic"]["magnet"]["setpoint_ack_tolerance_t"]
+                            if type(ack) not in (int, float) or not math.isfinite(ack) or ack <= 0:
+                                raise ValueError("Formal field lacks a finite positive archived ACK tolerance")
+                            if requested_command.magnitude_t != 0 and (
+                                    abs(command.bx_t - requested_command.bx_t) > ack
+                                    or abs(command.bz_t - requested_command.bz_t) > ack):
+                                raise ValueError("Formal field command context differs from its target beyond ACK tolerance")
+                        field_context = {"command": command}
                     if "magnetic" in modules and finite and set(actual) == expected_keys:
                         try:
                             if field_policy is None:
@@ -447,7 +482,8 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                                 if math.hypot(actual["field_x_t"], actual["field_z_t"]) > 3:
                                     raise ValueError("Historical formal field exceeds 3 T")
                             else:
-                                field_policy.validate_readback(VectorField(actual["field_x_t"], actual["field_z_t"]))
+                                field_policy.validate_readback(
+                                    VectorField(actual["field_x_t"], actual["field_z_t"]), **field_context)
                         except (ValueError, KeyError, TypeError):
                             acquisition_accepted = False
                     if finite and set(actual) == expected_keys:
@@ -474,7 +510,7 @@ def _run_combination(plan, store, run_id, *, station, snapshot, resume=False,
                     }
                     if field_policy is not None and {"field_x_t", "field_z_t"} <= actual.keys():
                         sample["field_readback_assessment"] = field_policy.assessment(
-                            VectorField(actual["field_x_t"], actual["field_z_t"]))
+                            VectorField(actual["field_x_t"], actual["field_z_t"]), **field_context)
                     with timing.timed_stage("sample_store", sample_index=sample_index):
                         store.sample(run_id, condition["condition_id"], attempt, sample_index, sample)
                     emit("formal_sample", {"sample_index": sample_index, "clean": clean})

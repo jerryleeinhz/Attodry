@@ -4,6 +4,29 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Command-scoped magnetic boundaries (offline)
+
+Readback mode and previous nonzero command context are derived from already
+captured state and updated in memory. Nominal-boundary and inactive-axis checks
+reuse the existing synchronous reads, audit events and exact-float32 transition
+planner. Recovery applies the archived new policy to fresh state and its pending
+path instead of substituting a universal 3 T ceiling. No extra instrument
+connection, query/write, stability dwell, poll, fixed delay, background monitor,
+status clearing or retry is introduced. Failures still use original cleanup and
+retain all evidence; a strict-boundary rejection cannot claim a verified zero.
+Accepted-prefix archive review replays the already recorded `cryostat_state`
+register history once per execution. It caches that trace and uses time-indexed
+lookup for formal brackets, checking zero-transition context against original
+evidence. This adds one read-only SQLite query per new-policy execution during
+archive review, with no extra acquisition I/O or changes to legacy review paths.
+
+Validation spans 488 distinct hardware-blocked cases. The 306-case primary run
+passed in 233.909 s. The 179-case supplementary run exposed two old universal-3 T/
+two-start-path expectations; after updating them to the new versioned contract,
+the affected recovery/tolerance set passed 32 cases in 53.847 s. All 36 new
+boundary/context/ACK tests passed in 11.801 s; the scoped parser passed 55 config
+cases in 0.184 s. These are offline regression costs, not station scan speed.
+
 ## No-write connection-preflight review (2026-11-14)
 
 The exceptional recovery review reads a bounded global event tail and requires

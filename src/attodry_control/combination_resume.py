@@ -222,6 +222,13 @@ def _allowed(path, old, new, hardware):
 
 
 def configuration_changes(original, current):
+    command_scoped = any(s.get("command_scoped_field", False)
+                         or s.get("field_limit_policy") == "command-scoped-configured-v1"
+                         for s in (original, current))
+    if command_scoped and (
+            original.get("field_limit_policy") != current.get("field_limit_policy")
+            or original.get("command_scoped_field", False) != current.get("command_scoped_field", False)):
+        raise ValueError("Magnetic boundary policy changed; start a new run")
     compatibility = source_compatibility(original.get("source_sha256"),
                                        current.get("source_sha256"))
     old_policy = original.get("excitation_output_policy")

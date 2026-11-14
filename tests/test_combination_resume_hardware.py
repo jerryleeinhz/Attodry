@@ -43,8 +43,12 @@ class HardwareRecoveryTests(unittest.TestCase):
             for action in cleanup["actions"]:
                 action.update(clean=False, failure_requires_manual_review=True)
             with CombinationStore(self.database) as store:
-                store.connection.execute("DROP TABLE combination_attempt_executions")
-                store.connection.execute("DROP TABLE combination_executions")
+                if not config.plan.command_scoped_field:
+                    # Historical writers lacked execution tables. The new
+                    # magnetic policy requires its real execution-bound raw
+                    # command trace, so retain those genuine records there.
+                    store.connection.execute("DROP TABLE combination_attempt_executions")
+                    store.connection.execute("DROP TABLE combination_executions")
                 store.connection.execute("UPDATE combination_runs SET status='failed', cleanup_json=?, error=? "
                     "WHERE run_id='recovery-test'", (json.dumps(cleanup), "injected final close failure"))
                 store.connection.commit()
@@ -107,14 +111,18 @@ class HardwareRecoveryTests(unittest.TestCase):
         self.assertEqual(self.adapters, {})
         self.assertNotIn("set_temperature", self.dll.events)
 
-    def test_recovery_additional_3t_guard_rejects_current_single_z_4t(self):
+    def test_new_magnetic_recovery_retains_configured_single_z_cap(self):
         config = self.seed(("magnetic", "lockin"), source=self.base.replace(
             '{ bx_t = 0.0, bz_t = 0.0 },', '{ bx_t = 0.0, bz_t = 1.0 },'))
         self.dll.bz_t = self.dll.setpoint_z_t = 4.0
         result = self.execute(config, recovery=self.recovery(config))
-        self.assertEqual(result["status"], "failed", result)
-        self.assertEqual(self.xx.writes + self.xy.writes, [])
-        self.assertFalse(any(event.startswith("set_field") for event in self.dll.events))
+        self.assertEqual(result["status"], "completed", result)
+        self.assertIn("set_field_z", self.dll.events)
+        initial = next(payload["state"] for kind, payload in self.events()
+                       if kind == "recovery_environment_initial")
+        self.assertEqual(initial["field"]["bz_t"], 4)
+        self.assertEqual(initial["field_setpoint"]["bz_t"], 4)
+        self.assertTrue(result["cleanup"]["clean"])
 
     def test_acknowledged_review_is_required_before_connection(self):
         config = self.seed(("temperature", "lockin"))
@@ -273,7 +281,15 @@ class HardwareRecoveryTests(unittest.TestCase):
         result = self.execute(config, recovery=self.recovery(config))
         self.assertEqual(result["status"], "completed", result)
         kinds = [kind for kind, _ in self.events()]
-        self.assertEqual(kinds.count("recovery_magnetic_path_verified"), 2)
+        # Fresh actual readbacks are checked against confirmed command context;
+        # only the confirmed register is promoted into a command path.
+        self.assertEqual(kinds.count("recovery_magnetic_path_verified"), 1)
+        proof = next(payload for kind, payload in self.events()
+                     if kind == "recovery_magnetic_path_verified")
+        initial = next(payload["state"] for kind, payload in self.events()
+                       if kind == "recovery_environment_initial")
+        self.assertEqual(proof["start"], initial["field_setpoint"])
+        self.assertEqual(proof["field_readback_policy"]["readback_margin_t"], 0)
         self.assertIn("magnetic_point_event", kinds)
         self.assertTrue(result["cleanup"]["clean"])
 

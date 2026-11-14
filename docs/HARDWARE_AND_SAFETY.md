@@ -1,5 +1,35 @@
 # Hardware and safety guide
 
+## Command-scoped magnetic boundary alignment (offline)
+
+For newly versioned magnetic combination scans, use the verified photonics command
+context to select single-X, single-Z or simultaneous-axis readback checks.
+Commands and exact float32 transition corners retain the configured axis caps;
+both commanded axes nonzero additionally require the configured resultant cap
+(never above 3 T). Pure-Z commands may exceed 3 T only within their configured
+Z cap (hardware ceiling 9 T); no configuration cap is increased by this change.
+
+The new magnetic hard readback envelope adds no 0.5 mT margin. The inactive
+axis has an independent configured residual guard, clamped to its nominal axis
+cap. A small measured residual must not be reclassified as a commanded second
+axis. During zeroing retain the last confirmed nonzero command context; unknown
+initial mixed-plan context remains conservative. Failed communication never
+certifies zero or permits use of a stale actual reading.
+
+Recovery of a run that archived this new policy uses the same single/dual-axis
+bounds for fresh actual/register checks and pending transitions; it does not add
+the legacy universal 3 T clamp to pure-Z operation. Legacy runs and temperature-
+only operations retain their own archived contracts. Boundary alignment does
+not authorize source-version migration, hardware writes, an experiment retry,
+broader configured caps or new real commissioning.
+
+Target-arrival/stability tolerance, setpoint-register ACK and actual-zero proof
+remain independent checks. New magnetic configuration may use the verified
+photonics explicit tolerance/ACK semantics; default standalone, generic and
+temperature-only entry points retain their existing caps. Every failure preserves raw status, original
+cleanup and manual-verification flags. This change does not add magnetic
+`record_continue` or weaken current-source compliance/OFF checks.
+
 ## Condition-gated external 6221 (2026-11-14)
 
 External-6221 combination scans require a fresh verified OFF, stopped waveform

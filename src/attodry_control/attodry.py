@@ -198,28 +198,44 @@ class AttoDryDriver:
         writes_authorized: bool,
         readback_tolerance_t: float | None = None,
         setpoint_ack_tolerance_t: float = FIELD_SETPOINT_ACK_TOLERANCE_T,
+        field_readback_policy: FieldReadbackPolicy | None = None,
     ) -> None:
         field_tolerance = field_stability.criteria.tolerance
-        maximum = (CONFIRMED_FIELD_TOLERANCE_MAX_T if readback_tolerance_t is None
-                   else APPROVED_READBACK_TOLERANCE_MAX_T)
+        if field_readback_policy is not None and (
+            not isinstance(field_readback_policy, FieldReadbackPolicy)
+            or field_readback_policy.limits != limits
+            or field_readback_policy.readback_tolerance_t != readback_tolerance_t
+        ):
+            raise ValueError("Field policy must match the driver's nominal limits and readback tolerance.")
+        command_scoped = field_readback_policy is not None and field_readback_policy.command_scoped
         if readback_tolerance_t is not None and (
             type(readback_tolerance_t) not in (float, int)
             or not math.isfinite(readback_tolerance_t)
-            or not 0 < readback_tolerance_t <= maximum
+            or readback_tolerance_t <= 0
             or readback_tolerance_t != field_tolerance
         ):
-            raise ValueError("Unified readback and stability tolerances must match and be at most 0.0015 T.")
-        if (type(setpoint_ack_tolerance_t) not in (float, int)
-                or not math.isfinite(setpoint_ack_tolerance_t)
-                or not 0 < setpoint_ack_tolerance_t <= FIELD_SETPOINT_ACK_TOLERANCE_T):
-            raise ValueError("Setpoint acknowledgement tolerance must be positive and at most 0.0001 T.")
+            raise ValueError("Unified readback and stability tolerances must match and be finite positive numbers.")
+        if (not command_scoped and readback_tolerance_t is not None
+                and readback_tolerance_t > APPROVED_READBACK_TOLERANCE_MAX_T):
+            raise ValueError("Legacy unified field tolerance cannot exceed 0.0015 T.")
         if (
-            field_tolerance is None
-            or field_tolerance > maximum
+            type(field_tolerance) not in (float, int)
+            or not math.isfinite(field_tolerance)
+            or field_tolerance <= 0
+            or (readback_tolerance_t is None and field_tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T)
         ):
             raise ValueError(
-                "AttoDryDriver field tolerance must be configured and cannot "
-                f"exceed {maximum:g} T."
+                "AttoDryDriver field tolerance must be finite and positive; "
+                f"legacy field_tolerance_t cannot exceed {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
+            )
+        ack_maximum = (max(FIELD_SETPOINT_ACK_TOLERANCE_T, field_tolerance)
+                       if command_scoped else FIELD_SETPOINT_ACK_TOLERANCE_T)
+        if (type(setpoint_ack_tolerance_t) not in (float, int)
+                or not math.isfinite(setpoint_ack_tolerance_t)
+                or not 0 < setpoint_ack_tolerance_t <= ack_maximum):
+            raise ValueError(
+                "Setpoint acknowledgement tolerance must be finite and positive "
+                f"and cannot exceed {ack_maximum:g} T for the selected field policy."
             )
         configure_attodry_signatures(dll)
         self.dll = dll
@@ -231,7 +247,8 @@ class AttoDryDriver:
         self.limits = limits
         # Only a complete, validated magnetic scan installs the new policy.
         # Generic diagnostics and historical entry points retain strict limits.
-        self.field_readback_policy: FieldReadbackPolicy | None = None
+        self.field_readback_policy = field_readback_policy
+        self._last_nonzero_field_command: VectorField | None = None
         self.field_stability = field_stability
         self.readback_tolerance_t = readback_tolerance_t
         self.setpoint_ack_tolerance_t = setpoint_ack_tolerance_t
@@ -256,6 +273,7 @@ class AttoDryDriver:
         dll: object | None = None,
         connection_authorized: bool = False,
         writes_authorized: bool = False,
+        field_readback_policy: FieldReadbackPolicy | None = None,
     ) -> AttoDryDriver:
         if config.project.mode is not RunMode.HARDWARE:
             raise ValueError("AttoDryDriver requires hardware configuration.")
@@ -279,6 +297,7 @@ class AttoDryDriver:
             field_stability=config.magnet.stability,
             readback_tolerance_t=config.magnet.readback_tolerance_t,
             setpoint_ack_tolerance_t=config.magnet.setpoint_ack_tolerance_t,
+            field_readback_policy=field_readback_policy,
             temperature_stability=config.temperature_stability,
             connection_authorized=connection_authorized,
             writes_authorized=writes_authorized,
@@ -562,15 +581,19 @@ class AttoDryDriver:
             if not enabled:
                 return
             tolerance = self.field_stability.criteria.tolerance
-            maximum = (CONFIRMED_FIELD_TOLERANCE_MAX_T if self.readback_tolerance_t is None
-                       else APPROVED_READBACK_TOLERANCE_MAX_T)
+            policy = self._active_field_policy()
+            command_scoped = policy is not None and policy.command_scoped
             if (
-                tolerance is None
-                or tolerance > maximum
+                type(tolerance) not in (float, int)
+                or not math.isfinite(tolerance)
+                or tolerance <= 0
+                or (self.readback_tolerance_t is None and tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T)
+                or (not command_scoped and self.readback_tolerance_t is not None
+                    and tolerance > APPROVED_READBACK_TOLERANCE_MAX_T)
             ):
                 raise AttoDryError(
-                    "Field-control takeover requires a configured field tolerance "
-                    f"no greater than {maximum:g} T."
+                    "Field-control takeover requires a finite positive field tolerance; "
+                    f"legacy field_tolerance_t cannot exceed {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T."
                 )
             mismatch = math.hypot(
                 state.field.bx_t - state.field_setpoint.bx_t,
@@ -587,9 +610,11 @@ class AttoDryDriver:
             # before enabling a latent setpoint can be considered safe.
             self._validate_field_actual(
                 VectorField(state.field.bx_t, state.field_setpoint.bz_t),
+                command=self.field_readback_context(state),
             )
             self._validate_field_actual(
                 VectorField(state.field_setpoint.bx_t, state.field.bz_t),
+                command=self.field_readback_context(state),
             )
 
         self._ensure_control(
@@ -845,6 +870,8 @@ class AttoDryDriver:
                     VectorField(command_value, current_state.field.bz_t)
                     if axis == "x"
                     else VectorField(current_state.field.bx_t, command_value),
+                    command=(expected_setpoint if expected_setpoint.magnitude_t != 0
+                             else self.field_readback_context(current_state)),
                 )
                 command = self._begin_field_command(
                     command_kind="set_field_component",
@@ -1278,7 +1305,7 @@ class AttoDryDriver:
         self, state: CryostatState, *, require_control: bool = False
     ) -> None:
         limits = self._field_readback_limits()
-        self._validate_field_actual(state.field)
+        self._validate_field_actual(state.field, command=self.field_readback_context(state))
         policy = self._active_field_policy()
         if policy is None:
             validate_vector_field(state.field_setpoint, limits)
@@ -1295,12 +1322,30 @@ class AttoDryDriver:
     def _active_field_policy(self) -> FieldReadbackPolicy | None:
         return self.field_readback_policy
 
-    def _validate_field_actual(self, actual: VectorField) -> None:
+    def field_readback_context(self, state: CryostatState) -> VectorField:
+        """Use confirmed command axes, retaining the previous axes during zeroing.
+
+        This consumes no I/O and never classifies a mode from noisy actual axes.
+        Unknown initial zero in a mixed plan keeps the conservative vector bound.
+        """
+        policy = self._active_field_policy()
+        command = state.field_setpoint
+        if policy is not None and policy.command_scoped:
+            policy.validate_target(command)
+            if command.magnitude_t != 0:
+                self._last_nonzero_field_command = command
+            elif self._last_nonzero_field_command is not None:
+                command = self._last_nonzero_field_command
+        return command
+
+    def _validate_field_actual(self, actual: VectorField, *, command: VectorField | None = None) -> None:
         policy = self._active_field_policy()
         if policy is None:
             validate_vector_field(actual, self._field_readback_limits())
         else:
-            policy.validate_readback(actual)
+            if policy.command_scoped and command is None and self.last_confirmed_state is not None:
+                command = self.field_readback_context(self.last_confirmed_state)
+            policy.validate_readback(actual, command=command)
 
     def _validate_field_target(self, target: VectorField) -> VectorField:
         policy = self._active_field_policy()

@@ -294,7 +294,9 @@ def _validate_state(
         validate_vector_field(state.field, driver.limits)
         validate_vector_field(state.field_setpoint, driver.limits)
     else:
-        readback_policy.validate_readback(state.field)
+        command = (driver.field_readback_context(state) if readback_policy.command_scoped
+                   else None)
+        readback_policy.validate_readback(state.field, command=command)
         readback_policy.validate_target(state.field_setpoint)
     if state.error_code:
         raise AttoDryError(f"attoDRY field operation reported error code {state.error_code}.")

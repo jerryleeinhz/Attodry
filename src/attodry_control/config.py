@@ -544,7 +544,7 @@ def _parse_cryostat(
     )
 
 
-def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
+def _parse_magnet(table: Mapping[str, Any], *, allow_configurable_readback: bool = False) -> MagnetConfig:
     name = "magnet"
     _strict_keys_with_optional(
         table,
@@ -585,15 +585,24 @@ def _parse_magnet(table: Mapping[str, Any]) -> MagnetConfig:
     unified = "readback_tolerance_t" in table
     key = "readback_tolerance_t" if unified else "field_tolerance_t"
     tolerance = _positive_number(table[key], f"{name}.{key}")
-    maximum = APPROVED_READBACK_TOLERANCE_MAX_T if unified else CONFIRMED_FIELD_TOLERANCE_MAX_T
-    if tolerance > maximum:
-        raise ConfigError(f"magnet.{key} cannot exceed the approved {maximum:g} T zero-field criterion.")
+    if unified and not allow_configurable_readback and tolerance > APPROVED_READBACK_TOLERANCE_MAX_T:
+        raise ConfigError(f"magnet.{key} cannot exceed the approved {APPROVED_READBACK_TOLERANCE_MAX_T:g} T zero-field criterion.")
+    if not unified and tolerance > CONFIRMED_FIELD_TOLERANCE_MAX_T:
+        raise ConfigError(f"magnet.{key} cannot exceed the legacy {CONFIRMED_FIELD_TOLERANCE_MAX_T:g} T zero-field criterion.")
     stability = _parse_stability({**table, "field_tolerance_t": tolerance}, name, value_prefix="field_")
     tolerance = stability.criteria.tolerance
     ack = _positive_number(table.get("setpoint_ack_tolerance_t", FIELD_SETPOINT_ACK_TOLERANCE_T),
                            f"{name}.setpoint_ack_tolerance_t")
-    if ack > FIELD_SETPOINT_ACK_TOLERANCE_T:
+    # Preserve the historical default for narrower actual-field criteria. A
+    # wider explicit register ACK may not exceed the configured actual-field
+    # tolerance; actual arrival/dwell, zero magnitude and hard limits stay unchanged.
+    if not allow_configurable_readback and ack > FIELD_SETPOINT_ACK_TOLERANCE_T:
         raise ConfigError("magnet.setpoint_ack_tolerance_t cannot exceed 0.0001 T.")
+    if ack > max(FIELD_SETPOINT_ACK_TOLERANCE_T, tolerance):
+        raise ConfigError(
+            "magnet.setpoint_ack_tolerance_t cannot exceed the larger of "
+            "the 0.0001 T compatibility default and the configured actual-field tolerance."
+        )
     return MagnetConfig(limits=limits, stability=stability,
                         readback_tolerance_t=tolerance if unified else None,
                         setpoint_ack_tolerance_t=ack)
@@ -923,10 +932,12 @@ def _parse_temperature_excitation_scan(
 
 
 def load_temperature_operation_config(
-    path: str | Path,
+    path: str | Path, *, command_scoped: bool = False,
 ) -> TemperatureOperationConfig:
     """Load only the strict attoDRY tables needed by daily temperature operation."""
 
+    if type(command_scoped) is not bool:
+        raise ConfigError("command_scoped must be a boolean")
     document = _load_document(path)
     project = _parse_project(_table(document, "project"))
     if project.mode is not RunMode.HARDWARE:
@@ -969,7 +980,9 @@ def load_temperature_operation_config(
         known_tables,
     )
     cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
-    magnet = _parse_magnet(_table(document, "magnet"))
+    # A combined magnetic plan may explicitly select its own versioned bounds;
+    # daily/temperature-only callers retain the historical narrower defaults.
+    magnet = _parse_magnet(_table(document, "magnet"), allow_configurable_readback=command_scoped)
     temperature_stability = _parse_stability(
         _table(document, "temperature_stability"),
         "temperature_stability",
@@ -1101,7 +1114,7 @@ def load_temperature_excitation_operation_config(
 
 
 def _parse_magnetic_field_run(
-    table: Mapping[str, Any], limits: MagnetLimits
+    table: Mapping[str, Any], limits: MagnetLimits, *, command_scoped: bool = False
 ) -> MagneticFieldRunConfig:
     name = "magnetic_field_run"
     _strict_keys_with_optional(
@@ -1174,9 +1187,9 @@ def _parse_magnetic_field_run(
         f"{name}.transition_policy",
     )
     try:
-        # Requested targets keep strict nominal limits; the run-wide mode never
-        # changes because of a residual readback or a later segment.
-        FieldReadbackPolicy.from_targets(points, limits)
+        # Requested targets keep strict nominal limits. The explicitly selected
+        # command policy never infers an active axis from noisy actual readbacks.
+        FieldReadbackPolicy.from_targets(points, limits, command_scoped=command_scoped)
         # A zero start makes static validation independent of any real station
         # state while still checking every target, exact float32 waypoint, and
         # both component-write mixed corners for the selected transition policy.
@@ -1203,10 +1216,12 @@ def _parse_magnetic_field_run(
 
 
 def load_magnetic_field_operation_config(
-    path: str | Path,
+    path: str | Path, *, command_scoped: bool = False,
 ) -> MagneticFieldOperationConfig:
     """Load only the strict tables needed by standalone field operation."""
 
+    if type(command_scoped) is not bool:
+        raise ConfigError("command_scoped must be a boolean")
     document = _load_document(path)
     project = _parse_project(_table(document, "project"))
     if project.mode is not RunMode.HARDWARE:
@@ -1241,10 +1256,10 @@ def load_magnetic_field_operation_config(
     )
     try:
         cryostat = _parse_cryostat(_table(document, "cryostat"), project.mode)
-        magnet = _parse_magnet(_table(document, "magnet"))
+        magnet = _parse_magnet(_table(document, "magnet"), allow_configurable_readback=command_scoped)
         cleanup = _parse_cleanup(_table(document, "cleanup"))
         run = _parse_magnetic_field_run(
-            _table(document, "magnetic_field_run"), magnet.limits
+            _table(document, "magnetic_field_run"), magnet.limits, command_scoped=command_scoped
         )
     except ConfigError:
         raise

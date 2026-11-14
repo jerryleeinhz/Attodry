@@ -55,7 +55,15 @@ changes, altered compliance, or unknown cleanup.
 | Temperature | Target tolerance, stable range, dwell, minimum samples, poll/timeout | Acceptance mode, targets, response and hard/overshoot limits |
 | Lock-in | Base/selected harmonic ranges and Reserve, supported autorange, TC/filter, settling/sample interval, existing overload policy | Roles/model/address, wiring/reference/input, source/frequency targets, harmonic identities, circuit/safety model and safety TOML |
 | SMU | NPLC, point delay, counter-axis compliance/protection | Source mode, source-axis limit, V/I/power capability, targets, wiring, finish policy |
-| Magnetic | Stable/readback tolerance within existing caps, dwell/poll/timeout, reduced step | Targets/order, transition policy, ACK tolerance, hard bounds and recovery vector ceiling 3 T |
+| Magnetic | Stable/readback tolerance within the archived policy's bounds, dwell/poll/timeout, reduced step | Targets/order, transition policy, ACK tolerance, configured hard bounds and archived recovery policy |
+
+New command-scoped magnetic runs use the same configured single-axis/dual-axis
+limits for ordinary execution and recovery: pure-Z may exceed 3 T within the
+configured Z cap, while simultaneous commanded axes retain their resultant cap
+(maximum 3 T). There is no added hard readback margin. Legacy magnetic runs and
+temperature-only recovery retain their prior universal 3 T contract. A current
+TOML or source update cannot relabel a legacy run as the new policy; unsupported
+source/policy migration remains blocked rather than rewriting its archive.
 
 For voltage sourcing, SMU `max_abs_current_a` controls both hardware compliance
 and the software readback bound. The current-source counterpart is
@@ -110,7 +118,8 @@ clear status are required; an overloaded baseline needs separately authorized
 repair. New range preparation widens before Reserve and narrows afterwards.
 SMU actual zero/OFF, source mode, limits and status are checked. Cryostat actual
 temperature, Bx/Bz, registers, controls and errors are read fresh. Recovery plans
-the pending transition from actual state and retains the 3 T ceiling.
+the pending transition from actual state using the archived policy: the legacy
+3 T ceiling or the new command-scoped configured single/dual-axis bounds.
 
 The first pending condition reapplies all axes and completes a new qualification.
 No old dwell, baseline, partial group or harmonic is reused. A new magnetic
