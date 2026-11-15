@@ -27,6 +27,21 @@ the affected recovery/tolerance set passed 32 cases in 53.847 s. All 36 new
 boundary/context/ACK tests passed in 11.801 s; the scoped parser passed 55 config
 cases in 0.184 s. These are offline regression costs, not station scan speed.
 
+## Automatic dense-curve colorbars (2026-11-14)
+
+Color selection operates on the same cached observations and prepared curve
+statistics used for drawing. A shared color context counts actual drawable
+groups, normalizes numeric coordinates or records curve-index identities, and
+adds one Matplotlib colorbar for a dense plot, including four-channel cards.
+The presentation change adds no database read, hardware call, acquisition wait,
+background refresh, data interpolation or statistical aggregation. Existing
+export uses the rendered snapshot and records the mapping in its report.
+The 120 relevant hardware-blocked tests passed on 2026-11-15 in 26.229 s.
+An offline 765-row,
+51-group check measured about 19.3 ms for preparation and 4.01 ms median for the
+prewarmed color context (10 repetitions); the context's first call included a
+Matplotlib import. These local display timings are not acquisition throughput.
+
 ## No-write connection-preflight review (2026-11-14)
 
 The exceptional recovery review reads a bounded global event tail and requires

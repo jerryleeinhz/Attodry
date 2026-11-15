@@ -1,6 +1,15 @@
 # Development stages
 
-## Current: Command-scoped magnetic boundary alignment (offline)
+## Current: Magnetic boundary and dense-curve plotting delivery (2026-11-15)
+
+- Combine the tested magnetic boundary policy and automatic plotting colorbars
+  before the separately authorized magnetic sequence. Preserve configured
+  protections, raw history and source OFF during condition changes.
+- The preceding temperature scan completed normally with its original cleanup
+  and exit evidence before boundary deployment. Repository integration adds no
+  hardware action; exact bindings and private deployment proof stay uncommitted.
+
+## Current: Command-scoped magnetic boundary alignment (2026-11-15)
 
 - Port the verified photonics command-context boundary semantics, preserving
   configured X/Z caps and the strict dual-command resultant ceiling. No margin
@@ -12,12 +21,28 @@
   on their existing contracts; scope configurable tolerance to the new entry.
 - Keep source OFF during all condition changes, independent source protections,
   formal-window qualification, read ownership, waits and exact-float32 planning.
-- Independent local worktree only; real deployment and scans are not performed.
+- Implement and validate in an independent local worktree; boundary deployment
+  follows normal temperature completion, original cleanup and process exit.
 - Validation: 488 distinct relevant offline cases covered, including 36 new
   cases. Primary 306 passed; revised legacy expectations passed in the affected
   32-case recovery/tolerance rerun. Configured 0.2 mT ACK, temperature+magnetic
   scoping and real quantized-register provenance pass; six core ASTs match the
   verified source. The private 630-condition review configuration parses.
+
+## Current: Automatic dense-curve colorbars (2026-11-14)
+
+- Replace long per-temperature legends automatically at 10 drawable curves,
+  retaining ordinary legends below that boundary and the existing hide switch.
+- Use numeric temperature/unique numeric stack values or an explicitly labeled
+  curve-index scale. Share color mapping across four-channel panels and preserve
+  all provenance-separated curves and the original selected observations.
+- Record color field/map/normalization and curve identities in the existing
+  report/manifest; preserve setup compatibility and all CSV values/statistics.
+- Develop and validate in an isolated local worktree without changing the
+  temperature acquisition; combine delivery after that acquisition has ended.
+- Validation: 120 relevant hardware-blocked tests passed on 2026-11-15
+  (14 new regressions);
+  PNG/PDF/SVG export and rendered 51-temperature/shared-four-panel layouts checked.
 
 ## Current: Proven no-write connection preflight (2026-11-14)
 

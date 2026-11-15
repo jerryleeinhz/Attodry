@@ -155,10 +155,19 @@ Restart an existing notebook kernel after updating the code, then run both cells
    error intervals crossing zero. XY–Z shows raw measured points only, reports
    overlaps and applies no interpolation. Generic CSV units/independent dimensions
    are not inferred; without recorded condition IDs it supports Raw only.
-   **Show curve legend** is enabled by default; stacked curves retain every entry,
-   with units and recorded group identities, including more than 12 curves.
-   Large legends expand the figure and use multiple columns. Hiding the legend
-   changes only the display, not the exported observations.
+   **Show curve legend** is enabled by default. Fewer than 10 drawable curves use
+   the ordinary legend; 10 or more automatically use a continuous colorbar.
+   The threshold counts curve groups after filters/channel quality/exclusions,
+   not individual data rows. Numeric stacks prefer temperature and map actual
+   coordinate values linearly, with the selected target/readback meaning and
+   units on the colorbar. Ambiguous/non-numeric grouping uses an explicitly
+   labeled curve-index scale and exports its complete group mapping.
+   Four-channel cards share one scale/colorbar. Different runs/configurations,
+   ranges and branches remain separate curves; a compact residual-identity
+   legend can distinguish them. Full curve identities, colors and normalization
+   remain in the export report. Hiding the legend hides the colorbar and compact
+   legend without changing observations or statistics. Existing saved setups use
+   the automatic threshold through the same display checkbox.
 6. **Render this plot** or **Render all plots**, then **Export figures + data**.
    Edits clear the old figure and export state. SQLite plots and exports use the
    loaded snapshot even while acquisition appends new records. Click **Refresh

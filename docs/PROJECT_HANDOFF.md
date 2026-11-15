@@ -1,10 +1,19 @@
 # Project handoff
 
-Last updated: 2026-11-14
+Last updated: 2026-11-15
 
 ## Current stage
 
-### Command-scoped magnetic boundaries (offline alignment)
+### Magnetic boundary and dense-curve plotting delivery (2026-11-15)
+
+- Integrate the separately tested command-scoped magnetic boundaries and
+  analysis-only automatic colorbars before the next authorized magnetic scan.
+- The preceding temperature scan completed normally with original clean cleanup
+  and exit evidence before boundary deployment. Plotting integration does not
+  start a scan or certify live instrument state. Keep exact run bindings,
+  private configurations and deployment evidence outside Git.
+
+### Command-scoped magnetic boundaries (2026-11-15)
 
 - Align new magnetic combination scans with the verified photonics `a93b786` boundary
   policy: strict configured axis caps, command-scoped single/dual-axis readback
@@ -23,7 +32,9 @@ Last updated: 2026-11-14
 - Bind archived formal command context to the same execution's raw register
   trace, including the previous nonzero waypoint while zeroing. Missing or
   altered trace/context blocks accepted-prefix certification and recovery.
-- Work is isolated locally. Do not deploy into the pinned active temperature
+- Implementation and validation were isolated from the active temperature
+  acquisition. Boundary deployment followed that scan's normal completion,
+  original cleanup and process exit. Never update a later pinned active
   acquisition or infer instrument state from offline tests.
 - Validation covers 488 distinct hardware-blocked cases, including 36 new
   boundary/ACK/context/recovery regressions. The 306-case primary run passed;
@@ -34,6 +45,25 @@ Last updated: 2026-11-14
   preserving its electrical settings and 20 V compliance. The donor 0.2 mT ACK
   also parses; confirmed register values within ACK are retained, not rounded
   into requested targets. Beyond-ACK and hard-boundary faults still reject.
+
+### Automatic dense-curve colorbars (2026-11-14)
+
+- Unified curve/stacked and four-channel cards automatically use a continuous
+  colorbar for 10 or more drawable curve groups; fewer curves retain the ordinary
+  legend. Keep the existing show/hide checkbox and saved-setup structure.
+- Numeric stacks prefer temperature, use actual coordinate spacing and preserve
+  target/readback labels. Non-numeric/ambiguous stacks use an explicit curve-index
+  mapping. Four channels share their mapping and one bar, not four scales.
+- Preserve run/configuration/range/branch/sample identities, missing-data gaps,
+  quality exclusions and statistics. Export complete group/color provenance with
+  the existing figure/report path; selected-sample/statistics CSVs stay unchanged.
+- Implementation and offline tests used an isolated local worktree without
+  changing the temperature acquisition. The current delivery combines this
+  analysis feature with the reviewed magnetic boundary version.
+- Validation: 120 hardware-blocked plotting/cache/filter/heatmap tests passed on
+  2026-11-15, including 14 new threshold/mapping/export regressions.
+  Rendered 51-temperature single/four-panel
+  figures and categorical fallback were visually checked for layout and labels.
 
 ### Proven no-write cryostat connection preflight (2026-11-14)
 

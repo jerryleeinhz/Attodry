@@ -155,15 +155,16 @@ class PlotTests(unittest.TestCase):
         _, data = render_plot(rows, dict(x=X, y=Y, group_by='requested.lockin_excitation_v_rms'))
         self.assertEqual(len(data['rows']), 2)
 
-    def test_fifteen_stacked_traces_retain_all_legend_entries(self):
+    def test_fifteen_stacked_traces_use_colorbar_and_retain_audit_labels(self):
         group_by = 'requested.lockin_excitation_v_rms'
         rows = [{**observation(condition, value=trace + condition + 1.),
                  group_by: float(trace + 1)}
                 for trace in range(15) for condition in range(2)]
-        figure, _ = render_plot(rows, dict(x=X, y=Y, group_by=group_by))
-        legend = figure.axes[0].get_legend()
-        self.assertIsNotNone(legend)
-        labels = [text.get_text() for text in legend.get_texts()]
+        figure, data = render_plot(rows, dict(x=X, y=Y, group_by=group_by))
+        self.assertIsNone(figure.axes[0].get_legend())
+        self.assertEqual(len(figure.axes), 2)
+        self.assertIn('v rms', figure.axes[1].get_ylabel().lower())
+        labels = data['report']['legend_labels']
         self.assertEqual(len(labels), 15)
         self.assertEqual(len(set(labels)), 15)
         self.assertTrue(all('v rms' in label.lower() for label in labels))
@@ -178,7 +179,7 @@ class PlotTests(unittest.TestCase):
         self.assertIn('0.125', label)
         self.assertIn('v rms', label.lower())
 
-    def test_sixty_trace_legend_uses_columns_and_exports_without_clipping(self):
+    def test_sixty_trace_colorbar_exports_without_clipping(self):
         import xml.etree.ElementTree as ET
         group_by = 'requested.lockin_excitation_v_rms'
         rows = [{**observation(condition, value=trace + condition + 1.),
@@ -187,29 +188,27 @@ class PlotTests(unittest.TestCase):
         spec = dict(x=X, y=Y, group_by=group_by)
         figure, data = render_plot(rows, spec)
         figure.canvas.draw()
-        legend = figure.axes[0].get_legend()
-        self.assertIsNotNone(legend)
-        texts = legend.get_texts()
-        labels = [text.get_text() for text in texts]
+        self.assertIsNone(figure.axes[0].get_legend())
+        self.assertEqual(len(figure.axes), 2)
+        colorbar_axis = figure.axes[1]
+        labels = data['report']['legend_labels']
         self.assertEqual(len(set(labels)), 60)
         renderer = figure.canvas.get_renderer()
-        extents = [text.get_window_extent(renderer) for text in texts]
-        self.assertGreaterEqual(len({round(box.x0) for box in extents}), 3)
-        for label, box in zip(labels, extents):
-            with self.subTest(label=label):
-                self.assertGreaterEqual(box.x0, figure.bbox.x0 - 2)
-                self.assertLessEqual(box.x1, figure.bbox.x1 + 2)
-                self.assertGreaterEqual(box.y0, figure.bbox.y0 - 2)
-                self.assertLessEqual(box.y1, figure.bbox.y1 + 2)
+        box = colorbar_axis.get_tightbbox(renderer)
+        self.assertGreaterEqual(box.x0, figure.bbox.x0 - 2)
+        self.assertLessEqual(box.x1, figure.bbox.x1 + 2)
+        self.assertGreaterEqual(box.y0, figure.bbox.y0 - 2)
+        self.assertLessEqual(box.y1, figure.bbox.y1 + 2)
+        self.assertLess(float(figure.get_size_inches()[0]), 14.)
         self.assertGreater(figure.axes[0].get_window_extent(renderer).width, 200)
         destination = export_plot_bundle(self.directory, [{'figure': figure, 'data': data, 'spec': spec}])
         svg = ET.parse(destination / 'plot_01.svg').getroot()
         svg_legend = svg.find(".//{http://www.w3.org/2000/svg}g[@id='legend_1']")
-        self.assertIsNotNone(svg_legend)
-        legend_text = ' '.join(' '.join(svg_legend.itertext()).split())
-        for label in labels:
-            self.assertIn(' '.join(label.split()), legend_text)
+        self.assertIsNone(svg_legend)
+        self.assertIsNotNone(svg.find(".//{http://www.w3.org/2000/svg}g[@id='axes_2']"))
         manifest = json.loads((destination / 'plot_manifest.json').read_text(encoding='utf-8'))
+        self.assertEqual(manifest['plots'][0]['report']['legend_mode'], 'colorbar')
+        self.assertEqual(len(manifest['plots'][0]['report']['legend_labels']), 60)
         png = (destination / 'plot_01.png').read_bytes()
         self.assertEqual(png[:8], b'\x89PNG\r\n\x1a\n')
         width, height = (int.from_bytes(png[start:start + 4], 'big') for start in (16, 20))
@@ -250,20 +249,21 @@ class PlotTests(unittest.TestCase):
                     self.assertTrue(all(point['n'] == 2 for point in data['summary_rows']))
         self.assertEqual(rows, before)
 
-    def test_sixty_multiline_branch_labels_fit_inside_figure(self):
+    def test_sixty_traces_keep_only_compact_branch_legend_inside_figure(self):
         group_by = 'requested.lockin_excitation_v_rms'
         rows = [{**observation(condition, value=trace + branch + condition + 1.),
                  group_by: float(trace + 1),
                  'axes.magnetic.segment': f'magnetic branch {branch}: measured field sweep',
                  'axes.magnetic.direction': 'forward' if branch % 2 == 0 else 'reverse'}
                 for trace in range(15) for branch in range(4) for condition in range(2)]
-        figure, _ = render_plot(rows, dict(x=X, y=Y, group_by=group_by))
+        figure, data = render_plot(rows, dict(x=X, y=Y, group_by=group_by))
         figure.canvas.draw()
         legend = figure.axes[0].get_legend()
         self.assertIsNotNone(legend)
         labels = legend.get_texts()
-        self.assertEqual(len(labels), 60)
-        self.assertGreaterEqual(min(len(text.get_text().splitlines()) for text in labels), 3)
+        self.assertLessEqual(len(labels), 10)
+        self.assertEqual(len(data['report']['legend_labels']), 60)
+        self.assertEqual(len(figure.axes), 2)
         renderer = figure.canvas.get_renderer()
         for text in labels:
             with self.subTest(label=text.get_text()):
@@ -273,7 +273,7 @@ class PlotTests(unittest.TestCase):
                 self.assertGreaterEqual(box.y0, figure.bbox.y0 - 2)
                 self.assertLessEqual(box.y1, figure.bbox.y1 + 2)
 
-    def test_four_channel_fifteen_group_legends_fit_inside_figure(self):
+    def test_four_channel_fifteen_groups_share_one_colorbar(self):
         group_by = 'requested.lockin_excitation_v_rms'
         rows = [{**observation(condition, value=trace + condition + 1.),
                  group_by: float(trace + 1),
@@ -288,20 +288,16 @@ class PlotTests(unittest.TestCase):
                                        'reading': {'harmonic': sample['harmonic']}}
         figure, _ = render_plot(rows, dict(mode='field', x=X, group_by=group_by, statistics='mean_sd'))
         figure.canvas.draw()
-        self.assertEqual(len(figure.axes), 4)
+        self.assertEqual(len(figure.axes), 5)
         renderer = figure.canvas.get_renderer()
-        for axis in figure.axes:
-            legend = axis.get_legend()
-            self.assertIsNotNone(legend)
-            self.assertEqual(len(legend.get_texts()), 15)
+        for axis in figure.axes[:4]:
+            self.assertIsNone(axis.get_legend())
             self.assertGreater(axis.get_window_extent(renderer).width, 200)
-            for text in legend.get_texts():
-                with self.subTest(channel=axis.get_ylabel(), label=text.get_text()):
-                    box = text.get_window_extent(renderer)
-                    self.assertGreaterEqual(box.x0, figure.bbox.x0 - 2)
-                    self.assertLessEqual(box.x1, figure.bbox.x1 + 2)
-                    self.assertGreaterEqual(box.y0, figure.bbox.y0 - 2)
-                    self.assertLessEqual(box.y1, figure.bbox.y1 + 2)
+        box = figure.axes[4].get_tightbbox(renderer)
+        self.assertGreaterEqual(box.x0, figure.bbox.x0 - 2)
+        self.assertLessEqual(box.x1, figure.bbox.x1 + 2)
+        self.assertGreaterEqual(box.y0, figure.bbox.y0 - 2)
+        self.assertLessEqual(box.y1, figure.bbox.y1 + 2)
 
     def test_explicit_legend_hide_keeps_plotted_groups_and_samples(self):
         group_by = 'requested.lockin_excitation_v_rms'

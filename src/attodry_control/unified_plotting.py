@@ -750,7 +750,8 @@ def _audit_title(rows):
     return " · ".join(flags) + "\n" if flags else ""
 
 
-def _draw_curve(axis, rows, spec, x, y):
+def _prepare_curve(rows, spec, x, y):
+    """Prepare qualification/statistics once, before choosing shared curve colors."""
     from .analysis_observations import qualify_observations, repeat_statistics, observation_id
     mode = spec.get("statistics", "raw")
     kept, quality = qualify_observations([r for r in rows if not r.get("_manual_excluded")], (x, y), spec.get("quality_policy", "exclude"))
@@ -762,9 +763,9 @@ def _draw_curve(axis, rows, spec, x, y):
     if group_keys is None:
         group_keys = _effective_group_keys(rows, spec)
     groups = _curve_groups(masked, group_keys, separate_samples=mode == "raw")
-    summaries = []
+    summaries, series = [], []
     valid = [row for row in kept if _is_numeric(row.get(x)) and _is_numeric(row.get(y))]
-    for index, (identity, group) in enumerate(groups.items()):
+    for identity, group in groups.items():
         points = repeat_statistics(group, x=x, y=y, mode=mode)
         summaries.extend({**p, "group": dict(identity), "channel": y} for p in points)
         label = _series_label(identity, bool(identity),
@@ -773,17 +774,102 @@ def _draw_curve(axis, rows, spec, x, y):
                                      if (caption := _channel_caption(key, group))))
         if captions:
             label += " · " + "; ".join(captions)
-        color = OKABE_ITO_ON_WHITE[index % len(OKABE_ITO_ON_WHITE)]
+        series.append({"identity": identity, "points": points, "label": label,
+                       "drawable": any(_is_numeric(p["x"]) and _is_numeric(p["y"]) for p in points)})
+    return {"kept": kept, "quality": quality, "valid": valid, "summaries": summaries,
+            "series": series, "group_keys": group_keys}
+
+
+def _curve_color_context(panels, spec, rows):
+    """Use one encoding for the union of visible groups, including four panels."""
+    import matplotlib as mpl
+    identities = tuple(dict.fromkeys(series["identity"] for panel in panels
+                                    for series in panel["series"] if series["drawable"]))
+    if len(identities) < 10:
+        return None
+    group_keys = spec.get("_effective_group_keys", ())
+    numeric_keys = [key for key in group_keys
+                    if all(_is_numeric(dict(identity).get(key)) for identity in identities)
+                    and len({dict(identity)[key] for identity in identities}) > 1]
+    temperatures = [key for key in numeric_keys
+                    if _dimension_module(key) == "temperature"
+                    or key.rsplit(".", 1)[-1].endswith("temperature_k")]
+    field = temperatures[0] if temperatures else numeric_keys[0] if len(numeric_keys) == 1 else None
+    residuals, varying = (), set()
+    if field:
+        varying = {key for identity in identities for key, _ in identity
+                   if key != field and len({dict(item).get(key) for item in identities}) > 1}
+        residuals = tuple(dict.fromkeys(tuple((key, value) for key, value in identity if key in varying)
+                                      for identity in identities))
+        # A second large categorical legend would recreate the original problem.
+        if len(residuals) > 10:
+            field, residuals = None, ()
+    values = [float(dict(identity)[field]) if field else float(index)
+              for index, identity in enumerate(identities, start=1)]
+    norm = mpl.colors.Normalize(min(values), max(values))
+    cmap = mpl.colormaps["viridis"]
+    colors = {identity: cmap(norm(value)) for identity, value in zip(identities, values)}
+    styles = {}
+    for index, identity in enumerate(identities):
+        residual = tuple((key, value) for key, value in identity if field and key in varying)
+        styles[identity] = residuals.index(residual) if field else index
+    encoding = {"kind": "numeric" if field else "curve_index", "field": field,
+                "label": column_label(field, rows) if field else "Curve index", "cmap": "viridis",
+                "vmin": norm.vmin, "vmax": norm.vmax,
+                "mapping": [{"group": dict(identity), "value": value, "index": index,
+                             "color": mpl.colors.to_hex(colors[identity])}
+                            for index, (identity, value) in enumerate(zip(identities, values), start=1)]}
+    return {"colors": colors, "styles": styles, "norm": norm, "cmap": cmap,
+            "encoding": encoding, "residuals": residuals}
+
+
+def _curve_legend_report(count, spec, color_context):
+    return {"curve_count": count,
+            "legend_mode": "hidden" if not spec.get("show_legend", True) else "colorbar" if color_context else "legend",
+            "color_encoding": color_context["encoding"] if color_context else None}
+
+
+def _add_curve_colorbar(figure, axes, context, spec):
+    if not context or not spec.get("show_legend", True):
+        return
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.ticker import MaxNLocator
+    colorbar = figure.colorbar(ScalarMappable(norm=context["norm"], cmap=context["cmap"]), ax=axes)
+    colorbar.set_label(context["encoding"]["label"])
+    if context["encoding"]["kind"] == "curve_index":
+        colorbar.locator = MaxNLocator(nbins=6, integer=True)
+        colorbar.update_ticks()
+
+
+_PROVENANCE_MARKERS = SERIES_MARKERS + ("<", ">", "h")
+_PROVENANCE_LINES = ("-", "--", "-.", ":", (0, (5, 1)), (0, (3, 1, 1, 1)),
+                     (0, (1, 2)), (0, (5, 2, 1, 2)), (0, (3, 2)), (0, (5, 1, 1, 1, 1, 1)))
+
+
+def _draw_curve(axis, rows, spec, x, y, *, prepared=None, color_context=None):
+    mode = spec.get("statistics", "raw")
+    prepared = prepared if prepared is not None else _prepare_curve(rows, spec, x, y)
+    kept, quality, valid = (prepared[key] for key in ("kept", "quality", "valid"))
+    summaries, series, group_keys = (prepared[key] for key in ("summaries", "series", "group_keys"))
+    visible = [item for item in series if item["drawable"]]
+    style = spec.get("curve_style", "points")
+    if style not in ("points", "line", "line+points"):
+        raise ValueError("Unknown curve style")
+    for index, item in enumerate(series):
+        identity, points = item["identity"], item["points"]
+        color = (color_context["colors"][identity] if color_context and item["drawable"]
+                 else OKABE_ITO_ON_WHITE[index % len(OKABE_ITO_ON_WHITE)])
+        style_index = color_context["styles"][identity] if color_context and item["drawable"] else index
         xs = [p["x"] if _is_numeric(p["x"]) else float("nan") for p in points]
         ys = [p["y"] if _is_numeric(p["y"]) else float("nan") for p in points]
         errors = [p["error"] if _is_numeric(p["error"]) else float("nan") for p in points]
-        style = spec.get("curve_style", "points")
-        if style not in ("points", "line", "line+points"):
-            raise ValueError("Unknown curve style")
+        markers = _PROVENANCE_MARKERS if color_context else SERIES_MARKERS
+        linestyle = (_PROVENANCE_LINES[style_index % len(_PROVENANCE_LINES)]
+                     if color_context and color_context["residuals"] else "-")
         axis.errorbar(xs, ys, yerr=errors if mode != "raw" else None, color=color,
-                      marker=SERIES_MARKERS[index % len(SERIES_MARKERS)] if style != "line" else None,
-                      linestyle="-" if style != "points" else "none", markersize=4,
-                      capsize=2, linewidth=1, label=label)
+                      marker=markers[style_index % len(markers)] if style != "line" else None,
+                      linestyle=linestyle if style != "points" else "none", markersize=4,
+                      capsize=2, linewidth=1, label=item["label"] if item["drawable"] else "_nolegend_")
     axis.set(xlabel=column_label(x, rows), ylabel=column_label(y, rows))
     for name, key in (("x", x), ("y", y)):
         scale = spec.get(name + "_scale", "linear")
@@ -810,26 +896,36 @@ def _draw_curve(axis, rows, spec, x, y):
             axis.set_xlim(min(measured_x), max(measured_x))
     style_axis(axis)
     legend_labels = []
-    if spec.get("show_legend", True) and (len(groups) > 1 or group_keys):
+    if spec.get("show_legend", True) and (len(visible) > 1 or group_keys):
         handles, labels = axis.get_legend_handles_labels()
         legend_labels = labels
-        columns = max(1, math.ceil(len(labels) / 16))
-        wrapped = [textwrap.fill(label, width=44, break_on_hyphens=False) for label in labels]
-        # Reserve real figure space: large legends must not shrink the data panel.
-        entries_per_column = math.ceil(len(wrapped) / columns)
-        column_heights = [sum(len(label.splitlines()) * 7 * 1.2 + 7 * .4
-                              for label in wrapped[start:start + entries_per_column]) / 72
-                          for start in range(0, len(wrapped), entries_per_column)]
-        grid = axis.get_subplotspec().get_gridspec()
-        width, height = axis.figure.get_size_inches()
-        axis.figure.set_size_inches(max(width, (7 + 3.2 * columns) * grid.ncols),
-                                    max(height, (max(column_heights, default=0) + 1.5) * grid.nrows, 5.5))
-        outside_legend(axis, handles, wrapped, ncols=columns, fontsize=7,
-                       columnspacing=1.1)
+        if not color_context:
+            columns = max(1, math.ceil(len(labels) / 16))
+            wrapped = [textwrap.fill(label, width=44, break_on_hyphens=False) for label in labels]
+            # Reserve real figure space: the ordinary legend must not shrink the data panel.
+            entries_per_column = max(1, math.ceil(len(wrapped) / columns))
+            column_heights = [sum(len(label.splitlines()) * 7 * 1.2 + 7 * .4
+                                  for label in wrapped[start:start + entries_per_column]) / 72
+                              for start in range(0, len(wrapped), entries_per_column)]
+            grid = axis.get_subplotspec().get_gridspec()
+            width, height = axis.figure.get_size_inches()
+            axis.figure.set_size_inches(max(width, (7 + 3.2 * columns) * grid.ncols),
+                                        max(height, (max(column_heights, default=0) + 1.5) * grid.nrows, 5.5))
+            outside_legend(axis, handles, wrapped, ncols=columns, fontsize=7, columnspacing=1.1)
+        elif len(color_context["residuals"]) > 1:
+            from matplotlib.lines import Line2D
+            handles = [Line2D([], [], color="black",
+                             marker=_PROVENANCE_MARKERS[index] if style != "line" else None,
+                             linestyle=_PROVENANCE_LINES[index] if style != "points" else "none",
+                             markersize=4, linewidth=1)
+                       for index in range(len(color_context["residuals"]))]
+            axis.legend(handles, [textwrap.fill(_series_label(identity, True), width=44, break_on_hyphens=False)
+                                  for identity in color_context["residuals"]], loc="best", fontsize=7)
     report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), **quality, "selected_row_count": len(rows), "plotted_row_count": len(valid),
               "omitted_missing_or_nonfinite_count": len(kept)-len(valid),
               "displayed_point_count": sum(_is_numeric(p["y"]) for p in summaries),
               "statistics": mode, "legend_labels": legend_labels,
+              **_curve_legend_report(len(visible), spec, color_context),
               "group_keys": list(group_keys),
               "show_legend": bool(spec.get("show_legend", True)),
               "replication_unit": "formal repeats within the same source/run/condition/attempt",
@@ -883,23 +979,32 @@ def render_plot(rows: Sequence[Mapping[str, Any]], spec: Mapping[str, Any]):
         try:
             if mode == "field":
                 figure, axes = plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
+                prepared = [_prepare_curve(selected, spec, x, key) for key in plot_keys[1:]]
+                colors = _curve_color_context(prepared, spec, selected)
                 reports, raw, summary = {}, [], []
-                for axis, key in zip(axes.flat, plot_keys[1:]):
-                    panel = _draw_curve(axis, selected, {**spec, "title": column_label(key, selected)}, x, key)
+                for axis, key, data in zip(axes.flat, plot_keys[1:], prepared):
+                    panel = _draw_curve(axis, selected, {**spec, "title": column_label(key, selected)}, x, key,
+                                        prepared=data, color_context=colors)
                     reports[key] = panel["report"]
                     raw.extend({**r, "plot_channel": key} for r in panel["rows"])
                     summary.extend(panel["summary_rows"])
                 figure.suptitle(_audit_title(selected) + (spec.get("title") or "Vxx / Vxy · h1 / h2"))
+                _add_curve_colorbar(figure, list(axes.flat), colors, spec)
+                curve_count = len({series["identity"] for data in prepared for series in data["series"] if series["drawable"]})
                 report = {"manual_excluded_sample_ids": list(spec.get("excluded_sample_ids", ())), "mode": mode, "channels": reports, "selected_row_count": len(selected),
                           "plotted_row_count": len(raw), "excluded_quality_count": sum(r['excluded_quality_count'] for r in reports.values()),
                           "omitted_missing_or_nonfinite_count": sum(r['omitted_missing_or_nonfinite_count'] for r in reports.values()),
                           "statistics": spec.get("statistics", "raw"),
+                          **_curve_legend_report(curve_count, spec, colors),
                           "group_keys": list(effective_groups),
                           "source_paths": sorted({p for r in reports.values() for p in r['source_paths']})}
                 return figure, {"rows": tuple(raw), "summary_rows": summary, "report": report}
             figure, axis = plt.subplots(figsize=PUBLICATION_WIDE_FIGSIZE, layout="constrained")
             if mode == "curve":
-                data = _draw_curve(axis, selected, spec, x, y)
+                prepared = _prepare_curve(selected, spec, x, y)
+                colors = _curve_color_context([prepared], spec, selected)
+                data = _draw_curve(axis, selected, spec, x, y, prepared=prepared, color_context=colors)
+                _add_curve_colorbar(figure, axis, colors, spec)
                 axis.set_title(_audit_title(selected) + axis.get_title())
                 data["report"]["mode"] = mode
                 return figure, data
@@ -1321,7 +1426,7 @@ class UnifiedPlotDashboard:
             widgets.HBox([x_axis, component if mode == "field" else y_axis], layout=widgets.Layout(width="100%")),
             group_axis if mode in {"curve", "field"} else z_axis,
             show_legend,
-            widgets.HTML("Heatmap: recorded requested grid when available; runs and sweep segments are separate panels. Gray means missing/excluded. Raw requires one sample per cell; choose Mean for formal repeats. No interpolation." if mode == "heatmap" else "XY–Z scatter retains measured coordinates. Use a segment filter to view one hysteresis branch." if mode == "xy_z" else "Curve legends remain visible for more than 12 traces."),
+            widgets.HTML("Heatmap: recorded requested grid when available; runs and sweep segments are separate panels. Gray means missing/excluded. Raw requires one sample per cell; choose Mean for formal repeats. No interpolation." if mode == "heatmap" else "XY–Z scatter retains measured coordinates. Use a segment filter to view one hysteresis branch." if mode == "xy_z" else "10 or more curves use a gradient colorbar; fewer curves use a legend."),
             widgets.HBox([statistics, quality], layout=widgets.Layout(width="100%")),
             widgets.HTML("SD: scatter of formal repeats; SEM: SD/√n assumes independent repeats. Missing status stays unknown. n and exclusions are exported."),
             excluded,
