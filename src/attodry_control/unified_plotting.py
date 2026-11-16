@@ -564,11 +564,20 @@ def _sort_value(value: Any) -> tuple[int, Any]:
 def _filter_rows(
     rows: Sequence[Mapping[str, Any]], filters: Mapping[str, Sequence[Any]] | None
 ) -> tuple[dict[str, Any], ...]:
+    # Exact Python equality is retained, including bool/number equivalence.
+    # Unhashable and nonfinite audit values keep the historical comparison path.
+    def hashable_scalar(value):
+        return value is None or type(value) in (str, bool, int) or (
+            type(value) is float and math.isfinite(value))
+
+    prepared = [(key, frozenset(values) if all(hashable_scalar(v) for v in values) else None, values)
+                for key, values in (filters or {}).items()]
     selected = []
     for row in rows:
         if all(
-            any(row.get(key) == value for value in values)
-            for key, values in (filters or {}).items()
+            row.get(key) in lookup if lookup is not None and hashable_scalar(row.get(key))
+            else any(row.get(key) == value for value in values)
+            for key, lookup, values in prepared
         ):
             selected.append(dict(row))
     return tuple(selected)
@@ -788,17 +797,19 @@ def _curve_color_context(panels, spec, rows):
     if len(identities) < 10:
         return None
     group_keys = spec.get("_effective_group_keys", ())
+    identity_values = tuple(dict(identity) for identity in identities)
     numeric_keys = [key for key in group_keys
-                    if all(_is_numeric(dict(identity).get(key)) for identity in identities)
-                    and len({dict(identity)[key] for identity in identities}) > 1]
+                    if all(_is_numeric(values.get(key)) for values in identity_values)
+                    and len({values[key] for values in identity_values}) > 1]
     temperatures = [key for key in numeric_keys
                     if _dimension_module(key) == "temperature"
                     or key.rsplit(".", 1)[-1].endswith("temperature_k")]
     field = temperatures[0] if temperatures else numeric_keys[0] if len(numeric_keys) == 1 else None
     residuals, varying = (), set()
     if field:
-        varying = {key for identity in identities for key, _ in identity
-                   if key != field and len({dict(item).get(key) for item in identities}) > 1}
+        keys = {key for identity in identities for key, _ in identity}
+        varying = {key for key in keys if key != field
+                   and len({values.get(key) for values in identity_values}) > 1}
         residuals = tuple(dict.fromkeys(tuple((key, value) for key, value in identity if key in varying)
                                       for identity in identities))
         # A second large categorical legend would recreate the original problem.
@@ -1352,6 +1363,7 @@ class UnifiedPlotDashboard:
         stacked = _stacked_filter_keys({**default_spec, "mode": mode})
         title = widgets.Text(
             value=str(default_spec.get("title", "")), description="Title:",
+            continuous_update=False,
             layout=widgets.Layout(width="100%"),
         )
         checklist = _CheckboxSourceList(widgets, lambda: self._card_changed(card))
@@ -1442,8 +1454,11 @@ class UnifiedPlotDashboard:
         remove_button.on_click(lambda _button, target=card: self._remove_card(target))
         render_card_button.on_click(lambda _button, target=card: self._render_card(target))
         add_filter_button.on_click(lambda _button, target=card: self._add_filter(target))
-        for control in (runs, x_axis, y_axis, z_axis, group_axis, curve_style, x_scale, y_scale, title, statistics, quality, component, show_legend):
-            control.observe(lambda _change, target=card: self._card_changed(target), names="value")
+        runs.observe(lambda _change, target=card: self._card_changed(target), names="value")
+        for control in (x_axis, y_axis, z_axis, group_axis):
+            control.observe(lambda _change, target=card: self._card_selection_changed(target), names="value")
+        for control in (curve_style, x_scale, y_scale, title, statistics, quality, component, show_legend):
+            control.observe(lambda _change, target=card: self._presentation_changed(target), names="value")
         excluded.observe(lambda _change, target=card: self._exclusions_changed(target), names="value")
         self.cards.append(card)
         self.card_box.children = tuple(item["widget"] for item in self.cards)
@@ -1563,10 +1578,16 @@ class UnifiedPlotDashboard:
         return (str(source.path), runs, bool(self.include_audit.value),
                 bool(self.preview_active.value), self._refresh_generation)
 
-    def _selected_rows(self, card: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    def _selected_rows(self, card: dict[str, Any], *, copy_rows: bool = True) -> tuple[dict[str, Any], ...]:
+        """Detach rows for callers; UI consumers borrow the private read-only cache."""
         include_audit = bool(self.include_audit.value)
+        groups = tuple(self._source_groups(card))
+        selection_key = tuple(self._cache_key(source, runs) for source, runs in groups)
+        if card.get("_rows_key") == selection_key:
+            rows = card["_rows"]
+            return tuple(copy.deepcopy(row) for row in rows) if copy_rows else rows
         result = []
-        for source, runs in self._source_groups(card):
+        for source, runs in groups:
             cache_key = self._cache_key(source, runs)
             if cache_key not in self._cache:
                 if source.kind == "combination_sqlite":
@@ -1580,8 +1601,23 @@ class UnifiedPlotDashboard:
                     if _source_signature(source.path) != signature:
                         raise ValueError("A source changed while loading. Refresh records and try again.")
                     self._cache[cache_key] = _LoadedSource(rows, signature)
-            result.extend(copy.deepcopy(row) for row in self._cache[cache_key].rows)
-        return tuple(result)
+            result.extend(self._cache[cache_key].rows)
+        rows = tuple(result)
+        card["_rows_key"], card["_rows"] = selection_key, rows
+        card.pop("_column_options", None)
+        card["_column_values"] = {}
+        return tuple(copy.deepcopy(row) for row in rows) if copy_rows else rows
+
+    def _column_options(self, card, rows):
+        if "_column_options" not in card:
+            card["_column_options"] = numeric_columns(rows), scalar_columns(rows)
+        return card["_column_options"]
+
+    def _column_values(self, card, rows, key):
+        cache = card.setdefault("_column_values", {})
+        if key not in cache:
+            cache[key] = column_values(rows, key)
+        return cache[key]
 
     def _loaded_signatures(self, card: dict[str, Any]) -> dict[str, tuple]:
         signatures = {}
@@ -1612,17 +1648,16 @@ class UnifiedPlotDashboard:
         card["updating"] = True
         try:
             self._update_run_options(card)
-            rows = self._selected_rows(card)
+            rows = self._selected_rows(card, copy_rows=False)
             card["snapshot_status"].value = self._snapshot_text(card)
-            axes = numeric_columns(rows)
-            scalars = scalar_columns(rows)
+            axes, scalars = self._column_options(card, rows)
             for key in ("x", "y", "z"):
                 control = card[key]
                 old = control.value
                 control.options = axes
                 control.value = old if old in {value for _, value in axes} else (axes[0][1] if axes else None)
                 if old is None and card["mode"] == "field" and key == "x":
-                    preferred = next((k for k in ("actual.field_x_t", "actual.field_z_t", "requested.field_x_t", "requested.field_z_t") if k in {v for _, v in axes} and len(column_values(rows, k)) > 1), None)
+                    preferred = next((k for k in ("actual.field_x_t", "actual.field_z_t", "requested.field_x_t", "requested.field_z_t") if k in {v for _, v in axes} and len(self._column_values(card, rows, k)) > 1), None)
                     if preferred:
                         control.value = preferred
             group = card["group"]
@@ -1630,17 +1665,8 @@ class UnifiedPlotDashboard:
             group.options = [("None", "")] + list(scalars)
             group.value = old_group if old_group in {value for _, value in scalars} else ""
             for filter_row in card["filters"]:
-                self._update_filter_row(card, filter_row, force=True)
-            visible = _filter_rows(rows, self._selected_filters(card))
-            context = self._exclusion_context_keys(rows, card)
-            card["excluded"].options = [(self._exclusion_label(r, context), _sample_token(r)) for r in visible]
-            available_ids = {v for _, v in card["excluded"].options}
-            card["excluded"].value = tuple(v for v in card["excluded_ids"] if v in available_ids)
-            hidden = sum(v not in available_ids for v in card["excluded_ids"])
-            card["exclusion_status"].value = (
-                f"{len(visible)} observations in the current filters; {len(card['excluded_ids'])} excluded. "
-                + (f"{hidden} excluded observations outside the current selection are retained; "
-                   "change filters/run selection to review them." if hidden else ""))
+                self._update_filter_row(card, filter_row, force=True, rows=rows, scalar_options=scalars)
+            self._update_exclusion_options(card, rows)
         except Exception as exc:
             card["snapshot_status"].value = ""
             card["output"].clear_output(wait=False)
@@ -1655,6 +1681,36 @@ class UnifiedPlotDashboard:
         self._invalidate_card(card)
         self._update_card_options(card)
 
+    def _presentation_changed(self, card):
+        if not card.get("updating"):
+            self._invalidate_card(card)
+
+    def _card_selection_changed(self, card):
+        if card.get("updating"):
+            return
+        self._invalidate_card(card)
+        card["updating"] = True
+        try:
+            rows = self._selected_rows(card, copy_rows=False)
+            self._update_exclusion_options(card, rows)
+        finally:
+            card["updating"] = False
+
+    def _update_exclusion_options(self, card, rows):
+        visible = _filter_rows(rows, self._selected_filters(card))
+        context = self._exclusion_context_keys(rows, card)
+        card["excluded"].options = [(self._exclusion_label(r, context), _sample_token(r)) for r in visible]
+        available_ids = {v for _, v in card["excluded"].options}
+        card["excluded"].value = tuple(v for v in card["excluded_ids"] if v in available_ids)
+        self._update_exclusion_status(card, available_ids)
+
+    def _update_exclusion_status(self, card, available_ids):
+        hidden = sum(v not in available_ids for v in card["excluded_ids"])
+        card["exclusion_status"].value = (
+            f"{len(card['excluded'].options)} observations in the current filters; {len(card['excluded_ids'])} excluded. "
+            + (f"{hidden} excluded observations outside the current selection are retained; "
+               "change filters/run selection to review them." if hidden else ""))
+
     def _selected_filters(self, card):
         return {row["field"].value: list(row["choices"].value)
                 for row in card["filters"] if row["field"].value}
@@ -1665,7 +1721,8 @@ class UnifiedPlotDashboard:
         visible = {token for _, token in card["excluded"].options}
         hidden = [token for token in card["excluded_ids"] if token not in visible]
         card["excluded_ids"] = tuple(dict.fromkeys((*hidden, *card["excluded"].value)))
-        self._card_changed(card)
+        self._update_exclusion_status(card, visible)
+        self._presentation_changed(card)
 
     def _exclusion_context_keys(self, rows, card):
         keys = [card["group"].value]
@@ -1678,7 +1735,7 @@ class UnifiedPlotDashboard:
         keys += [card["x"].value]
         available = {key for row in rows for key in row}
         candidates = [key for key in sorted(available) if key.startswith("requested.")
-                      and len(column_values(rows, key)) > 1]
+                      and len(self._column_values(card, rows, key)) > 1]
         for bare in ("excitation_frequency_hz", "excitation_current_rms_a", "lockin_frequency_hz"):
             candidates.append(next((prefix + bare for prefix in ("actual.", "requested.")
                                     if prefix + bare in available), ""))
@@ -1729,35 +1786,40 @@ class UnifiedPlotDashboard:
             widgets.HBox([field, remove], layout=widgets.Layout(width="100%")), choices, stack_control,
         ], layout=widgets.Layout(width="100%", padding="6px", border="1px solid #dedede"))
         card["filters"].append(row)
-        field.observe(lambda _change, target=card, entry=row: self._update_filter_row(target, entry), names="value")
-        field.observe(lambda _change, target=card: self._card_changed(target), names="value")
-        choices.observe(lambda _change, target=card: self._card_changed(target), names="value")
-        stack_control.observe(lambda _change, target=card: self._card_changed(target), names="value")
+        field.observe(lambda _change, target=card, entry=row: self._filter_dimension_changed(target, entry), names="value")
+        choices.observe(lambda _change, target=card: self._card_selection_changed(target), names="value")
+        stack_control.observe(lambda _change, target=card: self._card_selection_changed(target), names="value")
         remove.on_click(lambda _button, target=card, entry=row: self._remove_filter(target, entry))
         card["filter_box"].children = tuple(item["widget"] for item in card["filters"])
         self._update_filter_row(card, row, preferred_key=key)
-        self._card_changed(card)
+        self._card_selection_changed(card)
 
     def _remove_filter(self, card: dict[str, Any], row: dict[str, Any]) -> None:
         if row in card["filters"]:
             card["filters"].remove(row)
             card["filter_box"].children = tuple(item["widget"] for item in card["filters"])
-            self._card_changed(card)
+            self._card_selection_changed(card)
 
-    def _update_filter_row(self, card, row, preferred_key=None, *, force=False):
+    def _filter_dimension_changed(self, card, row):
+        if not card.get("updating"):
+            self._update_filter_row(card, row)
+            self._card_selection_changed(card)
+
+    def _update_filter_row(self, card, row, preferred_key=None, *, force=False, rows=None, scalar_options=None):
         if card.get("updating") and not force:
             return
         was_updating = card["updating"]
         card["updating"] = True
         try:
-            rows = self._selected_rows(card)
-            options = scalar_columns(rows)
+            if rows is None:
+                rows = self._selected_rows(card, copy_rows=False)
+            options = self._column_options(card, rows)[1] if scalar_options is None else scalar_options
             field = row["field"]
             key = preferred_key or field.value
             field.options = [("Choose dimension", "")] + list(options)
             field.value = key if key in {k for _, k in options} else ""
             key = field.value
-            values = column_values(rows, key) if key else ()
+            values = self._column_values(card, rows, key) if key else ()
             saved = row.get("saved_values")
             if saved is not None:
                 keep = saved
@@ -1800,7 +1862,7 @@ class UnifiedPlotDashboard:
         self._invalidate_card(card)
         card["output"].clear_output(wait=False)
         try:
-            rows = self._selected_rows(card)
+            rows = self._selected_rows(card, copy_rows=False)
             spec = self._card_spec(card)
             spec["source_paths"] = list(card["sources"].value)
             spec["source_signatures"] = self._loaded_signatures(card)
@@ -1809,6 +1871,9 @@ class UnifiedPlotDashboard:
                    for path, signature in spec["source_signatures"].items()):
                 raise ValueError("A source changed since loading. Refresh records before rendering.")
             figure, data = render_plot(rows, spec)
+            # This is the editable result/export boundary, not a UI option change.
+            # Detach its nested audit records from the shared input snapshot once.
+            data = copy.deepcopy(data)
             card["figure"] = figure
             card["rendered"] = {"figure": figure, "data": data, "spec": spec}
             import io

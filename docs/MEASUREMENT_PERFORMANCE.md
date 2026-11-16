@@ -4,6 +4,39 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## Unified plotting interactions (2026-11-16)
+
+Notebook option changes borrow private snapshot rows without copying full nested
+instrument histories. Full option updates select rows once for all filters;
+column catalogs and unique values are reused until the selection or refresh
+generation changes. Presentation changes invalidate only the current figure.
+Rendering detaches the selected result once for independent edits and export.
+Exact-value filtering uses sets for finite built-in scalars, preserving the
+historical equality path for nonfinite or unhashable audit values. Dense colorbar
+group checks traverse each key's identities once instead of once per curve.
+
+The loader reads run plans/cleanup once and removes these repeated columns from
+the sample JOIN. Native status and provenance remain complete; source validation
+and channel quality are retained. Snapshot normalization uses builtin fast paths
+with the identical digest and a generic Mapping fallback. SQLite connection
+ownership and the short read-only transaction remain unchanged. No instrument
+query/write, connection, settle, poll, retry or acquisition wait is introduced.
+
+A local 100-row repetition of one archived sample measured median load time
+0.866 s before and 0.606 s after (three repetitions), with identical rows and
+snapshot digests. This is a representative synthetic analysis workload, not a
+complete experiment, browser benchmark or measurement-throughput claim.
+For a separate 1260-row repeated-sample UI comparison with two filters, full
+option updates took 14.893 s before and 0.065 s after; changing the selected
+filter took 14.955 s and 0.013 s respectively, retaining the same 630 observations.
+Title invalidation took 14.557 s before and below 1 ms after. These single-action
+local backend timings exclude browser transfer and figure rendering; ordinary
+rendering still pays for detached selected output and Matplotlib drawing.
+Verification: 182 relevant offline tests and 81 subtests passed in 59.89 s,
+including 14 new interaction/equality/isolation/snapshot regressions. These tests
+cover preview, audit, terminal-prefix, legacy/execution provenance, quality,
+heatmaps, colorbars, statistics, exports and refresh behavior.
+
 ## Command-scoped magnetic boundaries (offline)
 
 Readback mode and previous nonzero command context are derived from already

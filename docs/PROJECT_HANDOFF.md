@@ -1,8 +1,26 @@
 # Project handoff
 
-Last updated: 2026-11-15
+Last updated: 2026-11-16
 
 ## Current stage
+
+### Unified plotting cache and loading performance (2026-11-16)
+
+- Reuse the private loaded snapshot for notebook option changes; each full
+  update obtains rows once, shares them across filters and caches column/value
+  catalogs. Presentation changes only invalidate that card's rendered figure.
+- Public selected rows and rendered/exported results remain detached, including
+  nested audit status. Filters preserve exact equality, hidden exclusions and
+  source/run/configuration/branch identities; Refresh still owns SQLite reloads.
+- Read run plans/cleanup once instead of repeating them per sample. Optimize
+  snapshot normalization without changing digest bytes or nonfinite handling.
+  Keep all raw status, channel qualification and CSV/statistical results.
+- User authorized origin delivery and LK_setup synchronization after offline
+  tests. Preserve target notebook edits and defer deployment if acquisition is
+  active. No instrument connection, acquisition change or scan restart is added.
+- Validation: 182 relevant offline tests and 81 subtests passed, including 14
+  new cache/ownership/equality/digest regressions. Representative two-filter UI
+  updates improved from 14.893 s to 0.065 s; browser/render costs are separate.
 
 ### Magnetic boundary and dense-curve plotting delivery (2026-11-15)
 

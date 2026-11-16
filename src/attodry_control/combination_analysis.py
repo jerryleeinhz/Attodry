@@ -1,7 +1,9 @@
 """Read-only common table and regrouping, independent of acquisition loop order."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import closing
+from copy import deepcopy
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,7 +11,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from .combination_store import SCHEMA_VERSION, open_readonly
 
@@ -45,6 +47,21 @@ class CombinationSnapshot:
 
 def _snapshot_json_value(value):
     """Preserve nonfinite raw readings while giving their digest standard JSON."""
+    # SQLite JSON is made of these exact builtins. Avoid generic Mapping checks
+    # for every scalar in the large archived native status trees.
+    kind = type(value)
+    if kind is dict:
+        return {key: _snapshot_json_value(item) for key, item in value.items()}
+    if kind in (tuple, list):
+        return [_snapshot_json_value(item) for item in value]
+    if kind is float:
+        if not math.isfinite(value):
+            return {"__nonfinite_float__": "nan" if math.isnan(value) else "inf" if value > 0 else "-inf"}
+        return value
+    if kind in (str, int, bool, type(None)):
+        return value
+    # Preserve the existing contract for callers supplying custom mappings or
+    # container/scalar subclasses rather than records decoded by json.loads.
     if isinstance(value, Mapping):
         return {key: _snapshot_json_value(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
@@ -149,7 +166,7 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
     with closing(open_readonly(path)) as connection:
         connection.execute("BEGIN")
         run_rows = connection.execute(
-            "SELECT run_id, schema_version, created_at_utc, status, error, cleanup_json "
+            "SELECT run_id, schema_version, created_at_utc, status, error, cleanup_json, plan_json "
             "FROM combination_runs" + clause + " ORDER BY created_at_utc, run_id", parameters,
         ).fetchall()
         if terminal_prefix:
@@ -167,9 +184,7 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
                     terminal_validation[run["run_id"]] = validate_accepted_records(connection, run["run_id"])
         where = clause.replace("run_id IN", "s.run_id IN")
         rows = connection.execute(f"""
-            SELECT r.schema_version, r.status AS run_status, r.error AS run_error,
-                   r.cleanup_json, r.plan_json,
-                   c.context_json, a.status AS attempt_status, s.*
+            SELECT c.context_json, a.status AS attempt_status, s.*
             FROM combination_samples s
             JOIN combination_runs r USING(run_id)
             JOIN combination_conditions c USING(run_id, condition_id)
@@ -193,7 +208,9 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
                 attempt_executions[key] = mapping["execution_id"]
     output = []
     plan_cache = {}
+    execution_cleanup_cache = {}
     cleanup_by_run = {}
+    run_by_id = {run["run_id"]: run for run in run_rows}
     runs = []
     for run in run_rows:
         if run["schema_version"] not in {1, SCHEMA_VERSION}:
@@ -206,15 +223,14 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
                      "final": run["status"] == "completed" and cleanup.get("clean") is True})
     source_path = str(Path(path).resolve())
     for row in rows:
-        if row["schema_version"] not in {1, SCHEMA_VERSION}:
-            raise ValueError("Unsupported combination schema")
+        run = run_by_id[row["run_id"]]
         sample = json.loads(row["payload_json"])
         cleanup = cleanup_by_run[row["run_id"]]
-        accepted = (row["attempt_status"] == "accepted" and row["run_status"] == "completed"
+        accepted = (row["attempt_status"] == "accepted" and run["status"] == "completed"
                     and cleanup.get("clean") is True and sample.get("clean") is True)
-        preliminary = (preview and row["run_status"] == "active"
+        preliminary = (preview and run["status"] == "active"
                        and row["attempt_status"] == "accepted" and sample.get("clean") is True)
-        partial_terminal = (terminal_prefix and row["run_status"] in {"failed", "interrupted"}
+        partial_terminal = (terminal_prefix and run["status"] in {"failed", "interrupted"}
                             and row["attempt_status"] == "accepted" and sample.get("clean") is True)
         if not audit and not accepted and not preliminary and not partial_terminal:
             continue
@@ -227,19 +243,23 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
                 raise ValueError("Formal sample lacks its archived execution/configuration")
             execution = run_executions[execution_id]
             plan_json = execution["plan_json"]
+            cleanup_key = row["run_id"], execution_id
+            if cleanup_key not in execution_cleanup_cache:
+                execution_cleanup_cache[cleanup_key] = json.loads(execution["cleanup_json"] or "{}")
             provenance = {
                 "execution_id": execution_id, "execution_index": execution["sequence_index"],
                 "execution_kind": execution["kind"], "execution_status": execution["status"],
                 "execution_error": execution["error"],
-                "execution_cleanup": json.loads(execution["cleanup_json"] or "{}"),
+                # Public rows historically own separate mutable cleanup dicts.
+                "execution_cleanup": deepcopy(execution_cleanup_cache[cleanup_key]),
             }
         else:
             # Schema-1 records remain readable without writing a migration. No
             # historical execution identity is invented by this read-only path.
-            plan_json = row["plan_json"]
+            plan_json = run["plan_json"]
             provenance = {"execution_id": None, "execution_index": 0,
-                "execution_kind": "legacy_unsegmented", "execution_status": row["run_status"],
-                "execution_error": row["run_error"], "execution_cleanup": cleanup}
+                "execution_kind": "legacy_unsegmented", "execution_status": run["status"],
+                "execution_error": run["error"], "execution_cleanup": cleanup}
         plan_key = row["run_id"], provenance["execution_id"]
         if plan_key not in plan_cache:
             execution_plan = json.loads(plan_json)
@@ -254,10 +274,10 @@ def load_combination_snapshot(path: str | Path, *, run_ids: Sequence[str] | None
             excitation_source=execution_plan.get("excitation_source"),
             measurement_contract=execution_plan.get("measurement_contract"))
         record = {
-            "schema_version": row["schema_version"], "source_path": source_path,
+            "schema_version": run["schema_version"], "source_path": source_path,
             "run_id": row["run_id"], "condition_id": row["condition_id"],
             "attempt_index": row["attempt_index"], "sample_index": row["sample_index"],
-            "accepted": accepted, "run_status": row["run_status"], "run_error": row["run_error"],
+            "accepted": accepted, "run_status": run["status"], "run_error": run["error"],
             "preview": bool(preliminary),
             "attempt_status": row["attempt_status"], "clean": sample["clean"],
             "sequence_index": context["sequence_index"], "repeat_index": context["repeat_index"],

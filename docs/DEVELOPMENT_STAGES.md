@@ -1,5 +1,21 @@
 # Development stages
 
+## Current: Unified plotting performance (2026-11-16)
+
+- Reuse cached observations within notebook interactions and share one rows
+  selection across filters. Cache column/value choices; update only affected
+  controls. Title, legend, styling and statistics changes invalidate the figure.
+- Keep detached public rows and rendered results so nested status mutations or
+  manual exclusions cannot contaminate another plot or the original snapshot.
+- Fetch run metadata once, retain a short SQLite transaction, and accelerate
+  snapshot digest traversal with identical output. Preserve legacy/execution,
+  preview/audit/terminal-prefix, quality and export contracts.
+- Add regression coverage for interactive update work, exclusion counts,
+  filter equality, isolation, refresh and exact snapshot/content parity.
+- Verification: 182 offline tests and 81 subtests passed in 59.89 s, including
+  14 new regressions. Representative data retains identical loaded rows and
+  snapshot digests; cached versus detached rendering retains selection/statistics.
+
 ## Current: Magnetic boundary and dense-curve plotting delivery (2026-11-15)
 
 - Combine the tested magnetic boundary policy and automatic plotting colorbars
