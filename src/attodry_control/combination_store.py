@@ -156,10 +156,13 @@ def _condition_lockin_range(snapshot, condition, index=None):
 
 def _validate_lockin_record(reading, snapshot, condition, start, finish, range_index=None):
     """Check archived formal pairs rather than trusting an accepted/clean label."""
-    from .lockin_overload import OverloadPolicy
+    from .lockin_overload import OverloadPolicy, OUTPUT_OVERLOAD_POLICY, nonblocking_native_analog_output
     from .lockin_model_settings import sensitivity_full_scale_for, time_constant_seconds_for
     from .lockin_capture_contract import SINGLE_ROLE_PAIR_POLICY, selected_sample_harmonic
     config = snapshot["hardware"]["lockin"]
+    output_policy = config.get("output_overload_policy")
+    if output_policy not in (None, OUTPUT_OVERLOAD_POLICY):
+        raise ValueError("Unknown archived native analog output policy")
     selections = config["harmonics_by_role"]
     selections = {("lockin_" + role if role in {"xx", "xy"} else role): tuple(values)
                   for role, values in selections.items()}
@@ -251,6 +254,26 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
                 raise ValueError("formal Lock-in settings readback is incomplete")
             role_config = config[role]
             model = role_config.get("model", "SR830")
+            if model == "SR865A":
+                marker = flags.get("output_overload_policy")
+                if marker is not None and marker != output_policy:
+                    raise ValueError("Native analog output policy differs from its execution")
+                if output_policy is None and flags["output_overload"]:
+                    raise ValueError("Legacy native output faults cannot use the new analog output exception")
+                if output_policy == OUTPUT_OVERLOAD_POLICY:
+                    if marker != OUTPUT_OVERLOAD_POLICY:
+                        raise ValueError("Native analog output policy evidence is missing")
+                    native = flags.get("native_status", {})
+                    current, latched = native.get("current_status_raw"), native.get("lia_status_raw")
+                    if (any(type(v) is not int or not 0 <= v <= 65535 for v in (current, latched))
+                            or flags.get("raw") != latched
+                            or flags.get("output_overload") != bool((current | latched) & 0xF03)
+                            or flags.get("input_or_reserve_overload") != bool((current | latched) & 0x10)
+                            or flags.get("filter_overload") != bool(latched & 0x60)
+                            or flags.get("reference_unlocked") != bool((current | latched) & 0x08)):
+                        raise ValueError("Native formal status contradicts its raw status words")
+                    if flags["output_overload"] and not nonblocking_native_analog_output(flags):
+                        raise ValueError("Native formal output fault is not the approved analog output status")
             if mixed_pair and model == "SR865A":
                 from .lockin_native_archive import validate_native_capture_proofs
                 validate_native_capture_proofs(before[role], after[role], role_config)

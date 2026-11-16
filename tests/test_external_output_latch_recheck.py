@@ -151,7 +151,7 @@ class RecoveredOutputLatchTests(unittest.TestCase):
                 self.assertFalse(any(kind == "lockin_formal_pair" for kind, _ in events))
 
     def test_current_overload_unlock_or_error_during_recheck_fails(self):
-        for extra in ({"CUROVLDSTAT?": "1"}, {"CUROVLDSTAT?": "8"}, {"ERRS?": "1"}):
+        for extra in ({"CUROVLDSTAT?": "256"}, {"CUROVLDSTAT?": "8"}, {"ERRS?": "1"}):
             with self.subTest(extra=extra):
                 f, _, session, clock, events, _ = self.ready()
                 self.inject(f, session, clock, recheck=lambda: f.xy.responses.update(extra))
@@ -223,16 +223,16 @@ class RecoveredOutputLatchTests(unittest.TestCase):
         self.assertEqual(len(self.proofs(events)), 2)
         self.assertTrue(all(p["completed"] for p in self.proofs(events)))
 
-    def test_formal_output_fault_after_successful_recheck_is_still_blocking(self):
+    def test_formal_data_channel_fault_after_successful_recheck_is_still_blocking(self):
         f, _, session, clock, events, _ = self.ready()
         self.inject(f, session, clock)
         session.qualify()
-        f.xy.responses["LIAS?"] = "1"
+        f.xy.responses["LIAS?"] = "256"
         with self.assertRaises(Sr830Error):
             session.sample_point()
         self.assertEqual(len(self.proofs(events)), 1)
 
-    def test_cleanup_output_latch_after_successful_recheck_is_still_blocking(self):
+    def test_cleanup_data_channel_latch_after_successful_recheck_is_still_blocking(self):
         f, _, session, clock, events, _ = self.ready()
         self.inject(f, session, clock)
         session.qualify()
@@ -240,7 +240,7 @@ class RecoveredOutputLatchTests(unittest.TestCase):
         sleep = clock.sleep
         def cleanup_latch(seconds):
             sleep(seconds)
-            f.xy.responses["LIAS?"] = "1"
+            f.xy.responses["LIAS?"] = "256"
         session.base_sleep = cleanup_latch
         result = session.cleanup()
         self.assertFalse(result["verified"])

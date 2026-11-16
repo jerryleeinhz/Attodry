@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 from .electrical_lockin_backend import native_status_problems
+from .lockin_overload import blocking_output_overload
 from .lockin_model_settings import model_name, receiver_invariant_targets, sensitivity_full_scale_for
 from .sr830 import Sr830Error, verify_fixed_settings_readback
 
@@ -29,7 +30,7 @@ def _status_problems(diagnostic, *, frequency_transition=False, time_constant_tr
         and (not native or diagnostic.native_status.locked is True)
     ):
         problems.append('reference unlocked')
-    if status.input_or_reserve_overload or status.filter_overload or (native and status.output_overload):
+    if status.input_or_reserve_overload or status.filter_overload or (native and blocking_output_overload(status)):
         problems.append('overload')
     if status.frequency_range_changed and not frequency_transition:
         problems.append('unexpected frequency-change latch')

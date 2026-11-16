@@ -1,5 +1,16 @@
 # Measurement timing and verification
 
+## Record-only SR865A analog output status (2026-11-17)
+
+The CH1/CH2 analog output classifier uses the existing four status replies and
+pure CPU checks. It adds zero queries, writes, settling sleeps, status resets,
+threads or retry budgets. Current/latched analog-only status follows the clean
+control's qualification/capture flow without another 10TC requalification.
+Raw output flags and default analysis exclusion remain intact. Input, digital
+Data Channel scaling, unknown, lock and error decisions retain their guards.
+New execution/status metadata bind archive interpretation; historical source
+migration gates do not change.
+
 ## Fresh snapshot and fixed-role capture reuse (2026-11-16)
 
 SR865A harmonic/sensitivity/time-constant compatibility fields now derive from

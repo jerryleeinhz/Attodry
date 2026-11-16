@@ -111,7 +111,7 @@ class PairApplyTests(unittest.TestCase):
         self.assertEqual(fixture.manager.opened, [])
 
     def test_preflight_faults_do_not_write(self):
-        for query, value in [('CUROVLDSTAT?', '4'), ('LIAS?', '1'), ('ERRS?', '1')]:
+        for query, value in [('CUROVLDSTAT?', '4'), ('LIAS?', '256'), ('ERRS?', '1')]:
             with self.subTest(query=query):
                 helper, fixture, _ = self.fixture()
                 fixture.xy.responses[query] = value

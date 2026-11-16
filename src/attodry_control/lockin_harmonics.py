@@ -10,7 +10,7 @@ import time
 import math
 from dataclasses import asdict
 
-from .lockin_overload import OverloadPolicy
+from .lockin_overload import OverloadPolicy, blocking_output_overload
 from .lockin_autorange import AutorangePolicy, AutorangeState
 from .sr830_settings import SensitivityMode
 from .lockin_settling import LockinSettling, SETTLING_POLICY
@@ -94,7 +94,7 @@ class HarmonicSensitivitySession:
             if getattr(status, "model", "SR830") == "SR865A":
                 from .electrical_lockin_backend import native_status_problems
                 blocking.extend(role + " " + p for p in native_status_problems(status))
-                if status.output_overload:
+                if blocking_output_overload(status):
                     blocking.append(role + " native output scale overload")
         if blocking:
             event["blocking_problems"] = blocking

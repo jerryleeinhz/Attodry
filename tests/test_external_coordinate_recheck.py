@@ -190,8 +190,8 @@ class ExternalCoordinateRecheckTests(unittest.TestCase):
                 self.assertEqual(self.proofs(events), [])
 
     def test_ongoing_or_latched_native_fault_blocks_initial_reobservation(self):
-        cases = (("xy", "CUROVLDSTAT?", "1"), ("xy", "CUROVLDSTAT?", "8"),
-                 ("xy", "CUROVLDSTAT?", "16"), ("xy", "LIAS?", "1"),
+        cases = (("xy", "CUROVLDSTAT?", "256"), ("xy", "CUROVLDSTAT?", "8"),
+                 ("xy", "CUROVLDSTAT?", "16"), ("xy", "LIAS?", "256"),
                  ("xy", "LIAS?", "8"), ("xy", "LIAS?", "32"),
                  ("xy", "ERRS?", "1"), ("xy", "*ESR?", "128"), ("xx", "LIAS?", "1"))
         for role, command, value in cases:
@@ -205,7 +205,7 @@ class ExternalCoordinateRecheckTests(unittest.TestCase):
                 self.assertFalse(any(kind == "lockin_formal_pair" for kind, _ in events))
 
     def test_native_fault_between_reobservations_rejects_even_when_next_pair_matches(self):
-        for role, command, value in (("xy", "CUROVLDSTAT?", "1"), ("xy", "LIAS?", "8"),
+        for role, command, value in (("xy", "CUROVLDSTAT?", "256"), ("xy", "LIAS?", "8"),
                                       ("xy", "ERRS?", "1"), ("xx", "LIAS?", "2")):
             with self.subTest(role=role, command=command):
                 f, _, session, clock, events, _ = self.prepared()

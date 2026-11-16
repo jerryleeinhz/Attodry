@@ -280,8 +280,8 @@ class ElectricalPairTests(unittest.TestCase):
         with self.assertRaisesRegex(ElectricalLockinError, "incomplete"):
             controller.verify_existing_configuration(frequency_hz=50027)
 
-    def test_sr865a_output_scale_unlock_and_unknown_faults_remain_strict(self):
-        for command, value in (("LIAS?", "1"), ("CUROVLDSTAT?", "8"),
+    def test_sr865a_data_channel_unlock_and_unknown_faults_remain_strict(self):
+        for command, value in (("LIAS?", "256"), ("CUROVLDSTAT?", "8"),
                                ("LIAS?", "4"), ("*ESR?", "32")):
             controller, xx_resource, xy_resource = self.pair()
             xy_resource.responses[command] = value

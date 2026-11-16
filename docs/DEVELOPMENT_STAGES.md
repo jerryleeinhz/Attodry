@@ -1,5 +1,20 @@
 # Development stages
 
+
+## Current: SR865A analog output overload continuation (2026-11-17)
+
+- CH1/CH2 analog output scaling bits 0/1 in current or latched SR865A status
+  are record-only when complete raw evidence proves no other fault. Digital
+  data-channel scaling, input/unlock/unknown/error and source protections remain.
+- Raw overload/validity and default analysis exclusions remain unchanged;
+  additive execution/status policy prevents historical records being relabelled.
+- Offline verification: 169 affected tests and all 10 full-scan/archive
+  integration tests pass, including current/latched combinations, raw-proof
+  tampering, legacy records and exact query/write/wait trace comparisons.
+- Pure CPU classification adds no I/O, settling, resets or range changes.
+- Offline regression and target verification are required before delivery and
+  the separately authorized Bz -> Bx -> temperature sequence.
+
 ## Current: Fixed-role capture and snapshot deduplication (2026-11-16)
 
 - Share one physical serial pair for combination fixed singleton roles with

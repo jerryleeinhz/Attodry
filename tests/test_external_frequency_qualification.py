@@ -154,8 +154,8 @@ class ExternalFrequencyPendingTests(unittest.TestCase):
         self.assertFalse(self.proof(events).get("frequency_pending_observed", False))
 
     def test_initial_mismatch_with_nonreference_status_cannot_open_pending_window(self):
-        cases = (("xy", "CUROVLDSTAT?", "1"), ("xy", "CUROVLDSTAT?", "16"),
-                 ("xy", "LIAS?", "1"), ("xy", "LIAS?", "16"),
+        cases = (("xy", "CUROVLDSTAT?", "256"), ("xy", "CUROVLDSTAT?", "16"),
+                 ("xy", "LIAS?", "256"), ("xy", "LIAS?", "16"),
                  ("xy", "LIAS?", "32"), ("xy", "ERRS?", "1"),
                  ("xy", "*ESR?", "128"), ("xx", "LIAS?", "1"))
         for role, command, value in cases:
@@ -168,8 +168,8 @@ class ExternalFrequencyPendingTests(unittest.TestCase):
                 self.assertEqual(clock.waits, [])
 
     def test_fault_between_pending_polls_is_not_consumed_even_if_frequency_recovers(self):
-        cases = (("xy", "CUROVLDSTAT?", "1"), ("xy", "CUROVLDSTAT?", "16"),
-                 ("xy", "LIAS?", "1"), ("xy", "LIAS?", "32"),
+        cases = (("xy", "CUROVLDSTAT?", "256"), ("xy", "CUROVLDSTAT?", "16"),
+                 ("xy", "LIAS?", "256"), ("xy", "LIAS?", "32"),
                  ("xy", "ERRS?", "1"), ("xy", "*ESR?", "64"),
                  ("xy", "CUROVLDSTAT?", "4"), ("xx", "LIAS?", "2"))
         for role, command, value in cases:

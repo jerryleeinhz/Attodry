@@ -1,13 +1,98 @@
 """Explicit acquisition exception for overloads; never erase the raw fault.
 
-This policy is applied only after the existing settled status recheck. Setup,
-cleanup, communication and all non-overload checks remain fail closed.
+The acquisition overload policy applies after the existing settled recheck.
+Separately, fully proven SR865A CH1/CH2 analog output scaling is record-only at
+live decision gates. Input/digital-channel faults and incomplete evidence
+retain their guards; neither rule erases raw quality flags.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 
 OVERLOAD_POLICIES = ("abort", "continue_unselected", "record_continue")
+OUTPUT_OVERLOAD_POLICY = "sr865a-analog-output-record-only-v1"
+
+
+def _value(value, key):
+    return value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
+
+
+def _native_analog_output_proof(native):
+    """Prove analog CH1/CH2 output scaling, with no other current/latched fault."""
+    words = {key: _value(native, key) for key in (
+        "current_status_raw", "lia_status_raw", "error_status_raw",
+        "standard_event_status_raw", "unknown_status_bits")}
+    if (any(type(value) is not int for value in words.values())
+            or words["error_status_raw"] != 0
+            or words["standard_event_status_raw"] != 0 or words["unknown_status_bits"] != 0):
+        return False
+    current, lia = words["current_status_raw"], words["lia_status_raw"]
+    if (not 0 <= current <= 3 or not 0 <= lia <= 0xFFFF
+            or lia & ~0x7083 or not (current | lia) & 0x3):
+        return False
+    expected = {"locked": True, "consumed_status_latches": True,
+        "output_scale_overload_latched": bool(lia & 0x3), "input_overload": False,
+        "output_scale_overload": bool(current & 0x3), "instrument_error": False,
+        "reference_unlock_latched": False, "input_overload_latched": False,
+        "filter_fault_latched": False, "configuration_changed_latched": False,
+        "power_on_latched": False}
+    if any(_value(native, key) is not value for key, value in expected.items()):
+        return False
+    raw = _value(native, "raw")
+    if not isinstance(raw, (list, tuple)) or len(raw) != 4:
+        return False
+    for record, command, value in zip(raw, ("CUROVLDSTAT?", "LIAS?", "ERRS?", "*ESR?"),
+                                      (current, lia, 0, 0)):
+        response = _value(record, "response")
+        has_error = "error" in record if isinstance(record, Mapping) else hasattr(record, "error")
+        if (not has_error or _value(record, "command") != command or _value(record, "error") is not None
+                or not isinstance(response, str) or re.fullmatch(r"[+]?\d+", response.strip()) is None
+                or int(response.strip()) != value):
+            return False
+    return True
+
+
+def nonblocking_native_analog_output(status):
+    """Only fully evidenced native CH1/CH2 output scaling is record-only.
+
+    Raw overload flags and measurement quality remain unchanged. In particular,
+    unknown evidence, data-channel scaling and input/reference faults fail.
+    """
+    if (_value(status, "model") != "SR865A"
+            or _value(status, "output_overload_policy") != OUTPUT_OVERLOAD_POLICY):
+        return False
+    expected = {"status_known": True, "output_overload": True,
+        "input_or_reserve_overload": False, "filter_overload": False,
+        "reference_unlocked": False, "frequency_range_changed": False,
+        "time_constant_changed": False, "configuration_changed_latched": False,
+        "power_on_latched": False, "instrument_error": False}
+    if any(_value(status, key) is not value for key, value in expected.items()):
+        return False
+    native = _value(status, "native_status")
+    return (type(_value(status, "raw")) is int
+            and type(_value(status, "unknown_status_bits")) is int
+            and _value(status, "unknown_status_bits") == 0
+            and _value(status, "raw") == _value(native, "lia_status_raw")
+            and _native_analog_output_proof(native))
+
+
+def blocking_output_overload(status):
+    """Decision view only; never rewrite the recorded output-overload flag."""
+    if nonblocking_native_analog_output(status):
+        return False
+    if _value(status, "output_overload") is not False:
+        return True
+    if _value(status, "model") == "SR865A":
+        native = _value(status, "native_status")
+        # A forged clear aggregate must not mask contradictory native evidence.
+        return any(type(_value(native, key)) is int and _value(native, key) & 0xF03
+                   for key in ("current_status_raw", "lia_status_raw")) or any(
+                       _value(native, key) is True for key in
+                       ("output_scale_overload", "output_scale_overload_latched"))
+    return False
+
+
 _FAULTS = {f"lockin_{role} {fault}{stage}": f"lockin_{role}"
            for role in ("xx", "xy")
            for fault in ("input/reserve overload", "filter overload")

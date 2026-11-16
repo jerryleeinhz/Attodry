@@ -171,7 +171,8 @@ class LockinPointSession:
         for diagnostic in self.preflight:
             role = "lockin_" + diagnostic.role.value
             problems.extend(_status_problems(diagnostic))
-            if diagnostic.lia_status is not None and diagnostic.lia_status.output_overload:
+            from .lockin_overload import blocking_output_overload
+            if diagnostic.lia_status is not None and blocking_output_overload(diagnostic.lia_status):
                 problems.append(role + ": output overload at recovery baseline")
             if diagnostic.harmonic != 1:
                 problems.append(role + ": recovery baseline must be h1")

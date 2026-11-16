@@ -1,5 +1,22 @@
 # Hardware and safety guide
 
+## SR865A CH1/CH2 analog output overload is record-only (2026-11-17)
+
+The operator explicitly removed CH1 and CH2 analog output scale overload as
+stop criteria, including current and latched bits 0/1 (weights 1/2). A complete
+consistent four-query status proof must show known input, lock and error states.
+Retain every native reply, aggregate output-overload flag and existing per-role
+analysis quality. A flagged XY observation remains excluded by default.
+
+Digital Data Channels 1-4 scale bits 8-11, input overload, unlock, unknown or
+contradictory status, instrument/transport errors and all source, field,
+temperature and SMU protections retain their checks. No automatic range change,
+status reset, extra settling or retry is added by this policy. It does not expand
+record_continue's other faults. New status and execution metadata declare
+`sr865a-analog-output-record-only-v1`; archive validation rederives it from the
+original four replies and matching execution policy. Historical failures,
+rejected data and source-transition/recovery restrictions remain unchanged.
+
 ## Fresh capture reuse (2026-11-16)
 
 Combination fixed singleton roles at different harmonics may share one real
@@ -139,7 +156,8 @@ Start one fresh complete shared settling window, then require strict clean
 native status, unchanged detector settings and matching coordinates. Repeated
 latches, ongoing faults, transport/audit failures and changed settings reject;
 repeated qualification cannot reset the budget. This is not permission to accept
-an output-overloaded formal sample. Formal capture, cleanup, other topologies
+an output-overloaded formal sample, except for the separately approved
+2026-11-17 record-only analog output policy above. Formal capture, cleanup, other topologies
 and policies, and 6221 compliance/interlock protections retain their checks.
 
 ## Explicit external AC topology (offline implementation, 2026-11-13)

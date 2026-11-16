@@ -462,7 +462,8 @@ class Sr865a:
                     raise Sr865aError(message + " Recheck requires authorized complete current/latched status.")
                 status = self.read_status(consume_status_latches=True, current_status_supported=True)
                 checks[-1] = replace(checks[-1], status=status)
-                if status.valid is not True:
+                from .lockin_overload import _native_analog_output_proof
+                if status.valid is not True and not _native_analog_output_proof(status):
                     raise Sr865aError(message + " Frequency recheck blocked by unsafe/unknown status.")
                 if attempt == EXTERNAL_FREQUENCY_MAX_RECHECKS + 1:
                     raise Sr865aError(message + f" Frequency checks exhausted ({attempt}/{attempt}).")

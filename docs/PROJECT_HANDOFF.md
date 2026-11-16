@@ -1,8 +1,28 @@
 # Project handoff
 
-Last updated: 2026-11-16
+Last updated: 2026-11-17
 
 ## Current stage
+
+
+### SR865A analog output overload continuation (2026-11-17)
+
+- User approved removal of CH1/CH2 analog output scale overload, current and
+  latched (bits 0/1), as a stop criterion. Native raw replies and output/quality
+  flags remain; only the decision view changes. Digital data-channel scaling,
+  input/unknown/error/unlock faults and source/field/thermal protections retain
+  their guards and cleanup.
+- Bind new capture status to `sr865a-analog-output-record-only-v1` in the same
+  execution and verify original four status replies during archive review.
+  Preserve legacy decisions, rejected data and source-version recovery gates.
+- Offline verification: 169 affected tests and all 10 full-scan/archive
+  integration tests pass, including current/latched combinations, raw-proof
+  tampering, legacy records and exact query/write/wait trace comparisons.
+- No extra instrument query, setting write, sleep, status reset or automatic
+  range change is added. Preserve station TOMLs and edited notebooks on delivery.
+- The operator has authorized a new Bz run followed by Bx and temperature using
+  the reviewed private plans; unsupported source migration must not relabel the
+  earlier accepted prefix. Software tests and deployment precede hardware start.
 
 ### Shared fixed-role capture and fresh snapshot reuse (2026-11-16)
 

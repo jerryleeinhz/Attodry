@@ -12,6 +12,7 @@ import math
 import time
 
 from .models import LockinRole
+from .lockin_overload import OUTPUT_OVERLOAD_POLICY, blocking_output_overload
 from .sr830 import (AuthorizationRequired, DualSr830Controller, Sr830, Sr830Error,
                     MINIMUM_SINE_OUTPUT_V, PAIR_FREQUENCY_ABS_TOLERANCE_HZ)
 from .sr865a import QueryRecord, Sr865a, Sr865aError, Sr865aStatus
@@ -61,6 +62,7 @@ class ElectricalLiaStatus:
     power_on_latched: bool | None = None
     instrument_error: bool | None = None
     native_status: Sr865aStatus | None = None
+    output_overload_policy: str = OUTPUT_OVERLOAD_POLICY
 
     @property
     def any_overload(self) -> bool:
@@ -505,7 +507,7 @@ class ElectricalPairController:
                     problems.append(f"{role} input/reserve overload")
                 if status.filter_overload:
                     problems.append(f"{role} filter overload")
-                if status.output_overload and (role == "lockin_xy" or not ignore_output_overload):
+                if blocking_output_overload(status) and (role == "lockin_xy" or not ignore_output_overload):
                     problems.append(f"{role} output-scale overload")
                 if diagnostic.error_status:
                     problems.append(f"{role} instrument error {diagnostic.error_status}")

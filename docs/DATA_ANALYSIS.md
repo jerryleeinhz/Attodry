@@ -918,3 +918,15 @@ An immediate environmental snapshot may retain its original `before_sample`
 stage when reused for the first formal environmental module. Original evidence
 time/identity is preserved, with explicit reuse provenance. Window statistics
 count it once; later formal before/after observations remain separate reads.
+
+
+## SR865A CH1/CH2 analog output status (2026-11-17)
+
+New captures may continue past proven CH1/CH2 analog output scale overload in
+current or latched status. Native LIAS/CUROVLDSTAT replies and decoded
+output_overload/reading.overload fields stay unchanged. Existing per-role quality
+still excludes the flagged XY observation by default; clean XX and other groups
+remain available. This removes interruption, not analysis exclusions. Digital
+Data Channel scaling, input, unlock, unknown and error faults keep their guards.
+The versioned execution and status policy must match during archive validation;
+old failed/rejected records retain their original identities and decisions.

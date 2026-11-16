@@ -19,7 +19,8 @@ from .combination_store import utc_now
 from .electrical_lockin_backend import Sr865aReceiver, native_status_problems
 from .lockin_harmonics import HarmonicSensitivitySession
 from .lockin_points import LockinPointSession, _AuditedInstrument
-from .lockin_overload import OVERLOAD_POLICIES
+from .lockin_overload import (OVERLOAD_POLICIES, blocking_output_overload,
+                              nonblocking_native_analog_output)
 from .models import LockinRole
 from .sr830 import Sr830, Sr830Error, AuthorizationRequired
 
@@ -196,7 +197,8 @@ class ExternalLockinPointSession(LockinPointSession):
                 problems.extend(role + " " + p for p in native_status_problems(status))
                 if initial_baseline and status.native_status.input_overload is not False:
                     problems.append(role + " current input overload or unknown input state")
-                if initial_baseline and status.native_status.output_scale_overload is not False:
+                if (initial_baseline and status.native_status.output_scale_overload is not False
+                        and not nonblocking_native_analog_output(status)):
                     problems.append(role + " current scale overload or unknown scale state")
             elif status.raw < 0 or status.raw & ~0x7f:
                 problems.append(role + " unknown native status")
@@ -213,7 +215,7 @@ class ExternalLockinPointSession(LockinPointSession):
                     problems.extend(blocking)
                 else:
                     problems.extend(overloads)
-                if status.output_overload and (role == "lockin_xy" or not acquisition):
+                if blocking_output_overload(status) and (role == "lockin_xy" or not acquisition):
                     problems.append(role + " output overload")
             if not (transition or initial_baseline) and (status.time_constant_changed or status.frequency_range_changed):
                 problems.append(role + " unexpected detector setting change")
@@ -544,8 +546,11 @@ class ExternalLockinPointSession(LockinPointSession):
         xx, xy = (evidence['roles'][role] for role in ('lockin_xx', 'lockin_xy'))
         native = xy['lia_status']['native_status']
         if (evidence['problems'] or xx['error_status'] != 0 or xx['lia_status']['raw'] != 0
-                or xy['error_status'] != 0 or native['current_status_raw'] != 0
-                or native['lia_status_raw'] not in (0, 8)
+                or xy['error_status'] != 0
+                or (native['current_status_raw'] != 0
+                    and not nonblocking_native_analog_output(xy['lia_status']))
+                or (native['lia_status_raw'] not in (0, 8)
+                    and not nonblocking_native_analog_output(xy['lia_status']))
                 or native['error_status_raw'] != 0 or native['standard_event_status_raw'] != 0
                 or native['unknown_status_bits'] != 0 or native['locked'] is not True
                 or native['consumed_status_latches'] is not True):

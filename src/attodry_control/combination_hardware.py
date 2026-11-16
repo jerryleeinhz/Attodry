@@ -218,6 +218,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         hardware["lockin"]["harmonics_by_role"] = prepared.harmonics_by_role
         from .lockin_capture_contract import SINGLE_ROLE_PAIR_POLICY
         hardware["lockin"]["capture_policy"] = SINGLE_ROLE_PAIR_POLICY
+        from .lockin_overload import OUTPUT_OVERLOAD_POLICY
+        hardware["lockin"]["output_overload_policy"] = OUTPUT_OVERLOAD_POLICY
         hardware["lockin"]["skipped_harmonics_by_frequency"] = prepared.skipped_by_frequency
     addresses = []
     if smu is not None:
