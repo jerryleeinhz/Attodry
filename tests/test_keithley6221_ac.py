@@ -319,9 +319,8 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(resource.commands, [])
         self.assertFalse(driver.cleanup()["output_off_confirmed"])
 
-    def test_preflight_requires_identity_exact_model_off_zero(self):
-        for key, value in (("*IDN", "KEITHLEY,MODEL 6220,123,A03"), ("OUTP:STAT", "1"),
-                           ("SOUR:CURR", "1e-10"), ("TRIG:OLIN", "3"),
+    def test_preflight_rejects_identity_trigger_and_health_faults_before_writes(self):
+        for key, value in (("*IDN", "KEITHLEY,MODEL 6220,123,A03"), ("TRIG:OLIN", "3"),
                            ("OUTP:INT:TRIP", "0"), ("STAT:MEAS:COND", "10"),
                            ("STAT:OPER:COND", "8"), ("STAT:QUES:COND", "1")):
             r, d, _ = self.make()

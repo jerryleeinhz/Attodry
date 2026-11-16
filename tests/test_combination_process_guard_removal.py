@@ -44,7 +44,9 @@ class ProcessGuardRemovalTests(unittest.TestCase):
                               if k not in {"lockin_settling.py", "lockin_range_rules.py",
                                            "measurement_timing.py", "monitor_progress.py",
                                            "monitor_environment.py", "excitation_6221_config.py",
-                                           "keithley6221_ac.py", "external_lockin_points.py"}}
+                                           "keithley6221_ac.py", "external_lockin_points.py",
+                                           "excitation_quantization.py", "commissioning_6221_analysis.py",
+                                           "commissioning_6221_widgets.py", "smu_off_zero_monitor.py"}}
         original_glob = Path.glob
         source_directory = Path(__file__).resolve().parents[1] / "src" / "attodry_control"
         def historical_glob(directory, pattern, *args, **kwargs):
@@ -98,6 +100,11 @@ class ProcessGuardRemovalTests(unittest.TestCase):
     def review(self, cap):
         return build_recovery(self.config, self.database, self.run_id,
             acknowledge_failure=True, live_owner_resolution=cap)
+
+    def test_new_modules_do_not_expand_the_historical_source_transition(self):
+        from attodry_control.combination_owner_resolution import _process_guard_removal_sources
+        with self.assertRaisesRegex(ValueError, "reviewed source transition"):
+            _process_guard_removal_sources(self.old_sources, self.current_sources)
 
     def claim(self, recovery):
         with CombinationStore(self.database) as store:

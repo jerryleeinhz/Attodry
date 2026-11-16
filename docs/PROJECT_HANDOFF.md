@@ -4,6 +4,29 @@ Last updated: 2026-11-16
 
 ## Current stage
 
+### 2400 OFF ZERO monitoring and 6221 startup stop (2026-11-16)
+
+- User approved optional TOML off-state selection plus a standalone
+  `three_smu_run.mode="off_zero_monitor"`. Fixed-zero voltage-source roles are
+  configured OFF/ZERO and inspected on the same adapters without any ON or
+  formal acquisition. The combination axis and normal run/point APIs reject it.
+- Latest-buffer V/I is diagnostic only, with unknown measurement freshness,
+  receipt UTC/raw values and optional device time. Separate monitor JSONL and
+  metadata retain `accepted=false`, zero formal samples and no actual-zero claim.
+- Healthy active 6221 startup is now deliberately stopped after recording its
+  original native protection evidence; OFF/wave stopped/DC-zero must pass before
+  continuing preflight and configuration. Compliance/interlock/unknown/I/O faults
+  still reject. Already-OFF preflight retains zero writes; no automatic run starts.
+- Preserve historical recovery/version gates and target notebook/config/data
+  edits. Software delivery is authorized; real OFF ZERO freshness capability is
+  not established by offline tests and no independent instrument probe is run.
+- Validation: the broad offline run passed 753 cases; all 11 failures were then
+  resolved and covered in the final 193-case / 232-subtest rerun, including new
+  CLI/serialization/recovery guards. Two broad-run cases were skipped. Historical
+  source-transition checks remain unchanged; only the synthetic old-file fixture
+  excludes later-added modules. The example describes 10 monitor observations,
+  zero formal samples and hardware_opened=false with an injected fake address.
+
 ### Unified plotting cache and loading performance (2026-11-16)
 
 - Reuse the private loaded snapshot for notebook option changes; each full

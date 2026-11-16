@@ -1,5 +1,22 @@
 # Development stages
 
+## Current: OFF ZERO monitoring and 6221 startup shutdown (2026-11-16)
+
+- Add optional 2400 off-state parsing with preserve-by-default compatibility,
+  guarded setting/readback and a fixed-zero voltage-only diagnostic run mode.
+  Keep monitor observations separate from formal CSV/accepted/actual-zero proof.
+- Reuse the same connection for latest buffered V/I; record unknown freshness
+  and raw/receipt/device-time evidence. Formal scan and combination APIs reject
+  the monitor mode. Normal ON-only acquisition and source limits remain intact.
+- Permit the authorized 6221 preflight to stop an initially healthy active source
+  or known DC residue with ABOR/OFF, bounded OFF proof and exact DC zero. Preserve
+  native faults before any stop and retain strict protection/startup rejection.
+- Validation: 193 affected offline tests and 232 subtests pass in 83.09 s after
+  the broader run's 753 passes exposed serialization/legacy-test issues. All
+  original failures are covered by that final rerun; two broad cases skipped.
+  Include a complete healthy-initial-ON scan, strict recovery OFF gate, exact
+  historical source-count boundary and no-output-ON monitor CLI path.
+
 ## Current: Unified plotting performance (2026-11-16)
 
 - Reuse cached observations within notebook interactions and share one rows

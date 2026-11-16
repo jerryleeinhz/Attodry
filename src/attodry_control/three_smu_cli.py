@@ -17,6 +17,7 @@ from .three_smu import ThreeSmuSample, ThreeSmuSession
 from .three_smu_config import (
     FinishAction,
     SEMANTIC_ROLES,
+    ScanMode,
     ScanPoint,
     ThreeSmuHardwareConfig,
     ThreeSmuOperationConfig,
@@ -104,6 +105,15 @@ def run(
             print_fn=print_fn,
             sleep=sleep,
         )
+
+    if plan.mode is ScanMode.OFF_ZERO_MONITOR:
+        from .smu_off_zero_monitor import run_off_zero_monitor
+        _print_scan_run_summary(operation, hardware, plan, points, output_dir, print_fn=print_fn)
+        return run_off_zero_monitor(hardware, plan, output_dir=output_dir,
+            session_open=session_open, print_fn=print_fn, sleep=sleep,
+            run_name="" if operation is None else operation.run_name,
+            note="" if operation is None else operation.note,
+            config_path=None if operation is None else operation.config_path)
 
     _print_scan_run_summary(
         operation,
@@ -214,7 +224,8 @@ def _print_description(
                 ],
                 "scan": asdict(plan),
                 "generated_points": len(points),
-                "formal_samples": len(points) * plan.samples_per_point,
+                "formal_samples": (0 if plan.mode is ScanMode.OFF_ZERO_MONITOR
+                                   else len(points) * plan.samples_per_point),
                 "hardware_opened": False,
                 "config_path": None if operation is None else str(operation.config_path),
             },
@@ -238,6 +249,8 @@ def _print_scan_run_summary(
     print_fn("Three-SMU scan plan (no instrument has been opened):")
     print_fn(f"  config: {operation.config_path if operation else 'unknown'}")
     print_fn(f"  mode: {plan.mode.value}; points: {len(points)}; samples: {len(points) * plan.samples_per_point}")
+    if plan.mode is ScanMode.OFF_ZERO_MONITOR:
+        print_fn("  OFF ZERO monitoring only: latest buffered V/I; freshness unknown; formal samples: 0")
     print_fn(f"  finish: {plan.finish_action.value}; output directory: {output_dir}")
     for role in SEMANTIC_ROLES:
         channel = plan.by_role()[role]
@@ -494,8 +507,8 @@ def _run_monitor_live(
             while args.samples == 0 or sample_index < args.samples:
                 readings = {
                     role: monitors[role].read_monitor(
-                        consume_status_queue=args.consume_status_queue
-                    )
+                        consume_status_queue=args.consume_status_queue,
+                        **({"allow_off_zero": True} if hardware.require_role(role).off_state.value == "zero" else {}))
                     for role in active_roles
                 }
                 problems = [

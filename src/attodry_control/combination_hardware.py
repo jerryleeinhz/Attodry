@@ -169,6 +169,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
                 magnetic.run.max_step_t, magnetic.run.transition_policy, effective)
     if "smu" in order:
         smu = load_three_smu_operation_config(path)
+        if smu.plan.mode is ScanMode.OFF_ZERO_MONITOR:
+            raise ValueError("off_zero_monitor is diagnostic only, not a combination scan axis")
         if smu.plan.mode is ScanMode.SOFTWARE_PULSE:
             raise ValueError("Software-pulse timing is not supported by combination scans")
         points = validate_plan_targets(smu.hardware, smu.plan)
@@ -371,7 +373,8 @@ class HardwareCombinationStation:
                 self.events.event, authorize_writes=self.authorize_hardware,
                 sleep=self.sleep,
                 **({"monotonic": self.monotonic} if self.monotonic is not None else {}))
-            preflight["excitation"] = self.excitation.preflight()
+            preflight["excitation"] = self.excitation.preflight(
+                stop_active_output=self.recovery is None)
         if self.config.cryostat is not None:
             self.cryo = CryostatPointSession(self.config.cryostat, self.config.temperature,
                 self.config.magnetic, self.events.event, dll=self.dll,
@@ -407,7 +410,8 @@ class HardwareCombinationStation:
             self.lockin.monitor_wait_context = self._monitor_lockin_wait
             preflight["lockin"] = (self.lockin.open(recovery=True) if self.recovery is not None
                                    else self.lockin.open())
-        # All active preflights must succeed before any configuration writes.
+        # Only the authorized 6221 safety stop may write during preflight.
+        # All active preflights still precede waveform/detector/axis configuration.
         if self.excitation is not None:
             self.excitation.configure()
         if self.lockin is not None:

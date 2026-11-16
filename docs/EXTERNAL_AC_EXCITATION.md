@@ -1,5 +1,21 @@
 # 6221 AC excitation with SR830 XX / SR865A XY
 
+## Authorized startup shutdown (2026-11-16)
+
+An authorized run now records the 6221 identity, native condition/event and
+interlock/error state before taking over a healthy enabled waveform or finite
+DC residue. It sends one ABOR/OFF, requires bounded OFF/wave-stopped confirmation,
+then sets and verifies exact DC zero before waveform, detector or axis setup.
+An already-OFF/DC-zero preflight retains its zero-write path. Read-only preflight
+still rejects an active source; it has no shutdown authorization.
+
+Compliance (including a captured event latch), interlock, unknown status and
+transport/audit errors still prevent startup. No clear/reset, retry or limit
+increase is added. Preserve the original before-state and each acknowledgement;
+an uncertain startup write is owned for normal shutdown cleanup. These safety
+stop writes are the sole exception to the all-module-preflight-before-configure
+sequence, and do not authorize an experiment replay or historical proof rewrite.
+
 Status: implemented and tested with injected fake instruments only. Source-code
 deployment does not commission a real waveform, reference wiring or sample limits.
 

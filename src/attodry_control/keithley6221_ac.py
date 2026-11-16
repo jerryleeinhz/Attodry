@@ -136,6 +136,7 @@ class Keithley6221Ac:
         self.last_confirmed_state = None
         self.last_change_monotonic_s = None
         self._cleanup_result = None
+        self._startup_stop_owned = False
 
     def _emit(self, kind, payload):
         self.event(kind, {"source_kind": "keithley6221_ac",
@@ -223,7 +224,7 @@ class Keithley6221Ac:
         return state
 
     @staticmethod
-    def _healthy(state, *, active=False, stopping=False):
+    def _healthy(state, *, active=False, stopping=False, allow_dc=False):
         # Only known idle/wave status is relevant to this waveform owner. Other
         # sweep/delta/calibration/RS232/unknown modes cannot be taken over.
         if state["operation_condition"] & ~(1024 | 128 | 16):
@@ -237,7 +238,8 @@ class Keithley6221Ac:
         # ARM clears the prior DC source value (Rev B section 7, item 12).
         # The sine offset is a separate, explicitly verified waveform setting.
         dc_current = state.get("dc_current_setpoint_a")
-        if type(dc_current) not in (int, float) or not math.isfinite(dc_current) or dc_current != 0:
+        if (type(dc_current) not in (int, float) or not math.isfinite(dc_current)
+                or (not allow_dc and dc_current != 0)):
             raise Keithley6221Error("6221 exact known DC zero is required")
         if active:
             if (state["measurement_event"] is None
@@ -247,18 +249,18 @@ class Keithley6221Ac:
         elif not stopping and (state["output_enabled"] or state["wave_started"]):
             raise Keithley6221Error("6221 output OFF, inactive waveform and exact DC zero are required")
 
-    def _confirm_stopped(self, audit):
+    def _confirm_stopped(self, audit, *, allow_dc=False):
         """Read-only bounded ACK after our ABOR; never repeat a stop command.
 
         Only output/wave transition flags may lag. Compliance (including its
         event latch), interlock, DC zero, unknown bits and I/O errors fail now.
-        Preflight still requires an immediately known inactive source.
+        Startup and reusable condition stops use the same strict final proof.
         """
         deadline = self.monotonic() + 2.0
         for poll in range(21):
             state = self._core()
             audit.append(state)
-            self._healthy(state, stopping=True)
+            self._healthy(state, stopping=True, allow_dc=allow_dc)
             if not state['output_enabled'] and not state['wave_started']:
                 return state
             remaining = deadline - self.monotonic()
@@ -267,7 +269,7 @@ class Keithley6221Ac:
             self.sleep(min(0.1, remaining))
 
     @_operation
-    def preflight(self):
+    def preflight(self, *, stop_active_output=True):
         if self.owned:
             raise Keithley6221Error("6221 preflight cannot re-enter an owned session")
         identity = self._query("*IDN?")
@@ -278,10 +280,38 @@ class Keithley6221Ac:
             raise Keithley6221Error("Unexpected 6221 identity: " + identity)
         state = self._core()
         state["identity"] = identity
-        self._healthy(state)
+        # An authorized run can take over a healthy running source only by
+        # stopping it first. Preserve all original condition/event evidence
+        # before ABOR can change it; faults never become permission to proceed.
+        if self.authorize_writes and stop_active_output:
+            self._healthy(state, stopping=True, allow_dc=True)
+        else:
+            self._healthy(state)
         trigger_line = _word(self._query("TRIG:OLIN?"))
         if not 1 <= trigger_line <= 6 or trigger_line == self.config.phase_marker_line:
             raise Keithley6221Error("6221 phase marker conflicts with the trigger output line")
+        if state["output_enabled"] or state["wave_started"] or state["dc_current_setpoint_a"] != 0:
+            before = deepcopy(state)
+            proof = {"attempted": True, "verified": False, "before": before,
+                     "final": None, "stop_confirmation": [], "zero_confirmation": []}
+            self._emit("excitation_startup_stop_requested", deepcopy(proof))
+            # Separate from waveform configuration ownership: a partial startup
+            # stop must get cleanup, while configure() must still run only once.
+            self._startup_stop_owned = True
+            self._write("SOUR:WAVE:ABOR")
+            self._write("OUTP:STAT OFF")
+            # Establish OFF before changing an initial DC setting. This relaxed
+            # intermediate proof is never a zero or permission-to-start proof.
+            self._confirm_stopped(proof["stop_confirmation"], allow_dc=True)
+            self._write("SOUR:CURR 0")
+            state = self._confirm_stopped(proof["zero_confirmation"])
+            self._healthy(state)
+            state["identity"] = identity
+            proof.update(verified=True, final=deepcopy(state))
+            self._emit("excitation_startup_output_stopped", deepcopy(proof))
+            # The ACK list contains the original final state. Attach the proof
+            # to a separate outer dict so the archive cannot become cyclic.
+            state = {**state, "startup_output_stop": deepcopy(proof)}
         self.preflight_passed = True
         self.last_confirmed_state = deepcopy(state)
         return state
@@ -445,13 +475,17 @@ class Keithley6221Ac:
         if self._cleanup_result is not None:
             return deepcopy(self._cleanup_result)
         self.ready = False
-        result = {"attempted": self.owned, "verified": not self.owned,
+        cleanup_owned = self.owned or self._startup_stop_owned
+        result = {"attempted": cleanup_owned, "verified": not cleanup_owned,
                   "output_off_confirmed": False,
                   "errors": [], "final": None, "last_confirmed": deepcopy(self.last_confirmed_state)}
         self._cleanup_result = result
-        if not self.owned:
+        if not cleanup_owned:
             return deepcopy(result)
-        for command in ("SOUR:WAVE:ABOR", "OUTP:STAT OFF"):
+        commands = ["SOUR:WAVE:ABOR", "OUTP:STAT OFF"]
+        if self._startup_stop_owned:
+            commands.append("SOUR:CURR 0")
+        for command in commands:
             try:
                 self._write(command, cleanup_errors=result["errors"])
             except BaseException as exc:

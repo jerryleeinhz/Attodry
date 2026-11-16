@@ -145,7 +145,11 @@ def format_live_three_smu_snapshot(snapshot: ThreeSmuLiveSnapshot) -> str:
             f"{measure_unit}; source range={reading.source_range:g} {source_unit}; "
             f"measure range={reading.measure_range:g} {measure_unit}; status={status}"
         )
-        if not reading.output_enabled:
+        if not reading.output_enabled and getattr(reading, "off_state", None) == "zero":
+            lines.append(f"  {role}: OFF/ZERO; V/I origin={reading.reading_origin}; "
+                         f"freshness={reading.measurement_freshness}; "
+                         f"received UTC={reading.received_at_utc}; not an actual-zero certification")
+        elif not reading.output_enabled:
             lines.append(
                 f"  {role}: live V/I/R and trip state unavailable while output "
                 "is OFF; :READ? and protection-trip query not sent"

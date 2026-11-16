@@ -1,5 +1,25 @@
 # Hardware and safety guide
 
+## OFF ZERO diagnostics and authorized 6221 startup stop (2026-11-16)
+
+Explicit 2400 `off_state` is set and read back only during zero/OFF configuration;
+omitted/preserve keeps the previous behavior. Standalone `off_zero_monitor`
+requires fixed-zero voltage-source roles with ZERO explicitly selected. Configure
+once on the same adapters, keep output OFF, and never enter formal run/point
+acquisition. Query latest-buffer V/I without READ/MEAS/INIT or an ON transition;
+bracket it with OFF/ZERO checks and retain raw data, receipt UTC and unknown
+measurement freshness. Cached readings cannot certify actual zero or become
+accepted samples. Normal scan cleanup still zeros the source before OFF.
+
+An authorized 6221 run may stop a healthy enabled source or finite DC residue
+during its source preflight, before other axes/detectors are configured. Archive
+native condition/event/identity/interlock evidence before ABOR/OFF; then confirm
+OFF/wave stopped and exact DC zero with bounded acknowledgements. Preserve every
+fault and reject startup on compliance, interlock, unknown status or I/O/audit
+failure. No reset/status-clear, protection increase or automatic restart is added.
+Read-only diagnostics do not gain permission to stop a source. Historical source
+versions and failed/manual records retain their original behavior and evidence.
+
 ## Command-scoped magnetic boundary alignment (offline)
 
 For newly versioned magnetic combination scans, use the verified photonics command

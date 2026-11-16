@@ -21,6 +21,7 @@ from .keithley2400 import (
 from .three_smu_config import (
     FinishAction,
     SEMANTIC_ROLES,
+    ScanMode,
     ScanPoint,
     SmuHardwareConfig,
     SourceMode,
@@ -268,6 +269,8 @@ class ThreeSmuSession:
         problem sample raises its fail-closed safety error.  It is intended for
         in-process presentation consumers only; it must not issue hardware I/O.
         """
+        if self.plan.mode is ScanMode.OFF_ZERO_MONITOR or getattr(self, "_off_zero_prepared", False):
+            raise ThreeSmuSafetyError("off_zero_monitor is diagnostic only; use the monitor entry point")
         if self._closed:
             raise ThreeSmuError("Session is closed")
         if self._run_active or self._recorder is not None or self._point_recorder is not None:
@@ -391,6 +394,8 @@ class ThreeSmuSession:
         The recorder supplies durable event(kind, payload). Standalone run()
         and this point interface cannot share a session.
         """
+        if self.plan.mode is ScanMode.OFF_ZERO_MONITOR or getattr(self, "_off_zero_prepared", False):
+            raise ThreeSmuSafetyError("off_zero_monitor cannot provide formal combination points")
         if self._closed or self._recorder is not None or self._point_recorder is not None:
             raise ThreeSmuError("Session is closed or already used")
         self._point_recorder = recorder
@@ -428,7 +433,19 @@ class ThreeSmuSession:
         self._points_cleaned = True
         return result
 
-    def _configure(self, recorder: "_RunRecorder") -> None:
+    def prepare_off_zero_monitor(self, recorder) -> None:
+        """Configure zero/OFF once, borrowing the existing adapters without enabling them."""
+        if self.plan.mode is not ScanMode.OFF_ZERO_MONITOR:
+            raise ThreeSmuSafetyError("OFF ZERO preparation requires off_zero_monitor mode")
+        validate_plan_targets(self.hardware, self.plan)
+        if (self._closed or self._recorder is not None or self._point_recorder is not None
+                or getattr(self, "_off_zero_prepared", False)):
+            raise ThreeSmuError("Session is closed or already used")
+        # Set before the first write: failed preparation must not be replayed.
+        self._off_zero_prepared = True
+        self._configure(recorder, enable_outputs=False)
+
+    def _configure(self, recorder: "_RunRecorder", *, enable_outputs: bool = True) -> None:
         for role in active_smu_roles(self.plan):
             adapter = self.adapters[role]
             config = self.hardware.require_role(role)
@@ -492,6 +509,8 @@ class ThreeSmuSession:
             )
             if problems:
                 raise ThreeSmuSafetyError("; ".join(problems))
+        if not enable_outputs:
+            return
         for role in active_smu_roles(self.plan):
             adapter = self.adapters[role]
             self._guard_recovery_point_write()
@@ -640,6 +659,9 @@ class ThreeSmuSession:
                 f"{role} source mode is {state.source_mode.value}, expected "
                 f"{config.source_mode.value}"
             )
+        if (state.off_state is not None and config.off_state.value != "preserve"
+                and state.off_state != config.off_state.value):
+            problems.append(f"{role} OFF state is {state.off_state}, expected {config.off_state.value}")
         if not math.isfinite(state.source_setpoint):
             problems.append(f"{role} source setpoint readback is not finite")
         elif expected_source is not None and state.source_setpoint != expected_source:

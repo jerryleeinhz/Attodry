@@ -334,6 +334,7 @@ class GateConfig:
     backend: str | None = None
     model: str | None = None
     address: str | None = None
+    off_state: str = "preserve"
 
 
 @dataclass(frozen=True, slots=True)
@@ -2069,7 +2070,10 @@ def _parse_gate(
         "four_wire",
     }
     if mode is RunMode.HARDWARE:
-        _strict_keys(table, name, hardware_keys)
+        _strict_keys_with_optional(table, name, hardware_keys, {"off_state"})
+        off_state = _string(table.get("off_state", "preserve"), f"{name}.off_state")
+        if off_state not in {"preserve", "normal", "zero", "high_impedance", "guard"}:
+            raise ConfigError(f"{name}.off_state is not a supported output-off state")
         source_mode = _string(table["source_mode"], f"{name}.source_mode")
         if source_mode not in {"voltage", "current"}:
             raise ConfigError(f"{name}.source_mode must be 'voltage' or 'current'.")
@@ -2087,6 +2091,7 @@ def _parse_gate(
             ),
             model=_string(table["model"], f"{name}.model"),
             address=_string(table["address"], f"{name}.address"),
+            off_state=off_state,
         )
 
     _strict_keys(table, name, simulation_keys | {"backend"})

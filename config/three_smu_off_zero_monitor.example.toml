@@ -1,0 +1,37 @@
+# Copy into an ignored *.local.toml and review address, wiring and DUT limits.
+# Configure OFF ZERO; inspect only the latest buffer without enabling output.
+[gate_bottom]
+model = "Keithley2400"
+address = "CHANGE_ME_BOTTOM_GATE_VISA_ADDRESS"
+source_mode = "voltage"
+off_state = "zero"
+max_abs_voltage_v = 1.0
+max_abs_current_a = 1e-6
+nplc = 1.0
+source_auto_range = true
+measure_auto_range = true
+four_wire = false
+
+[three_smu_run]
+mode = "off_zero_monitor"
+point_count = 10
+samples_per_point = 1
+delay_s = 1.0
+serpentine = false
+finish_action = "zero_disable"
+pulse_high_s = 0.0
+pulse_period_s = 0.0
+output_directory = "../run_data/smu_off_zero_monitor"
+run_name = "bottom-gate-off-zero-monitor"
+note = "Latest-buffer V/I only; freshness unknown, no actual-zero certification."
+
+[three_smu_run.smu_bias]
+role = "off"
+
+[three_smu_run.gate_top]
+role = "off"
+
+[three_smu_run.gate_bottom]
+role = "fixed"
+fixed = 0.0
+bidirectional = false

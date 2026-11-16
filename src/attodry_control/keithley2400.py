@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import importlib
 import math
 import re
 import time
 from typing import Any, Callable
 
-from .three_smu_config import SmuHardwareConfig, SourceMode
+from .three_smu_config import OffState, SmuHardwareConfig, SourceMode
 
 
 KEITHLEY_2400_TIMEOUT_MS = 5000
@@ -31,6 +32,7 @@ class KeithleyPreflight:
     four_wire: bool | None = None
     status: str | None = None
     status_query_consumed: bool = False
+    off_state: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +69,12 @@ class KeithleyMonitorReading:
     compliance_trip: bool | None
     status: str | None
     status_queue_consumed: bool
+    off_state: str | None = None
+    reading_origin: str | None = None
+    measurement_freshness: str | None = None
+    received_at_utc: str | None = None
+    raw_response: str | None = None
+    device_timestamp_s: float | None = None
 
     @property
     def resistance_ohm(self) -> float | None:
@@ -84,6 +92,7 @@ class KeithleyConfigurationReadback:
     concurrent_measurement: bool = False
     read_elements: tuple[str, ...] = ()
     configuration_audit: tuple[dict[str, Any], ...] = ()
+    off_state: str | None = None
 
 
 def open_keithley2400(
@@ -191,6 +200,8 @@ class QcodesKeithley2400:
             four_wire=four_wire,
             status=status,
             status_query_consumed=self._status_consumption_authorized,
+            off_state=(_parse_off_state(self.ask(":OUTP:SMOD?"), self.role).value
+                       if self.config is not None and self.config.off_state is not OffState.PRESERVE else None),
         )
 
     def authorize_status_consumption(self) -> None:
@@ -280,6 +291,22 @@ class QcodesKeithley2400:
         if self._nominal_sense_range(sense, measure_range) * .001 > requested * (1 + 1e-9):
             raise Keithley2400Error(f"{self.role} final sense range is incompatible with compliance")
         functions, concurrent, elements = step("final", "verify V/I functions", self._verify_vi_measurement)
+        off_state = None
+        if config.off_state is not OffState.PRESERVE:
+            self._require_configuration_idle(config.source_mode, "off_state")
+            command = ":OUTP:SMOD " + _OFF_STATE_SCPI[config.off_state]
+            step("off_state", command, lambda: self.write(command))
+            actual_off_state = step("off_state", ":OUTP:SMOD?",
+                                    lambda: _parse_off_state(self.ask(":OUTP:SMOD?"), self.role))
+            if actual_off_state is not config.off_state:
+                raise Keithley2400Error(f"{self.role} output-off state readback differs from configuration")
+            self._require_configuration_idle(config.source_mode, "off_state_final")
+            self._require_configuration_errors_clean("off_state")
+            # ZERO retains voltage-source current compliance; require the original
+            # configured protection to remain valid after the OFF-state write.
+            if config.source_mode is SourceMode.VOLTAGE and config.off_state is OffState.ZERO:
+                self._verify_compliance(self._query_float(":SENS:CURR:PROT?", "OFF ZERO compliance"), requested, sense)
+            off_state = actual_off_state.value
         final_output = step("final", ":OUTP?", lambda: _parse_bool(self.ask(":OUTP?"), "output"))
         final_source = step("final", "source setpoint", lambda: self._query_source(config.source_mode))
         if final_output or final_source != 0.0:
@@ -289,6 +316,7 @@ class QcodesKeithley2400:
             compliance_limit=compliance, source_range=source_range, measure_range=measure_range,
             measurement_functions=functions, concurrent_measurement=concurrent,
             read_elements=elements, configuration_audit=tuple(self.configuration_audit),
+            off_state=off_state,
         )
 
     def _configuration_call(
@@ -458,6 +486,20 @@ class QcodesKeithley2400:
             status_query_consumed=self._status_consumption_authorized,
         )
 
+    def read_off_zero_monitor(self, *, consume_status_queue: bool = False) -> KeithleyMonitorReading:
+        """Retrieve only latest buffered V/I, never trigger or enable the source."""
+        config = self._require_configured()
+        if config.off_state is not OffState.ZERO or config.source_mode is not SourceMode.VOLTAGE:
+            raise Keithley2400Error("OFF ZERO monitoring requires configured voltage source and off_state='zero'")
+        if consume_status_queue and not self._status_consumption_authorized:
+            raise Keithley2400Error("OFF ZERO status consumption was not authorized")
+        adapter = VisaKeithley2400Monitor(self.role, self)
+        return adapter.read_monitor(consume_status_queue=consume_status_queue, allow_off_zero=True)
+
+    def query(self, command: str) -> str:
+        """Share this owned transport with the query-only monitor adapter."""
+        return self.ask(command)
+
     def close(self) -> None:
         self.instrument.close()
 
@@ -507,7 +549,7 @@ class VisaKeithley2400Monitor:
         self.resource = resource
 
     def read_monitor(
-        self, *, consume_status_queue: bool = False
+        self, *, consume_status_queue: bool = False, allow_off_zero: bool = False
     ) -> KeithleyMonitorReading:
         identity = self.ask("*IDN?").strip()
         if not identity:
@@ -517,6 +559,18 @@ class VisaKeithley2400Monitor:
         output = _parse_bool(self.ask(":OUTP?"), f"{self.role} output")
         voltage_v: float | None = None
         current_a: float | None = None
+        off_state = None
+        raw_response = None
+        received_at_utc = None
+        device_timestamp_s = None
+        if allow_off_zero:
+            if output or mode is not SourceMode.VOLTAGE:
+                raise Keithley2400Error(f"{self.role} OFF ZERO monitor requires output OFF in voltage mode")
+            off_state = _parse_off_state(self.ask(":OUTP:SMOD?"), self.role)
+            if off_state is not OffState.ZERO:
+                raise Keithley2400Error(f"{self.role} OFF ZERO monitor requires output-off state ZERO")
+            voltage_v, current_a, raw_response, device_timestamp_s = self._latest_off_zero_vi()
+            received_at_utc = datetime.now(timezone.utc).isoformat()
         if output:
             values = _parse_float_list(self.ask(":READ?"))
             if len(values) < 2 or not all(
@@ -541,7 +595,7 @@ class VisaKeithley2400Monitor:
             self.ask(":SYST:RSEN?"), f"{self.role} remote sense"
         )
         trip: bool | None = None
-        if output:
+        if output or allow_off_zero:
             trip_command = (
                 "SENS:CURR:PROT:TRIP?"
                 if mode is SourceMode.VOLTAGE
@@ -555,6 +609,11 @@ class VisaKeithley2400Monitor:
             if consume_status_queue
             else None
         )
+        if allow_off_zero:
+            final_output = _parse_bool(self.ask(":OUTP?"), f"{self.role} final output")
+            final_off_state = _parse_off_state(self.ask(":OUTP:SMOD?"), self.role)
+            if final_output or final_off_state is not OffState.ZERO:
+                raise Keithley2400Error(f"{self.role} output/OFF state changed during OFF ZERO monitoring")
         return KeithleyMonitorReading(
             identity=identity,
             source_mode=mode,
@@ -569,7 +628,35 @@ class VisaKeithley2400Monitor:
             compliance_trip=trip,
             status=status,
             status_queue_consumed=consume_status_queue,
+            off_state=off_state.value if off_state is not None else None,
+            reading_origin="latest_buffer" if allow_off_zero else None,
+            measurement_freshness="unknown" if allow_off_zero else None,
+            received_at_utc=received_at_utc,
+            raw_response=raw_response,
+            device_timestamp_s=device_timestamp_s,
         )
+
+    def _latest_off_zero_vi(self) -> tuple[float, float, str, float | None]:
+        concurrent = _parse_bool(self.ask(":SENS:FUNC:CONC?"), f"{self.role} V/I concurrency")
+        functions = {item.strip().strip('\"\'').upper().removesuffix(":DC")
+                     for item in self.ask(":SENS:FUNC?").split(",")}
+        elements = tuple(item.strip().upper() for item in self.ask(":FORM:ELEM?").split(","))
+        if (not concurrent or not {"VOLT", "CURR"} <= functions
+                or not {"VOLT", "CURR"} <= set(elements) or len(elements) != len(set(elements))
+                or not set(elements) <= {"VOLT", "CURR", "RES", "TIME", "STAT"}):
+            raise Keithley2400Error(f"{self.role} OFF ZERO V/I measurement functions/format are not verified")
+        raw = self.ask(":SENS:DATA?").strip()
+        values = _parse_float_list(raw)
+        if len(values) != len(elements):
+            raise Keithley2400Error(f"{self.role} OFF ZERO buffered data does not match verified format")
+        measured = dict(zip(elements, values, strict=True))
+        for field in ("VOLT", "CURR"):
+            if not math.isfinite(measured[field]) or abs(measured[field]) >= 9e37:
+                raise Keithley2400Error(f"{self.role} OFF ZERO buffered {field} is unavailable/non-finite")
+        timestamp = measured.get("TIME")
+        if timestamp is not None and (not math.isfinite(timestamp) or timestamp < 0 or timestamp >= 9e37):
+            timestamp = None
+        return measured["VOLT"], measured["CURR"], raw, timestamp
 
     def close(self) -> None:
         self.resource.close()
@@ -629,6 +716,20 @@ def _parse_source_mode(raw: str, role: str) -> SourceMode:
     if normalized.startswith("CURR"):
         return SourceMode.CURRENT
     raise Keithley2400Error(f"{role} returned unknown source mode {normalized!r}")
+
+
+_OFF_STATE_SCPI = {OffState.NORMAL: "NORM", OffState.ZERO: "ZERO",
+                   OffState.HIGH_IMPEDANCE: "HIMP", OffState.GUARD: "GUAR"}
+
+
+def _parse_off_state(raw: str, role: str) -> OffState:
+    normalized = raw.strip().strip('\"').upper()
+    for prefix, state in (("NORM", OffState.NORMAL), ("ZERO", OffState.ZERO),
+                          ("HIMP", OffState.HIGH_IMPEDANCE), ("GUAR", OffState.GUARD)):
+        if normalized in {prefix, {OffState.NORMAL:"NORMAL", OffState.ZERO:"ZERO",
+                                  OffState.HIGH_IMPEDANCE:"HIMPEDANCE", OffState.GUARD:"GUARD"}[state]}:
+            return state
+    raise Keithley2400Error(f"{role} returned unknown output-off state {raw!r}")
 
 
 def _parse_bool(raw: str, name: str) -> bool:

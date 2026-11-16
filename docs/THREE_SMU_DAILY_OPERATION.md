@@ -1,5 +1,10 @@
 # Three-SMU 独立日常操作
 
+2400现在可在各角色硬件表设置 `off_state="zero"` 等输出关闭模式；省略默认为
+`preserve`。新增 `three_smu_run.mode="off_zero_monitor"` 可配置后保持输出OFF，
+读取最近缓冲V/I作为监控，固定零目标并禁止开启输出。详见
+[OFF ZERO监控说明](THREE_SMU_LIVE_MONITOR.md)及示例配置；这些读数不属于正式扫描数据。
+
 本模块可在不配合 Lock-in、冷台和磁场的情况下独立配置、测试和（commissioning 后）运行。
 当前软件路径已完成 target-offline 验证；仅 `gate_bottom` 的一次有界读写验收已完成。
 `smu_bias`、`gate_top` 及任何新的真实运行仍需要各自的明确授权和前面板确认。

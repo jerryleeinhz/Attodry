@@ -1,5 +1,38 @@
 # Three-SMU 实时状态监控
 
+## OFF ZERO 监控模式（2026-11-16）
+
+每台2400的硬件表新增可选 `off_state`：`preserve`（省略时保留旧行为）、
+`normal`、`zero`、`high_impedance`、`guard`。普通扫描只在已确认源零/输出OFF的
+配置阶段设置并核验它；不能将 `zero_disable` 当成仪器已选择 ZERO 的证明。
+
+需要配置后保持OFF监控时，使用独立 `three_smu_run.mode = "off_zero_monitor"`。
+示例见 `config/three_smu_off_zero_monitor.example.toml`，复制为本地配置并核对地址和
+器件限制后使用。active角色必须 `source_mode="voltage"`、`off_state="zero"`、
+`role="fixed"`、`fixed=0.0`；其余角色 `off`，禁止扫描轴或 `hold`。
+`point_count * samples_per_point` 是监控次数，`delay_s` 是两轮之间的间隔。
+
+```powershell
+python -m attodry_control.three_smu_cli describe --config config/three_smu_off_zero_monitor.local.toml
+python -m attodry_control.three_smu_cli run --config config/three_smu_off_zero_monitor.local.toml
+```
+
+此 `run` 明确配置OFF ZERO并消耗错误队列；2400初始输出仍须OFF。它复用同一连接，
+设置、读回核验后读取 `:SENS:DATA?`，从不发送 `:READ?`、`:MEAS?`、`:INIT`
+或输出ON。正常结束、异常和Ctrl+C关闭通信，不转入需要ON测量的正式清理流程。
+记录写到独立的 `monitor.jsonl`、`monitor_events.jsonl`、`monitor_metadata.json`；
+没有正式CSV、accepted样本或实际零电压认证。该模式不能作为combination scan轴。
+
+已设置 `off_state="zero"` 的配置也可用原 `monitor-live` 查询式入口检查现有OFF ZERO，
+该入口只查询、不配置；实际仍为其他OFF模式或ON时拒绝OFF ZERO读取。
+终端显示 V/I 的 `latest_buffer` 来源、`unknown` 新鲜性和接收UTC；设备TIME字段如有
+也保留，但不把主机接收时间冒充采集时间。缓冲可能重复此前ON时的读数，不能用来
+证明当前端电压为零。OFF ZERO是内部0V钳位，不能当作高阻断开。
+
+手册依据：[Keithley2400 Rev.K](https://download.tek.com/manual/2400S-900-01_K-Sep2011_User.pdf)
+第13-10页及17-3至17-5页；`:READ?` 涉及触发流程，`:MEAS?` 可开启输出，
+`:SENS:DATA?` 只取最近缓冲值。实机新鲜性需单独验证。
+
 `three_smu_cli monitor-live` 是 Three-SMU 模块当前 active Keithley 2400 的终端状态面板。它不依赖 Lock-in、
 冷台或主 acquisition，也不使用 QCoDeS 的扫描/设置 adapter。
 

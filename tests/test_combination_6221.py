@@ -180,10 +180,25 @@ class Combination6221Tests(unittest.TestCase):
 
     def test_source_preflight_failure_never_writes_or_opens_detectors(self):
         self.source.state["OUTP:STAT"] = "1"
+        self.source.state["STAT:MEAS:EVEN"] = "8"
         result = self.execute()
         self.assertEqual(result["status"], "failed")
         self.assertEqual(self.xx.writes + self.xy.writes + self.source.commands, [])
         self.assertEqual(self.manager.opened, ["FAKE::SOURCE"])
+
+    def test_healthy_active_source_is_stopped_before_fresh_scan_configuration(self):
+        self.source.state["OUTP:STAT"] = "1"
+        result = self.execute()
+        self.assertEqual(result["status"], "completed", result)
+        commands = self.source.commands
+        self.assertEqual(commands[:3], ["SOUR:WAVE:ABOR", "OUTP:STAT OFF", "SOUR:CURR 0"])
+        self.assertLess(commands.index("OUTP:STAT OFF"), commands.index("SOUR:WAVE:ARM"))
+        stopped = [payload for kind, payload in self.events()
+                   if kind == "excitation_startup_output_stopped"]
+        self.assertEqual(len(stopped), 1)
+        self.assertTrue(stopped[0]["before"]["output_enabled"])
+        self.assertFalse(stopped[0]["final"]["output_enabled"])
+        json.dumps(stopped[0], allow_nan=False)
 
     def test_six_nanamp_points_quantize_before_write_and_validate_in_analysis(self):
         import math

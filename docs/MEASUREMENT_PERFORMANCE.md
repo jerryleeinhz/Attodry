@@ -4,6 +4,30 @@ Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
 
+## OFF ZERO monitor and 6221 startup shutdown (2026-11-16)
+
+The explicit OFF ZERO read path uses 16 queries per 2400 snapshot, or 17 with
+opt-in error-queue consumption. These include identity/function/format and
+protection checks, one latest-buffer query, and OFF/ZERO state brackets. It sends
+zero instrument writes, trigger commands or source ON transitions. Standalone
+monitor preparation does send authorized zero/configuration/OFF-mode writes once,
+then reuses the same adapter/transport; each configured delay is between complete
+monitor rounds. Buffer freshness remains unknown despite repeated requests.
+Normal preserve-mode and ON-only scan paths retain their original read behavior.
+
+Already-OFF/DC-zero 6221 preflight retains its existing query count and zero
+writes. Healthy active/DC-residue takeover adds one ABOR, OFF and DC-zero write,
+plus bounded OFF and zero acknowledgements (existing 2 s / 21-poll budget each).
+There is no unconditional new sleep; only actual acknowledgement lag waits.
+Archive protection before ABOR; repeated/unknown faults do not reset the budget
+or permit INIT. No second instrument session or background monitor is introduced.
+The final affected rerun passed 193 offline cases and 232 subtests in 83.09 s;
+the broader pass also covered 753 cases before resolving its 11 failures, with
+two skips. All original failures were rechecked. Raw startup proof remains JSON
+serializable (no reference cycle), and the unchanged source-version guard is
+tested against an explicitly historical 81-file fixture and rejects today's
+additional modules. These timings are test costs, not real measurement speed.
+
 ## Unified plotting interactions (2026-11-16)
 
 Notebook option changes borrow private snapshot rows without copying full nested

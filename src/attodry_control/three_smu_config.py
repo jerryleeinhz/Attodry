@@ -26,6 +26,14 @@ class SourceMode(StrEnum):
     CURRENT = "current"
 
 
+class OffState(StrEnum):
+    PRESERVE = "preserve"
+    NORMAL = "normal"
+    ZERO = "zero"
+    HIGH_IMPEDANCE = "high_impedance"
+    GUARD = "guard"
+
+
 class ChannelRole(StrEnum):
     OFF = "off"
     FIXED = "fixed"
@@ -34,6 +42,7 @@ class ChannelRole(StrEnum):
 
 class ScanMode(StrEnum):
     TIME_TRACE = "time_trace"
+    OFF_ZERO_MONITOR = "off_zero_monitor"
     BIAS_IV = "bias_iv"
     TOP_GATE_TRANSFER = "top_gate_transfer"
     BOTTOM_GATE_TRANSFER = "bottom_gate_transfer"
@@ -59,8 +68,11 @@ class SmuHardwareConfig:
     source_auto_range: bool
     measure_auto_range: bool
     four_wire: bool
+    off_state: OffState = OffState.PRESERVE
 
     def __post_init__(self) -> None:
+        if not isinstance(self.off_state, OffState):
+            raise ThreeSmuConfigError(f"{self.role}.off_state must be a supported OffState")
         if self.role not in SEMANTIC_ROLES:
             raise ThreeSmuConfigError(f"Unknown semantic SMU role {self.role!r}")
         for field_name in (
@@ -344,6 +356,12 @@ def validate_plan_targets(
 ) -> tuple[ScanPoint, ...]:
     active_roles = active_smu_roles(plan)
     hardware.require_ready(active_roles)
+    if plan.mode is ScanMode.OFF_ZERO_MONITOR:
+        for role in active_roles:
+            config = hardware.require_role(role)
+            if config.source_mode is not SourceMode.VOLTAGE or config.off_state is not OffState.ZERO:
+                raise ThreeSmuConfigError(
+                    f"{role} off_zero_monitor requires source_mode='voltage' and off_state='zero'")
     points = generate_scan_points(plan)
     for point in points:
         for role, target in point.coordinates.items():
@@ -379,8 +397,9 @@ def generate_scan_points(plan: ThreeSmuScanPlan) -> tuple[ScanPoint, ...]:
     }
     points: list[tuple[str, dict[str, float], float]] = []
 
-    if plan.mode is ScanMode.TIME_TRACE:
-        points = [("time", dict(base), 0.0) for _ in range(plan.point_count)]
+    if plan.mode in {ScanMode.TIME_TRACE, ScanMode.OFF_ZERO_MONITOR}:
+        segment = "off_zero_monitor" if plan.mode is ScanMode.OFF_ZERO_MONITOR else "time"
+        points = [(segment, dict(base), 0.0) for _ in range(plan.point_count)]
     elif plan.mode is ScanMode.SOFTWARE_PULSE:
         sweep_role = _sweep_roles(plan)[0]
         channel = channels[sweep_role]
@@ -495,6 +514,12 @@ def _validate_scan_shape(plan: ThreeSmuScanPlan) -> None:
         )
     if plan.mode is ScanMode.TIME_TRACE and sweeps:
         raise ThreeSmuConfigError("time_trace does not allow sweep channels")
+    if plan.mode is ScanMode.OFF_ZERO_MONITOR:
+        active = [channel for channel in plan.by_role().values() if channel.role is not ChannelRole.OFF]
+        if not active or any(channel.role is not ChannelRole.FIXED or channel.fixed != 0.0 for channel in active):
+            raise ThreeSmuConfigError("off_zero_monitor requires at least one fixed-zero role and no sweep channels")
+        if plan.finish_action is not FinishAction.ZERO_DISABLE:
+            raise ThreeSmuConfigError("off_zero_monitor requires finish_action='zero_disable'")
     if plan.mode is ScanMode.MULTI_SMU_MAP and not 1 <= len(sweeps) <= 3:
         raise ThreeSmuConfigError("multi_smu_map requires one to three sweep channels")
     if plan.mode is ScanMode.SOFTWARE_PULSE:
@@ -548,7 +573,7 @@ def _parse_hardware_role(
         "measure_auto_range",
         "four_wire",
     }
-    _strict_keys(table, role, common)
+    _strict_keys({key: value for key, value in table.items() if key != "off_state"}, role, common)
     source_mode = _enum(SourceMode, table["source_mode"], f"{role}.source_mode")
     config = SmuHardwareConfig(
         role=role,
@@ -569,6 +594,7 @@ def _parse_hardware_role(
             table["measure_auto_range"], f"{role}.measure_auto_range"
         ),
         four_wire=_boolean(table["four_wire"], f"{role}.four_wire"),
+        off_state=_enum(OffState, table.get("off_state", "preserve"), f"{role}.off_state"),
     )
     return config
 
