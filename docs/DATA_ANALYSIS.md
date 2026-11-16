@@ -895,3 +895,26 @@ Then add:
 
 The software never names a resistance feature a zero-electric-field line by
 itself. Use a user/calibration supplied relation and document its sign convention.
+
+
+## Combination fixed-role capture layout (2026-11-16)
+
+New combination fixed singleton roles at different harmonics can share one real
+serial pair, archived as `capture_layout="fixed_role_single_pair_v1"`. Its
+scalar `harmonic` is null: the authoritative `harmonics_by_role` map and each
+native reading retain the actual XX/XY harmonics. Both roles are selected once,
+with their own acquisition timestamps and existing measurement keys. Physical
+pair counts can decrease while the number of selected channel observations
+stays unchanged. Do not reconstruct a second raw pair or assign a common harmonic.
+
+The common archive validator binds this layout to the execution's declared
+capture policy, exact role selections/settings and raw native readings. Legacy
+scalar-harmonic pairs remain supported. Existing commissioning/unified notebook
+panels consume the same normalized per-channel values and quality exclusions;
+no notebook file or legacy dataset migration is required. Historical source
+fingerprint recovery gates are unchanged by this acquisition optimization.
+
+An immediate environmental snapshot may retain its original `before_sample`
+stage when reused for the first formal environmental module. Original evidence
+time/identity is preserved, with explicit reuse provenance. Window statistics
+count it once; later formal before/after observations remain separate reads.

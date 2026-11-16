@@ -158,6 +158,7 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
     """Check archived formal pairs rather than trusting an accepted/clean label."""
     from .lockin_overload import OverloadPolicy
     from .lockin_model_settings import sensitivity_full_scale_for, time_constant_seconds_for
+    from .lockin_capture_contract import SINGLE_ROLE_PAIR_POLICY, selected_sample_harmonic
     config = snapshot["hardware"]["lockin"]
     selections = config["harmonics_by_role"]
     selections = {("lockin_" + role if role in {"xx", "xy"} else role): tuple(values)
@@ -196,10 +197,23 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
                     or context.get("confirmed_full_scales_v") != selection["full_scales_v"]):
                 raise ValueError("Formal Lock-in pair range context differs from its compiled condition")
         harmonic = pair["harmonic"]
+        layout = pair.get("capture_layout")
+        if layout not in (None, SINGLE_ROLE_PAIR_POLICY):
+            raise ValueError("formal Lock-in capture layout is unknown")
+        mixed_pair = layout == SINGLE_ROLE_PAIR_POLICY
+        if mixed_pair and (
+                config.get("capture_policy") != SINGLE_ROLE_PAIR_POLICY
+                or harmonic is not None or len(status["samples"]) != 1
+                or any(len(values) != 1 for values in selections.values())
+                or len(expected) != 2 or len({h for _, h in expected}) != 2
+                or set(pair.get("harmonics_by_role", {})) != set(selections)):
+            raise ValueError("formal mixed Lock-in pair differs from its archived capture policy")
         selected = tuple("lockin_" + role for role in pair["selected_roles"])
+        expected_selected = (set(selections) if mixed_pair else
+                             {role for role, h in expected if h == harmonic})
         if (pair.get("sampling_policy") != "independent_roles" or pair.get("sample_index") != 0
                 or pair.get("settings_verified") is not True or len(set(selected)) != len(selected)
-                or set(selected) != {role for role, h in expected if h == harmonic}
+                or set(selected) != expected_selected
                 or not selected):
             raise ValueError("formal Lock-in pair selection/settings are incomplete")
         policy = pair.get("overload_policy")
@@ -237,6 +251,9 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
                 raise ValueError("formal Lock-in settings readback is incomplete")
             role_config = config[role]
             model = role_config.get("model", "SR830")
+            if mixed_pair and model == "SR865A":
+                from .lockin_native_archive import validate_native_capture_proofs
+                validate_native_capture_proofs(before[role], after[role], role_config)
             if model == "SR830":
                 masks = {"input_or_reserve_overload": 1, "filter_overload": 2,
                          "output_overload": 4, "reference_unlocked": 8,
@@ -269,9 +286,12 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
                 raise ValueError("formal Lock-in amplitude/frequency readback is invalid")
             if role not in selected:
                 continue
+            harmonic = selected_sample_harmonic(pair, role)
             setting = next((s for s in role_config.get("harmonic_settings", [])
                             if s["harmonic"] == harmonic), None)
             effective = {**role_config, **(setting or {})}
+            if mixed_pair and effective.get("sensitivity_mode", "fixed") != "fixed":
+                raise ValueError("formal mixed Lock-in pair cannot bypass bounded-auto qualification")
             scale = before[role]["sensitivity_full_scale_v"]
             if effective.get("sensitivity_mode", "fixed") == "bounded_auto":
                 if not effective["autorange_min_full_scale_v"] <= scale <= effective["autorange_max_full_scale_v"]:

@@ -23,6 +23,7 @@ from .config import (
     load_config,
 )
 from .lockin_harmonics import HarmonicSensitivitySession
+from .lockin_capture_contract import SINGLE_ROLE_PAIR_POLICY
 from .lockin_settling import SETTLING_POLICY
 from .lockin_model_settings import (
     model_name, sensitivity_code_for, sensitivity_full_scale_for,
@@ -4599,6 +4600,7 @@ def _capture_sweep_point(
     | None = None,
     on_formal_sample_recorded: Callable[[Mapping[str, object]], None] | None = None,
     harmonic_control: HarmonicSensitivitySession | None = None,
+    single_role_pair: bool = False,
 ) -> None:
     skipped = {(item.get("role"), item.get("harmonic"))
                for item in record.get("skipped_harmonics", ())}
@@ -4623,13 +4625,24 @@ def _capture_sweep_point(
                 targets["lockin_" + role] = requested[0]
         harmonic_control.enter(lockin_xx, lockin_xy, harmonic=targets,
                                settle_s=harmonic_settle_s, record=record)
-    for harmonic in harmonics:
-        selected_roles = selected_roles_by_harmonic.get(harmonic, ())
+    # Combination-only fixed singleton roles can share one real serial pair.
+    # Keep legacy standalone, multi-harmonic and bounded-auto scheduling intact.
+    mixed_pair = (single_role_pair and harmonic_control is not None
+        and not harmonic_control.policies
+        and all(len(harmonic_control.selected[role]) == 1
+                for role in ("lockin_xx", "lockin_xy"))
+        and len(set(harmonic_control.current_harmonics.values())) == 2
+        and all(sum(role in selected_roles_by_harmonic.get(h, ()) for h in harmonics) == 1
+                for role in ("xx", "xy")))
+    capture_groups = ([(None, ("xx", "xy"))] if mixed_pair else
+                      [(h, selected_roles_by_harmonic.get(h, ())) for h in harmonics])
+    for harmonic, selected_roles in capture_groups:
         if not selected_roles:
             raise ValueError(f"Harmonic {harmonic} has no selected formal role.")
         if harmonic_control is not None:
-            harmonic_control.enter(lockin_xx, lockin_xy, harmonic=harmonic,
-                                   roles=selected_roles, settle_s=harmonic_settle_s, record=record)
+            if not mixed_pair:
+                harmonic_control.enter(lockin_xx, lockin_xy, harmonic=harmonic,
+                                       roles=selected_roles, settle_s=harmonic_settle_s, record=record)
             harmonic_control.qualify(
                 lockin_xx, lockin_xy, harmonic=harmonic, roles=selected_roles,
                 settle_s=harmonic_settle_s, target_frequency_hz=target_frequency_hz,
@@ -4670,6 +4683,8 @@ def _capture_sweep_point(
                 "lockin_xy": _audited_harmonic_sample_record(xy),
                 "problems": problems,
             }
+            if mixed_pair:
+                sample_payload["capture_layout"] = SINGLE_ROLE_PAIR_POLICY
             if context_before is not None or context_after is not None:
                 sample_payload["measurement_context"] = {
                     "before": context_before,
@@ -4720,7 +4735,10 @@ def _capture_sweep_point(
                         "initial": initial_context,
                     }
             if harmonic_control is not None:
-                problems.extend(harmonic_control.formal_problems(harmonic, xx, xy, roles=selected_roles))
+                for role in selected_roles:
+                    role_harmonic = expected_harmonics["lockin_" + role] if mixed_pair else harmonic
+                    problems.extend(harmonic_control.formal_problems(
+                        role_harmonic, xx, xy, roles=(role,)))
                 sample_payload["settings_before"] = settings_before
                 # Retain the raw pair even if the post-read setting check fails.
                 sample_payload["settings_verified"] = False

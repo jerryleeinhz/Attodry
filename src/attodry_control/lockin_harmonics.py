@@ -18,6 +18,7 @@ from .lockin_settling import LockinSettling, SETTLING_POLICY
 from .sr830 import RESERVE_MODE_CODES, Sr830Error
 from .lockin_model_settings import (
     sensitivity_code_for, sensitivity_full_scale_for, time_constant_seconds_for,
+    time_constant_code_for,
     reserve_code_for, harmonic_supported, model_name,
     receiver_invariant_targets,
 )
@@ -120,18 +121,21 @@ class HarmonicSensitivitySession:
         audit.append(result)
         for role, instrument in instruments.items():
             values = result["roles"][role] = {}
-            values["harmonic"] = instrument.read_harmonic()
-            values["sensitivity_code"] = instrument.read_sensitivity()
             values["model"] = model_name(self.configs[role])
-            values["sensitivity_full_scale_v"] = sensitivity_full_scale_for(self.configs[role], values["sensitivity_code"])
-            values["reserve_code"] = instrument.read_reserve_mode()
-            values["reserve_mode"] = next((k for k, v in RESERVE_MODE_CODES.items()
-                                             if v == values["reserve_code"]), None)
-            values["time_constant_code"] = instrument.read_time_constant()
-            values["time_constant_s"] = time_constant_seconds_for(self.configs[role], values["time_constant_code"])
-            if model_name(self.configs[role]) == "SR865A":
+            if values["model"] == "SR865A":
                 try:
-                    values["receiver_invariants"] = instrument.read_receiver_invariants()
+                    # One fresh native snapshot already contains these settings.
+                    # Derive the compatibility view from its physical values;
+                    # never read/cache a second version of the same snapshot.
+                    native = values["receiver_invariants"] = instrument.read_receiver_invariants()
+                    values["harmonic"] = native["harmonic"]
+                    values["sensitivity_full_scale_v"] = native["sensitivity_full_scale_v"]
+                    values["sensitivity_code"] = sensitivity_code_for(
+                        self.configs[role], native["sensitivity_full_scale_v"])
+                    values["reserve_code"] = values["reserve_mode"] = None
+                    values["time_constant_s"] = native["time_constant_s"]
+                    values["time_constant_code"] = time_constant_code_for(
+                        self.configs[role], native["time_constant_s"])
                 except BaseException as exc:
                     values["receiver_invariants_error"] = str(exc)
                     if getattr(exc, "evidence", None) is not None:
@@ -139,6 +143,15 @@ class HarmonicSensitivitySession:
                     if getattr(exc, "raw", None) is not None:
                         values["receiver_invariants_raw"] = exc.raw
                     raise
+            else:
+                values["harmonic"] = instrument.read_harmonic()
+                values["sensitivity_code"] = instrument.read_sensitivity()
+                values["sensitivity_full_scale_v"] = sensitivity_full_scale_for(self.configs[role], values["sensitivity_code"])
+                values["reserve_code"] = instrument.read_reserve_mode()
+                values["reserve_mode"] = next((k for k, v in RESERVE_MODE_CODES.items()
+                                                 if v == values["reserve_code"]), None)
+                values["time_constant_code"] = instrument.read_time_constant()
+                values["time_constant_s"] = time_constant_seconds_for(self.configs[role], values["time_constant_code"])
         return result
 
     def _check(self, reading, harmonic, targets=None):

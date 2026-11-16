@@ -103,8 +103,12 @@ class CombinationTemperatureTelemetryTests(unittest.TestCase):
         events = self.events()
         raw_ids = {row["sample_id"] for kind, row in events if kind == "cryostat_state"}
         completed = [row for kind, row in events if kind == "temperature_telemetry"]
-        self.assertTrue({"temperature_qualification", "formal_temperature", "cleanup"}
+        self.assertTrue({"temperature_qualification", "before_sample", "cleanup"}
                         <= {row.get("stage") for row in completed})
+        reused = [row for kind, row in events if kind == "environment_sample_reuse_candidate"]
+        self.assertEqual(len(reused), 1)
+        self.assertEqual(reused[0]["module"], "temperature")
+        self.assertIn(reused[0]["sample_id"], {row["sample_id"] for row in completed})
         self.assertTrue(all(row["sample_id"] in raw_ids for row in completed))
         self.assertTrue(all(row["heater_power"] == {"sample_w": .25, "vti_w": .5}
                             for row in completed))

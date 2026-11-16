@@ -24,6 +24,14 @@ from .temperature_telemetry import TemperatureTelemetryRecorder, TEMPERATURE_TEL
 
 
 class _AuditedDriver(AttoDryDriver):
+    def _call(self, label, symbol, *args):
+        # Even a failed intervening DLL operation consumes the one-use entry
+        # observation. This is an in-memory guard, not another hardware query.
+        owner = getattr(self, "owner", None)
+        if owner is not None:
+            owner.invalidate_sample_entry()
+        return super()._call(label, symbol, *args)
+
     def _require_write_authorized(self):
         super()._require_write_authorized()
         guard = getattr(self.owner, "recovery_owner_guard", None)
@@ -72,6 +80,8 @@ class CryostatPointSession:
         self.touched = set()
         self.cleaning = False
         self.window = None
+        self._sample_entry = None
+        self._sample_entry_generation = 0
         self.baseline_temperature = None
         self.temperature_ceiling = None
         self.temperature_qualification = None
@@ -200,6 +210,7 @@ class CryostatPointSession:
         return self.telemetry.finish(record) if self.telemetry is not None else record
 
     def apply(self, module, point):
+        self.invalidate_sample_entry()
         if self.cleaning:
             raise AttoDryError("Cannot resume point writes after cryostat cleanup")
         if module == "magnetic":
@@ -243,6 +254,7 @@ class CryostatPointSession:
         return {"state": asdict(state)}
 
     def qualify(self, modules=None, scope=None):
+        self.invalidate_sample_entry()
         # execute_field_target already includes field arrival/dwell. Formal
         # captures continue checking its control, setpoint, tolerance and range.
         modules = ("temperature", "magnetic") if modules is None else modules
@@ -283,6 +295,7 @@ class CryostatPointSession:
                 "temperature_qualification": self.temperature_qualification}
 
     def capture(self, stage, harmonic=None, sample_index=None):
+        self.invalidate_sample_entry()
         state = self.driver.read_state()
         record = self._temperature_record(
             state, stage=stage, harmonic=harmonic, sample_index=sample_index,
@@ -324,8 +337,56 @@ class CryostatPointSession:
             record.update(completed)
         return record
 
-    def read(self, module):
-        record = self.capture("formal_" + module)
+    def invalidate_sample_entry(self):
+        self._sample_entry = None
+        self._sample_entry_generation += 1
+
+    def _consume_sample_entry(self, module):
+        entry, self._sample_entry = self._sample_entry, None
+        if entry is None:
+            return None
+        window, record, original, driver, state, started = entry
+        generation = self._sample_entry_generation
+        intervals = [1.0]
+        if self.temperature is not None:
+            intervals.append(self.config.temperature_stability.poll_interval_s)
+        if self.magnetic is not None:
+            intervals.append(self.config.magnet.stability.poll_interval_s)
+        maximum_age = min(intervals)
+        def eligible(age):
+            return (generation == self._sample_entry_generation
+                and not self.cleaning and self.connection_owned
+                and self.window is window and len(window) == 1
+                and window[0] is record and record == original
+                and self.driver is driver and driver.last_confirmed_state is state
+                and record["state"] == asdict(state)
+                and math.isfinite(age) and 0 <= age <= maximum_age
+                and (self.telemetry is None or record.get("telemetry_complete") is True))
+        age = self.monotonic() - started
+        if not eligible(age):
+            return None
+        # Keep the original capture time and the single original window entry:
+        # this is reuse of one observation, never a second measurement or weight.
+        proof = {
+            "policy": "immediate_sample_entry_v1", "module": module,
+            "original_stage": record["stage"],
+            "captured_at_utc": record["captured_at_utc"],
+            "captured_monotonic_s": record["captured_monotonic_s"],
+            "sample_id": record.get("sample_id"),
+            "age_s": age, "maximum_age_s": maximum_age,
+        }
+        self.event("environment_sample_reuse_candidate", proof)
+        # A slow/failed audit or observer I/O cannot extend this proof's age or
+        # revive its consumed identity. Fallback still obtains a fresh snapshot.
+        age = self.monotonic() - started
+        if not eligible(age):
+            return None
+        return {**deepcopy(record), "entry_observation_reuse": {**proof, "age_s": age}}
+
+    def read(self, module, *, reuse_sample_entry=False):
+        record = self._consume_sample_entry(module) if reuse_sample_entry else None
+        if record is None:
+            record = self.capture("formal_" + module)
         state = record["state"]
         actual = ({"temperature_k": state["sample_temperature_k"]} if module == "temperature" else
                   {"field_x_t": state["field"]["bx_t"], "field_z_t": state["field"]["bz_t"]})
@@ -333,10 +394,15 @@ class CryostatPointSession:
                 "measurements": {}, "clean": True, "problems": [], "status": record}
 
     def begin_sample(self):
+        self.invalidate_sample_entry()
         self.window = []
-        self.capture("before_sample")
+        started = self.monotonic()
+        record = self.capture("before_sample")
+        self._sample_entry = (self.window, record, deepcopy(record), self.driver,
+                              self.driver.last_confirmed_state, started)
 
     def end_sample(self, reads):
+        self.invalidate_sample_entry()
         try:
             after = self.capture("after_sample")
             values = [r["state"]["sample_temperature_k"] for r in self.window]
@@ -381,6 +447,7 @@ class CryostatPointSession:
             self.window = None
 
     def cleanup(self, module, failed):
+        self.invalidate_sample_entry()
         self.cleaning = True
         if self.driver is None or module not in self.touched:
             return {"attempted": False, "verified": True, "reason": "no writes attempted"}
@@ -424,6 +491,7 @@ class CryostatPointSession:
                 "scan_limits_violated": self.recovery_scan_limits_violated}
 
     def close(self):
+        self.invalidate_sample_entry()
         # connect() unwinds its own partial initialization on failure.
         if self.driver is not None and self.connection_owned:
             try:

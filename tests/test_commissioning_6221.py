@@ -107,12 +107,17 @@ class CurrentCommissioningTests(unittest.TestCase):
 
     def test_native_invalid_selected_channel_excluded_not_companion(self):
         def corrupt(s):
-            pair = next(p for r in s["reads"] if r["module"] == "lockin" for p in r["status"]["samples"] if p["harmonic"] == 2)
+            pair = next(p for r in s["reads"] if r["module"] == "lockin"
+                        for p in r["status"]["samples"]
+                        if "xy" in p["selected_roles"] and p["harmonics_by_role"]["lockin_xy"] == 2)
             pair["valid_for_analysis_by_role"]["lockin_xy"] = False
         self.mutate_sample(corrupt)
         snapshot = self.snapshot()
         self.assertEqual(snapshot.metadata["selected_channel_rows"], 9)
         self.assertEqual(snapshot.metadata["quality_exclusions"][0]["role"], "xy")
+        rows = tuple(r for rows in snapshot.groups.values() for r in rows)
+        self.assertEqual(sum(r.role == "xx" for r in rows), 5)
+        self.assertEqual(sum(r.role == "xy" for r in rows), 4)
         audit = self.snapshot(include_problem=True)
         self.assertEqual(audit.metadata["selected_channel_rows"], 10)
         self.assertEqual(sum("problem" in r.statuses for rows in audit.groups.values() for r in rows), 1)
@@ -159,8 +164,13 @@ class CurrentCommissioningTests(unittest.TestCase):
                     reading["status"]["samples"][0]["settings_verified"] = None
         self.mutate_sample(corrupt)
         snapshot = self.snapshot()
-        self.assertEqual(snapshot.metadata["selected_channel_rows"], 9)
-        self.assertIn("settings_unverified", snapshot.metadata["quality_exclusions"][0]["reasons"])
+        # One physical mixed pair shares its before/after settings proof. A
+        # missing proof invalidates both selected roles, not only the first one.
+        self.assertEqual(snapshot.metadata["selected_channel_rows"], 8)
+        exclusions = snapshot.metadata["quality_exclusions"]
+        self.assertEqual({row["role"] for row in exclusions}, {"xx", "xy"})
+        self.assertEqual(len(exclusions), 2)
+        self.assertTrue(all("settings_unverified" in row["reasons"] for row in exclusions))
 
     def test_fits_use_actual_rms_and_retain_minimum_points(self):
         rows = next(iter(self.snapshot().groups.values()))

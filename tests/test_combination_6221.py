@@ -174,9 +174,12 @@ class Combination6221Tests(unittest.TestCase):
         with closing(open_readonly(self.database)) as db:
             self.assertEqual(validate_accepted_records(db, "current-run")["accepted_conditions"], 6)
         pairs = [v for k, v in self.events() if k == "lockin_formal_pair"]
-        self.assertEqual(len(pairs), 12)
+        self.assertEqual(len(pairs), 6)
         self.assertEqual({(p["harmonic"], tuple(p["selected_roles"])) for p in pairs},
-                         {(1, ("xx",)), (2, ("xy",))})
+                         {(None, ("xx", "xy"))})
+        self.assertTrue(all(p["capture_layout"] == "fixed_role_single_pair_v1"
+                            and p["harmonics_by_role"] == {"lockin_xx": 1, "lockin_xy": 2}
+                            for p in pairs))
 
     def test_source_preflight_failure_never_writes_or_opens_detectors(self):
         self.source.state["OUTP:STAT"] = "1"
@@ -560,7 +563,8 @@ lockin_xy_full_scale_v = 0.100
             calls.append("environment")
             raise RuntimeError("secondary environment failure")
         station.excitation = SimpleNamespace(readback=source_failure)
-        station.cryo = SimpleNamespace(end_sample=environment_failure)
+        station.cryo = SimpleNamespace(end_sample=environment_failure,
+                                       invalidate_sample_entry=lambda: None)
         station.set_event_sink(lambda *_: None)
         with self.assertRaisesRegex(OSError, "source disconnected") as context:
             station.end_sample([])

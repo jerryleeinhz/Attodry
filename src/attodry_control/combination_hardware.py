@@ -216,6 +216,8 @@ def load_hardware_combination(path: str | Path) -> HardwareCombinationConfig:
         from .lockin_settling import SETTLING_POLICY
         hardware["lockin"]["settling_policy"] = SETTLING_POLICY
         hardware["lockin"]["harmonics_by_role"] = prepared.harmonics_by_role
+        from .lockin_capture_contract import SINGLE_ROLE_PAIR_POLICY
+        hardware["lockin"]["capture_policy"] = SINGLE_ROLE_PAIR_POLICY
         hardware["lockin"]["skipped_harmonics_by_frequency"] = prepared.skipped_by_frequency
     addresses = []
     if smu is not None:
@@ -328,6 +330,7 @@ class HardwareCombinationStation:
         self.point = None
         self.open_completed = False
         self.cryo = None
+        self._sample_entry_module = None
         self.dll, self.monotonic = dll, monotonic
         self.recovery = recovery
         # Kept as an ignored constructor argument for older callers. Process
@@ -523,6 +526,7 @@ class HardwareCombinationStation:
 
     def prepare_lockin_ranges(self, condition):
         """Apply the compiled target profile before this condition's Lock-in entry."""
+        self._invalidate_environment_entry()
         schedule = self.config.lockin_range_schedule
         if schedule is None:
             return
@@ -538,6 +542,7 @@ class HardwareCombinationStation:
             "requested": selection.requested, **result})
 
     def _stop_excitation_for_condition(self, condition, stage):
+        self._invalidate_environment_entry()
         if self.excitation is None:
             return
         context = {"condition_id": condition["condition_id"], "stage": stage}
@@ -556,6 +561,7 @@ class HardwareCombinationStation:
         self._stop_excitation_for_condition(condition, "after_samples")
 
     def apply(self, module, point):
+        self._invalidate_environment_entry()
         if module == "excitation":
             # Keep the requested coordinate while every other selected axis is
             # configured/qualified. Actual source activation belongs to qualify.
@@ -583,11 +589,13 @@ class HardwareCombinationStation:
             point.values["lockin_frequency_hz"], point_index=index)}
 
     def qualify_axis(self, module, point, scope):
+        self._invalidate_environment_entry()
         if module in {"temperature", "magnetic"}:
             return self.cryo.qualify(modules=(module,), scope=scope)
         return {"ready": True, "axis_scope": scope}
 
     def qualify(self, modules):
+        self._invalidate_environment_entry()
         if self.excitation is not None:
             if self.excitation_point is None:
                 raise ValueError("External excitation condition has no requested point")
@@ -605,11 +613,21 @@ class HardwareCombinationStation:
                 "temperature_qualification": (self.cryo.temperature_qualification
                     if self.cryo is not None else None)}
 
+    def _invalidate_environment_entry(self):
+        self._sample_entry_module = None
+        if self.cryo is not None:
+            self.cryo.invalidate_sample_entry()
+
     def begin_sample(self):
+        self._invalidate_environment_entry()
         if self.cryo is not None:
             self.cryo.begin_sample()
+            first_module = self.config.plan.axes[0].module
+            if first_module in {"temperature", "magnetic"}:
+                self._sample_entry_module = first_module
 
     def end_sample(self, reads):
+        self._invalidate_environment_entry()
         primary = None
         try:
             if self.excitation is not None:
@@ -638,13 +656,17 @@ class HardwareCombinationStation:
             raise primary
 
     def read(self, module):
+        reuse_entry = self._sample_entry_module == module
+        self._sample_entry_module = None
+        if not reuse_entry and self.cryo is not None:
+            self.cryo.invalidate_sample_entry()
         if module == "excitation":
             state = self.excitation.readback()
             return {"module": "excitation", "captured_at_utc": utc_now(),
                     "actual": dict(state["actual"]), "measurements": {},
                     "clean": True, "problems": [], "status": state}
         if module in {"temperature", "magnetic"}:
-            return self.cryo.read(module)
+            return self.cryo.read(module, reuse_sample_entry=reuse_entry)
         if module == "lockin":
             return _json(self.lockin.sample_point(
                 measurement_context=self.cryo.capture if self.cryo is not None else None))
@@ -681,6 +703,7 @@ class HardwareCombinationStation:
         return expected
 
     def cleanup(self, module, failed):
+        self._invalidate_environment_entry()
         self.events.cleaning = True
         if module == "excitation" and self.excitation is not None:
             result = self.excitation.cleanup()
@@ -716,6 +739,7 @@ class HardwareCombinationStation:
                       "result": result, "audit_errors": list(self.events.errors)})
 
     def close(self):
+        self._invalidate_environment_entry()
         errors = []
         for device in (self.lockin, self.smu, self.cryo):
             if device is not None:

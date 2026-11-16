@@ -1,5 +1,29 @@
 # Development stages
 
+## Current: Fixed-role capture and snapshot deduplication (2026-11-16)
+
+- Share one physical serial pair for combination fixed singleton roles with
+  different harmonics; archive explicit capture layout and authoritative role
+  harmonics. Retain legacy layouts, multi-harmonic/auto-range behavior, raw fault
+  evidence, selected-channel counts and execution-aware analysis/recovery gates.
+- Derive SR865A compatibility settings from its fresh native invariant snapshot;
+  retain all native checks and formal before/after verification.
+- Reuse only the immediate complete environmental entry observation for the
+  first environmental module, within one window and at most one second (also
+  capped by environmental poll intervals). Other operations/age/identity changes
+  invalidate it; actual formal brackets remain fresh and weights are not doubled.
+- Add file-only per-execution temperature-window diagnostics. All 53 reviewed
+  completed qualification times replay exactly; this is not a safety certificate
+  or authorization to change temperature control/acceptance.
+
+- Verification: 979 hardware-blocked broad regression cases (two optional skips)
+  exposed legacy fixture assumptions about physical pair counts, native timestamp
+  types, the new invalidation hook and the historical 81-file source fixture.
+  All affected cases and new paths pass the final 114-case rerun (63.2 s).
+  Production historical source-transition permissions remain unchanged. Source
+  syntax checks and independent read-only review pass. Fake query counts and
+  all 53 real archived temperature-window replays are documented separately.
+
 ## Current: OFF ZERO monitoring and 6221 startup shutdown (2026-11-16)
 
 - Add optional 2400 off-state parsing with preserve-by-default compatibility,

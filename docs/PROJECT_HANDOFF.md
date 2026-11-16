@@ -4,6 +4,33 @@ Last updated: 2026-11-16
 
 ## Current stage
 
+### Shared fixed-role capture and fresh snapshot reuse (2026-11-16)
+
+- New combination captures with fixed singleton XX/XY at different harmonics
+  use one real sequential pair with a versioned role-to-harmonic map. Native
+  readings, timestamps, status and formal before/after checks remain raw; old
+  scalar-harmonic records and multi-harmonic/auto-range paths stay readable.
+- SR865A compatibility settings derive from one fresh complete native snapshot,
+  removing four duplicate queries per settings snapshot. Native input-mode and
+  disconnected-source invariants remain checked; no cross-call cache is added.
+- A one-use immediate environmental entry observation can serve the first
+  environmental module when identity, completeness, window and bounded age pass.
+  Other operations invalidate it; stale evidence triggers a new real read.
+- Offline temperature replay reproduces all 53 completed qualification windows
+  in the reviewed archive. Target-band return, and simultaneous target/range
+  qualification, explain long post-arrival waits; no thresholds/PID are changed.
+  See TEMPERATURE_QUALIFICATION_TIMING_REVIEW.md for evidence and reproduction.
+- Delivery is software only. Preserve target notebooks/configuration/data and
+  never replace an active acquisition's source or start a new scan.
+
+- Verification: 979 hardware-blocked broad regression cases (two optional skips)
+  exposed legacy fixture assumptions about physical pair counts, native timestamp
+  types, the new invalidation hook and the historical 81-file source fixture.
+  All affected cases and new paths pass the final 114-case rerun (63.2 s).
+  Production historical source-transition permissions remain unchanged. Source
+  syntax checks and independent read-only review pass. Fake query counts and
+  all 53 real archived temperature-window replays are documented separately.
+
 ### 2400 OFF ZERO monitoring and 6221 startup stop (2026-11-16)
 
 - User approved optional TOML off-state selection plus a standalone

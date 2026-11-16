@@ -46,7 +46,10 @@ class ProcessGuardRemovalTests(unittest.TestCase):
                                            "monitor_environment.py", "excitation_6221_config.py",
                                            "keithley6221_ac.py", "external_lockin_points.py",
                                            "excitation_quantization.py", "commissioning_6221_analysis.py",
-                                           "commissioning_6221_widgets.py", "smu_off_zero_monitor.py"}}
+                                           "commissioning_6221_widgets.py", "smu_off_zero_monitor.py",
+                                           "lockin_capture_contract.py", "lockin_native_archive.py",
+                                           "temperature_qualification_analysis.py"}}
+        self.assertEqual(len(historical_sources), 81)
         original_glob = Path.glob
         source_directory = Path(__file__).resolve().parents[1] / "src" / "attodry_control"
         def historical_glob(directory, pattern, *args, **kwargs):

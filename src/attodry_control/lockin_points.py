@@ -513,17 +513,20 @@ class LockinPointSession:
                 harmonic_control=self.harmonic_control,
                 measurement_context=measurement_context,
                 on_formal_sample_recorded=self._formal_pair_recorded,
+                single_role_pair=True,
             )
         finally:
             self.event("lockin_point_samples", record)
         self.sample_count += 1
         measured = {}
+        from .lockin_capture_contract import selected_sample_harmonic
         self.unavailable_phase_keys = set()
         for sample in record["samples"]:
             for role in sample["selected_roles"]:
                 reading = sample["lockin_" + role]["reading"]
+                harmonic = selected_sample_harmonic(sample, role)
                 for metric in ("x_v", "y_v", "amplitude_v", "phase_deg"):
-                    key = f"lockin_{role}_h{sample['harmonic']}_{metric}"
+                    key = f"lockin_{role}_h{harmonic}_{metric}"
                     if (metric == "phase_deg" and reading[metric] is None
                             and reading.get("model") == "SR865A"
                             and reading["x_v"] == reading["y_v"] == reading["amplitude_v"] == 0):

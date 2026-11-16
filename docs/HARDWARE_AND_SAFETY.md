@@ -1,5 +1,22 @@
 # Hardware and safety guide
 
+## Fresh capture reuse (2026-11-16)
+
+Combination fixed singleton roles at different harmonics may share one real
+sequential XX/XY capture, with explicit versioned role harmonics. Preserve each
+native status/setting/timestamp and formal before/after checks; no simultaneous
+sampling claim or synthetic duplicate raw pair is allowed. Legacy records keep
+their original meaning. SR865A settings use a fresh complete invariant snapshot,
+including native input-mode and disconnected-source checks.
+
+Environmental reuse is limited to the immediate first module of the same sample
+window, with unchanged complete evidence/driver/state and age bounded by one
+second and the configured poll interval. Other operations invalidate the proof;
+stale/partial/unknown evidence requires a fresh read. Formal electrical windows
+keep fresh before/after observations. Reused data retain original identity/time
+and contribute once to statistics. All hard bounds, controls, communication,
+source compliance/OFF gates and cleanup remain mandatory.
+
 ## OFF ZERO diagnostics and authorized 6221 startup stop (2026-11-16)
 
 Explicit 2400 `off_state` is set and read back only during zero/OFF configuration;

@@ -46,7 +46,8 @@ class HarmonicConfigTests(unittest.TestCase):
         self.assertEqual(parsed.lockin_xy.harmonic_settings[0].sensitivity_mode, 'fixed')
         for invalid in ('[lockin_xy.harmonic_settings.h4]\nreserve_mode="normal"',
                         '[lockin_xy.harmonic_settings.h2]',
-                        '[lockin_xy.harmonic_settings.h2]\nsensitivity_full_scale_v=0.005',
+                        # 5 mV is now station-approved; 3 mV is not an SR830 step.
+                        '[lockin_xy.harmonic_settings.h2]\nsensitivity_full_scale_v=0.003',
                         '[lockin_xy.harmonic_settings.h2]\nreserve_mode="typo"',
                         '[lockin_xy.harmonic_settings.h2]\nfrequency_hz=100',
                         '[lockin_xy.harmonic_settings.h2]\nsensitivity_full_scale_v=nan'):

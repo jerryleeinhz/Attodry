@@ -138,6 +138,7 @@ class ConditionGateStationTests(unittest.TestCase):
             qualify=lambda: trace.append(('detector_qualified', None)),
             disturbed=lambda module: trace.append(('detector_disturbed', module)))
         station.cryo = SimpleNamespace(temperature_qualification=None,
+            invalidate_sample_entry=lambda: None,
             apply=lambda *args: trace.append(('temperature_applied', args)) or {'ready': True},
             qualify=lambda **kwargs: trace.append(('temperature_qualified', kwargs)) or {'ready': True})
         return station, resource, driver, point, trace

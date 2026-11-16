@@ -1,5 +1,50 @@
 # Measurement timing and verification
 
+## Fresh snapshot and fixed-role capture reuse (2026-11-16)
+
+SR865A harmonic/sensitivity/time-constant compatibility fields now derive from
+one fresh native receiver snapshot. Each mixed pair settings verification saves
+four native queries (HARM, IVMD/SCAL, OFLT), retaining the native interpretation
+checks, source-disconnected invariants and partial failure evidence. There is
+no cross-call settings cache, new write or new wait.
+
+Combination fixed singleton XX h1 / XY h2 capture can now obtain both selected
+channels from one actual serial XX->XY pair. The new `fixed_role_single_pair_v1`
+layout records scalar harmonic null and explicit `harmonics_by_role`; it does
+not fabricate companion pairs or duplicate samples. Multi-harmonic selections,
+bounded auto range and standalone capture retain their existing scheduling.
+The original settling deadline, source OFF boundaries and formal native checks
+remain. One normal mixed-role group removes a duplicate pair acquisition and
+its environmental before/after bracket; no claim of simultaneous reads is made.
+
+Only the immediately first environmental module may reuse the sample-entry
+observation. Same-window/driver/state identity, unchanged contents, complete
+telemetry and age <= min(1 s, environmental poll intervals) are required. It is
+one-use, invalidated by intervening operations, and never duplicated in window
+statistics. Old/stale/incomplete evidence causes a fresh capture. For the common
+outer-environment/XXh1/XYh2 case, seven environment snapshots become four when
+both optimizations apply; actual per-pair brackets and the final observation
+remain. Temperature captures have ten state DLL calls plus two power reads;
+magnetic-only captures have ten state calls. These are call-count savings,
+not measured instrument throughput or a change to safety tolerances.
+
+A two-condition fake comparison toggling only the shared-pair flag (fresh native
+snapshot reuse present in both variants) reduces detector queries from XX
+286 / XY 1273 to XX 196 / XY 809, a total of 554 fewer queries. Detector writes,
+source query/write counts and requested wait trace are identical. Startup and
+cleanup are included in those counts. The combined temperature fixture verifies
+four distinct real environmental observations and unchanged selected-channel
+counts; these fake budgets do not predict real VISA latency or convergence.
+
+The existing FULL-synchronous raw audit remains enabled. No source live-update,
+concurrent GPIB reader, changed dwell/TC, field-speed adjustment or historical
+source-version recovery exception is introduced. Real wait-time findings and
+the offline replay command are in TEMPERATURE_QUALIFICATION_TIMING_REVIEW.md.
+
+Validation: the 979-case guarded broad run had two optional skips and exposed
+legacy test-fixture assumptions; all affected cases and new paths pass the final
+114-case guarded rerun (63.2 s). Historical source-transition gates are unchanged.
+
 Review command counts, serial response ownership, qualification boundaries,
 remaining waits, raw evidence and failure/recovery cost for every measurement
 feature. Offline timings do not establish instrument settling or real throughput.
