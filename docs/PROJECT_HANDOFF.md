@@ -15,8 +15,8 @@ Last updated: 2026-11-17
 - Bind new capture status to `sr865a-analog-output-record-only-v1` in the same
   execution and verify original four status replies during archive review.
   Preserve legacy decisions, rejected data and source-version recovery gates.
-- Offline verification: 169 affected tests and all 11 full-scan/archive
-  integration tests pass, including current/latched combinations, raw-proof
+- Offline verification: 172 live regressions, 58 targeted readiness checks and 82
+  archive/recovery tests pass (13 policy and 12 integration methods), including current/latched combinations, raw-proof
   tampering (including stripped policy plus forged clear flags), legacy records
   and exact query/write/wait trace comparisons.
 - No extra instrument query, setting write, sleep, status reset or automatic

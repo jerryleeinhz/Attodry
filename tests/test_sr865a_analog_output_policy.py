@@ -6,6 +6,7 @@ import unittest
 from attodry_control.electrical_lockin_backend import electrical_status
 from attodry_control.lockin_overload import (
     OUTPUT_OVERLOAD_POLICY, blocking_output_overload, nonblocking_native_analog_output,
+    _native_analog_output_proof,
 )
 from attodry_control.models import LockinRole
 from attodry_control.sr830 import decode_lia_status, Sr830Error
@@ -45,14 +46,27 @@ class AnalogOutputPolicyTests(unittest.TestCase):
 
     def test_other_channels_current_faults_and_nonoverload_faults_never_exempt(self):
         cases = [dict(current=256), dict(current=258), dict(latch=256),
-                 dict(latch=1537), dict(latch=258), dict(latch=18), dict(latch=10),
-                 dict(latch=34), dict(latch=6), dict(current=8), dict(current=16),
+                 dict(latch=1537), dict(latch=258), dict(latch=6),
                  dict(current=4), dict(errors=1), dict(standard=64), dict(standard=128)]
         for case in cases:
             with self.subTest(case=case):
                 status = native_status(**case)
                 self.assertFalse(nonblocking_native_analog_output(status))
                 self.assertTrue(blocking_output_overload(status))
+
+    def test_output_attribution_does_not_grant_readiness_for_other_known_faults(self):
+        for words in (dict(current=8), dict(current=16), dict(latch=10),
+                      dict(latch=18), dict(latch=34), dict(current=27, latch=123)):
+            with self.subTest(words=words):
+                status = native_status(**words)
+                self.assertTrue(nonblocking_native_analog_output(status))
+                self.assertFalse(blocking_output_overload(status))
+                self.assertFalse(_native_analog_output_proof(status.native_status))
+                self.assertFalse(status.native_status.valid)
+                for flag in ('input_or_reserve_overload', 'filter_overload', 'reference_unlocked'):
+                    altered = asdict(status)
+                    altered[flag] = not altered[flag]
+                    self.assertFalse(nonblocking_native_analog_output(altered))
 
     def test_partial_forged_or_unknown_proof_does_not_gain_exception(self):
         original = asdict(native_status())
@@ -109,14 +123,16 @@ class AnalogOutputPolicyTests(unittest.TestCase):
         self.assertEqual(traces[1][1], [])
 
     def test_current_data_channel_blocks_native_counter_recheck_before_wait(self):
-        resource, waits = FakeResource(), []
-        resource.responses.update({'HARM?': '2', 'FREQEXT?': '25',
-            'FREQDET?': ['50.1', '50'], 'LIAS?': '2', 'CUROVLDSTAT?': '256'})
-        driver = Sr865a(resource, LockinRole.XY, sleep=waits.append)
-        with self.assertRaisesRegex(Sr865aError, 'unsafe/unknown status'):
-            driver.read_sample(consume_status_latches=True, current_status_supported=True)
-        self.assertEqual(waits, [])
-        self.assertNotIn(('query', 'SNAP? X,Y'), resource.events)
+        for current, latch in ((256, 2), (16, 2), (8, 2), (2, 34), (2, 10)):
+            with self.subTest(current=current, latch=latch):
+                resource, waits = FakeResource(), []
+                resource.responses.update({'HARM?': '2', 'FREQEXT?': '25',
+                    'FREQDET?': ['50.1', '50'], 'LIAS?': str(latch), 'CUROVLDSTAT?': str(current)})
+                driver = Sr865a(resource, LockinRole.XY, sleep=waits.append)
+                with self.assertRaisesRegex(Sr865aError, 'unsafe/unknown status'):
+                    driver.read_sample(consume_status_latches=True, current_status_supported=True)
+                self.assertEqual(waits, [])
+                self.assertNotIn(('query', 'SNAP? X,Y'), resource.events)
 
 
 class AnalogOutputLiveTimingTests(unittest.TestCase):
@@ -171,6 +187,52 @@ class AnalogOutputLiveTimingTests(unittest.TestCase):
                 reading = session.sample_point()
                 self.assertTrue(reading['clean'])
                 self.assertFalse(reading['valid_for_analysis'])
+
+    def test_expected_source_off_unlock_with_analog_output_keeps_initial_and_cleanup_permissions(self):
+        traces = []
+        for analog in range(4):
+            f, _, session, clock, events, _ = self.fixture(harmonics=(1,))
+            f.xy.responses.update({'LIAS?': str(8 | analog), 'CUROVLDSTAT?': str(8 | analog)})
+            self.start(f, session)
+            f.xy.responses.update({'LIAS?': str(analog), 'CUROVLDSTAT?': str(analog)})
+            session.qualify()
+            self.assertTrue(session.sample_point()['clean'])
+            session.source_stopped({'verified': True, 'output_off_confirmed': True})
+            f.xy.responses.update({'LIAS?': str(8 | analog), 'CUROVLDSTAT?': str(8 | analog)})
+            cleanup = session.cleanup()
+            self.assertTrue(cleanup['verified'], cleanup['errors'])
+            self.assertTrue(cleanup['status']['roles']['lockin_xy']['lia_status']['reference_unlocked'])
+            traces.append((f.xx.queries, f.xy.queries, f.xx.writes, f.xy.writes, clock.waits))
+        for trace in traces[1:]:
+            self.assertEqual(trace, traces[0])
+
+    def test_formal_unlock_and_pending_counter_input_still_reject_with_analog_output(self):
+        for current, latch in ((10, 2), (2, 10)):
+            f, _, session, _, _, _ = self.fixture(harmonics=(1,))
+            self.start(f, session)
+            session.qualify()
+            f.xy.responses.update({'LIAS?': str(latch), 'CUROVLDSTAT?': str(current)})
+            with self.assertRaisesRegex(Sr830Error, 'reference|unlocked'):
+                session.sample_point()
+        f, _, session, _, _, _ = self.fixture(harmonics=(1,))
+        self.start(f, session)
+        evidence = session._status(allow_unlock=True, transition=True)
+        for current, latch in ((18, 2), (2, 18), (2, 34), (10, 2), (2, 258)):
+            changed = deepcopy(evidence)
+            changed['roles']['lockin_xy']['lia_status'] = asdict(native_status(current=current, latch=latch))
+            with self.subTest(current=current, latch=latch), self.assertRaisesRegex(Sr830Error, 'unsafe/unknown'):
+                session._verify_frequency_pending_status(changed)
+
+    def test_pending_counter_preserves_current_clear_historical_unlock_with_analog_bits(self):
+        f, _, session, _, _, _ = self.fixture(harmonics=(1,))
+        self.start(f, session)
+        evidence = session._status(allow_unlock=True, transition=True)
+        for current in range(4):
+            for latch in range(8, 12):
+                with self.subTest(current=current, latch=latch):
+                    changed = deepcopy(evidence)
+                    changed['roles']['lockin_xy']['lia_status'] = asdict(native_status(current=current, latch=latch))
+                    session._verify_frequency_pending_status(changed)
 
 
 if __name__ == '__main__':

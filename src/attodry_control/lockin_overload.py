@@ -18,8 +18,8 @@ def _value(value, key):
     return value.get(key) if isinstance(value, Mapping) else getattr(value, key, None)
 
 
-def _native_analog_output_proof(native):
-    """Prove analog CH1/CH2 output scaling, with no other current/latched fault."""
+def _native_analog_output_attribution(native):
+    """Prove output bits belong only to analog CH1/CH2, not overall readiness."""
     words = {key: _value(native, key) for key in (
         "current_status_raw", "lia_status_raw", "error_status_raw",
         "standard_event_status_raw", "unknown_status_bits")}
@@ -28,14 +28,14 @@ def _native_analog_output_proof(native):
             or words["standard_event_status_raw"] != 0 or words["unknown_status_bits"] != 0):
         return False
     current, lia = words["current_status_raw"], words["lia_status_raw"]
-    if (not 0 <= current <= 3 or not 0 <= lia <= 0xFFFF
-            or lia & ~0x7083 or not (current | lia) & 0x3):
+    if (not 0 <= current <= 0xFFFF or current & ~0x1B
+            or not 0 <= lia <= 0xFFFF or lia & ~0x70FB or not (current | lia) & 0x3):
         return False
-    expected = {"locked": True, "consumed_status_latches": True,
-        "output_scale_overload_latched": bool(lia & 0x3), "input_overload": False,
+    expected = {"locked": not bool(current & 8), "consumed_status_latches": True,
+        "output_scale_overload_latched": bool(lia & 0x3), "input_overload": bool(current & 16),
         "output_scale_overload": bool(current & 0x3), "instrument_error": False,
-        "reference_unlock_latched": False, "input_overload_latched": False,
-        "filter_fault_latched": False, "configuration_changed_latched": False,
+        "reference_unlock_latched": bool(lia & 8), "input_overload_latched": bool(lia & 16),
+        "filter_fault_latched": bool(lia & 0x60), "configuration_changed_latched": False,
         "power_on_latched": False}
     if any(_value(native, key) is not value for key, value in expected.items()):
         return False
@@ -53,28 +53,38 @@ def _native_analog_output_proof(native):
     return True
 
 
+def _native_analog_output_proof(native):
+    """Strict analog-only readiness proof for bounded frequency reobservation."""
+    return (_native_analog_output_attribution(native)
+            and not _value(native, "current_status_raw") & ~0x3
+            and not _value(native, "lia_status_raw") & ~0x7083)
+
+
 def nonblocking_native_analog_output(status):
     """Only fully evidenced native CH1/CH2 output scaling is record-only.
 
     Raw overload flags and measurement quality remain unchanged. In particular,
-    unknown evidence, data-channel scaling and input/reference faults fail.
+    unknown evidence and data-channel scaling fail. Known input/filter/reference
+    flags remain truthful and are decided independently by the existing gates.
     """
     if (_value(status, "model") != "SR865A"
             or _value(status, "output_overload_policy") != OUTPUT_OVERLOAD_POLICY):
         return False
+    native = _value(status, "native_status")
+    if not _native_analog_output_attribution(native):
+        return False
+    current, lia = _value(native, "current_status_raw"), _value(native, "lia_status_raw")
     expected = {"status_known": True, "output_overload": True,
-        "input_or_reserve_overload": False, "filter_overload": False,
-        "reference_unlocked": False, "frequency_range_changed": False,
+        "input_or_reserve_overload": bool((current | lia) & 16), "filter_overload": bool(lia & 0x60),
+        "reference_unlocked": bool((current | lia) & 8), "frequency_range_changed": False,
         "time_constant_changed": False, "configuration_changed_latched": False,
         "power_on_latched": False, "instrument_error": False}
     if any(_value(status, key) is not value for key, value in expected.items()):
         return False
-    native = _value(status, "native_status")
     return (type(_value(status, "raw")) is int
             and type(_value(status, "unknown_status_bits")) is int
             and _value(status, "unknown_status_bits") == 0
-            and _value(status, "raw") == _value(native, "lia_status_raw")
-            and _native_analog_output_proof(native))
+            and _value(status, "raw") == lia)
 
 
 def blocking_output_overload(status):

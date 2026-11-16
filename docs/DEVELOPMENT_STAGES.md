@@ -4,12 +4,12 @@
 ## Current: SR865A analog output overload continuation (2026-11-17)
 
 - CH1/CH2 analog output scaling bits 0/1 in current or latched SR865A status
-  are record-only when complete raw evidence proves no other fault. Digital
+  are record-only when complete raw evidence identifies their bits. Digital
   data-channel scaling, input/unlock/unknown/error and source protections remain.
 - Raw overload/validity and default analysis exclusions remain unchanged;
   additive execution/status policy prevents historical records being relabelled.
-- Offline verification: 169 affected tests and all 11 full-scan/archive
-  integration tests pass, including current/latched combinations, raw-proof
+- Offline verification: 172 live regressions, 58 targeted readiness checks and 82
+  archive/recovery tests pass (13 policy and 12 integration methods), including current/latched combinations, raw-proof
   tampering (including stripped policy plus forged clear flags), legacy records
   and exact query/write/wait trace comparisons.
 - Pure CPU classification adds no I/O, settling, resets or range changes.

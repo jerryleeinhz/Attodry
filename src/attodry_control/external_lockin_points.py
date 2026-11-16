@@ -545,12 +545,18 @@ class ExternalLockinPointSession(LockinPointSession):
         """Reobserve only a clean current state, with optional old XY unlock."""
         xx, xy = (evidence['roles'][role] for role in ('lockin_xx', 'lockin_xy'))
         native = xy['lia_status']['native_status']
+        # Preserve the existing current-clear / optional historical-unlock
+        # contract after attributing only analog output bits. This is not a
+        # general readiness grant from the output classification.
+        analog_pending = (nonblocking_native_analog_output(xy['lia_status'])
+                          and (native['current_status_raw'] & ~3) == 0
+                          and (native['lia_status_raw'] & ~3) in (0, 8))
         if (evidence['problems'] or xx['error_status'] != 0 or xx['lia_status']['raw'] != 0
                 or xy['error_status'] != 0
                 or (native['current_status_raw'] != 0
-                    and not nonblocking_native_analog_output(xy['lia_status']))
+                    and not analog_pending)
                 or (native['lia_status_raw'] not in (0, 8)
-                    and not nonblocking_native_analog_output(xy['lia_status']))
+                    and not analog_pending)
                 or native['error_status_raw'] != 0 or native['standard_event_status_raw'] != 0
                 or native['unknown_status_bits'] != 0 or native['locked'] is not True
                 or native['consumed_status_latches'] is not True):

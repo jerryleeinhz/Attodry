@@ -25,7 +25,8 @@ from .config import (
 from .lockin_harmonics import HarmonicSensitivitySession
 from .lockin_capture_contract import SINGLE_ROLE_PAIR_POLICY
 from .lockin_settling import SETTLING_POLICY
-from .lockin_overload import blocking_output_overload, nonblocking_native_analog_output
+from .lockin_overload import (blocking_output_overload, nonblocking_native_analog_output,
+                              _native_analog_output_proof)
 from .lockin_model_settings import (
     model_name, sensitivity_code_for, sensitivity_full_scale_for,
     time_constant_code_for, reserve_code_for, harmonic_supported, ElectricalSettingCodes,
@@ -5479,7 +5480,9 @@ def _diagnostic_problems(
                 problems.append(f"lockin_{diagnostic.role.value} reference is unlocked")
             if (
                 diagnostic.lia_status.any_overload
-                and not nonblocking_native_analog_output(diagnostic.lia_status)
+                and not (nonblocking_native_analog_output(diagnostic.lia_status)
+                    and not diagnostic.lia_status.input_or_reserve_overload
+                    and not diagnostic.lia_status.filter_overload)
                 and not (
                     ignore_output_overload
                     and model_name(diagnostic) == "SR830"
@@ -5528,7 +5531,8 @@ def _read_verified_autorange_pair(
         if (
             diagnostic.lia_status is not None
             and diagnostic.lia_status.raw != 0
-            and not nonblocking_native_analog_output(diagnostic.lia_status)
+            and not (nonblocking_native_analog_output(diagnostic.lia_status)
+                and _native_analog_output_proof(diagnostic.lia_status.native_status))
             and not (diagnostic.role is LockinRole.XX and allowed_xx_output_overload)
         ):
             problems.append(

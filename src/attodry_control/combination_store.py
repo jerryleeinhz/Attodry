@@ -222,6 +222,10 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
         policy = pair.get("overload_policy")
         if policy not in {"abort", "continue_unselected", "record_continue"}:
             raise ValueError("formal Lock-in overload policy is unknown")
+        if output_policy == OUTPUT_OVERLOAD_POLICY:
+            acquisition = config.get("lockin_acquisition" if external else "lockin_sweep")
+            if not isinstance(acquisition, dict) or policy != acquisition.get("overload_policy"):
+                raise ValueError("Formal overload policy differs from its archived acquisition")
         if (pair.get("blocking_problems") != [] or OverloadPolicy(policy, selections).partition(
                 pair.get("problems", ()))[0]):
             raise ValueError("formal Lock-in pair contains a blocking fault")
@@ -288,6 +292,13 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
             if mixed_pair and model == "SR865A":
                 from .lockin_native_archive import validate_native_capture_proofs
                 validate_native_capture_proofs(before[role], after[role], role_config)
+            if output_policy == OUTPUT_OVERLOAD_POLICY and role in selected:
+                raw_faults = [f"{role} {name}" for key, name in (
+                    ("input_or_reserve_overload", "input/reserve overload"),
+                    ("filter_overload", "filter overload")) if flags[key]]
+                if (OverloadPolicy(policy, selections).partition(raw_faults)[0]
+                        or any(fault not in pair.get("problems", ()) for fault in raw_faults)):
+                    raise ValueError("Formal raw overload differs from its recorded policy/problems")
             if model == "SR830":
                 masks = {"input_or_reserve_overload": 1, "filter_overload": 2,
                          "output_overload": 4, "reference_unlocked": 8,

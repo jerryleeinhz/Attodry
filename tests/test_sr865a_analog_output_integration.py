@@ -30,9 +30,10 @@ def three_group_fixture():
 
 
 @contextmanager
-def formal_status(fixture, *, lia=2, current=0, errors=0, standard=0):
-    """Change real fake replies only during each condition's second raw pair."""
-    original = daily._read_sweep_pair
+def formal_status(fixture, *, lia=2, current=0, errors=0, standard=0, complete_group=False):
+    """Change real fake replies during each condition's second pair or group."""
+    method = '_capture_sweep_point' if complete_group else '_read_sweep_pair'
+    original = getattr(daily, method)
     count = [0]
     def capture(*args, **kwargs):
         count[0] += 1
@@ -41,7 +42,7 @@ def formal_status(fixture, *, lia=2, current=0, errors=0, standard=0):
         with patch.dict(fixture.xy.responses, {'LIAS?': str(lia),
                 'CUROVLDSTAT?': str(current), 'ERRS?': str(errors), '*ESR?': str(standard)}):
             return original(*args, **kwargs)
-    with patch.object(daily, '_read_sweep_pair', capture):
+    with patch.object(daily, method, capture):
         yield count
 
 
@@ -314,9 +315,6 @@ class AnalogOutputFailureAndRecoveryTests(unittest.TestCase):
             ('data-channel latch', {'lia': 256}),
             ('data-channel current', {'lia': 2, 'current': 256}),
             ('analog plus digital output', {'lia': 259, 'current': 3}),
-            ('CH2 plus input', {'lia': 18}),
-            ('analog plus current input', {'lia': 3, 'current': 17}),
-            ('CH2 plus filter', {'lia': 34}),
             ('reference unlock', {'lia': 2, 'current': 8}),
             ('unknown latch', {'lia': 6}),
             ('instrument error', {'lia': 2, 'errors': 1}),
@@ -336,3 +334,46 @@ class AnalogOutputFailureAndRecoveryTests(unittest.TestCase):
                 self.assertEqual(len(formal), 2)
                 self.assertEqual(formal[-1]['lockin_xy']['lia_status']['raw'], words.get('lia', 2))
                 self.assertTrue(formal[-1]['blocking_problems'])
+
+    def test_analog_output_keeps_input_and_filter_acquisition_policy_independent(self):
+        for policy in ('record_continue', 'abort'):
+            for current, latch in ((16, 0), (0, 16), (0, 32)):
+                traces = []
+                for analog in (0, 2):
+                    with self.subTest(policy=policy, current=current, latch=latch, analog=analog):
+                        fixture = three_group_fixture()
+                        self.addCleanup(fixture.doCleanups)
+                        fixture.text = fixture.text.replace('overload_policy = "record_continue"',
+                                                            'overload_policy = "' + policy + '"')
+                        fixture.path.write_text(fixture.text, encoding='utf-8')
+                        config = fixture.config()
+                        with formal_status(fixture, current=current, lia=latch | analog, complete_group=True), \
+                                patch.object(daily.time, 'sleep', fixture.clock.sleep):
+                            result = fixture.execute(config)
+                        self.assertEqual(result['status'], 'completed' if policy == 'record_continue' else 'failed', result)
+                        pairs = [p for kind, p in fixture.events() if kind == 'lockin_formal_pair']
+                        affected = pairs[1]
+                        self.assertEqual(affected['lockin_xy']['lia_status']['output_overload'], bool(analog))
+                        self.assertFalse(affected['valid_for_analysis_by_role']['lockin_xy'])
+                        self.assertEqual(bool(affected['blocking_problems']), policy == 'abort')
+                        if policy == 'record_continue':
+                            with closing(open_readonly(fixture.database)) as db:
+                                self.assertEqual(validate_accepted_records(db, 'current-run')['accepted_conditions'], 2)
+                            payload = sample_payloads(fixture)[1]
+                            for attack in ('abort_pair', 'abort_config', 'strip_problems'):
+                                changed = deepcopy(payload)
+                                snapshot = deepcopy(config.snapshot)
+                                read = next(r for r in changed['reads'] if r['module'] == 'lockin')
+                                pair = read['status']['samples'][0]
+                                if attack == 'abort_pair':
+                                    pair['overload_policy'] = 'abort'
+                                if attack == 'abort_config':
+                                    snapshot['hardware']['lockin']['lockin_acquisition']['overload_policy'] = 'abort'
+                                pair['problems'] = []
+                                with self.subTest(archive_attack=attack), self.assertRaises(ValueError):
+                                    _validate_lockin_record(read, snapshot, config.plan.conditions()[0],
+                                        datetime.fromisoformat(changed['started_at_utc']),
+                                        datetime.fromisoformat(changed['finished_at_utc']))
+                        traces.append((source_and_wait_trace(fixture), fixture.xx.queries, fixture.xy.queries))
+                if len(traces) == 2:
+                    self.assertEqual(traces[0], traces[1])

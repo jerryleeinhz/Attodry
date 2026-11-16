@@ -5,7 +5,10 @@
 The operator explicitly removed CH1 and CH2 analog output scale overload as
 stop criteria, including current and latched bits 0/1 (weights 1/2). A complete
 consistent four-query status proof must show known input, lock and error states.
-Retain every native reply, aggregate output-overload flag and existing per-role
+Known input/filter/reference flags retain their existing independent gates;
+output attribution is not proof that the detector is ready. Bounded frequency
+reobservations still require strict safe status. Retain every native reply,
+aggregate output-overload flag and existing per-role
 analysis quality. A flagged XY observation remains excluded by default.
 
 Digital Data Channels 1-4 scale bits 8-11, input overload, unlock, unknown or
