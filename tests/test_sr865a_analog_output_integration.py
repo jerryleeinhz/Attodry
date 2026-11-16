@@ -213,6 +213,41 @@ class AnalogOutputArchiveIntegrationTests(unittest.TestCase):
         self.assertEqual(fixture.xx.queries, self.normal.xx.queries)
         self.assertEqual(fixture.xy.queries, self.normal.xy.queries)
 
+    def test_legacy_clear_aggregate_cannot_hide_native_output_or_unknown_evidence(self):
+        snapshot = deepcopy(self.config.snapshot)
+        snapshot['hardware']['lockin'].pop('output_overload_policy')
+        payload = deepcopy(sample_payloads(self.normal)[0])
+        flags = next(r for r in payload['reads'] if r['module'] == 'lockin')['status']['samples'][0]['lockin_xy']['lia_status']
+        flags.pop('output_overload_policy')
+        self.validate(payload, snapshot)  # Genuine legacy clear evidence stays valid.
+        mutations = {
+            'raw analog latch': lambda f: f.update(raw=2),
+            'current analog output': lambda f: f['native_status'].update(current_status_raw=2),
+            'latched analog output': lambda f: f['native_status'].update(lia_status_raw=2),
+            'current digital output': lambda f: f['native_status'].update(current_status_raw=256),
+            'native current output flag': lambda f: f['native_status'].update(output_scale_overload=True),
+            'native latched output flag': lambda f: f['native_status'].update(output_scale_overload_latched=True),
+            'unknown current output flag': lambda f: f['native_status'].update(output_scale_overload=None),
+            'integer latched output flag': lambda f: f['native_status'].update(output_scale_overload_latched=0),
+            'text output flag': lambda f: f['native_status'].update(output_scale_overload='false'),
+            'bool current raw word': lambda f: f['native_status'].update(current_status_raw=False),
+            'unknown latched raw word': lambda f: f['native_status'].update(lia_status_raw=None),
+            'malformed native object': lambda f: f.update(native_status=[]),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(tamper=label):
+                changed = deepcopy(payload)
+                changed_flags = next(r for r in changed['reads'] if r['module'] == 'lockin')['status']['samples'][0]['lockin_xy']['lia_status']
+                mutation(changed_flags)
+                with self.assertRaises(ValueError):
+                    self.validate(changed, snapshot)
+        stripped = deepcopy(self.payloads[1])
+        flags = next(r for r in stripped['reads'] if r['module'] == 'lockin')['status']['samples'][0]['lockin_xy']['lia_status']
+        flags.pop('output_overload_policy')
+        flags['output_overload'] = False
+        with self.assertRaises(ValueError):
+            self.validate(stripped, snapshot)
+
     def test_current_analog_archive_rejects_stripped_policy_and_raw_proof_tampering(self):
         fixture = three_group_fixture()
         self.addCleanup(fixture.doCleanups)

@@ -15,9 +15,10 @@ Last updated: 2026-11-17
 - Bind new capture status to `sr865a-analog-output-record-only-v1` in the same
   execution and verify original four status replies during archive review.
   Preserve legacy decisions, rejected data and source-version recovery gates.
-- Offline verification: 169 affected tests and all 10 full-scan/archive
+- Offline verification: 169 affected tests and all 11 full-scan/archive
   integration tests pass, including current/latched combinations, raw-proof
-  tampering, legacy records and exact query/write/wait trace comparisons.
+  tampering (including stripped policy plus forged clear flags), legacy records
+  and exact query/write/wait trace comparisons.
 - No extra instrument query, setting write, sleep, status reset or automatic
   range change is added. Preserve station TOMLs and edited notebooks on delivery.
 - The operator has authorized a new Bz run followed by Bx and temperature using

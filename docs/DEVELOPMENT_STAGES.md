@@ -8,9 +8,10 @@
   data-channel scaling, input/unlock/unknown/error and source protections remain.
 - Raw overload/validity and default analysis exclusions remain unchanged;
   additive execution/status policy prevents historical records being relabelled.
-- Offline verification: 169 affected tests and all 10 full-scan/archive
+- Offline verification: 169 affected tests and all 11 full-scan/archive
   integration tests pass, including current/latched combinations, raw-proof
-  tampering, legacy records and exact query/write/wait trace comparisons.
+  tampering (including stripped policy plus forged clear flags), legacy records
+  and exact query/write/wait trace comparisons.
 - Pure CPU classification adds no I/O, settling, resets or range changes.
 - Offline regression and target verification are required before delivery and
   the separately authorized Bz -> Bx -> temperature sequence.

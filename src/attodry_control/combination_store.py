@@ -258,8 +258,19 @@ def _validate_lockin_record(reading, snapshot, condition, start, finish, range_i
                 marker = flags.get("output_overload_policy")
                 if marker is not None and marker != output_policy:
                     raise ValueError("Native analog output policy differs from its execution")
-                if output_policy is None and flags["output_overload"]:
-                    raise ValueError("Legacy native output faults cannot use the new analog output exception")
+                if output_policy is None:
+                    native = flags.get("native_status", {})
+                    # Legacy records have no analog-output exception. Do not let
+                    # a cleared aggregate hide positive or unknown raw evidence;
+                    # absent newer native fields remain backward compatible.
+                    if (flags["output_overload"] or not 0 <= flags["raw"] <= 65535
+                            or flags["raw"] & 0xF03 or not isinstance(native, dict)
+                            or any(key in native and (type(native[key]) is not int
+                                or not 0 <= native[key] <= 65535 or native[key] & 0xF03)
+                                for key in ("current_status_raw", "lia_status_raw"))
+                            or any(key in native and native[key] is not False for key in
+                                ("output_scale_overload", "output_scale_overload_latched"))):
+                        raise ValueError("Legacy native output faults cannot use the new analog output exception")
                 if output_policy == OUTPUT_OVERLOAD_POLICY:
                     if marker != OUTPUT_OVERLOAD_POLICY:
                         raise ValueError("Native analog output policy evidence is missing")
