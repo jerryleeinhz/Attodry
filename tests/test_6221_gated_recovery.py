@@ -34,6 +34,27 @@ def reviewed_migration(previous, targets):
         yield
 
 
+class TemperatureReadbackMigrationTests(unittest.TestCase):
+    def test_only_reviewed_readback_source_transition_is_accepted(self):
+        root = Path(resume.__file__).parent
+        changed = set(resume.TEMPERATURE_READBACK_TARGET_SHA256) | {"combination_resume.py"}
+        current = {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+                   for name in changed}
+        current["combination_scan.py"] = "c" * 64
+        previous = dict(current, **{name: "a" * 64 for name in changed})
+        self.assertIsNone(resume.source_compatibility(previous, current))
+        with patch.object(resume, "TEMPERATURE_READBACK_PREDECESSOR_SHA256",
+                          resume.digest(previous)):
+            self.assertEqual(resume.source_compatibility(previous, current),
+                             resume.TEMPERATURE_READBACK_COMPATIBILITY)
+            for name in current:
+                with self.subTest(tampered=name):
+                    self.assertIsNone(resume.source_compatibility(
+                        previous, dict(current, **{name: "b" * 64})))
+            self.assertIsNone(resume.source_compatibility(
+                previous, dict(current, **{"unknown.py": "d" * 64})))
+
+
 class GatedSourceMigrationTests(unittest.TestCase):
     def setUp(self):
         self.before, self.after, self.targets = source_maps()

@@ -41,6 +41,12 @@ sample's approved limits. These declarations never replace fresh hardware checks
 
 ## Allowed changes and fixed plan
 
+The reviewed LK_setup 9cdfb27 source fingerprint has a narrow forward
+transition for the temperature DLL readback audit. The exact file set and
+unrelated bytes are preserved, and the diagnostic files are checked against
+their reviewed hashes. The transition adds evidence, not an exception to
+temperature validation or the original cleanup and recovery checks.
+
 The reviewed f182ba4 external-6221 source set has a narrow migration to
 `condition-gated-verified-off-v1`. It accepts only the frozen LF/CRLF predecessor
 fingerprints and reviewed lifecycle implementation hashes, with the same source

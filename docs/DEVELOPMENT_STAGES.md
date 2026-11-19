@@ -1,5 +1,18 @@
 # Development stages
 
+## Current: attoDRY temperature readback evidence (2026-11-19)
+
+- Capture each getter's float32 buffer after the existing DLL call.
+  A distinct initial NaN bit pattern distinguishes an unchanged buffer from a
+  written zero. A return code or failed model validation still blocks the read.
+- Carry the raw diagnostics in existing successful state timing, and persist
+  failed snapshot evidence separately before the combination cleanup runs.
+  The read-only tool prints the same evidence. No new device calls or waits.
+- The original scan can retain its accepted prefix across the exact reviewed
+  source transition. The normal failure review, cleanup and fresh hardware
+  preflight continue to apply. Software deployment does not clear a sensor
+  or controller fault.
+
 
 ## Current: SR865A analog output overload continuation (2026-11-17)
 

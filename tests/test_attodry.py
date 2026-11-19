@@ -877,6 +877,60 @@ class AttoDryDriverTests(unittest.TestCase):
             self.driver.read_state()
 
         self.assertIs(self.driver.last_confirmed_state, confirmed)
+        evidence = self.driver.last_state_read_timing["temperature_dll_reads"]
+        self.assertEqual(list(evidence), ["getSampleTemperature"])
+        self.assertEqual(evidence["getSampleTemperature"]["dll_return_code"], 3)
+        self.assertEqual(evidence["getSampleTemperature"]["raw_value_k"], 2.0)
+
+    def test_temperature_snapshot_audits_three_getters_without_extra_calls(self) -> None:
+        self.connect()
+        self.dll.events.clear()
+
+        self.driver.read_state()
+
+        self.assertEqual(self.dll.events, [
+            "get_sample_temperature", "get_user_temperature", "get_vti_temperature",
+            "get_field_x", "get_field_z", "get_setpoint_x", "get_setpoint_z",
+            "is_temperature_control", "is_field_control", "get_error",
+        ])
+        reads = self.driver.last_state_read_timing["temperature_dll_reads"]
+        self.assertEqual(list(reads), [
+            "getSampleTemperature", "getUserTemperature", "getVtiTemperature",
+        ])
+        for label, expected, bits in zip(
+            reads, (2.0, 2.0, 2.1), ("0x40000000", "0x40000000", "0x40066666"),
+        ):
+            self.assertEqual(reads[label], {
+                "symbol": f"AttoDRY_Interface_{label}",
+                "dll_return_code": 0,
+                "buffer_changed": True,
+                "raw_float32_bits": bits,
+                "raw_value_k": ctypes.c_float(expected).value,
+            })
+
+    def test_zero_returned_value_differs_from_unchanged_buffer_and_nan(self) -> None:
+        outcomes = (
+            (lambda _: 0, "buffer unchanged", False, "0x7fc05a17", None),
+            (lambda p: self.dll._float_getter("get_vti_temperature", p, 0.0),
+             "finite and positive", True, "0x00000000", 0.0),
+            (lambda p: self.dll._float_getter("get_vti_temperature", p, math.nan),
+             "non-finite", True, "0x7fc00000", None),
+        )
+        self.connect()
+        confirmed = self.driver.read_state()
+        for getter, message, changed, bits, value in outcomes:
+            with self.subTest(message=message):
+                self.dll.AttoDRY_Interface_getVtiTemperature = getter
+                with self.assertRaisesRegex(AttoDryError, message):
+                    self.driver.read_state()
+                self.assertIs(self.driver.last_confirmed_state, confirmed)
+                timing = self.driver.last_state_read_timing
+                raw = timing["temperature_dll_reads"]["getVtiTemperature"]
+                self.assertEqual(raw["dll_return_code"], 0)
+                self.assertEqual(raw["buffer_changed"], changed)
+                self.assertEqual(raw["raw_float32_bits"], bits)
+                self.assertEqual(raw["raw_value_k"], value)
+                json.dumps(timing, allow_nan=False)
 
     def test_temperature_start_preloads_target_before_enabling_stale_300k(self) -> None:
         self.connect()
@@ -1417,6 +1471,10 @@ class AttoDryDriverTests(unittest.TestCase):
         self.assertFalse(result["writes_authorized"])
         self.assertEqual(len(result["samples"]), 2)
         self.assertEqual(
+            result["samples"][0]["state_read_timing"]["temperature_dll_reads"]
+            ["getSampleTemperature"]["dll_return_code"], 0,
+        )
+        self.assertEqual(
             result["samples"][0]["heater_power"],
             {"sample_w": 0.25, "vti_w": 0.5},
         )
@@ -1428,6 +1486,23 @@ class AttoDryDriverTests(unittest.TestCase):
                 for event in self.dll.events
             )
         )
+
+    def test_read_only_cli_reports_failed_buffer_before_disconnect(self) -> None:
+        self.dll.AttoDRY_Interface_getUserTemperature = lambda _: 0
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaisesRegex(AttoDryError, "buffer unchanged"):
+            run_attodry_test(
+                ["--config", "config/hardware.example.toml", "--authorize-connection"],
+                dll_loader=lambda _: self.dll,
+            )
+
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["completed"])
+        self.assertEqual(result["samples"], [])
+        evidence = result["last_state_read_timing"]["temperature_dll_reads"]
+        self.assertEqual(list(evidence), ["getSampleTemperature", "getUserTemperature"])
+        self.assertFalse(evidence["getUserTemperature"]["buffer_changed"])
+        self.assertEqual(self.dll.events[-2:], ["disconnect", "end"])
 
     @staticmethod
     def temperature_args(

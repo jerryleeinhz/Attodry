@@ -74,11 +74,14 @@ def run(
         for index in range(args.samples):
             if index:
                 time.sleep(args.interval_s)
+            captured_unix_s = time.time()
+            state = driver.read_state()
             states.append(
                 {
                     "sample_index": index,
-                    "captured_unix_s": time.time(),
-                    "state": asdict(driver.read_state()),
+                    "captured_unix_s": captured_unix_s,
+                    "state": asdict(state),
+                    "state_read_timing": driver.last_state_read_timing,
                     "heater_power": asdict(driver.read_heater_powers()),
                 }
             )
@@ -93,6 +96,7 @@ def run(
                     "completed": False,
                     "error": str(exc),
                     "samples": states,
+                    "last_state_read_timing": driver.last_state_read_timing,
                     "last_confirmed_state": (
                         None
                         if driver.last_confirmed_state is None

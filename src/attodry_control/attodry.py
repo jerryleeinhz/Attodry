@@ -41,6 +41,8 @@ from .stability import (
 
 TEMPERATURE_COMMAND_ACK_TIMEOUT_S = 30.0
 FIELD_COMMAND_ACK_TIMEOUT_S = 30.0
+# An unusual quiet NaN, distinct from zero and a conventional NaN reply.
+_TEMPERATURE_BUFFER_SENTINEL = 0x7FC05A17
 FieldSampleCallback = Callable[
     [CryostatState, float, str, int | None],
     None,
@@ -355,24 +357,28 @@ class AttoDryDriver:
     def read_state(self) -> CryostatState:
         timing = self._start_read_timing()
         self.last_state_read_timing = timing
+        temperature_reads: dict[str, dict[str, object]] = {}
+        timing["temperature_dll_reads"] = temperature_reads
         try:
-            return self._read_state_snapshot()
+            return self._read_state_snapshot(temperature_reads)
         except BaseException as exc:
             timing["error"] = f"{type(exc).__name__}: {exc}"
             raise
         finally:
             self._finish_read_timing(timing)
 
-    def _read_state_snapshot(self) -> CryostatState:
+    def _read_state_snapshot(
+        self, temperature_reads: dict[str, dict[str, object]],
+    ) -> CryostatState:
         self._require_connected()
-        sample_temperature = self._get_float(
-            "getSampleTemperature", "AttoDRY_Interface_getSampleTemperature"
+        sample_temperature = self._read_temperature(
+            "getSampleTemperature", temperature_reads
         )
-        user_temperature = self._get_float(
-            "getUserTemperature", "AttoDRY_Interface_getUserTemperature"
+        user_temperature = self._read_temperature(
+            "getUserTemperature", temperature_reads
         )
-        vti_temperature = self._get_float(
-            "getVtiTemperature", "AttoDRY_Interface_getVtiTemperature"
+        vti_temperature = self._read_temperature(
+            "getVtiTemperature", temperature_reads
         )
         try:
             field = VectorField(
@@ -1412,6 +1418,34 @@ class AttoDryDriver:
             if elapsed >= config.wait_timeout_s:
                 raise AttoDryTimeout(f"{label.capitalize()} stability wait timed out.")
             sleeper(config.poll_interval_s)
+
+    def _read_temperature(
+        self, label: str, reads: dict[str, dict[str, object]],
+    ) -> float:
+        symbol = f"AttoDRY_Interface_{label}"
+        buffer = ctypes.c_uint32(_TEMPERATURE_BUFFER_SENTINEL)
+        value = ctypes.c_float.from_buffer(buffer)
+        return_code = None
+        try:
+            return_code = self._call(label, symbol, ctypes.byref(value))
+        except AttoDryDllError as exc:
+            return_code = exc.return_code
+            raise
+        finally:
+            raw = value.value
+            changed = buffer.value != _TEMPERATURE_BUFFER_SENTINEL
+            reads[label] = {
+                "symbol": symbol,
+                "dll_return_code": return_code,
+                "raw_float32_bits": f"0x{buffer.value:08x}",
+                "raw_value_k": raw if math.isfinite(raw) else None,
+                "buffer_changed": changed,
+            }
+        if not changed:
+            raise AttoDryError(f"{label} left the temperature readback buffer unchanged.")
+        if not math.isfinite(raw):
+            raise AttoDryError(f"{label} returned a non-finite value.")
+        return raw
 
     def _get_float(self, label: str, symbol: str) -> float:
         value = ctypes.c_float()

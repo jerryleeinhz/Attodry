@@ -12,7 +12,7 @@ from attodry_control.combination_cli import run as cli
 from attodry_control.combination_hardware import load_hardware_combination, run_hardware_combination
 from attodry_control.combination_store import CombinationStore, open_readonly
 from attodry_control.cryostat_points import CryostatPointSession
-from attodry_control.attodry import AttoDryError, AttoDryTimeout
+from attodry_control.attodry import AttoDryDriver, AttoDryError, AttoDryTimeout
 from tests.test_attodry import FakeAttoDryDll, StepClock
 from tests.test_lockin_settling import Clock
 from tests import test_combination_hardware as fixtures
@@ -143,6 +143,76 @@ class CryostatCombinationTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed", result)
         rows = load_combination_rows(self.database, run_id="reset")
         self.assertEqual([r["requested.temperature_k"] for r in rows], [2, 2.1] * 3)
+
+    def test_failed_temperature_qualification_archives_raw_getter_before_cleanup(self):
+        self.write_config(("temperature",))
+        original_wait = AttoDryDriver.wait_for_temperature
+        for writes_zero in (False, True):
+            with self.subTest(writes_zero=writes_zero):
+                self.dll = FakeAttoDryDll()
+                self.dll.temperature_follows_setpoint = True
+                original_read = self.dll.AttoDRY_Interface_getVtiTemperature
+
+                def read_once(pointer):
+                    self.dll.AttoDRY_Interface_getVtiTemperature = original_read
+                    if writes_zero:
+                        self.dll._set(pointer, 0.0)
+                    return self.dll._code("get_vti_temperature")
+
+                def fail_one_qualification_read(driver, *args, **kwargs):
+                    self.dll.AttoDRY_Interface_getVtiTemperature = read_once
+                    return original_wait(driver, *args, **kwargs)
+
+                run_id = f"invalid-temperature-{writes_zero}"
+                with patch.object(AttoDryDriver, "wait_for_temperature", fail_one_qualification_read):
+                    result = self.execute(run_id)
+                self.assertEqual(result["status"], "failed", result)
+                self.assertEqual(self.dll.temperature_control, 0)
+                with closing(open_readonly(self.database)) as db:
+                    events = [(row[0], json.loads(row[1])) for row in db.execute(
+                        "SELECT event_type,payload_json FROM combination_events "
+                        "WHERE run_id=? ORDER BY event_id", (run_id,))]
+                    attempts = db.execute(
+                        "SELECT status,error FROM combination_attempts WHERE run_id=?",
+                        (run_id,)).fetchall()
+                    samples = db.execute(
+                        "SELECT count(*) FROM combination_samples WHERE run_id=?", (run_id,)
+                    ).fetchone()[0]
+                self.assertEqual([tuple(row) for row in attempts], [("rejected", result["error"])])
+                self.assertEqual(samples, 0)
+                kinds = [kind for kind, _ in events]
+                self.assertEqual(kinds.count("cryostat_state_read_failed"), 1)
+                failure_index = kinds.index("cryostat_state_read_failed")
+                self.assertLess(kinds.index("temperature_qualification_started"), failure_index)
+                self.assertLess(failure_index, kinds.index("cleanup_started"))
+                failure = events[failure_index][1]
+                self.assertEqual(failure["condition_id"], "condition-000000")
+                self.assertEqual(failure["attempt_index"], 0)
+                self.assertIsNone(failure["recovery_action"])
+                self.assertNotIn("state", failure)
+                timing = failure["state_read_timing"]
+                self.assertEqual(timing["error"], result["error"])
+                reads = timing["temperature_dll_reads"]
+                self.assertEqual(set(reads), {
+                    "getSampleTemperature", "getUserTemperature", "getVtiTemperature"
+                })
+                for name in ("getSampleTemperature", "getUserTemperature"):
+                    self.assertEqual(reads[name]["dll_return_code"], 0)
+                    self.assertEqual(reads[name]["raw_value_k"], 2.0)
+                    self.assertTrue(reads[name]["buffer_changed"])
+                vti = reads["getVtiTemperature"]
+                self.assertEqual(vti["symbol"], "AttoDRY_Interface_getVtiTemperature")
+                self.assertEqual(vti["dll_return_code"], 0)
+                self.assertIs(vti["buffer_changed"], writes_zero)
+                self.assertEqual(vti["raw_float32_bits"],
+                                 "0x00000000" if writes_zero else "0x7fc05a17")
+                self.assertEqual(vti["raw_value_k"], 0.0 if writes_zero else None)
+                # The later valid cleanup snapshot must not replace failed evidence.
+                cleanup = next(payload for kind, payload in events[failure_index + 1:]
+                               if kind == "temperature_telemetry" and payload["stage"] == "cleanup")
+                self.assertEqual(cleanup["state"]["vti_temperature_k"], 2.0)
+                self.assertEqual(cleanup["state_read_timing"]["temperature_dll_reads"]
+                                 ["getVtiTemperature"]["raw_value_k"], 2.0)
 
     def test_preflight_limits_and_static_temperature_reset_reject(self):
         source = self.base.replace('bz_t = 0.0 },', 'bz_t = 9.01 },')

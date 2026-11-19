@@ -48,15 +48,27 @@ class _AuditedDriver(AttoDryDriver):
         guard = getattr(self.owner, "recovery_owner_guard", None)
         if guard is not None:
             guard()
-        state = super().read_state()
+        try:
+            state = super().read_state()
+        except BaseException as exc:
+            timing = self.last_state_read_timing
+            if timing and timing.get("temperature_dll_reads"):
+                try:
+                    self.owner.event("cryostat_state_read_failed", {
+                        "captured_at_utc": utc_now(), "state_read_timing": timing,
+                        "recovery_action": self.owner.recovery_action,
+                    })
+                except BaseException as audit_error:
+                    exc.add_note(f"Cryostat readback audit also failed: {audit_error}")
+            raise
         # Persist even an unsafe complete readback before rejecting it.
         record = {
-            "captured_at_utc": utc_now(), "state": asdict(state),
-            "recovery_action": self.owner.recovery_action}
+            "captured_at_utc": utc_now(), "recovery_action": self.owner.recovery_action}
         if self.owner.telemetry is not None:
-            record.pop("state")
             record = self.owner.telemetry.start(state, **record)
             self.owner.pending_temperature_record = (state, record)
+        else:
+            record.update(state=asdict(state), state_read_timing=self.last_state_read_timing)
         self.owner.event("cryostat_state", record)
         self.owner.validate_state(state)
         return state

@@ -1,5 +1,15 @@
 # Measurement timing and verification
 
+## Temperature readback evidence (2026-11-19)
+
+Each full snapshot still uses the same ten DLL calls in the same order. The
+three temperature getters supply return codes and float32 evidence in the
+existing timing object, with no separate success event or instrument retry.
+Raw log records grow by the size of those fields. A failed combination
+snapshot adds one audit event before cleanup; it never joins qualification or
+formal samples. No writes, waits, asynchronous reads or control changes
+result from the diagnostic.
+
 ## Record-only SR865A analog output status (2026-11-17)
 
 The CH1/CH2 analog output classifier uses the existing four status replies and

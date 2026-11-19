@@ -1,8 +1,21 @@
 # Project handoff
 
-Last updated: 2026-11-17
+Last updated: 2026-11-19
 
 ## Current stage
+
+### attoDRY temperature readback evidence (2026-11-19)
+
+- Capture the sample, user setpoint and VTI getter return codes, raw float32
+  bits and finite values in state read timing. The read-only diagnostic prints
+  this timing for valid reads and failed attempts.
+- The combination runner records `cryostat_state_read_failed` before cleanup
+  can replace the last attempt. An unchanged sentinel, explicit zero, negative
+  value, non-finite reply or DLL failure still prevents an accepted snapshot.
+- Existing stable windows and hardware protections retain their validation.
+  The reviewed archived 9cdfb27 source set can resume with exactly this
+  diagnostic update after fault resolution. Earlier attempts, source
+  fingerprints and accepted data remain in the original execution archive.
 
 
 ### SR865A analog output overload continuation (2026-11-17)

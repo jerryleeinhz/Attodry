@@ -66,6 +66,27 @@ BUSY_PREFLIGHT_PREDECESSOR_SETS = {
 BUSY_PREFLIGHT_ERROR = "AttoDryDllError: Connect returned DLL error code -1073807246."
 BUSY_PREFLIGHT_CONTRACT = "reviewed-83abe96-busy-connect-no-writes-v1"
 
+# Exact 9cdfb27 source set archived on LK_setup. Permit only the reviewed
+# readback-audit implementation, including its read-only diagnostic entry.
+TEMPERATURE_READBACK_PREDECESSOR_SHA256 = (
+    "2e1c195884889f1bd118029ddc4f75305380d0e5f5c69bf01030f792c5a1cd85"
+)
+TEMPERATURE_READBACK_COMPATIBILITY = "reviewed-9cdfb27-temperature-dll-readback-v1"
+TEMPERATURE_READBACK_TARGET_SHA256 = {
+    "attodry.py": frozenset({
+        "1a5ba321a7db7870a574410aae3ecade50851329031455204c2d5ecc1da7e11d",
+        "9001ba00ed881ac1bb6dbcd6a6fe4967c3bd6aa333bf8d0db5fa61368fc5a1cd",
+    }),
+    "cryostat_points.py": frozenset({
+        "71c4dee7568d8734fddb438a4d829bf06915e96ece597eb2690962bfc64beaf0",
+        "85e64ad94d0c92c31f52dce620193b5245af56151de6783a2f65d3788a8f9445",
+    }),
+    "attodry_test.py": frozenset({
+        "06fb3262a65631d086671e74a37917a6215ed1b09c00510c5ea8ac4af8e35781",
+        "c73803d29f10658cdd18ac45fafb36164073b4a10024c6a7824fbd7c1d1acf1e",
+    }),
+}
+
 
 def _gated_6221_destination(after):
     if any(after.get(name) not in hashes
@@ -101,6 +122,14 @@ def source_compatibility(before, after):
             and after["combination_resume.py"] == hashlib.sha256(
                 Path(__file__).read_bytes()).hexdigest()):
         return BUSY_PREFLIGHT_CONTRACT
+    if (set(before) == set(after)
+            and changed == set(TEMPERATURE_READBACK_TARGET_SHA256) | {"combination_resume.py"}
+            and digest(before) == TEMPERATURE_READBACK_PREDECESSOR_SHA256
+            and all(after[name] in hashes
+                    for name, hashes in TEMPERATURE_READBACK_TARGET_SHA256.items())
+            and after["combination_resume.py"] == hashlib.sha256(
+                Path(__file__).read_bytes()).hexdigest()):
+        return TEMPERATURE_READBACK_COMPATIBILITY
     return None
 
 
