@@ -20,6 +20,7 @@ from .config import (
     LockinConfig,
     RunMode,
     SweepPointConfig,
+    _load_document,
     load_config,
 )
 from .lockin_harmonics import HarmonicSensitivitySession
@@ -270,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     recover_interface = subparsers.add_parser(
         "recover-interface",
         help=(
-            "Clear pending VISA responses on both SR830 interfaces without "
+            "Clear pending VISA responses on the XX/XY lock-in interfaces without "
             "changing instrument settings."
         ),
     )
@@ -726,7 +727,7 @@ def _run_recover_interface(
 ) -> int:
     """Explicitly recover stale VISA I/O after an interrupted hardware run."""
 
-    settings = _resolve_pair_settings(args)
+    settings = _resolve_pair_settings(args, allow_6221_config=True)
     _validate_distinct_addresses(settings["xx_address"], settings["xy_address"])
     with _open_pair(settings, factory) as (lockin_xx, lockin_xy):
         interface_clear = _clear_pair_interfaces(lockin_xx, lockin_xy)
@@ -5355,12 +5356,19 @@ def _clear_pair_interfaces(
     return status
 
 
-def _resolve_pair_settings(args: argparse.Namespace) -> dict[str, object]:
+def _resolve_pair_settings(
+    args: argparse.Namespace, *, allow_6221_config: bool = False,
+) -> dict[str, object]:
     config = None
     if args.config is not None:
-        config = load_config(args.config)
-        if config.project.mode is not RunMode.HARDWARE:
-            raise ValueError("The standalone SR830 tool requires a hardware config.")
+        if allow_6221_config and "excitation_6221" in _load_document(args.config):
+            from .combination_hardware import load_hardware_combination
+
+            config = load_hardware_combination(args.config).lockin
+        else:
+            config = load_config(args.config)
+            if config.project.mode is not RunMode.HARDWARE:
+                raise ValueError("The standalone SR830 tool requires a hardware config.")
 
     xx_address = args.xx_address or (
         None if config is None else config.lockin_xx.address

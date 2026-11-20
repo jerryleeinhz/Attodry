@@ -1,5 +1,12 @@
 # Development stages
 
+## Current: 6221 configuration in Lock-in VISA recovery (2026-11-20)
+
+- Validate 6221 combination files with the existing combination parser before
+  opening VISA. Reuse the model-aware XX/XY path for the two interface clears.
+- 184 offline tests passed, including the compact 6221 configuration, SR865A dispatch,
+  zero SCPI traffic, no source session, and legacy dual-SR830 recovery.
+
 ## Current: attoDRY temperature readback evidence (2026-11-19)
 
 - Capture each getter's float32 buffer after the existing DLL call.

@@ -572,8 +572,9 @@ cleanup 前再次尽力清理，并记录 `interface_clear.before_cleanup`。清
 python -m attodry_control.lockin_test recover-interface
 ```
 
-该命令只打开两台已配置的 SR830、清理 VISA 接口并输出 JSON，`settings_changed` 必须
-为 `false`。通信故障后仍须人工确认前面板和接线；接口清理不能证明仪器处于安全状态。
+锁相空闲时，可用 `--config` 指定 6221 组合扫描 TOML。命令按配置打开 XX 的 SR830
+和 XY 的 SR830 或 SR865A，各清理一次 VISA 接口并输出 JSON。仅打开这两台锁相，
+不访问 6221，`settings_changed` 为 `false`。通信故障后仍须人工确认前面板和接线。
 
 ### 按 TOML 远程准备双机（SR830 XX + SR830 / SR865A XY）
 

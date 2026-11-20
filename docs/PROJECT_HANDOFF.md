@@ -1,8 +1,17 @@
 # Project handoff
 
-Last updated: 2026-11-19
+Last updated: 2026-11-20
 
 ## Current stage
+
+### 6221 configuration in Lock-in VISA recovery (2026-11-20)
+
+- `lockin_test recover-interface --config ...` accepts 6221 combination TOMLs
+  through the existing offline configuration validator. The command uses the
+  configured SR830 XX and SR865A or SR830 XY roles.
+- Recovery opens only the two detector interfaces and clears each once.
+  It issues no SCPI queries or setting writes and introduces no measurement
+  waits. Use the command with the detectors idle.
 
 ### attoDRY temperature readback evidence (2026-11-19)
 

@@ -1,7 +1,8 @@
 """Complete mixed-detector scans, archive review and recovery with fake resources."""
-from contextlib import closing
+from contextlib import closing, redirect_stdout
 from copy import deepcopy
 import json
+from io import StringIO
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,8 @@ from attodry_control.combination_launch import launch_summary
 from attodry_control.combination_resume import build_recovery, configuration_changes
 from attodry_control.combination_store import CombinationStore, open_readonly, validate_accepted_records
 from attodry_control.combination_terminal import launch_text
+from attodry_control.electrical_lockin_backend import create_electrical_lockin
+from attodry_control.lockin_test import run as run_lockin_test
 from tests.test_keithley6221_ac import Fake6221
 from tests.test_lockin_settling import Clock
 from tests.test_mixed_lockin_integration import TrackingReceiverResource
@@ -64,6 +67,29 @@ class Combination6221Tests(unittest.TestCase):
 
     def config(self):
         return load_hardware_combination(self.path)
+
+    def test_recover_interface_accepts_6221_config_and_clears_only_detectors(self):
+        output = StringIO()
+        with redirect_stdout(output), patch(
+            "attodry_control.electrical_lockin_backend.create_electrical_lockin",
+            wraps=create_electrical_lockin,
+        ) as create:
+            code = run_lockin_test(["recover-interface", "--config", str(self.path)],
+                                   resource_manager_factory=lambda: self.manager)
+        self.assertEqual(code, 0)
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["completed"])
+        self.assertFalse(result["settings_changed"])
+        self.assertEqual(self.manager.opened, ["FAKE::XX", "FAKE::XY"])
+        create.assert_called_once()
+        self.assertEqual(create.call_args.args[1].model, "SR865A")
+        for detector in (self.xx, self.xy):
+            self.assertEqual(detector.clear_calls, 1)
+            self.assertEqual(detector.queries, [])
+            self.assertEqual(detector.writes, [])
+            self.assertTrue(detector.closed)
+        self.assertTrue(self.manager.closed)
+        self.assertFalse(self.database.exists())
 
     def range_configuration(self):
         return self.text.replace(
